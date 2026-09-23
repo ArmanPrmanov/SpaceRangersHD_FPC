@@ -72,7 +72,26 @@ Two existing pieces make the plan realistic:
 Exit: running the same save twice on one machine gives the same hashes. If it
 does not, the cause is Phase 1 work and is now measurable.
 
-## Phase 1 — Determinism (medium)
+## Spike — Second human (small, throwaway)
+
+Phase 4 is the main risk, so probe it before investing in Phases 1–3. On a
+scratch branch that is never merged:
+
+1. Create a second `TPlayer` in a loaded galaxy and register it as human.
+2. Run turns with the headless runner and in the game. Fix only what crashes
+   or blocks the turn, with the crudest change that works.
+3. Record every place that broke and why: turn loop, film, AI, scripts, save,
+   UI assumptions.
+
+Output is a note in `docs/progress/`, not code: which subsystems assume one
+human, how deep each assumption goes, and a revised size for Phase 4. Adjust
+Phase 2 scope from the findings before starting it.
+
+## Phase 1 — Determinism (small to medium)
+
+Networking does not need determinism, since only the host simulates (Phase 5).
+Determinism is needed for replay tests (Phase 3) and for localising
+regressions. Do items 1–4; item 5 is optional.
 
 1. **Split the RNG.** Give the simulation its own stream
    (`Galaxy.RandomState` already exists) and leave `PresentationRandom` to
@@ -89,12 +108,16 @@ does not, the cause is Phase 1 work and is now measurable.
    the UI thread must not mutate simulation state while
    [TThreadCalc.Execute](source/game/ThreadCalc.pas#L114) runs, and add a debug
    assertion at the main mutation points.
-5. **Measure cross-target drift.** Run the golden saves on Windows x64 and
-   macOS ARM64 and record where hashes diverge. Do not try to fix it. The
-   network model in Phase 5 does not depend on cross-target determinism, so
-   this only decides whether golden hashes can be shared between targets.
+5. **Measure cross-target drift (optional).** Run the golden saves on Windows
+   x64 and macOS ARM64 and record where hashes diverge. Do not try to fix it.
+   It only decides whether golden hashes can be shared between targets.
 
-## Phase 2 — Separate simulation from UI (large, incremental)
+## Phase 2 — Separate simulation from UI (medium, incremental)
+
+Scope this phase to what the test runner and Phase 4 need. The host runs the
+full game with its UI and clients receive state, so no client ever runs the
+simulation headless; headless running exists for tests. Use the spike's
+findings to pick which units to separate, and leave the rest alone.
 
 1. **Events out, not calls out.** Replace direct uses of screen units from
    `source/game` with a small event interface, generalising
@@ -201,6 +224,25 @@ Model: **host-authoritative, state streaming.** Only the host runs the day.
   compressed; a full snapshot only on join or when a client has no base. The
   save writer is the serialiser, so no per-object replication code is needed.
 - Joining is the same path: the host sends a full snapshot.
+- Deltas are computed on the uncompressed state. Compressed bytes change
+  almost entirely even when little in the game changed, and a byte-for-byte
+  diff breaks when lists change length. Use a diff that handles inserted
+  bytes, such as zstd's `--patch-from` mode (the previous state as the
+  reference), as one C library next to the native code.
+- Order per day: the film first (small, needed immediately), then the state
+  delta, which streams while the animation plays.
+
+**Applying state on the client.** Screens hold direct references to ships,
+planets and items. Loading new state frees those objects, so it must happen
+only at a safe point:
+
+- Apply new state only at the end of the day's animation, never mid-screen.
+- Before applying, every open screen drops its object references and keeps
+  ids instead; after applying, it looks them up again or closes.
+- A debug build poisons freed objects so a stale reference fails at once
+  instead of later.
+
+Milestone 1 tests this, not only transfer sizes.
 
 Why this and not lockstep: mixed platforms are required, and x87 and native
 float math do not produce bit-identical results, so lockstep across targets
@@ -249,15 +291,17 @@ Decided with the project owner. Later versions may revisit any row.
 | Phase | Size | Useful without multiplayer |
 | --- | --- | --- |
 | 0 Safety net | S | Yes |
-| 1 Determinism | M | Yes |
-| 2 Sim/UI separation | L, incremental | Yes |
+| Spike: second human | S, throwaway | No |
+| 1 Determinism | S–M | Yes |
+| 2 Sim/UI separation | M, incremental | Yes |
 | 3 Commands and replay | M | Yes |
 | 4 Multiple humans | L | No |
 | 5 Networking | M | No |
 | 6 Rules | decided | No |
 
-Phase 4 is the expensive one and the main risk. Phase 6 is settled, so Phase 4
-can classify call sites against fixed rules.
+Phase 4 is the expensive one and the main risk. The spike right after Phase 0
+measures that risk early, and its findings resize Phases 2 and 4. Phase 6 is
+settled, so Phase 4 can classify call sites against fixed rules.
 
 ## Milestones
 
@@ -268,7 +312,9 @@ Each milestone is playable and ships on its own.
    observer. Clients never simulate, so this needs no determinism, commands or
    `GetPlayer` changes. It proves the socket layer, the handshake and snapshot
    delivery, and it measures snapshot size, delta size, film size and load time
-   on real saves across platforms.
+   on real saves across platforms. It also replaces the client's galaxy every
+   day, which tests the safe-point rules in Phase 5 before any gameplay
+   depends on them.
 2. **Replayable single player (after Phases 1–3).** A recorded session replays
    headlessly to the same hash. This is the regression gate for Phase 4.
 3. **Hot-seat multiplayer (after Phase 4).** Any number of humans on one
@@ -279,10 +325,16 @@ Each milestone is playable and ships on its own.
 
 ## Risks
 
-- **Bandwidth and client load time.** Every day sends each client a state
-  delta and a film. If deltas of the save buffer stay large (the save layout
-  can shift bytes when lists change length), the fix is a smarter diff over
-  the save's own blocks, not a new replication system. Measure in Milestone 1.
+- **Stale object references on clients.** Replacing the galaxy every day frees
+  objects that screens still point to, which gives crashes that are hard to
+  reproduce. Mitigation: the safe-point rules in Phase 5, poisoned frees in
+  debug builds, and Milestone 1 exercising the path daily.
+- **Bandwidth and client load time.** A save is about 11 MB compressed. Sent
+  in full every day, that is ~0.1 s per client on gigabit LAN but ~4.5 s per
+  client on a 20 Mbit home upload, so full daily snapshots are not viable over
+  the internet. Deltas (Phase 5) are expected to be a few hundred KB to 1–2 MB;
+  this is a guess until Milestone 1 measures it. Many clients on one slow host
+  upload remain the practical limit of "unlimited players".
 - **Undiscovered nondeterminism** (uninitialised memory, pointer ordering,
   list iteration that depends on addresses). It no longer breaks networking,
   but it breaks replay tests. Mitigation: the per-turn hash, plus a debug mode

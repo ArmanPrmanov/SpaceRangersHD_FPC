@@ -11,10 +11,12 @@ has got.
 
 ## Status
 
-- Phase: not started. Planning is done.
-- Next: speed up the Windows build loop, add `tools/outline.py`, then Phase 0.
-- Open issues: none.
-- Latest entry: [2026-09-23-planning.md](2026-09-23-planning.md)
+- Phase: 0 done (runner, hash, goldens, unit tests, round trip). CI written, not yet run.
+- Next: run CI and fix it; then the second-human spike or Phase 1.
+- Open issues: script object references saved as raw addresses; some cannot
+  be resolved to an object (see the Phase 0 entry). CI format job fails on
+  files formatted before this session.
+- Latest entry: [2026-09-24-phase0.md](2026-09-24-phase0.md)
 
 ## Session entry format
 
