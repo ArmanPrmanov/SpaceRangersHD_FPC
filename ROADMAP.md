@@ -47,6 +47,9 @@ Two existing pieces make the plan realistic:
 - Refactor units when a phase needs them, not wholesale. A mass rewrite of
   decompiled code makes the diff against `main` unreadable and buys little.
 - Every phase ends with a single-player game that still plays normally.
+- Every working session records its progress in
+  [docs/progress/](docs/progress/README.md) before it ends. Short notes are
+  enough. This file holds the plan; progress does not go here.
 
 ## Phase 0 — Safety net (small)
 
