@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    # Linux: a Windows checkout converts line endings to CRLF, which pasfmt rejects.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install formatters
+        env:
+          PASFMT_VERSION: "0.7.0"
+          PASFMT_SHA256: c1f02bfee6c7c2868774a27f7907c41b1ea96518f08268c8648fdd00ff5bda2e
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libxml2-utils
+          python -m pip install ruff==0.16.8 cmakelang==0.6.13 clang-format==23.1.1
+          archive="pasfmt-${PASFMT_VERSION}-x86_64-unknown-linux-gnu"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/$archive.tar.gz" \
+            "https://github.com/integrated-application-development/pasfmt/releases/download/v${PASFMT_VERSION}/$archive.tar.gz"
+          echo "$PASFMT_SHA256  $RUNNER_TEMP/$archive.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$archive" >> "$GITHUB_PATH"
+      - name: Check formatting
+        run: python tools/format.py --check
+
+  windows:
+    runs-on: windows-latest
+    env:
+      FPC_VERSION: "3.2.2"
+      FPC_SHA256: 8c255390544b051388b577eb61c6191a04883264afe0e3369b3600a56daf7bde
+      FPC_BOOTSTRAP: C:\FPC\3.2.2\bin\i386-win32\ppcrossx64.exe
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-SDL2
+            mingw-w64-ucrt-x86_64-SDL2_mixer
+            mingw-w64-ucrt-x86_64-libjpeg-turbo
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-zlib
+      - name: Locate MSYS2 prefix
+        shell: pwsh
+        run: |
+          "MSYS2_PREFIX=${{ steps.msys2.outputs.msys2-location }}\ucrt64" >> $env:GITHUB_ENV
+      - name: Cache FPC installer
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\fpc-installer
+          key: fpc-installer-${{ env.FPC_VERSION }}
+      - name: Install FPC bootstrap compiler
+        shell: pwsh
+        run: |
+          $directory = "${{ runner.temp }}\fpc-installer"
+          $installer = "$directory\fpc-$env:FPC_VERSION.win32.and.win64.exe"
+          if (-not (Test-Path $installer)) {
+            New-Item -ItemType Directory -Force $directory | Out-Null
+            $urls = @(
+              "https://downloads.freepascal.org/fpc/dist/$env:FPC_VERSION/i386-win32/fpc-$env:FPC_VERSION.win32.and.win64.exe",
+              "https://downloads.sourceforge.net/project/freepascal/Win32/$env:FPC_VERSION/fpc-$env:FPC_VERSION.win32.and.win64.exe"
+            )
+            foreach ($url in $urls) {
+              curl.exe --fail --location --retry 3 --output $installer $url
+              if ($LASTEXITCODE -eq 0) { break }
+            }
+          }
+          $hash = (Get-FileHash -Algorithm SHA256 $installer).Hash
+          if ($hash -ne $env:FPC_SHA256) { throw "Unexpected FPC installer hash $hash" }
+          # Inno Setup installer.
+          $arguments = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/DIR=C:\FPC\3.2.2'
+          Start-Process -FilePath $installer -ArgumentList $arguments -Wait
+          if (-not (Test-Path $env:FPC_BOOTSTRAP)) { throw "FPC install did not produce $env:FPC_BOOTSTRAP" }
+      - name: Submodule revision
+        id: vendor
+        shell: bash
+        run: echo "fpc=$(git rev-parse HEAD:vendor/fpc)" >> "$GITHUB_OUTPUT"
+      - name: Cache vendored compiler
+        uses: actions/cache@v4
+        with:
+          path: .local/fpc
+          key: vendored-fpc-windows-${{ steps.vendor.outputs.fpc }}-${{ hashFiles('tools/compiler.py') }}
+      - name: Build
+        run: python tools/build.py --target windows
+      - name: Asset-free tests
+        run: python tools/unit_tests.py
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-logs
+          path: |
+            .local/fpc/*.log
+            .local/windows-debug/*.log
+            .local/windows-tests/*.log
+          if-no-files-found: ignore

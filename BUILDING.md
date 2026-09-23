@@ -128,6 +128,38 @@ After applying mods or settings that need a restart, tap Play in the launcher.
 `--release` enables optimized native code. Keep `.local/android/debug.keystore`
 for subsequent updates signed with the same local key.
 
+## Tests
+
+`python tools/unit_tests.py` builds and runs `tests/UnitTests.dpr`: RNG, `EC_Str`,
+the expression evaluator, `TBufEC`, DAT and package codecs, on synthetic input.
+It needs no game assets, but it links the game units, so build the game first.
+CI runs it on Windows, plus `format.py --check`.
+
+The save tests need assets and saves, which cannot be redistributed:
+
+```sh
+python tools/test.py --game-dir=/path/to/game path/to/saves-or-dir
+```
+
+For each save it checks a save → load → save round trip, runs 100 turns twice
+and requires the same per-turn hashes, and compares them with
+`tests/golden/<target>/<save sha256>.txt`. A missing golden file is recorded;
+`--update` records it again after an intended change. `tests/saves/` is the
+default save directory and is ignored by Git.
+
+The runner behind it is the game binary itself:
+
+```sh
+Rangers --sim-save=save.sav --sim-turns=100 --sim-hash [--sim-roundtrip]
+        [--sim-seed=0] [--sim-dump=DIR]
+```
+
+It runs without a window or audio, parks the player as the observer does, and
+prints `turn N day=D hash=H bytes=B unresolved=U` per turn. The hash covers
+`TGalaxy.SaveToBuffer`, with script references to objects written by id instead
+of address; `unresolved` counts references it could not name. `--sim-dump`
+writes each hashed state so two runs can be diffed.
+
 ## Formatting
 
 Install [pasfmt](https://github.com/integrated-application-development/pasfmt),

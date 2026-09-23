@@ -60,7 +60,8 @@ uses
   aConst,
   ThreadCalc,
   aSaveLoad,
-  ObserverHost;
+  ObserverHost,
+  HeadlessSim;
 
 var
   ApplicationEvents: TAD;
@@ -72,6 +73,8 @@ var
   GpuRendererRequested: Boolean;
   ObserverMode: Boolean;
   ObserverSave: AnsiString;
+  SimulationMode: Boolean;
+  Simulation: TSimulationOptions;
 
 procedure Log(const Text: AnsiString);
 begin
@@ -160,6 +163,22 @@ begin
       ObserverMode := True;
       ObserverSave := ExpandFileName(Copy(Argument, 17, MaxInt))
     end
+    // CHANGE: ENHANCEMENT - Headless turn runner for regression tests.
+    else if Pos('--sim-save=', Argument) = 1 then
+    begin
+      SimulationMode := True;
+      Simulation.SavePath := ExpandFileName(Copy(Argument, 12, MaxInt))
+    end
+    else if Pos('--sim-turns=', Argument) = 1 then
+      Simulation.Turns := StrToInt(Copy(Argument, 13, MaxInt))
+    else if Pos('--sim-seed=', Argument) = 1 then
+      Simulation.Seed := StrToDWord(Copy(Argument, 12, MaxInt))
+    else if Pos('--sim-dump=', Argument) = 1 then
+      Simulation.DumpDirectory := ExpandFileName(Copy(Argument, 12, MaxInt))
+    else if Argument = '--sim-hash' then
+      Simulation.Hash := True
+    else if Argument = '--sim-roundtrip' then
+      Simulation.RoundTrip := True
     else if Pos('--game-dir=', Argument) = 1 then
       GameDirectory := Copy(Argument, 12, MaxInt)
     else if Pos('--user-dir=', Argument) = 1 then
@@ -174,6 +193,16 @@ begin
   end;
   GameDirectory := ExpandFileName(GameDirectory);
   UserDirectory := ExcludeTrailingPathDelimiter(ExpandFileName(UserDirectory));
+  if SimulationMode then
+  begin
+    if ObserverMode then
+      raise Exception.Create('--sim-save cannot be combined with the observer');
+    GpuRendererRequested := False;
+    sr_renderer_select(0);
+    sr_set_headless(1)
+  end
+  else if (Simulation.Turns <> 0) or Simulation.Hash or Simulation.RoundTrip then
+    raise Exception.Create('--sim-* options require --sim-save=/path/to/save.sav');
   if ObserverMode then
   begin
     GpuRendererRequested := True;
@@ -479,7 +508,12 @@ begin
         AvailableLanguageCodes := SelectedLanguage;
       InitializeScreens;
       TimerPeriodStarted := timeBeginPeriod(1) = 0;
-      if ObserverSave <> '' then
+      if SimulationMode then
+      begin
+        Stage('headless simulation');
+        System.ExitCode := RunHeadlessSimulation(Simulation);
+      end
+      else if ObserverSave <> '' then
       begin
         Stage('galaxy observer');
         RunObserver(ObserverSave);
@@ -501,12 +535,15 @@ begin
         if LogReady then
           ErrorText :=
               ErrorText + #13#10#13#10 + 'Log: ' + UserDirectory + '/' + RuntimeLogFileName;
-        MessageBoxA(
-            0,
-            PAnsiChar(ErrorText),
-            'Rangers startup/runtime error',
-            MB_OK or MB_ICONERROR
-        );
+        if SimulationMode then
+          WriteLn(StdErr, ErrorText)
+        else
+          MessageBoxA(
+              0,
+              PAnsiChar(ErrorText),
+              'Rangers startup/runtime error',
+              MB_OK or MB_ICONERROR
+          );
       end;
     end;
   finally

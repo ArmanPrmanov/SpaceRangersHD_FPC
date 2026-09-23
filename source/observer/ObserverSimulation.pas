@@ -14,6 +14,7 @@ type
 var
   ObserverSimulatedTurns: Integer;
 procedure ParkObserverPlayer;
+procedure SimulateParkedTurn;
 implementation
 uses
   SysUtils,
@@ -59,6 +60,22 @@ begin
   TurnSaveStep := 0;
 end;
 
+// CHANGE: ENHANCEMENT - Share one parked turn between the observer and the headless runner.
+procedure SimulateParkedTurn;
+begin
+  PruneExpiredPersistentPlayerMessages;
+  // Parked player: same two ordinary jobs as the docked turn controller.
+  GetPlayer.OrderNone(False);
+  StartPlayerStarTurnCalculation;
+  WaitForTurnCalculation;
+  RaisePendingWorkerError;
+  if GetPlayer = nil then
+    raise Exception.Create('The player no longer exists.');
+  StartGalaxyTurnCalculation;
+  WaitForTurnCalculation;
+  RaisePendingWorkerError;
+end;
+
 procedure TObserverWorker.Execute;
 begin
   try
@@ -74,17 +91,7 @@ begin
       ObserverHit := CaptureObserverHit;
     end;
     try
-      PruneExpiredPersistentPlayerMessages;
-      // Parked player: same two ordinary jobs as the docked turn controller.
-      GetPlayer.OrderNone(False);
-      StartPlayerStarTurnCalculation;
-      WaitForTurnCalculation;
-      RaisePendingWorkerError;
-      if GetPlayer = nil then
-        raise Exception.Create('The player no longer exists.');
-      StartGalaxyTurnCalculation;
-      WaitForTurnCalculation;
-      RaisePendingWorkerError;
+      SimulateParkedTurn;
       if Recording <> nil then
         Recording.CaptureTransits(False);
       Inc(ObserverSimulatedTurns);
