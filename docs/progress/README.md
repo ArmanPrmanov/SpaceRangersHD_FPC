@@ -11,12 +11,15 @@ has got.
 
 ## Status
 
-- Phase: 0 done (runner, hash, goldens, unit tests, round trip). CI written, not yet run.
-- Next: run CI and fix it; then the second-human spike or Phase 1.
-- Open issues: script object references saved as raw addresses; some cannot
-  be resolved to an object (see the Phase 0 entry). CI format job fails on
-  files formatted before this session.
-- Latest entry: [2026-09-24-phase0.md](2026-09-24-phase0.md)
+- Phase: 0 done; second-human spike done (branch `spike/second-human`,
+  not for merging). CI written, not yet run (needs a push).
+- Next: the two single-player-safe fixes from the spike (`GetPlayer`→`Self`
+  in `TPlayer`, eager ruins proxy), then Phase 1 including the script
+  raw-address fix.
+- Open issues: script object references saved as raw addresses; after one
+  turn a round trip no longer matches, even in single player. CI format job
+  fails on files formatted before Phase 0.
+- Latest entry: [2026-09-24-spike-second-human.md](2026-09-24-spike-second-human.md)
 
 ## Session entry format
 

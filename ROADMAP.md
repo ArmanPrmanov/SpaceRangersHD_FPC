@@ -91,7 +91,7 @@ Phase 2 scope from the findings before starting it.
 
 Networking does not need determinism, since only the host simulates (Phase 5).
 Determinism is needed for replay tests (Phase 3) and for localising
-regressions. Do items 1–4; item 5 is optional.
+regressions. Do items 1–6; item 7 is optional.
 
 1. **Split the RNG.** Give the simulation its own stream
    (`Galaxy.RandomState` already exists) and leave `PresentationRandom` to
@@ -108,7 +108,14 @@ regressions. Do items 1–4; item 5 is optional.
    the UI thread must not mutate simulation state while
    [TThreadCalc.Execute](source/game/ThreadCalc.pas#L114) runs, and add a debug
    assertion at the main mutation points.
-5. **Measure cross-target drift (optional).** Run the golden saves on Windows
+5. **Script references by id.** Script variables hold raw object addresses
+   and the save writes them truncated to 32 bits, so after one turn a save
+   no longer loads back to the same state, even in single player. Save and
+   resolve them as object ids. This also blocks Phase 5 snapshots.
+6. **Saving must not change state.** `TPlayer.SaveToBuffer` creates the ruins
+   proxy lazily and draws from the galaxy stream. Create it with the player
+   and check for other lazy creation in writers.
+7. **Measure cross-target drift (optional).** Run the golden saves on Windows
    x64 and macOS ARM64 and record where hashes diverge. Do not try to fix it.
    It only decides whether golden hashes can be shared between targets.
 
@@ -124,11 +131,16 @@ findings to pick which units to separate, and leave the rest alone.
    `ObserverHooks`: `OnBubble`, `OnDialogueRequested`, `OnShipDestroyed`,
    `OnFatalError`. The UI subscribes; the headless runner and the network layer
    subscribe differently. Start with `aGalaxy`, `aShip`, `aSaveLoad`.
+   The turn thread must never wait on a screen: today it sleeps until the
+   score screen is dismissed when the player dies.
 2. **Group the globals.** Move unit-level variables into three records:
    `Session` (galaxy, players, turn phase), `Settings` (what `GlobalsV` mostly
    holds) and `UiState`. Same names at first, accessed through the record, so
    the change is mechanical. This makes it visible which globals the simulation
-   touches.
+   touches. The local player's state (`PlayerStar`,
+   `PendingPlayerFollowTarget`, `PlayerAutomaticControl`, `PlayerOldQuests`,
+   the message bubbles and the `TStar` player-visit fields) goes into a
+   per-human record, since Phase 4 needs one per human.
 3. **Enforce the direction.** Add a check to `tools/` that fails if a unit under
    `source/game`, `source/core` or `source/script` uses a unit under
    `source/screens` or `source/ui`. Start with an allowlist of current
@@ -181,8 +193,10 @@ Exit: a recorded 30-minute session replays headlessly to the same final hash.
    take the relevant human as a parameter.
 4. **Scripts and quests.** Script functions that mean "the player" need a bound
    human per script instance. Default: the human who triggered the script.
-5. **Save format.** Additive block for extra humans, prefixed with a count; a
-   save with one human stays loadable by the original layout rules.
+5. **Save format.** Every `TPlayer` is already saved and loaded as one (ship
+   tag 255), so extra humans need no new block. Add the per-human copy of
+   the local-player state from Phase 2 as an additive block; a save with one
+   human stays loadable by the original layout rules.
 6. **No fixed player count.** `Session.Humans` is a list, not an array with a
    maximum. Per-human state (relations, reputation, messages, quest bindings,
    film viewpoint) lives on the human or in maps keyed by human id, never in
@@ -202,6 +216,9 @@ Exit: a recorded 30-minute session replays headlessly to the same final hash.
    law consequences as attacking an NPC ranger.
 9. **Respawn.** A destroyed human respawns at the nearest planet instead of
    ending the game (see Phase 6). Single player keeps the original game over.
+   `TryRelocateUnseenShip`, which already moves rangers destroyed where the
+   player cannot see, is a starting point; its "not the player's star" test
+   must become "no human in this star".
 10. **Session flags.** Text quests off, friendly fire on/off, cheat tracking.
     Each flag is part of the saved session, and changing one is a command so
     every machine sees the change at the same point.
@@ -299,8 +316,10 @@ Decided with the project owner. Later versions may revisit any row.
 | 5 Networking | M | No |
 | 6 Rules | decided | No |
 
-Phase 4 is the expensive one and the main risk. The spike right after Phase 0
-measures that risk early, and its findings resize Phases 2 and 4. Phase 6 is
+Phase 4 is the expensive one. The spike
+([findings](docs/progress/2026-09-24-spike-second-human.md)) showed that the
+simulation already runs with many `TPlayer` objects; the cost is in code that
+tests identity with `GetPlayer = Self`, which is wide but mechanical. Phase 6 is
 settled, so Phase 4 can classify call sites against fixed rules.
 
 ## Milestones
