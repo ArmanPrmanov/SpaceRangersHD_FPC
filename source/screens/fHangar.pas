@@ -21,7 +21,6 @@ type
   TfHangar = class;
   THangarShipSlot = record
     AnimationState: Integer;
-    ShipId: Integer;
     ImageBuffer: TGraphBufGR;
     Opacity: Integer;
     ImageControl: TGraphBufGI;
@@ -1347,7 +1346,7 @@ begin
   for I := 0 to 8 do
     if ShipSlots[I].AnimationState = 2 then
     begin
-      Ship := TShip(Galaxy.IdToShip(ShipSlots[I].ShipId, False));
+      Ship := TShip(Galaxy.IdToShip(LocalHuman.HangarShipIds[I], False));
       if (Ship = nil)
           or (not (GetPlayer.IsOnPlanet and (GetPlayer.CurrentPlanet = Ship.CurrentPlanet))
               and not (GetPlayer.IsDockedToShip and (GetPlayer.DockedTo = Ship.DockedTo))) then
@@ -1357,9 +1356,9 @@ begin
       end;
     end;
   for I := 1 to 8 do
-    if (ShipSlots[I].AnimationState = 0) and (ShipSlots[I].ShipId <> 0) then
+    if (ShipSlots[I].AnimationState = 0) and (LocalHuman.HangarShipIds[I] <> 0) then
     begin
-      Ship := TShip(Galaxy.IdToShip(ShipSlots[I].ShipId, False));
+      Ship := TShip(Galaxy.IdToShip(LocalHuman.HangarShipIds[I], False));
       if Ship <> nil then
       begin
         if not ((GetPlayer.IsOnPlanet and (GetPlayer.CurrentPlanet = Ship.CurrentPlanet))
@@ -1370,7 +1369,7 @@ begin
           K := 0;
           while K <= 8 do
           begin
-            if (ShipSlots[K].AnimationState <> 0) and (ShipSlots[K].ShipId = Ship.Id) then
+            if (ShipSlots[K].AnimationState <> 0) and (LocalHuman.HangarShipIds[K] = Ship.Id) then
             begin
               Ship := nil;
               Break;
@@ -1386,7 +1385,7 @@ begin
       Path := Ship.GetShipPortraitImagePath;
       if Path = WideString('') then
         Continue;
-      ShipSlots[I].ShipId := Ship.Id;
+      LocalHuman.HangarShipIds[I] := Ship.Id;
       ShipSlots[I].AnimationState := 1;
       ShipSlots[I].Opacity := 0;
       LoadDockedShipImage(I, Path, LargeHull, GetShipPortraitScale(Ship));
@@ -1424,7 +1423,7 @@ begin
               K := 0;
               while K <= 8 do
               begin
-                if (ShipSlots[K].AnimationState <> 0) and (ShipSlots[K].ShipId = Ship.Id) then
+                if (ShipSlots[K].AnimationState <> 0) and (LocalHuman.HangarShipIds[K] = Ship.Id) then
                   Break;
                 Inc(K);
               end;
@@ -1444,7 +1443,7 @@ begin
                 K := 0;
                 while K <= 8 do
                 begin
-                  if (ShipSlots[K].AnimationState <> 0) and (ShipSlots[K].ShipId = Ship.Id) then
+                  if (ShipSlots[K].AnimationState <> 0) and (LocalHuman.HangarShipIds[K] = Ship.Id) then
                     Break;
                   Inc(K);
                 end;
@@ -1467,7 +1466,7 @@ begin
               K := 0;
               while K <= 8 do
               begin
-                if (ShipSlots[K].AnimationState <> 0) and (ShipSlots[K].ShipId = Ship.Id) then
+                if (ShipSlots[K].AnimationState <> 0) and (LocalHuman.HangarShipIds[K] = Ship.Id) then
                   Break;
                 Inc(K);
               end;
@@ -1484,7 +1483,7 @@ begin
       Path := Ship.GetShipPortraitImagePath;
       if Path = WideString('') then
         Continue;
-      ShipSlots[SlotOrder[I]].ShipId := Ship.Id;
+      LocalHuman.HangarShipIds[SlotOrder[I]] := Ship.Id;
       ShipSlots[SlotOrder[I]].AnimationState := 1;
       ShipSlots[SlotOrder[I]].Opacity := 0;
       LoadDockedShipImage(SlotOrder[I], Path, LargeHull, GetShipPortraitScale(Ship));
@@ -1504,7 +1503,7 @@ begin
   CursorPoint := GetCursorPoint;
   for I := 0 to 8 do
   begin
-    Ship := TShip(Galaxy.IdToShip(ShipSlots[I].ShipId, False));
+    Ship := TShip(Galaxy.IdToShip(LocalHuman.HangarShipIds[I], False));
     if (Ship <> nil) and ShipSlots[I].ImageControl.HitTestPixel(CursorPoint) then
     begin
       ShowShipInfo(Ship);
@@ -1541,7 +1540,7 @@ begin
   CursorPoint := GetCursorPoint;
   for I := 0 to 8 do
   begin
-    Ship := TShip(Galaxy.IdToShip(ShipSlots[I].ShipId, False));
+    Ship := TShip(Galaxy.IdToShip(LocalHuman.HangarShipIds[I], False));
     if (Ship <> nil)
         and ShipSlots[I].ImageControl.HitTestPixel(CursorPoint)
         and (Ship.TypeId <> stKling)

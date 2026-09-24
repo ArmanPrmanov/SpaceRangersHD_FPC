@@ -35,6 +35,8 @@ type
     TemporaryShopSlots: TList;
     TemporaryShopPlanet: TPlanet;
     TemporaryShopStation: TRuins;
+    // Ships shown in the hangar's nine slots, by id.
+    HangarShipIds: array[0..8] of Integer;
   end;
 var
   LocalHuman: THumanState;

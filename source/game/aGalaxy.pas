@@ -833,7 +833,6 @@ uses
   Achievements,
   aPlanet,
   fShip2,
-  fHangar,
   aShopStock,
   aPlayer,
   GI_GI,
@@ -899,7 +898,7 @@ begin
   GameEndReason := 0;
   PlayerRangerIndex := -1;
   for I := 0 to 8 do
-    HangarScreen.ShipSlots[I].ShipId := 0;
+    LocalHuman.HangarShipIds[I] := 0;
   SaveCount := 0;
   LoadCount := 0;
   Randomize;
@@ -1411,7 +1410,7 @@ begin
     Buffer.AddIntegerValue(SpaceBackgroundEntries[I].FrameIndex);
   end;
   for I := 0 to 8 do
-    Buffer.AddDWord(HangarScreen.ShipSlots[I].ShipId);
+    Buffer.AddDWord(LocalHuman.HangarShipIds[I]);
   Buffer.AddIntegerValue(0);
   Buffer.AddIntegerValue(0);
   Buffer.AddIntegerValue(0);
@@ -1984,7 +1983,7 @@ begin
     end;
     Stage := 32;
     for I := 0 to 8 do
-      HangarScreen.ShipSlots[I].ShipId := Buffer.GetUInt32;
+      LocalHuman.HangarShipIds[I] := Buffer.GetUInt32;
     Stage := 33;
     Buffer.GetInt32;
     Buffer.GetInt32;

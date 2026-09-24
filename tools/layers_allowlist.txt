@@ -1,6 +1,5 @@
 # Simulation units that still use UI units. Written by tools/check_layers.py --update.
 # Remove entries by removing the dependency; never add one by hand.
-aGalaxy -> fHangar
 aGalaxy -> fShip2
 aGalaxy -> GI_GraphButton
 aGalaxy -> GI_Label
