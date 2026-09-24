@@ -34,6 +34,8 @@ var
   SaveLoadLock: TCriticalSection = nil;
   SaveWriter: TSaver = nil;
   LastSaveLoadError: WideString;
+  // Told after a save file has been loaded (the command log starts from it).
+  GameLoadedHook: procedure(const FileName: WideString);
 function SaveGameToFile(FileName: WideString; Description: WideString): Boolean;
 procedure LoadGameFromSaveBuffer(Buffer: TBufEC);
 function LoadGameFromFile(FileName: WideString): Boolean;
@@ -567,6 +569,8 @@ begin
   finally
     SaveLoadLock.Leave;
   end;
+  if Result and Assigned(GameLoadedHook) then
+    GameLoadedHook(FileName);
 
 end;
 procedure SaveGameToMemorySnapshot;

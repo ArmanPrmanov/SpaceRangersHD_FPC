@@ -17,6 +17,7 @@ procedure ParkObserverPlayer;
 procedure SimulateParkedTurn;
 implementation
 uses
+  aPlayerActions,
   aSession,
   aHuman,
   SysUtils,
@@ -35,7 +36,6 @@ uses
 procedure ParkObserverPlayer;
 var
   P: TPlayer;
-  I: Integer;
 begin
   P := GetPlayer;
   if (P = nil) or (LocalHuman.PlayerStar = nil) then
@@ -44,30 +44,19 @@ begin
     raise Exception.Create('Disable stasis before starting observer mode.');
   if P.InHyperspace then
     raise Exception.Create('Load a save made in a system or on a planet for observer mode.');
-  // This is deliberately a sandbox policy: the player stays docked and the
-  // observer never writes a save. No landing/travel actions or quests are run.
-  if P.InNormalSpace then
-  begin
-    if LocalHuman.PlayerStar.Planets.Count = 0 then
-      raise Exception.Create('Observer needs a planet in the starting system to park the player.');
-    P.CurrentPlanet := TPlanet(LocalHuman.PlayerStar.Planets[0]);
-    P.DockedTo := nil;
-  end;
-  P.OrderNone(False);
-  for I := 1 to P.WeaponCount do
-    P.Weapons[I].Target := nil;
-  LocalHuman.PlayerAutomaticControl := False;
-  LocalHuman.PendingPlayerFollowTarget := nil;
-  Session.PlayerStarDayPrepared := False;
+  if P.InNormalSpace and (LocalHuman.PlayerStar.Planets.Count = 0) then
+    raise Exception.Create('Observer needs a planet in the starting system to park the player.');
+  ParkPlayer;
+  // The observer never writes a save.
   TurnSaveStep := 0;
 end;
 
 // CHANGE: ENHANCEMENT - Share one parked turn between the observer and the headless runner.
 procedure SimulateParkedTurn;
 begin
-  PruneExpiredPersistentPlayerMessages;
+  PruneMessages;
   // Parked player: same two ordinary jobs as the docked turn controller.
-  GetPlayer.OrderNone(False);
+  OrderStop;
   StartPlayerStarTurnCalculation;
   WaitForTurnCalculation;
   RaisePendingWorkerError;

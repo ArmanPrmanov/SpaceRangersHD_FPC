@@ -64,6 +64,7 @@ uses
   aSaveLoad,
   ObserverHost,
   HeadlessSim,
+  CommandLog,
   SimEventHandlers,
   InterfaceOverrideViews;
 
@@ -79,6 +80,8 @@ var
   ObserverSave: AnsiString;
   SimulationMode: Boolean;
   Simulation: TSimulationOptions;
+  RecordCommandsPath: AnsiString;
+  Replay: TReplayOptions;
 
 procedure Log(const Text: AnsiString);
 begin
@@ -177,6 +180,16 @@ begin
       Simulation.Turns := StrToInt(Copy(Argument, 13, MaxInt))
     else if Pos('--sim-seed=', Argument) = 1 then
       Simulation.Seed := StrToDWord(Copy(Argument, 12, MaxInt))
+    // CHANGE: ENHANCEMENT - Record play as commands and replay it headlessly.
+    else if Pos('--record-commands=', Argument) = 1 then
+      RecordCommandsPath := ExpandFileName(Copy(Argument, 19, MaxInt))
+    else if Pos('--replay-commands=', Argument) = 1 then
+    begin
+      SimulationMode := True;
+      Replay.LogPath := ExpandFileName(Copy(Argument, 19, MaxInt))
+    end
+    else if Argument = '--replay-verbose' then
+      Replay.Verbose := True
     else if Pos('--sim-reload-at=', Argument) = 1 then
       Simulation.ReloadAt := StrToInt(Copy(Argument, 17, MaxInt))
     else if Pos('--sim-dump=', Argument) = 1 then
@@ -208,6 +221,11 @@ begin
   begin
     if ObserverMode then
       raise Exception.Create('--sim-save cannot be combined with the observer');
+    if (Replay.LogPath <> '') and (Simulation.SavePath <> '') then
+      raise Exception.Create('--replay-commands cannot be combined with --sim-save');
+    if (RecordCommandsPath <> '') and (Replay.LogPath <> '') then
+      raise Exception.Create('--record-commands cannot be combined with --replay-commands');
+    Replay.Seed := Simulation.Seed;
     GpuRendererRequested := False;
     sr_renderer_select(0);
     sr_set_headless(1)
@@ -520,10 +538,19 @@ begin
       InitializeScreens;
       InstallSimEventHandlers;
       TimerPeriodStarted := timeBeginPeriod(1) = 0;
-      if SimulationMode then
+      if SimulationMode and (Replay.LogPath <> '') then
+      begin
+        Stage('command replay');
+        System.ExitCode := RunCommandReplay(Replay);
+      end
+      else if SimulationMode then
       begin
         Stage('headless simulation');
+        // Recording a headless run tests the command log itself.
+        if RecordCommandsPath <> '' then
+          StartCommandRecording(RecordCommandsPath);
         System.ExitCode := RunHeadlessSimulation(Simulation);
+        StopCommandRecording;
       end
       else if ObserverSave <> '' then
       begin
@@ -531,7 +558,12 @@ begin
         RunObserver(ObserverSave);
       end
       else
+      begin
+        if RecordCommandsPath <> '' then
+          StartCommandRecording(RecordCommandsPath);
         RunScreens;
+        StopCommandRecording;
+      end;
       // Workers stop the screen loop; show their error on the main thread while
       // the window and SDL are still alive, before shutdown destroys them.
       RaisePendingWorkerError;

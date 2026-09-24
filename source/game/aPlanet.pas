@@ -3592,12 +3592,12 @@ begin
   LocalHuman.TalkScripted := True;
   ResetEvent(Session.TalkCompletedEvent);
   // CHANGE: ENHANCEMENT - The UI runs the dialogue while the turn thread waits.
-  InterlockedIncrement(TurnYieldedToUi);
+  BeginTurnWaitForUi(True);
   try
     SetEvent(Session.TalkRequestEvent);
     WaitResult := WaitForSingleObject(Session.TalkCompletedEvent, INFINITE);
   finally
-    InterlockedDecrement(TurnYieldedToUi);
+    EndTurnWaitForUi(True);
   end;
   if WaitResult <> WAIT_OBJECT_0 then
   begin

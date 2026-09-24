@@ -15,7 +15,8 @@ uses
   TestStrings,
   TestBuffer,
   TestExpression,
-  TestCodecs;
+  TestCodecs,
+  TestCommands;
 var
   WorkDirectory: string;
 
@@ -48,6 +49,7 @@ begin
   RunSuite('Strings', RunStringTests);
   RunSuite('Buffer', RunBufferTests);
   RunSuite('Expression', RunExpressionTests);
+  RunSuite('Commands', RunCommandTests);
   RunSuite('Codecs', RunCodecSuite);
   WriteLn(Format('%d checks, %d failed', [CheckCount, FailureCount]));
   if FailureCount > 0 then

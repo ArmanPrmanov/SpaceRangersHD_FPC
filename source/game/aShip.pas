@@ -15888,13 +15888,13 @@ begin
   Handles[0] := Session.TalkCompletedEvent;
   Handles[1] := Session.ScriptUiAbortEvent;
   // CHANGE: ENHANCEMENT - The UI runs the conversation while the turn thread waits.
-  InterlockedIncrement(TurnYieldedToUi);
+  BeginTurnWaitForUi(True);
   try
     SetEvent(Session.TalkRequestEvent);
     SetEvent(Session.ScriptUiRequestEvent);
     WaitResult := WaitForMultipleObjects(Length(Handles), @Handles[0], False, INFINITE);
   finally
-    InterlockedDecrement(TurnYieldedToUi);
+    EndTurnWaitForUi(True);
   end;
   if WaitResult <> WAIT_OBJECT_0 then
   begin

@@ -19,6 +19,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = ROOT / "tests" / "golden"
 ROUNDTRIP_TURNS = 5
+LOG_TURNS = 10
+REPLAYS = ROOT / "tests" / "replays"
 
 
 def target_name() -> str:
@@ -51,19 +53,60 @@ def save_digest(save: Path) -> str:
     return hashlib.sha256(save.read_bytes()).hexdigest()[:16]
 
 
-def simulate(binary: Path, game_dir: Path, save: Path, options: list[str]) -> tuple[int, str]:
+def run_game(binary: Path, game_dir: Path, options: list[str]) -> tuple[int, str]:
     # A throwaway profile keeps the player's settings and logs out of the test.
     with tempfile.TemporaryDirectory(prefix="rangers-test-") as profile:
-        command = [
-            str(binary),
-            f"--game-dir={game_dir}",
-            f"--user-dir={profile}",
-            f"--sim-save={save}",
-            *options,
-        ]
+        command = [str(binary), f"--game-dir={game_dir}", f"--user-dir={profile}", *options]
         result = subprocess.run(command, capture_output=True, cwd=profile)
     output = result.stdout.decode("utf-8", "replace") + result.stderr.decode("utf-8", "replace")
     return result.returncode, output
+
+
+def simulate(binary: Path, game_dir: Path, save: Path, options: list[str]) -> tuple[int, str]:
+    return run_game(binary, game_dir, [f"--sim-save={save}", *options])
+
+
+def output_tail(output: str) -> str:
+    return "".join("\n    " + line for line in output.strip().splitlines()[-12:])
+
+
+def last_line(output: str, prefix: str) -> str:
+    lines = [line for line in output.splitlines() if line.startswith(prefix)]
+    return lines[-1] if lines else ""
+
+
+def check_command_log(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """Record a headless run as a command log and replay it to the same hashes."""
+    with tempfile.TemporaryDirectory(prefix="rangers-log-") as directory:
+        log = Path(directory) / "run.srcl"
+        code, output = simulate(binary, args.game_dir, save, [
+            f"--sim-turns={LOG_TURNS}", "--sim-hash-last", f"--sim-seed={args.seed}",
+            f"--record-commands={log}",
+        ])  # fmt: skip
+        if code != 0:
+            return False, "recording failed:" + output_tail(output)
+        expected = last_line(output, "turn ").split("hash=")[-1].split()[0]
+        code, output = run_game(
+            binary, args.game_dir, [f"--replay-commands={log}", f"--sim-seed={args.seed}"]
+        )
+    summary = last_line(output, "done ")
+    if code != 0 or f"hash={expected}" not in summary or " diverged=0 " not in summary:
+        return False, "command log replay failed:" + output_tail(output)
+    return True, f"command log of {LOG_TURNS} turns replays to the same hash"
+
+
+def check_replay(args, binary: Path, log: Path) -> tuple[bool, list[str]]:
+    """Replay a recorded play session; it must not diverge from the recording."""
+    code, output = run_game(
+        binary, args.game_dir, [f"--replay-commands={log}", f"--sim-seed={args.seed}"]
+    )
+    summary = last_line(output, "done ")
+    notes = [line for line in output.splitlines() if line.startswith(("diverged ", "drift ", "checkpoint "))]
+    notes = notes[:12] + ([f"... {len(notes) - 12} more"] if len(notes) > 12 else [])
+    passed = code == 0 and " diverged=0 " in summary
+    if not summary:
+        notes.append("replay failed:" + output_tail(output))
+    return passed, [summary, *notes]
 
 
 def turn_lines(output: str) -> list[str]:
@@ -115,6 +158,11 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
         return False, notes
     notes.append("hashing leaves the game unchanged")
 
+    passed_log, note = check_command_log(args, binary, save)
+    notes.append(note)
+    if not passed_log:
+        return False, notes
+
     golden = GOLDEN / target_name() / f"{save_digest(save)}.txt"
     header = f"# {save.name}: {args.turns} turns, seed {args.seed}"
     if golden.is_file() and not args.update:
@@ -163,16 +211,19 @@ def main() -> None:
     if not saves:
         parser.error("No saves found. Put .sav files in tests/saves/ or pass them as arguments.")
 
+    replays = sorted(REPLAYS.glob("*.srcl")) if REPLAYS.is_dir() else []
     failed = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         futures = {save: pool.submit(check_save, args, binary, save) for save in saves}
-        for save, future in futures.items():
+        futures.update({log: pool.submit(check_replay, args, binary, log) for log in replays})
+        for path, future in futures.items():
             passed, notes = future.result()
             failed += not passed
-            print(f"{'PASS' if passed else 'FAIL'} {save.name}")
+            print(f"{'PASS' if passed else 'FAIL'} {path.name}")
             for note in notes:
                 print(f"  {note}")
-    print(f"{len(saves) - failed}/{len(saves)} saves passed ({target_name()})")
+    total = len(saves) + len(replays)
+    print(f"{total - failed}/{total} saves and replays passed ({target_name()})")
     sys.exit(1 if failed else 0)
 
 

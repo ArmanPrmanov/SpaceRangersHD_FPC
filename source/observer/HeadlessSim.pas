@@ -37,38 +37,6 @@ uses
   ThreadCalc,
   ObserverSimulation;
 
-function HashBytes(Data: PByte; Size: Integer): QWord;
-var
-  I: Integer;
-begin
-  // FNV-1a, 64-bit.
-  Result := QWord($CBF29CE484222325);
-  for I := 0 to Size - 1 do
-  begin
-    Result := Result xor Data[I];
-    Result := Result * QWord($100000001B3);
-  end;
-end;
-
-// Script variables keep object references as addresses, which differ between
-// runs. The state buffer names those objects by id instead, so it can only be
-// hashed, never loaded. The save and load counters are bookkeeping; write the
-// values the galaxy was loaded with and leave both counters as they were.
-function SerializeGalaxy: TBufEC;
-begin
-  Result := TBufEC.Create;
-  CollectObjectIdentities;
-  SnapshotObjectIdentity := @ObjectIdentity;
-  Dec(Galaxy.SaveCount);
-  Dec(Galaxy.LoadCount);
-  try
-    Galaxy.SaveToBuffer(Result);
-  finally
-    Inc(Galaxy.LoadCount);
-    SnapshotObjectIdentity := nil;
-  end;
-end;
-
 var
   // Where each object starts in the state being dumped (SaveTrace).
   TraceLines: TStringList;
@@ -108,7 +76,7 @@ begin
     SaveTraceHook := @RecordTrace;
   end;
   try
-    State := SerializeGalaxy;
+    State := SerializeGalaxyState;
   finally
     SaveTraceHook := nil;
   end;
@@ -267,11 +235,11 @@ begin
   First := GetTempDir(False) + 'rangers-roundtrip-' + IntToStr(GetProcessID) + '-1.sav';
   Second := GetTempDir(False) + 'rangers-roundtrip-' + IntToStr(GetProcessID) + '-2.sav';
   try
-    Before := SerializeGalaxy;
+    Before := SerializeGalaxyState;
     SaveUnchanged(First);
     LoadSave(First, Seed);
     DropSaveLoadedEvent;
-    After := SerializeGalaxy;
+    After := SerializeGalaxyState;
     SaveUnchanged(Second);
     ReadSavePayloads(First, FirstState, FirstFilms);
     ReadSavePayloads(Second, SecondState, SecondFilms);

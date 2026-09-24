@@ -27,9 +27,13 @@ type
     procedure Execute; override;
     procedure RunJob;
   end;
+  // Told when a job starts (on the thread that starts it) and when it has finished (on the
+  // turn thread, before the job counts as idle).
+  TTurnJobHook = procedure(Job: TTurnCalculationJob; Starting: Boolean);
 var
   AdaptiveBeginCalcNextTurn: Single = 0.5;
   LastGalaxyTurnDuration: Integer;
+  TurnJobHook: TTurnJobHook;
 procedure StartGalaxyTurnCalculation;
 procedure StartPlayerStarTurnCalculation;
 procedure StartPlayerStarPreparation;
@@ -53,20 +57,24 @@ uses
   aGalaxy,
   aPlayer,
   aShip;
+procedure StartJob(Job: TTurnCalculationJob);
+begin
+  if Assigned(TurnJobHook) then
+    TurnJobHook(Job, True);
+  Session.TurnCalculationThread.Job := Job;
+  Session.TurnCalculationThread.Start;
+end;
 procedure StartGalaxyTurnCalculation;
 begin
-  Session.TurnCalculationThread.Job := tcjGalaxy;
-  Session.TurnCalculationThread.Start;
+  StartJob(tcjGalaxy);
 end;
 procedure StartPlayerStarTurnCalculation;
 begin
-  Session.TurnCalculationThread.Job := tcjPlayerStar;
-  Session.TurnCalculationThread.Start;
+  StartJob(tcjPlayerStar);
 end;
 procedure StartPlayerStarPreparation;
 begin
-  Session.TurnCalculationThread.Job := tcjPreparePlayerStar;
-  Session.TurnCalculationThread.Start;
+  StartJob(tcjPreparePlayerStar);
 end;
 function IsTurnCalculationRunning: Boolean;
 begin
@@ -120,6 +128,8 @@ begin
   TurnJobRunning := True;
   try
     RunJob;
+    if Assigned(TurnJobHook) then
+      TurnJobHook(Job, False);
   finally
     TurnJobRunning := False;
     InTurnJob := False;

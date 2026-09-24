@@ -15,7 +15,14 @@ var
   TurnYieldedToUi: Integer;
   // Violations seen, for tests.
   SimulationThreadViolations: Integer;
+  // Told when the turn thread starts and stops waiting for the UI (the command log marks
+  // where in the day the UI's commands happened). Talk is set for a conversation, which the
+  // turn thread asks for through Session.TalkRequestEvent.
+  TurnWaitHook: procedure(Starting, Talk: Boolean);
 procedure CheckSimulationThread(const Site: AnsiString);
+// Brackets a wait of the turn thread for the UI; the UI may change state meanwhile.
+procedure BeginTurnWaitForUi(Talk: Boolean);
+procedure EndTurnWaitForUi(Talk: Boolean);
 implementation
 uses
   SysUtils,
@@ -63,6 +70,20 @@ begin
   if TurnJobRunning and not InTurnJob and (TurnYieldedToUi = 0) then
     ReportViolation(Site);
   {$ENDIF}
+end;
+
+procedure BeginTurnWaitForUi(Talk: Boolean);
+begin
+  if Assigned(TurnWaitHook) then
+    TurnWaitHook(True, Talk);
+  InterlockedIncrement(TurnYieldedToUi);
+end;
+
+procedure EndTurnWaitForUi(Talk: Boolean);
+begin
+  InterlockedDecrement(TurnYieldedToUi);
+  if Assigned(TurnWaitHook) then
+    TurnWaitHook(False, Talk);
 end;
 
 finalization

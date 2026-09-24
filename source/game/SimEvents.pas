@@ -16,7 +16,13 @@ type
   TScreenQueryHandler = function: TGameScreenId;
   TObjectQueryHandler = function: TObject;
   TBooleanQueryHandler = function: Boolean;
+  // Questions the simulation asks the UI. Values are part of the command log format.
+  TSimQuery = (sqHumanScreen = 0, sqInspectedShip = 1, sqTalkScreenOpen = 2, sqIsFilm = 3);
+  // Sees every answer and may replace it: the command log records answers and the replay
+  // gives the recorded ones back.
+  TQueryAnswerHook = procedure(Query: TSimQuery; var Value: PtrInt);
 var
+  QueryAnswerHook: TQueryAnswerHook;
   // Close the current screen and open Screen next.
   ScreenRequestHandler: TScreenRequestHandler;
   // A turn job failed; leave the screen loop.
@@ -37,6 +43,8 @@ var
   InspectedShipHandler: TObjectQueryHandler;
   // Whether the conversation screen is open.
   TalkScreenOpenHandler: TBooleanQueryHandler;
+  // Whether the star map is playing the day's film.
+  FilmPlayingHandler: TBooleanQueryHandler;
 procedure RequestScreen(Screen: TGameScreenId);
 procedure NotifyTurnFailed;
 procedure RecordPlayerResult(Victory: Boolean);
@@ -46,7 +54,15 @@ procedure PlaySound(const Name: WideString);
 function HumanScreen: TGameScreenId;
 function InspectedShip: TObject;
 function TalkScreenOpen: Boolean;
+function FilmPlaying: Boolean;
 implementation
+
+function Answer(Query: TSimQuery; Value: PtrInt): PtrInt;
+begin
+  if Assigned(QueryAnswerHook) then
+    QueryAnswerHook(Query, Value);
+  Result := Value;
+end;
 
 procedure RequestScreen(Screen: TGameScreenId);
 begin
@@ -90,6 +106,7 @@ begin
     Result := HumanScreenHandler
   else
     Result := screenNone;
+  Result := TGameScreenId(Answer(sqHumanScreen, Ord(Result)));
 end;
 
 function InspectedShip: TObject;
@@ -98,6 +115,7 @@ begin
     Result := InspectedShipHandler
   else
     Result := nil;
+  Result := TObject(Answer(sqInspectedShip, PtrInt(Result)));
 end;
 
 function TalkScreenOpen: Boolean;
@@ -106,5 +124,15 @@ begin
     Result := TalkScreenOpenHandler
   else
     Result := False;
+  Result := Answer(sqTalkScreenOpen, Ord(Result)) <> 0;
+end;
+
+function FilmPlaying: Boolean;
+begin
+  if Assigned(FilmPlayingHandler) then
+    Result := FilmPlayingHandler
+  else
+    Result := False;
+  Result := Answer(sqIsFilm, Ord(Result)) <> 0;
 end;
 end.

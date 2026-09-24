@@ -3168,7 +3168,8 @@ begin
     Exit;
   if not GetPlayer.InNormalSpace then
     Exit;
-  if CurrentScreenId <> screenStarMap then
+  // CHANGE: ENHANCEMENT - Ask through SimEvents, so that the command log records the answer.
+  if HumanScreen <> screenStarMap then
     Exit;
   if TalkDialogActive then
     Exit;
@@ -13052,7 +13053,8 @@ begin
 end;
 procedure SF_IsFilm(av: array of TVarEC; code: TCodeEC);
 begin
-  if StarMapScreen.Mode = smmTurnFilm then
+  // CHANGE: ENHANCEMENT - Ask through SimEvents, so that the command log records the answer.
+  if FilmPlaying then
     av[0].SetInt(1)
   else
     av[0].SetInt(0);

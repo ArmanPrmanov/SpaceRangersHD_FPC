@@ -15,7 +15,8 @@ uses
   Globals,
   GlobalsV,
   aGalaxy,
-  aHuman;
+  aHuman,
+  fStarMap;
 
 procedure SwitchScreen(Screen: TGameScreenId);
 begin
@@ -40,13 +41,13 @@ end;
 procedure WaitForPlayerShipScreens;
 begin
   // CHANGE: ENHANCEMENT - The UI shows the score screen while the turn thread waits.
-  InterlockedIncrement(TurnYieldedToUi);
+  BeginTurnWaitForUi(False);
   try
     while ((CurrentScreenId = screenJump) or (CurrentScreenId = screenArcadeBattle))
         and (Galaxy.ScoreScreenDismissed = 0) do
       SysUtils.Sleep(1);
   finally
-    InterlockedDecrement(TurnYieldedToUi);
+    EndTurnWaitForUi(False);
   end;
 end;
 
@@ -83,6 +84,11 @@ begin
   Result := (TalkScreen <> nil) and (TalkScreen.ParentLoop <> nil);
 end;
 
+function IsFilmPlaying: Boolean;
+begin
+  Result := StarMapScreen.Mode = smmTurnFilm;
+end;
+
 procedure InstallSimEventHandlers;
 begin
   ScreenRequestHandler := SwitchScreen;
@@ -94,5 +100,6 @@ begin
   HumanScreenHandler := OpenScreen;
   InspectedShipHandler := ShipOnOpenScreen;
   TalkScreenOpenHandler := IsTalkScreenOpen;
+  FilmPlayingHandler := IsFilmPlaying;
 end;
 end.

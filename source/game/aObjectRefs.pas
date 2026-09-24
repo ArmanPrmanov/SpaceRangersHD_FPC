@@ -22,6 +22,12 @@ function ObjectIdentity(Value: PtrUInt): WideString;
 procedure BeginObjectReferenceSave;
 procedure EndObjectReferenceSave(Buffer: TBufEC);
 procedure ResolveLoadedObjectReferences(Buffer: TBufEC);
+// The galaxy as TGalaxy.SaveToBuffer writes it, with objects named by key instead of
+// address, and its hash. The buffer can be hashed or compared, never loaded. Safe to call
+// from the UI and the turn thread; the calls take turns.
+function SerializeGalaxyState: TBufEC;
+function HashBytes(Data: PByte; Size: Integer): QWord;
+function GalaxyStateHash: QWord;
 var
   UnresolvedObjectCount: Integer;
 implementation
@@ -29,6 +35,7 @@ uses
   aHuman,
   aSession,
   SysUtils,
+  SyncObjs,
   contnrs,
   EC_Expression,
   Globals,
@@ -405,6 +412,56 @@ end;
 // Reads the table TGalaxy.SaveToBuffer appended, if any, and points every
 // script variable holding a saved address at the object that now has its key.
 // Saves written by the original game have no table; their values stay as read.
+var
+  StateLock: TCriticalSection;
+
+function HashBytes(Data: PByte; Size: Integer): QWord;
+var
+  I: Integer;
+begin
+  // FNV-1a, 64-bit.
+  Result := QWord($CBF29CE484222325);
+  for I := 0 to Size - 1 do
+  begin
+    Result := Result xor Data[I];
+    Result := Result * QWord($100000001B3);
+  end;
+end;
+
+// The save and load counters are bookkeeping; write the values the galaxy was loaded with
+// and leave both counters as they were.
+function SerializeGalaxyState: TBufEC;
+begin
+  Result := TBufEC.Create;
+  StateLock.Enter;
+  try
+    CollectObjectIdentities;
+    SnapshotObjectIdentity := @ObjectIdentity;
+    Dec(Galaxy.SaveCount);
+    Dec(Galaxy.LoadCount);
+    try
+      Galaxy.SaveToBuffer(Result);
+    finally
+      Inc(Galaxy.LoadCount);
+      SnapshotObjectIdentity := nil;
+    end;
+  finally
+    StateLock.Leave;
+  end;
+end;
+
+function GalaxyStateHash: QWord;
+var
+  State: TBufEC;
+begin
+  State := SerializeGalaxyState;
+  try
+    Result := HashBytes(State.Data, State.DataSize);
+  finally
+    State.Free
+  end;
+end;
+
 procedure ResolveLoadedObjectReferences(Buffer: TBufEC);
 var
   I, Count, Start: Integer;
@@ -448,4 +505,8 @@ begin
   end;
 end;
 
+initialization
+  StateLock := TCriticalSection.Create;
+finalization
+  StateLock.Free;
 end.
