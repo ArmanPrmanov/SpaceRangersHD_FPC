@@ -11,20 +11,18 @@ has got.
 
 ## Status
 
-- Phase: 0, 1 and 2 done. Phase 1 item 7 (cross-target drift) was skipped.
-  The second-human spike is done (branch `spike/second-human`, not for
-  merging). In Phase 2, the game and core layers are separated from the UI;
-  the 66 UI script builtins stay allowlisted until Phase 5. CI is not used:
-  the workflow exists but the repository is not connected to a runner, so
-  tests run locally (`tools/test.py`, `tools/unit_tests.py`,
-  `tools/check_layers.py`).
-- Next: Phase 3 (player commands and replay).
-- Open issues: chaotic mode is seeded from the clock, not the save (a
-  deliberate deviation, see the Phase 1 entry); a save with the object
-  reference table is untested in the original game; `format.py --check`
-  fails on files formatted before Phase 0; untested in the game: the
-  player-death and shop-refresh handlers and the interface overrides.
-- Latest entry: [2026-09-24-phase2-game-layer.md](2026-09-24-phase2-game-layer.md)
+- Phase: 0, 1 and 2 done; Phase 3 in progress. The command log, headless
+  replay and checkpoints are in place. Travel, orders, shops, the ship
+  screen, conversations, planets and the government are commands. Stations
+  and the 600 range (text quests, arcade, cheats, UI scripts) are not yet.
+  CI is not used; tests run locally (`tools/test.py`,
+  `tools/unit_tests.py`, `tools/check_layers.py`).
+- Next: finish stations from the draft in `.local/drafts/station/`, then
+  the 600 range, then record a real session for the exit test.
+- Open issues: chaotic mode is seeded from the clock (Phase 1 entry); a
+  loaded game drifts from the live one (Phase 3 entry); no converted screen
+  has been exercised in the UI yet.
+- Latest entry: [2026-09-25-phase3.md](2026-09-25-phase3.md)
 
 ## Session entry format
 
