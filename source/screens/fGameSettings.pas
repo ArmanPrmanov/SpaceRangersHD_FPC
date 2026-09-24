@@ -105,6 +105,8 @@ begin
     // Each generation thread establishes the native x87 precision and exception mask.
     // TThreadEC establishes the host floating-point exception mask.
     NewGameGenerationStage := 0;
+    // CHANGE: BUGFIX - Generation keeps the legacy stream seeded from GenerationSeed.
+    LegacyGenerationRandom := True;
 
     PlayerStarDayPrepared := True;
     Galaxy := TGalaxy.Create;
@@ -905,10 +907,12 @@ begin
     );
     GetPlayer.RefreshStorageBubbles;
     RunGlobalScriptsForContext(GetPlayer.CurrentStar, 0);
+    LegacyGenerationRandom := False;
     NewGameGenerationStage := 8;
   except
     on E: Exception do
     begin
+      LegacyGenerationRandom := False;
       AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
       LogExceptionBackTrace;
       AppendLogLineThreadSafe(

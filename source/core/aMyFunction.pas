@@ -19,6 +19,9 @@ type
     Radius: Double;
   end;
 var
+  // Set by the new-game worker while it generates the galaxy.
+  LegacyGenerationRandom: Boolean;
+  ChaoticRandomState: Cardinal;
   InfoNameColorTag: WideString = '<color=57,239,255>';
   InfoHullSeriesColorTag: WideString = '<color=82,166,255>';
 type
@@ -40,6 +43,16 @@ function AdvanceRandomSeed(var Seed: Cardinal): Cardinal;
 function NextRandomIntRange(BoundA: Integer; BoundB: Integer; var Seed: Cardinal): Integer;
 function NextRandomFloatRange(BoundA: Double; BoundB: Double; var Seed: Cardinal): Double;
 function NextRandomUnitFloat(var Seed: Cardinal): Double;
+// CHANGE: BUGFIX - Simulation draws that used the shared stream, which visuals and audio
+// also draw from on the UI thread. They draw from Galaxy.RandomState instead, except while
+// a new galaxy is generated, which keeps the legacy stream seeded from GenerationSeed so a
+// seed still gives the same galaxy.
+function GameRandomIntRange(BoundA: Integer; BoundB: Integer): Integer;
+function GameRandomUnitFloat: Single;
+// CHANGE: BUGFIX - Chaotic-random mode draws from its own stream, not the presentation one.
+// It is seeded from the clock when a galaxy is created or loaded, so a reload still
+// rerolls, and a test can pin it.
+procedure SeedChaoticRandom(Seed: Cardinal);
 function FractionalQuotient(Numerator: Integer; Denominator: Integer): Double;
 function RoundAndTruncateToFives(Value: Double): Integer;
 function RoundAndTruncateToTens(Value: Double): Integer;
@@ -198,15 +211,31 @@ begin
     Result := PresentationRandom(BoundA - BoundB + 1) + BoundB;
 end;
 
+function ChaoticRandomIntRange(BoundA, BoundB: Integer): Integer;
+var
+  Seed: Cardinal;
+begin
+  Seed := AdvanceRandomSeed(ChaoticRandomState);
+  if BoundA < BoundB then
+    Result := Seed mod Cardinal(BoundB - BoundA + 1) + BoundA
+  else
+    Result := Seed mod Cardinal(BoundA - BoundB + 1) + BoundB;
+end;
+
+function ChaoticRandomFloatRange(BoundA, BoundB: Double): Double;
+begin
+  Result := ChaoticRandomIntRange(Trunc(BoundA * 1000 + 1), Trunc(BoundB * 1000 + 1)) / 1000;
+end;
+
+procedure SeedChaoticRandom(Seed: Cardinal);
+begin
+  ChaoticRandomState := Seed;
+end;
+
 function SeededRandomIntRange(BoundA, BoundB: Integer; Seed: Cardinal): Integer;
 begin
   if (Galaxy <> nil) and Galaxy.IsChaoticRandomEnabled then
-  begin
-    if BoundA <= BoundB then
-      Result := PresentationRandom(BoundB - BoundA + 1) + BoundA
-    else
-      Result := PresentationRandom(BoundA - BoundB + 1) + BoundB;
-  end
+    Result := ChaoticRandomIntRange(BoundA, BoundB)
   else if BoundA < BoundB then
     Result := Seed mod Cardinal(BoundB - BoundA + 1) + BoundA
   else
@@ -254,7 +283,7 @@ var
   OldSeed: Cardinal;
 begin
   if (Galaxy <> nil) and Galaxy.IsChaoticRandomEnabled then
-    Result := RandomIntRange(BoundA, BoundB)
+    Result := ChaoticRandomIntRange(BoundA, BoundB)
   else
   begin
     OldSeed := Seed;
@@ -273,7 +302,7 @@ var
   OldSeed: Cardinal;
 begin
   if (Galaxy <> nil) and Galaxy.IsChaoticRandomEnabled then
-    Result := RandomFloatRange(BoundA, BoundB)
+    Result := ChaoticRandomFloatRange(BoundA, BoundB)
   else
   begin
     OldSeed := Seed;
@@ -289,7 +318,7 @@ var
   OldSeed: Cardinal;
 begin
   if (Galaxy <> nil) and Galaxy.IsChaoticRandomEnabled then
-    Result := RandomFloatRange(0, 1)
+    Result := ChaoticRandomFloatRange(0, 1)
   else
   begin
     OldSeed := Seed;
@@ -298,6 +327,19 @@ begin
       Seed := Seed * 5331 + 3417;
     Result := Frac(Seed / 10011001);
   end;
+end;
+
+function GameRandomIntRange(BoundA, BoundB: Integer): Integer;
+begin
+  if (Galaxy = nil) or LegacyGenerationRandom then
+    Result := RandomIntRange(BoundA, BoundB)
+  else
+    Result := NextRandomIntRange(BoundA, BoundB, Galaxy.RandomState);
+end;
+
+function GameRandomUnitFloat: Single;
+begin
+  Result := GameRandomIntRange(1, 1000) / 1000;
 end;
 
 function FractionalQuotient(Numerator, Denominator: Integer): Double;

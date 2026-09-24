@@ -3920,7 +3920,8 @@ begin
   if High(av) < 3 then
     raise Exception.Create('Error.Script UselessItemCreate');
   Item := TUselessItem.Create;
-  (Item as TUselessItem).Init(av[1].GetString, TDominatorSeries(RandomIntRange(0, 2)), 0, False);
+  // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+  (Item as TUselessItem).Init(av[1].GetString, TDominatorSeries(GameRandomIntRange(0, 2)), 0, False);
   ScriptItem := TScriptItem(av[2].GetDword);
   if ScriptItem.Item <> nil then
     ScriptItem.Item.ScriptItem := nil;
@@ -17342,7 +17343,6 @@ var
   UtilityNearbyShips: array of TUtilityNearbyShip;
   UtilityCapitalTarget: Integer = 0;
   UtilityCapitalWorkerExists: Boolean = False;
-  UtilityRandomState: Cardinal;
 
 procedure UtilityError(const Text: string);
 begin
@@ -17421,8 +17421,9 @@ begin
   begin
     // Compatibility: the DLL uses its own MSVC rand(), with only 15 random
     // bits, and does not advance the object's saved seed in chaotic mode.
-    UtilityRandomState := UtilityRandomState * 214013 + 2531011;
-    Seed := (UtilityRandomState shr 16) and $7FFF;
+    // CHANGE: BUGFIX - Step the chaotic-random stream instead of a clock-seeded state.
+    ChaoticRandomState := ChaoticRandomState * 214013 + 2531011;
+    Seed := (ChaoticRandomState shr 16) and $7FFF;
   end
   else
   begin
@@ -19821,7 +19822,6 @@ end;
 initialization
   // CHANGE: PORTABILITY - Register even before a galaxy exists: menu handlers
   // import the text-file helpers while choosing a new game.
-  UtilityRandomState := Cardinal(DateTimeToUnix(Now, False));
   RegisterNativeScriptFunction(
       'UtilityFunctions',
       'void,AdjustRuinsGoodsPricesToStorage,int,int,float,float',

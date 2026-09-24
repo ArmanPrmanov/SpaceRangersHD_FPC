@@ -91,9 +91,11 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     else:
         notes.append("round trip ok")
 
-    hash_options = [f"--sim-turns={args.turns}", "--sim-hash", f"--sim-seed={args.seed}"]
+    # The second run pins the presentation stream (visuals, audio) to another seed; the
+    # simulation must not draw from it.
     runs = []
-    for _ in range(2):
+    for seed in (args.seed, args.seed + 1):
+        hash_options = [f"--sim-turns={args.turns}", "--sim-hash", f"--sim-seed={seed}"]
         code, output = simulate(binary, args.game_dir, save, hash_options)
         if code != 0:
             notes.append("simulation failed:\n    " + "\n    ".join(output.strip().splitlines()[-12:]))
@@ -102,7 +104,7 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     if runs[0] != runs[1]:
         notes.append("nondeterministic: " + first_divergence(runs[0], runs[1]))
         return False, notes
-    notes.append(f"deterministic over {args.turns} turns")
+    notes.append(f"deterministic over {args.turns} turns, independent of the presentation seed")
 
     # Hashing saves the galaxy; saving must not change what later turns compute.
     last_options = [f"--sim-turns={args.turns}", "--sim-hash-last", f"--sim-seed={args.seed}"]
@@ -147,7 +149,7 @@ def main() -> None:
         help="Save files or directories of saves (default: tests/saves).",
     )
     parser.add_argument("--turns", type=int, default=100, help="Turns to simulate per save.")
-    parser.add_argument("--seed", type=int, default=0, help="Seed for the shared random stream.")
+    parser.add_argument("--seed", type=int, default=0, help="Seed for the presentation stream.")
     parser.add_argument("--update", action="store_true", help="Record golden hashes again.")
     parser.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     args = parser.parse_args()

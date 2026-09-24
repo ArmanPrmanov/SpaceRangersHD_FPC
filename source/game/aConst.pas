@@ -4220,7 +4220,8 @@ begin
   for ItemType := Ord(Low(TItemType)) to Ord(High(TItemType)) do
     if ItemType in Mask then
       Inc(Count);
-  Count := RandomIntRange(1, Count);
+  // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+  Count := GameRandomIntRange(1, Count);
   Result := 76; // Native exhausted-loop value for an empty mask.
   for ItemType := Ord(Low(TItemType)) to Ord(High(TItemType)) do
     if ItemType in Mask then

@@ -906,6 +906,8 @@ begin
   SaveCount := 0;
   LoadCount := 0;
   Randomize;
+  // CHANGE: BUGFIX - Chaotic-random mode has its own stream; a reload still rerolls it.
+  SeedChaoticRandom(Cardinal(System.RandSeed));
   GenerationSeed := RandomIntRange(100000, MaxInt);
   SetCheatPoints(0);
   RandomState := GenerationSeed;
@@ -2576,8 +2578,9 @@ begin
       Hole.Star1 := GetPlayer.CurrentStar;
       Hole.Star2 := GetPlayer.CurrentStar;
       Hole.ArcadeMapName := '';
-      Angle := HeadingDegreesToRadians(RandomIntRange(0, 359));
-      Radius := RandomIntRange(1000, 2000);
+      // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+      Angle := HeadingDegreesToRadians(GameRandomIntRange(0, 359));
+      Radius := GameRandomIntRange(1000, 2000);
       Hole.Position1 := MakePointF(Sin(Angle) * Radius, -Cos(Angle) * Radius);
       Hole.Position2 := MakePointF(Sin(Angle) * Radius, -Cos(Angle) * Radius);
       Hole.CreatedTurn := CurrentTurn;
@@ -4858,7 +4861,8 @@ begin
               TCountableItem(Item).DropFlag := 1;
             if Item <> nil then
               Items.Add(Item);
-            Angle := HeadingDegreesToRadians(RandomIntRange(0, 359));
+            // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+            Angle := HeadingDegreesToRadians(GameRandomIntRange(0, 359));
             Item.Position.X := Sin(Angle) * (3 * DamageRadius);
             Item.Position.Y := Cos(Angle) * (3 * DamageRadius);
           end;

@@ -502,6 +502,7 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
 procedure CheatCoolweapon;
 var
   Item: TEquipment;
@@ -516,9 +517,9 @@ begin
     GetPlayer.CurrentPlanet.EquipmentShop.Add(Item);
     (Item as TWeapon)
         .Init(
-            TItemType(RandomIntRange(58, 61)),
-            RandomIntRange(50, 100),
-            RandomIntRange(4, 8),
+            TItemType(GameRandomIntRange(58, 61)),
+            GameRandomIntRange(50, 100),
+            GameRandomIntRange(4, 8),
             RaceToOwner(GetPlayer.CurrentPlanet.RaceId));
     (Item as TWeapon).Improve(ikAny);
     BuildTemporaryShopSlotGrid;
@@ -531,6 +532,7 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
 procedure CheatLowcostweapon;
 var
   Item: TWeapon;
@@ -542,16 +544,16 @@ begin
       and GetPlayer.IsOnPlanet then
   begin
     RestoreTemporaryShopStock;
-    Info := Galaxy.SelectWeaponInfo(RandomIntRange(1, 100000), [0], 8, 1);
+    Info := Galaxy.SelectWeaponInfo(GameRandomIntRange(1, 100000), [0], 8, 1);
     Item :=
         CreateGeneratedWeapon(
             Info,
-            RandomIntRange(14, 200),
-            RandomIntRange(1, 8),
+            GameRandomIntRange(14, 200),
+            GameRandomIntRange(1, 8),
             RaceToOwner(GetPlayer.CurrentPlanet.RaceId)
         );
     GetPlayer.CurrentPlanet.EquipmentShop.Add(Item);
-    Item.Cost := RandomIntRange(1, 10);
+    Item.Cost := GameRandomIntRange(1, 10);
     if Item.Weight > 100 then
       Item.Improve(ikMajor);
     BuildTemporaryShopSlotGrid;
@@ -602,6 +604,7 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
 procedure CheatArtefact;
 var
   Item: TItem;
@@ -612,7 +615,7 @@ begin
         CreateRandomLootItem(
             ilpAnyAvailable,
             RaceToOwner(GetPlayer.HomePlanet.RaceId),
-            RandomIntRange(1, 1000000000)
+            GameRandomIntRange(1, 1000000000)
         );
     if Item is TArtefact then
       GetPlayer.Artefacts.Add(Item)
@@ -732,6 +735,7 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
 procedure CheatKlissanitem;
 var
   Item: TWeapon;
@@ -743,9 +747,9 @@ begin
       and (CurrentScreenId <> screenShip)
       and (GetPlayer.DockedTo.TypeId = Byte(rstScienceBase)) then
   begin
-    Info := Galaxy.SelectWeaponInfo(RandomIntRange(1, 100000), [4], 8, 1);
-    Item := CreateGeneratedWeapon(Info, RandomIntRange(77, 200), RandomIntRange(1, 8), 5);
-    case RandomIntRange(1, 3) of
+    Info := Galaxy.SelectWeaponInfo(GameRandomIntRange(1, 100000), [4], 8, 1);
+    Item := CreateGeneratedWeapon(Info, GameRandomIntRange(77, 200), GameRandomIntRange(1, 8), 5);
+    case GameRandomIntRange(1, 3) of
       1: Item.DominatorSeries := dsBlazer;
       2: Item.DominatorSeries := dsKeller;
       3: Item.DominatorSeries := dsTerron;
@@ -767,6 +771,7 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
 procedure CheatWeaponstrength;
 var
   I, J, K: Integer;
@@ -798,7 +803,7 @@ begin
             for K := 1 to Ship.WeaponCount do
             begin
               Ship.Weapons[K].MaxDamage :=
-                  Min(255, Ship.Weapons[K].MaxDamage + RandomIntRange(10, 20));
+                  Min(255, Ship.Weapons[K].MaxDamage + GameRandomIntRange(10, 20));
               if GetPlayer <> Ship then
                 Ship.ChangeRelationToRanger(GetPlayer, 50);
             end;
@@ -823,6 +828,7 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
 procedure CheatTenbomb;
 var
   Item: TArtefact;
@@ -839,8 +845,8 @@ begin
     begin
       Item := TArtefact.Create;
       Item.Init(GetPlayer.HomePlanet.OwnerId, t_ArtefactBomb);
-      Radius := RandomIntRange(300, 700);
-      Angle := HeadingDegreesToRadians(RandomIntRange(0, 360));
+      Radius := GameRandomIntRange(300, 700);
+      Angle := HeadingDegreesToRadians(GameRandomIntRange(0, 360));
       Item.Position.X := GetPlayer.Position.X + Sin(Angle) * Radius;
       Item.Position.Y := GetPlayer.Position.Y - Cos(Angle) * Radius;
       GetPlayer.CurrentStar.Items.Add(Item);
@@ -851,6 +857,7 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
 procedure CheatRangersdream;
 var
   Item: TProtoplasm;
@@ -870,13 +877,13 @@ begin
       if 10000 - Total < 100 then
         Count := 10000 - Total
       else
-        Count := RandomIntRange(10, 100);
+        Count := GameRandomIntRange(10, 100);
       Item.Init(Count, 1);
       Inc(Total, Count);
-      Item.DominatorSeries := TDominatorSeries(RandomIntRange(0, 2));
+      Item.DominatorSeries := TDominatorSeries(GameRandomIntRange(0, 2));
       repeat
-        X := RandomIntRange(-250, 250);
-        Y := RandomIntRange(-250, 250);
+        X := GameRandomIntRange(-250, 250);
+        Y := GameRandomIntRange(-250, 250);
       until (Sqr(X) + Sqr(Y) > Sqr(50)) and (Sqr(X) + Sqr(Y) < Sqr(250));
       Item.Position.X := GetPlayer.Position.X + X;
       Item.Position.Y := GetPlayer.Position.Y + Y;
@@ -887,6 +894,7 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
 procedure CheatRndbase;
 var
   Station: TRuins;
@@ -911,7 +919,7 @@ begin
     end;
     if TotalKinds - Remaining < 3 then
     begin
-      Choice := RandomIntRange(1, Remaining);
+      Choice := GameRandomIntRange(1, Remaining);
       I := 0;
       for Kind := 6 to 12 do
         if Kind in Kinds then
@@ -929,6 +937,7 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
 procedure CheatMapsector;
 var
   I: Integer;
@@ -953,7 +962,7 @@ begin
       repeat
         Constellation :=
             TConstellation(
-                Galaxy.Constellations[RandomIntRange(0, Galaxy.Constellations.Count - 1)]
+                Galaxy.Constellations[GameRandomIntRange(0, Galaxy.Constellations.Count - 1)]
             );
       until not Constellation.Visible;
       Constellation.Visible := True;
@@ -1080,6 +1089,7 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
 procedure CheatPirates;
 var
   I, Attempts: Integer;
@@ -1099,7 +1109,7 @@ begin
       begin
         Attempts := 0;
         repeat
-          Planet := TPlanet(Star.Planets[RandomIntRange(0, Star.Planets.Count - 1)]);
+          Planet := TPlanet(Star.Planets[GameRandomIntRange(0, Star.Planets.Count - 1)]);
           if Planet.OwnerId in [Ord(oiMaloc)..Ord(oiGaal), Ord(oiPirate)] then
           begin
             Planet.BuyPirate(100);
@@ -1443,6 +1453,7 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
 procedure CheatHole;
 var
   Items: TList;
@@ -1502,8 +1513,8 @@ begin
               Sqrt(PointDistanceSquared(GetPlayer.Position, MakePointF(0, 0))) + 200
           );
       Hole.Position1 := MakePointF(Sin(Angle) * Radius, -Cos(Angle) * Radius);
-      Angle := HeadingDegreesToRadians(RandomIntRange(0, 359));
-      Radius := RandomIntRange(1000, 2000);
+      Angle := HeadingDegreesToRadians(GameRandomIntRange(0, 359));
+      Radius := GameRandomIntRange(1000, 2000);
       Hole.Position2 := MakePointF(Sin(Angle) * Radius, -Cos(Angle) * Radius);
       Hole.CreatedTurn := Galaxy.CurrentTurn;
       Hole.HoleType := 1;

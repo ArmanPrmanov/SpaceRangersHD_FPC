@@ -26,6 +26,7 @@ uses
   EC_Expression,
   Globals,
   GlobalsV,
+  aMyFunction,
   aGalaxy,
   aGalaxyEvent,
   aObjectRefs,
@@ -191,6 +192,7 @@ begin
   // TGalaxy.Create reseeds the shared stream from the clock; pin it so that
   // call sites still on the shared stream repeat between runs.
   System.RandSeed := Integer(Seed);
+  SeedChaoticRandom(Seed);
 end;
 
 // The save and load counters would differ between the two files; write the

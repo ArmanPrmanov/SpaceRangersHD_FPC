@@ -50,9 +50,13 @@ is unchanged. [TBlockParEC.LoadFromEncryptedDatFile](source/resources/EC_BlockPa
 [LoadLocalAchievements](source/NoSteamAchievemens.pas#L51).
 
 Saved per-object random states and algorithms are retained. The original shared
-RNG also depends on runtime seeding and call order across gameplay and visuals.
-Removing protection draws changes that shared sequence, including chaotic-random mode.
-[RandomIntRange](source/core/aMyFunction.pas#L193), [NextRandomIntRange](source/core/aMyFunction.pas#L252).
+RNG also served gameplay, visuals and audio, with runtime seeding, so results depended
+on what was drawn on screen. Simulation draws that used it now use `Galaxy.RandomState`,
+text quests use their own stream seeded when a quest starts, and chaotic-random mode
+has its own stream seeded when a galaxy is created or loaded. Galaxy generation still
+uses the shared stream seeded from the generation seed, so a seed gives the same galaxy.
+[GameRandomIntRange](source/core/aMyFunction.pas), [NextRandomIntRange](source/core/aMyFunction.pas),
+[TextQuestRandom](source/quests/CPDiapClass.pas).
 Save-label padding is deterministic.
 [EncodeLegacySaveLabel](source/core/EC_Str.pas#L1158).
 

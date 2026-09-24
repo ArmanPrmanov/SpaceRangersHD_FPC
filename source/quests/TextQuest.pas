@@ -1048,7 +1048,7 @@ begin
           end;
           if Group.Count = 1 then
           begin
-            if System.Random <= MaxPriority then
+            if TextQuestRandom <= MaxPriority then
               Chosen.Add(Group[0]);
           end
           else
@@ -1065,7 +1065,7 @@ begin
               Path := TPath(Group[i]);
               TotalPriority := TotalPriority + Path.Priority;
             end;
-            RandomPriority := System.Random * TotalPriority;
+            RandomPriority := TextQuestRandom * TotalPriority;
             Selected := Group.Count - 1;
             for i := 0 to Group.Count - 1 do
             begin
@@ -1105,9 +1105,9 @@ begin
         end;
         for i := 1 to Chosen.Count * 2 do
         begin
-          Selected := System.Random(Chosen.Count);
+          Selected := TextQuestRandom(Chosen.Count);
           Path := TPath(Chosen[Selected]);
-          j := System.Random(Chosen.Count);
+          j := TextQuestRandom(Chosen.Count);
           Chosen[Selected] := Chosen[j];
           Chosen[j] := Path;
         end;

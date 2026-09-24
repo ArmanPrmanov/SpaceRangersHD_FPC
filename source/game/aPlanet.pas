@@ -1375,9 +1375,10 @@ begin
   RaceId := Byte(oiMaloc);
   Name := 'New Planet';
   Count := High(PlanetSpaceTemplates) + 1;
-  Quantity := RandomIntRange(0, Count - 1);
+  // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+  Quantity := GameRandomIntRange(0, Count - 1);
   while PlanetSpaceTemplates[Quantity].Style = 1 do
-    Quantity := RandomIntRange(0, Count - 1);
+    Quantity := GameRandomIntRange(0, Count - 1);
   SpriteTemplateIndex := Quantity;
   GraphicRadius := PlanetSpaceTemplates[Quantity].Radius;
   RetainSpaceObject(TObjectSE(Graphic), TPlanetSE.Create);
@@ -1657,7 +1658,8 @@ begin
           begin
             WeaponInfo :=
                 aGalaxy.Galaxy.SelectWeaponInfo(
-                    RandomIntRange(1, 100000),
+                    // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+                    GameRandomIntRange(1, 100000),
                     [Ord(waFree)],
                     InventionLevels[7],
                     1

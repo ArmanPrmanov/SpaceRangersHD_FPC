@@ -5652,7 +5652,8 @@ begin
     Reflect := PrimaryDamage < 0;
     if not Reflect then
       for J := 1 to Target.CountActiveArtefacts(Ord(t_ArtefactDef)) do
-        if RandomUnitFloat > Target.GetDefenseDamageFactor then
+        // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+        if GameRandomUnitFloat > Target.GetDefenseDamageFactor then
         begin
           Reflect := True;
           Break;
@@ -14088,7 +14089,8 @@ begin
       AppendStarAvoidingPathWithTurnPadding(AddPointsF(Point, OrderDestination), MaximumNodes);
       if MovementPath.ActiveHead = nil then
       begin
-        OrderDestination := MakePointF(RandomIntRange(-5, 5), RandomIntRange(-5, 5));
+        // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+        OrderDestination := MakePointF(GameRandomIntRange(-5, 5), GameRandomIntRange(-5, 5));
         AppendStarAvoidingPathWithTurnPadding(AddPointsF(Point, OrderDestination), MaximumNodes);
       end;
     end;

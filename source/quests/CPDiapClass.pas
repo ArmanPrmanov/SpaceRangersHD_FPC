@@ -31,6 +31,12 @@ type
     procedure AddValue(Value: Extended);
     procedure LoadFromText(Text: WideString);
   end;
+// CHANGE: BUGFIX - Text quests draw from their own stream instead of the shared one that
+// visuals and audio also use. The game seeds it when a quest starts.
+var
+  TextQuestRandomState: Cardinal;
+function TextQuestRandom(Limit: Int64): Int64; overload;
+function TextQuestRandom: Double; overload;
 implementation
 uses
   Math,
@@ -87,6 +93,29 @@ begin
       Result := RangeEnds[i];
 end;
 
+function NextTextQuestRandom: Cardinal;
+begin
+  TextQuestRandomState := TextQuestRandomState * 1664525 + 1013904223;
+  Result := TextQuestRandomState;
+end;
+
+// Like System.Random(Limit): 0 <= Result < Limit, and 0 when Limit <= 0.
+function TextQuestRandom(Limit: Int64): Int64;
+begin
+  if Limit <= 0 then
+    Result := 0
+  else if Limit <= High(Cardinal) then
+    Result := Int64((QWord(NextTextQuestRandom) * QWord(Limit)) shr 32)
+  else
+    Result := Int64(QWord(NextTextQuestRandom) mod QWord(Limit));
+end;
+
+// Like System.Random: 0 <= Result < 1.
+function TextQuestRandom: Double;
+begin
+  Result := NextTextQuestRandom / 4294967296.0;
+end;
+
 function TCPDiapazone.GetRandomValue: Integer;
 var
   i, RandomValue: Integer;
@@ -104,12 +133,12 @@ begin
       Ends[i] := RangeEnds[i] - RangeStarts[i] + Starts[i];
       RandomValue := RandomValue + RangeEnds[i] - RangeStarts[i] + 1;
     end;
-    RandomValue := System.Random(RandomValue);
+    RandomValue := TextQuestRandom(RandomValue);
     // Native scan includes RangeCount and draws again within the selected range.
     for i := 0 to RangeCount do
       if (RandomValue >= Starts[i]) and (RandomValue <= Ends[i]) then
       begin
-        Result := System.Random(RangeEnds[i] - RangeStarts[i] + 1) + RangeStarts[i];
+        Result := TextQuestRandom(RangeEnds[i] - RangeStarts[i] + 1) + RangeStarts[i];
         Break;
       end;
   end;

@@ -161,7 +161,8 @@ uses
   aGalaxyStruct,
   ValueListClass,
   EventClass,
-  aMyFunction;
+  aMyFunction,
+  CPDiapClass;
 
 constructor TfQuestA.Create;
 begin
@@ -296,6 +297,8 @@ begin
     CurrentDate := TrimWideString(Galaxy.FormatTurnDate(Galaxy.CurrentTurn));
   Quest.PlayerInterface := QuestPlayerInterface;
   ImportExternalParameters;
+  // CHANGE: BUGFIX - Seed the quest's own stream from the simulation stream.
+  TextQuestRandomState := Cardinal(GameRandomIntRange(0, MaxInt));
   if GetPlayer = nil then
     Quest.Start(-1, False)
   else

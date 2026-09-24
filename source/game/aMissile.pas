@@ -746,7 +746,8 @@ begin
           Stage := 13;
           DistanceSquared := PointDistanceSquared(Position, TargetPosition);
           if (LastTargetDistance < DistanceSquared) and (OvershootTicks < 0) then
-            OvershootTicks := RandomIntRange(Round(Speed / 40), Round(Speed / 10));
+            // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+            OvershootTicks := GameRandomIntRange(Round(Speed / 40), Round(Speed / 10));
           LastTargetDistance := DistanceSquared;
           if OvershootTicks > 0 then
           begin

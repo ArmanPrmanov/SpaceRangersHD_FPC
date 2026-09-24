@@ -4009,7 +4009,8 @@ const
   OtherPrograms = [prgShipwreck..prgDisconnection];
 begin
   if (CountProgramsInFilter(BasicProgram) = 0)
-      or (CountProgramsInFilter(BasicProgram) < RandomIntRange(3, 10)) then
+      // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+      or (CountProgramsInFilter(BasicProgram) < GameRandomIntRange(3, 10)) then
     Result := prgIntercom
   else
     Result := SelectRandomProgramIdFromFilter(OtherPrograms);
@@ -5086,7 +5087,8 @@ begin
   if ArtefactWeight > 0 then
     ArtefactWeight := RemapClamped(Artefacts.Count, 1, 5, 80, 10);
   if ModuleWeight > 0 then
-    ModuleWeight := RandomIntRange(10, 90);
+    // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+    ModuleWeight := GameRandomIntRange(10, 90);
   if (AwardWeight = 0) and (ProgramWeight = 0) and (ArtefactWeight = 0) and (ModuleWeight = 0) then
   begin
     FinalizeSuccessfulQuestTurnIn;
@@ -5328,7 +5330,8 @@ begin
   if ArtefactWeight > 0 then
     ArtefactWeight := RemapClamped(Artefacts.Count, 0, 5, 40, 5);
   if ModuleWeight > 0 then
-    ModuleWeight := RandomIntRange(40, 95);
+    // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+    ModuleWeight := GameRandomIntRange(40, 95);
   if (AwardWeight = 0) and (ProgramWeight = 0) and (ArtefactWeight = 0) and (ModuleWeight = 0) then
     Exit;
   if AwardWeight > 0 then

@@ -62,6 +62,7 @@ type
 implementation
 uses
   CalcParseClass,
+  CPDiapClass,
   EC_Str,
   Math;
 
@@ -662,7 +663,7 @@ begin
       Attempts := 0;
       while not Found do
       begin
-        i := System.Random(EventCount) + 1;
+        i := TextQuestRandom(EventCount) + 1;
         Text := TrimWideString(Events[i].Text.Text);
         if Text <> '' then
         begin

@@ -322,7 +322,8 @@ begin
   else
     ArtefactWeight := 0;
   if Self is TPlayer then
-    ModuleWeight := RandomIntRange(10, 90)
+    // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
+    ModuleWeight := GameRandomIntRange(10, 90)
   else
     ModuleWeight := 0;
   if (AwardWeight = 0) and (ProgramWeight = 0) and (ArtefactWeight = 0) and (ModuleWeight = 0) then
