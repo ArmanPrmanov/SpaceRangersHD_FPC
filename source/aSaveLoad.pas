@@ -51,6 +51,7 @@ implementation
 uses
   aSession,
   aHold,
+  aPlayerActions,
   aItem,
   aObjectRefs,
   Classes,
@@ -229,17 +230,6 @@ begin
   FilmBuffer := Films;
   Start;
 end;
-// CHANGE: BUGFIX - Moved out of TGalaxy.SaveToBuffer so that hashing the state changes
-// nothing. Returns shop stock left behind by a shop the player is no longer at, and runs
-// mod OnSave handlers.
-procedure PrepareGalaxyForSave;
-begin
-  if (LocalHuman.TemporaryShopSlots <> nil)
-      and (GetPlayer.CurrentPlanet <> LocalHuman.TemporaryShopPlanet)
-      and (GetPlayer.DockedTo <> LocalHuman.TemporaryShopStation) then
-    RestoreTemporaryShopStock;
-  Galaxy.RunConfigOnSaveHandlers;
-end;
 
 function SaveGameToFile(FileName, Description: WideString): Boolean;
 var
@@ -319,7 +309,9 @@ begin
         GameState.AddAnsiChar(AnsiChar(Entry.GoodsIndex));
         GameState.AddDWord(Entry.ItemId);
       end;
-      PrepareGalaxyForSave;
+      // CHANGE: BUGFIX - Moved out of TGalaxy.SaveToBuffer so that hashing the state
+      // changes nothing; a command, since it can change the game.
+      PrepareSave;
       Galaxy.SaveToBuffer(GameState);
       Films := TBufEC.Create;
       FilmEntry := TBufEC.Create;

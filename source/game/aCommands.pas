@@ -19,6 +19,9 @@ type
       ckPrepareSave = 2,
       ckPruneMessages = 3,
       ckParkPlayer = 4,
+      ckPreparePlayerPath = 5,
+      ckApplyPendingOrders = 6,
+      ckBuildPlayerPath = 7,
       // Orders in space.
       ckOrderMove = 10,
       ckOrderStop = 11,
@@ -28,11 +31,19 @@ type
       ckOrderJumpHole = 15,
       ckOrderJump = 16,
       ckSetWeaponTarget = 17,
-      ckClearWeaponTargets = 18,
       ckSetPickupTarget = 19,
       ckTogglePickupTargets = 20,
       ckSetAfterburner = 21,
-      ckSetInterceptorTarget = 22
+      ckSetInterceptorTarget = 22,
+      ckSetPendingFollow = 23,
+      ckEnterRuinsMode = 24,
+      ckExitRuinsMode = 25,
+      ckCancelInvalidTravelOrder = 26,
+      ckRefreshStepParameters = 27,
+      // Script hooks the UI runs: entering or leaving a screen, showing an object.
+      ckScriptItemsAct = 28,
+      ckRunScriptTurns = 29,
+      ckLandingWear = 30
   );
   TCommandRefKind = (
       crNone = 0,
@@ -75,6 +86,8 @@ function IntArg(const Command: TPlayerCommand; Index: Integer): Integer;
 function FloatArg(const Command: TPlayerCommand; Index: Integer): Single;
 function PointArg(const Command: TPlayerCommand; Index: Integer): TPointF;
 function ResolveRef(const Ref: TCommandRef): TObject;
+// Whether AddRef can name Instance.
+function CanNameObject(Instance: TObject): Boolean;
 
 procedure EncodeCommand(const Command: TPlayerCommand; Buffer: TBufEC);
 function DecodeCommand(Buffer: TBufEC): TPlayerCommand;
@@ -94,7 +107,8 @@ uses
   aItem,
   aAsteroid,
   aMissile,
-  aPlayer;
+  aPlayer,
+  SimulationThread;
 
 var
   Executors: array[TCommandKind] of TCommandExecutor;
@@ -105,6 +119,20 @@ begin
   Result.Kind := Kind;
   if GetPlayer <> nil then
     Result.Actor := Cardinal(GetPlayer.Id);
+end;
+
+function CanNameObject(Instance: TObject): Boolean;
+begin
+  Result :=
+      (Instance = nil)
+          or (Instance is TStar)
+          or (Instance is TPlanet)
+          or (Instance is TShip)
+          or (Instance is TItem)
+          or (Instance is THole)
+          or (Instance is TConstellation)
+          or (Instance is TAsteroid)
+          or (Instance is TMissile);
 end;
 
 procedure AddRef(var Command: TPlayerCommand; Instance: TObject);
@@ -273,6 +301,9 @@ begin
     ckPrepareSave: Result := 'PrepareSave';
     ckPruneMessages: Result := 'PruneMessages';
     ckParkPlayer: Result := 'ParkPlayer';
+    ckPreparePlayerPath: Result := 'PreparePlayerPath';
+    ckApplyPendingOrders: Result := 'ApplyPendingOrders';
+    ckBuildPlayerPath: Result := 'BuildPlayerPath';
     ckOrderMove: Result := 'OrderMove';
     ckOrderStop: Result := 'OrderStop';
     ckOrderFollow: Result := 'OrderFollow';
@@ -281,11 +312,18 @@ begin
     ckOrderJumpHole: Result := 'OrderJumpHole';
     ckOrderJump: Result := 'OrderJump';
     ckSetWeaponTarget: Result := 'SetWeaponTarget';
-    ckClearWeaponTargets: Result := 'ClearWeaponTargets';
     ckSetPickupTarget: Result := 'SetPickupTarget';
     ckTogglePickupTargets: Result := 'TogglePickupTargets';
     ckSetAfterburner: Result := 'SetAfterburner';
     ckSetInterceptorTarget: Result := 'SetInterceptorTarget';
+    ckSetPendingFollow: Result := 'SetPendingFollow';
+    ckEnterRuinsMode: Result := 'EnterRuinsMode';
+    ckExitRuinsMode: Result := 'ExitRuinsMode';
+    ckCancelInvalidTravelOrder: Result := 'CancelInvalidTravelOrder';
+    ckRefreshStepParameters: Result := 'RefreshStepParameters';
+    ckScriptItemsAct: Result := 'ScriptItemsAct';
+    ckRunScriptTurns: Result := 'RunScriptTurns';
+    ckLandingWear: Result := 'LandingWear';
   else
     Result := 'Command' + IntToStr(Ord(Kind));
   end;
@@ -307,6 +345,12 @@ end;
 
 procedure SubmitCommand(const Command: TPlayerCommand);
 begin
+  // On the turn thread a command is part of the job that runs it, not something a human did.
+  if InTurnJob then
+  begin
+    ExecuteCommand(Command);
+    Exit;
+  end;
   if Assigned(BeforeCommandHook) then
     BeforeCommandHook(Command);
   ExecuteCommand(Command);
