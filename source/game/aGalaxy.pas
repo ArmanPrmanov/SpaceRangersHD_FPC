@@ -832,7 +832,6 @@ uses
   SE_Weapon,
   Achievements,
   aPlanet,
-  fShip2,
   aShopStock,
   aPlayer,
   GI_GI,
