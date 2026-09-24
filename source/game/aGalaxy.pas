@@ -796,8 +796,6 @@ uses
   SE_Garbage,
   SE_Sputnik,
   aEObjInfo,
-  fGov,
-  fGoodsShop2,
   EC_Expression,
   ab_Ship,
   SE_Planet,

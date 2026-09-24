@@ -718,7 +718,6 @@ uses
   GI_MessageBox,
   Achievements,
   fHangar,
-  fScaner,
   aEFilmEnd,
   SE_Weapon,
   SE_GAIEffect,
@@ -742,7 +741,6 @@ uses
   SimEvents,
   fAbout,
   fPanelMain,
-  fGoodsShop2,
   fGalaxy2,
   GI_GraphBuf;
 procedure SF_GRun(av: array of TVarEC; code: TCodeEC);
