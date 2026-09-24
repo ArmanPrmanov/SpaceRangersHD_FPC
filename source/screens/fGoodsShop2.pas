@@ -17,12 +17,6 @@ uses
   fPanelRuins;
 type
   TfGoodsShop2 = class;
-  TGoodsShopTradeRow = record
-    Count: Integer;
-    MaximumPrice: Single;
-    PurchasePrice: Integer;
-    BaseSalePrice: Integer;
-  end;
   TfGoodsShop2 = class(TMessageLoopGIWithMainPanel)
     PlanetPanel: TfPanelPlanet;
     StationPanel: TfPanelRuins;
@@ -32,7 +26,6 @@ type
     FaceCaptionHeight: Integer;
     FlagEC: Boolean;
     GapED: array[0..2] of Byte;
-    TradeRows: array[0..7] of TGoodsShopTradeRow;
     PartnerCargoLimit: Integer;
     PartnerMoneyLimit: Integer;
     MoneyWarningActive: Boolean;
@@ -88,6 +81,7 @@ function RunGoodsShop(ParentLoop: TMessageLoopGI): Boolean;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   GI_GI,
   ThreadCalc,
   aCalc,
@@ -659,23 +653,23 @@ begin
   begin
     for Good := 0 to 7 do
     begin
-      TradeRows[Good].Count := TalkShip.CargoGoods[Good].Count;
-      TradeRows[Good].MaximumPrice := GoodsMarket[Good].MaxPrice;
+      LocalHuman.TradeRows[Good].Count := TalkShip.CargoGoods[Good].Count;
+      LocalHuman.TradeRows[Good].MaximumPrice := GoodsMarket[Good].MaxPrice;
       if TalkShip.CargoGoods[Good].Count <= 0 then
       begin
-        TradeRows[Good].PurchasePrice := Round(Max(GoodsMarket[Good].AveragePrice * 1.1, 0));
-        TradeRows[Good].BaseSalePrice := Round(Max(GoodsMarket[Good].MinPrice, 0));
+        LocalHuman.TradeRows[Good].PurchasePrice := Round(Max(GoodsMarket[Good].AveragePrice * 1.1, 0));
+        LocalHuman.TradeRows[Good].BaseSalePrice := Round(Max(GoodsMarket[Good].MinPrice, 0));
       end
       else
       begin
-        TradeRows[Good].PurchasePrice :=
+        LocalHuman.TradeRows[Good].PurchasePrice :=
             Round(
                 Max(
                     GoodsMarket[Good].AveragePrice * 1.1,
                     TalkShip.CargoGoods[Good].TotalCost / TalkShip.CargoGoods[Good].Count * 1.3
                 )
             );
-        TradeRows[Good].BaseSalePrice :=
+        LocalHuman.TradeRows[Good].BaseSalePrice :=
             Round(
                 Max(
                     GoodsMarket[Good].MinPrice,

@@ -59,6 +59,5 @@ aScriptFun -> GI_GraphButton
 aScriptFun -> GI_Label
 aScriptFun -> GI_MessageBox
 aScriptFun -> GI_MessageLoop
-aShip -> fGoodsShop2
 Robot -> fPanelLoad
 Robot -> GI_MessageLoop

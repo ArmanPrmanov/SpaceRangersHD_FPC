@@ -862,7 +862,6 @@ uses
   aGroup,
   aGalaxyEvent,
   aShopStock,
-  fGoodsShop2,
   ThreadCalc,
   EC_Mem,
   aEFilmEnd,
@@ -6892,7 +6891,7 @@ begin
   else if Self is TRuins then
     Result := @TRuins(Self).ShopGoods[Good]
   else if TalkShip <> nil then
-    Result := PGoodsTradePriceEntry(@GoodsShopScreen.TradeRows[Good])
+    Result := PGoodsTradePriceEntry(@LocalHuman.TradeRows[Good])
   else
   begin
     AppendLogLineThreadSafe(AnsiString('Error in ShopGoods, ship = ' + GetFullName(' ')));

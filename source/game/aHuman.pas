@@ -18,6 +18,13 @@ uses
   aRuins,
   aShip;
 type
+  // Read back as TGoodsTradePriceEntry, so the layout must match it.
+  TGoodsShopTradeRow = record
+    Count: Integer;
+    MaximumPrice: Single;
+    PurchasePrice: Integer;
+    BaseSalePrice: Integer;
+  end;
   THumanState = record
     // The star the human is in; its day is simulated with the film.
     PlayerStar: TStar;
@@ -40,6 +47,8 @@ type
     // The ship screen's hold order (aHold) and the ship it lists.
     PlayerHoldEntries: TList;
     PlayerHoldShip: TShip;
+    // Prices while trading with a ship in space.
+    TradeRows: array[0..7] of TGoodsShopTradeRow;
   end;
 var
   LocalHuman: THumanState;
