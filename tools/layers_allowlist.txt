@@ -1,5 +1,6 @@
 # Simulation units that still use UI units. Written by tools/check_layers.py --update.
 # Remove entries by removing the dependency; never add one by hand.
+aSaveLoad -> ab_MainForm
 aSaveLoad -> fChameleon
 aSaveLoad -> fCount2
 aSaveLoad -> fEquipmentShop
@@ -33,6 +34,11 @@ aScript -> fShip2
 aScript -> fStarMap
 aScript -> GI_MessageBox
 aScript -> GI_MessageLoop
+aScript -> Robot
+aScriptFun -> ab_Hit
+aScriptFun -> ab_Ship
+aScriptFun -> ab_ShipAI
+aScriptFun -> ab_W
 aScriptFun -> BreakMessageGIException
 aScriptFun -> fAbout
 aScriptFun -> fCount1
@@ -54,5 +60,4 @@ aScriptFun -> GI_GraphButton
 aScriptFun -> GI_Label
 aScriptFun -> GI_MessageBox
 aScriptFun -> GI_MessageLoop
-Robot -> fPanelLoad
-Robot -> GI_MessageLoop
+aScriptFun -> Robot

@@ -2,7 +2,7 @@
 """Check that simulation units do not use UI units.
 
 Units under source/game, source/core and source/script must not name a unit under
-source/screens or source/ui in a uses clause. Existing violations are listed in
+source/screens, source/ui or source/arcade in a uses clause. Existing violations are listed in
 tools/layers_allowlist.txt; the check fails on a violation that is not listed, and on
 a listed one that no longer exists, so the list only shrinks. Pass --update to rewrite
 the list after removing violations.
@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "source"
 ALLOWLIST = Path(__file__).with_name("layers_allowlist.txt")
 SIMULATION = ("game", "core", "script")
-PRESENTATION = ("screens", "ui")
+PRESENTATION = ("screens", "ui", "arcade")
 
 COMMENT = re.compile(r"\{[^}]*\}|\(\*.*?\*\)|//[^\n]*", re.DOTALL)
 USES = re.compile(r"\buses\b(.*?);", re.IGNORECASE | re.DOTALL)

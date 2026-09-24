@@ -76,6 +76,6 @@ galaxy view, Space pauses, N advances one turn, and +/- changes playback speed.
   [ShowModsManager](source/screens/fMods.pas#L1702), [LoadSelectedModInstallBlocks](source/GR_Main.pas#L2496).
 - Achievements use local storage. [LoadLocalAchievements](source/NoSteamAchievemens.pas#L51).
 - Robot battles resolve as automatic victories.
-  [AutoWinRobotBattle](source/game/Robot.pas#L659).
+  [AutoWinRobotBattle](source/arcade/Robot.pas#L659).
 - Intro movies and recording are disabled.
   [PrepareUserSettings](source/GameBootstrap.pas#L195), [FlushRecordingFrames](source/GR_Main.pas#L3733).

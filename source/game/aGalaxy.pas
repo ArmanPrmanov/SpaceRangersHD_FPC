@@ -800,7 +800,6 @@ uses
   SE_Sputnik,
   aEObjInfo,
   EC_Expression,
-  ab_Ship,
   SE_Planet,
   SE_Gate,
   ThreadCalc,
