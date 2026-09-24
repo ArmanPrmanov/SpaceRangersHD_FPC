@@ -117,6 +117,7 @@ function ItemMatchesInfoSearch(Item: TItem; Search: WideString): Boolean;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aHuman,
   aCalc,
   aScript,
@@ -553,12 +554,12 @@ begin
   if SearchMode then
     ToggleSearchMode(nil);
   aCalc.WaitForTurnCalculationUI;
-  RestoreTemporaryShopStock;
+  ReturnShopStock;
   MainPanel.EndTurnClicked(Sender);
   MainPanel.RebuildMessageButtons(False);
   if ExitCode = 0 then
   begin
-    BuildTemporaryShopSlotGrid;
+    OpenShopStock;
     ShowNews;
     aCalc.WaitForTurnCalculationUI;
   end;

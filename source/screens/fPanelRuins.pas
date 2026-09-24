@@ -30,6 +30,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aHuman,
   Math,
   aRanger,
@@ -221,20 +222,9 @@ begin
   SaveGameToFile(SaveManagerScreen.GetAutoSavePath, 'as');
   if MusicManager.CategoryOverride = '' then
     MusicManager.RequestFadeOut;
-  LocalHuman.PlayerAutomaticControl := False;
-  PruneExpiredPersistentPlayerMessages;
-  GetPlayer.OrderTakeoff;
-  for Index := 0 to Galaxy.Scripts.Count - 1 do
-    TScript(Galaxy.Scripts[Index]).RunTurnCode;
+  Takeoff(tfEndAutomaticControl or tfReturnShopStock);
   LocalHuman.StarMapWeaponPanelOpen := False;
   FilmCameraFollow := True;
-  LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
-  RestoreTemporaryShopStock;
-  RunGlobalScriptsForContext(GetPlayer.CurrentStar, 1);
-  if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
-    Galaxy.EnableDominatorSurfaces
-  else
-    Galaxy.DisableDominatorSurfaces;
   CalculatePlayerStarTurnAndWait;
   if ExitScreenLoop then
     Exit;

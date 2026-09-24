@@ -347,6 +347,7 @@ function ApplyRecentDominionOrderSurcharge(Cost: Single): Integer;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aSession,
   aHuman,
   Achievements,
@@ -813,10 +814,10 @@ begin
     begin
       SelectMusic;
       if LocalHuman.TemporaryShopSlots <> nil then
-        RestoreTemporaryShopStock;
+        ReturnShopStock;
       RunGlobalScriptsForContext(GetPlayer.CurrentStar, 0);
       PruneExpiredPersistentPlayerMessages;
-      BuildTemporaryShopSlotGrid;
+      OpenShopStock;
     end;
     if GetPlayer.PendingDockDialogue = 1 then
       GetPlayer.PendingDockDialogue := 0;
@@ -1260,11 +1261,11 @@ begin
   if LoadPanel.IsAnimatingShutters then
     Exit;
   aCalc.WaitForTurnCalculationUI;
-  RestoreTemporaryShopStock;
+  ReturnShopStock;
   MainPanel.EndTurnClicked(Sender);
   if ExitCode = 0 then
   begin
-    BuildTemporaryShopSlotGrid;
+    OpenShopStock;
     I_Start;
     aCalc.WaitForTurnCalculationUI;
     RestartTextPresentation;
@@ -5509,7 +5510,7 @@ begin
     aCalc.WaitForTurnCalculationUI;
   RequestedScreenId := screenJump;
   ClearChoices;
-  RestoreTemporaryShopStock;
+  ReturnShopStock;
   if SkipVideo then
   begin
     ActiveLoadPanel.SelectBackgroundStyle(2);
@@ -10126,10 +10127,10 @@ var
   begin
     if LocalHuman.TemporaryShopSlots <> nil then
     begin
-      RestoreTemporaryShopStock;
+      ReturnShopStock;
       Station := TRuins(GetPlayer.DockedTo);
       Station.EquipmentShop.Delete(Station.EquipmentShop.IndexOf(Item));
-      BuildTemporaryShopSlotGrid;
+      OpenShopStock;
       EquipmentShopScreen.ClearGoodsControls;
       EquipmentShopScreen.BuildGoodsControls;
       EquipmentShopScreen.UpdateScrollButtons;

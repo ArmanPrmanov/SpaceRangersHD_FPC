@@ -104,6 +104,7 @@ const
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aHuman,
   fGalaxy2,
   Windows,
@@ -342,17 +343,8 @@ begin
   CaptureGalaxyPreview(Self);
   SaveManagerReturnScreenId := FormToId(Self);
   SaveGameToFile(SaveManagerScreen.GetAutoSavePath, 'as');
-  PruneExpiredPersistentPlayerMessages;
-  GetPlayer.OrderTakeoff;
-  for I := 0 to Galaxy.Scripts.Count - 1 do
-    TScript(Galaxy.Scripts[I]).RunTurnCode;
+  Takeoff(0);
   StarMapScreen.SetMapCenterManually(TruncatePointF(GetPlayer.Position));
-  LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
-  RunGlobalScriptsForContext(GetPlayer.CurrentStar, 1);
-  if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
-    Galaxy.EnableDominatorSurfaces
-  else
-    Galaxy.DisableDominatorSurfaces;
   CalculatePlayerStarTurnAndWait;
   if not ExitScreenLoop then
     if GetPlayer = nil then

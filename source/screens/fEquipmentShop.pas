@@ -99,6 +99,7 @@ function GetShopItemIconName(Item: TItem): WideString;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aHuman,
   GI_Main,
   ThreadCalc,
@@ -399,7 +400,7 @@ begin
     DownCallback := ScrollRight;
   GetByName('PII').SetActive(False);
   ClearGoodsControls;
-  RestoreTemporaryShopStock;
+  ReturnShopStock;
   if GetPlayer <> nil then
   begin
     SavedSlots := LocalHuman.TemporaryShopSlots;
@@ -407,7 +408,7 @@ begin
     GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
     LocalHuman.TemporaryShopSlots := SavedSlots;
   end;
-  BuildTemporaryShopSlotGrid;
+  OpenShopStock;
   BuildGoodsControls;
   UpdateScrollButtons;
   PreviewSlot := nil;
@@ -483,7 +484,7 @@ begin
     CancelCallbackTimer(ItemInfoTimer);
     ItemInfoTimer := nil;
   end;
-  RestoreTemporaryShopStock;
+  ReturnShopStock;
   MainPanel.OnClose;
   LoadPanel.OnClose;
   if (GetPlayer <> nil) and GetPlayer.IsOnPlanet then
@@ -821,12 +822,12 @@ begin
   begin
     RefreshItemInfo(nil);
     aCalc.WaitForTurnCalculationUI;
-    RestoreTemporaryShopStock;
+    ReturnShopStock;
     MainPanel.EndTurnClicked(Sender);
     MainPanel.RebuildMessageButtons(False);
     if ExitCode = 0 then
     begin
-      BuildTemporaryShopSlotGrid;
+      OpenShopStock;
       aCalc.WaitForTurnCalculationUI;
       ClearGoodsControls;
       BuildGoodsControls;

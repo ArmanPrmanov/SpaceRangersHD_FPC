@@ -222,6 +222,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aSession,
   aHold,
   aHuman,
@@ -3591,8 +3592,6 @@ begin
 end;
 
 procedure TfAB.FinishCampaignTransition;
-var
-  SavedStar: TStar;
 begin
   if (Galaxy <> nil) and ((GetPlayer = nil) or (GetPlayer.GetHull.HullPoints <= 0)) then
   begin
@@ -3627,18 +3626,8 @@ begin
       end
       else
       begin
-        Galaxy.ClearJumpGates;
-        SavedStar := LocalHuman.PlayerStar;
-        LocalHuman.PlayerStar := GetPlayer.CurrentStar;
-        LocalHuman.PlayerStar.RebuildShipMovementPaths;
-        SavedStar.RebuildShipMovementPaths;
-        if (Cardinal(GetPlayer.OrderStateData) and $FFFF) = 1 then
-        begin
-          PruneExpiredPersistentPlayerMessages;
-          RunGlobalScriptsForContext(GetPlayer.CurrentStar, 3);
-        end;
+        HyperspaceStep(True);
         Galaxy.GenerateSpaceBackground(GetPlayer.CurrentStar.BackgroundImage);
-        GetPlayer.InHyperspace := True;
         QueueGalaxyTurnCalculation;
       end;
     end;

@@ -43,7 +43,15 @@ type
       // Script hooks the UI runs: entering or leaving a screen, showing an object.
       ckScriptItemsAct = 28,
       ckRunScriptTurns = 29,
-      ckLandingWear = 30
+      ckLandingWear = 30,
+      ckOrderNone = 31,
+      ckTakeoff = 32,
+      ckHyperspaceStep = 33,
+      ckCreateJumpHole = 34,
+      ckOrderTeleport = 35,
+      // The open shop's stock: back to the planet or station, or out into the slot grid.
+      ckReturnShopStock = 36,
+      ckOpenShopStock = 37
   );
   TCommandRefKind = (
       crNone = 0,
@@ -324,6 +332,13 @@ begin
     ckScriptItemsAct: Result := 'ScriptItemsAct';
     ckRunScriptTurns: Result := 'RunScriptTurns';
     ckLandingWear: Result := 'LandingWear';
+    ckOrderNone: Result := 'OrderNone';
+    ckTakeoff: Result := 'Takeoff';
+    ckHyperspaceStep: Result := 'HyperspaceStep';
+    ckCreateJumpHole: Result := 'CreateJumpHole';
+    ckOrderTeleport: Result := 'OrderTeleport';
+    ckReturnShopStock: Result := 'ReturnShopStock';
+    ckOpenShopStock: Result := 'OpenShopStock';
   else
     Result := 'Command' + IntToStr(Ord(Kind));
   end;

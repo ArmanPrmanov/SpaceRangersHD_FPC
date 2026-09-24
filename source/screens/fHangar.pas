@@ -85,6 +85,7 @@ const
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aSession,
   aHuman,
   fLoad,
@@ -616,31 +617,18 @@ begin
 end;
 
 function TfHangar.TryTakeOff: Boolean;
-var
-  I: Integer;
 begin
 
   aCalc.WaitForTurnCalculationUI;
-  PruneExpiredPersistentPlayerMessages;
-  GetPlayer.OrderTakeoff;
-  if GetPlayer.Order <> soTakeoff then
+  if not Takeoff(tfReturnShopStock or tfStopWithoutOrder) then
   begin
     Result := False;
     aCalc.WaitForTurnCalculationUI;
     Exit;
   end;
   Result := True;
-  for I := 0 to Galaxy.Scripts.Count - 1 do
-    TScript(Galaxy.Scripts[I]).RunTurnCode;
   LocalHuman.StarMapWeaponPanelOpen := False;
   FilmCameraFollow := True;
-  LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
-  RestoreTemporaryShopStock;
-  RunGlobalScriptsForContext(GetPlayer.CurrentStar, 1);
-  if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
-    Galaxy.EnableDominatorSurfaces
-  else
-    Galaxy.DisableDominatorSurfaces;
   CalculatePlayerStarTurnAndWait;
   if ExitScreenLoop then
     Exit;
@@ -695,14 +683,14 @@ begin
   if LoadPanel.IsAnimatingShutters then
     Exit;
   aCalc.WaitForTurnCalculationUI;
-  RestoreTemporaryShopStock;
+  ReturnShopStock;
   MainPanel.EndTurnClicked(Sender);
   aCalc.WaitForTurnCalculationUI;
   RefreshServiceButtons;
   MainPanel.RebuildMessageButtons(False);
   if ExitCode = 0 then
   begin
-    BuildTemporaryShopSlotGrid;
+    OpenShopStock;
     aCalc.WaitForTurnCalculationUI;
     RefreshDockedShips;
   end;

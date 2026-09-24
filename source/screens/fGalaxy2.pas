@@ -95,6 +95,7 @@ procedure CaptureGalaxyPreview(ParentLoop: TMessageLoopGI);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aHuman,
   GI_GI,
   ThreadCalc,
@@ -1309,8 +1310,6 @@ procedure TfGalaxy2.JumpClicked(Sender: TObjectGI);
 var
   First, Second: TPointF;
   Hole: THole;
-  Angle, Radius: Double;
-  Event: TGalaxyEvent;
 begin
   if (GetPlayer.CurrentStar = SelectedJumpStar) or (SelectedJumpStar = nil) then
     Exit;
@@ -1328,7 +1327,7 @@ begin
     aCalc.WaitForTurnCalculationUI;
     if GetPlayer.JumpRange < Round(Sqrt(Sqr(First.X - Second.X) + Sqr(First.Y - Second.Y))) then
     begin
-      GetPlayer.OrderNone(False);
+      OrderNone;
       aCalc.WaitForTurnCalculationUI;
       ShowMessageBoxGI(
           Self,
@@ -1345,45 +1344,25 @@ begin
       Exit;
     end
     else
-      GetPlayer.OrderJump(SelectedJumpStar, False);
+      OrderJumpTo(SelectedJumpStar);
   end
   else if ViewMode = 3 then
   begin
     aCalc.WaitForTurnCalculationUI;
-    Hole := THole.Create;
-    Hole.InitializeGraphic('');
+    Hole := CreateJumpHoleTo(SelectedJumpStar) as THole;
     THoleSE(Hole.Graphic).SetState(1);
-    Hole.Star1 := GetPlayer.CurrentStar;
-    Angle := ArcTan2(GetPlayer.Position.X, -GetPlayer.Position.Y);
-    Radius :=
-        Max(
-            GetPlayer.CurrentStar.SafeRadius + 100,
-            Sqrt(PointDistanceSquared(GetPlayer.Position, MakePointF(0, 0))) + 200
-        );
-    Hole.Position1 := MakePointF(Sin(Angle) * Radius, -Cos(Angle) * Radius);
-    Hole.Star2 := SelectedJumpStar;
-    Angle := HeadingDegreesToRadians(SeededRandomIntRange(0, 359, Galaxy.RandomState));
-    Radius := SeededRandomIntRange(1000, 2000, Galaxy.RandomState);
-    Hole.Position2 := MakePointF(Sin(Angle) * Radius, -Cos(Angle) * Radius);
-    Hole.CreatedTurn := Galaxy.CurrentTurn - 190;
-    Hole.HoleType := 1;
     StarMapScreen.PendingHoleRefresh := Hole;
-    Galaxy.Holes.Add(Hole);
-    Hole.ArcadeMapName := 'SkipAB';
-    GetPlayer.OrderJumpHole(Hole, False);
-    GetPlayer.GetHull.Energy := Max(0, GetPlayer.GetHull.Energy - 600);
-    Event := AddGalaxyEvent('PlayerCreatedStarDestroyerBH');
-    Event.AddData(Hole.Id);
-    Event.AddData(Hole.CreatedTurn);
   end
   else if ViewMode = 0 then
   begin
     aCalc.WaitForTurnCalculationUI;
-    GetPlayer.OrderTeleport(SelectedJumpStar, GetPlayer.Position, 10, False);
+    OrderTeleportTo(SelectedJumpStar);
   end
   else
+  begin
     aCalc.WaitForTurnCalculationUI;
-  LocalHuman.PendingPlayerFollowTarget := nil;
+    SetPendingFollowTarget(nil);
+  end;
   aCalc.WaitForTurnCalculationUI;
   SpaceViewPosition := GetPlayer.Position;
   RequestedScreenId := screenStarMap;

@@ -35,6 +35,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aHuman,
   EC_Cache,
   EC_Struct,
@@ -214,8 +215,6 @@ begin
 end;
 
 procedure TfJump.AdvanceTravel(Timer: PCallbackTimerGI; UserData: PtrInt);
-var
-  PreviousStar: TStar;
 begin
   if (GetPlayer = nil) or (GetPlayer.GetHull.HullPoints <= 0) then
   begin
@@ -249,16 +248,7 @@ begin
       AdvanceLoading(nil, 0);
       Exit;
     end;
-    Galaxy.ClearJumpGates;
-    PreviousStar := LocalHuman.PlayerStar;
-    LocalHuman.PlayerStar := GetPlayer.CurrentStar;
-    LocalHuman.PlayerStar.RebuildShipMovementPaths;
-    PreviousStar.RebuildShipMovementPaths;
-    if (Cardinal(GetPlayer.OrderStateData) and $FFFF) = 1 then
-    begin
-      PruneExpiredPersistentPlayerMessages;
-      RunGlobalScriptsForContext(GetPlayer.CurrentStar, 3);
-    end;
+    HyperspaceStep(False);
     Galaxy.GenerateSpaceBackground(GetPlayer.CurrentStar.BackgroundImage);
     QueueGalaxyTurnCalculation;
     Present;
@@ -274,16 +264,7 @@ begin
       AdvanceLoading(nil, 0);
       Exit;
     end;
-    Galaxy.ClearJumpGates;
-    PreviousStar := LocalHuman.PlayerStar;
-    LocalHuman.PlayerStar := GetPlayer.CurrentStar;
-    LocalHuman.PlayerStar.RebuildShipMovementPaths;
-    PreviousStar.RebuildShipMovementPaths;
-    if (Cardinal(GetPlayer.OrderStateData) and $FFFF) = 1 then
-    begin
-      PruneExpiredPersistentPlayerMessages;
-      RunGlobalScriptsForContext(GetPlayer.CurrentStar, 3);
-    end;
+    HyperspaceStep(False);
     Galaxy.GenerateSpaceBackground(GetPlayer.CurrentStar.BackgroundImage);
     QueueGalaxyTurnCalculation;
     Present;

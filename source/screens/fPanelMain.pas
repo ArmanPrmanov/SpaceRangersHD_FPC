@@ -119,6 +119,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aSession,
   aHuman,
   Math,
@@ -503,7 +504,7 @@ begin
   begin
     TryAutoTurnSave;
     SoundManager.PlaySound('Sound.Turn');
-    PruneExpiredPersistentPlayerMessages;
+    PruneMessages;
     CalculatePlayerStarTurnAndWait;
     if ExitScreenLoop then
       Exit;

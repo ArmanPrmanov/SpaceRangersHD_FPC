@@ -81,6 +81,7 @@ function RunGoodsShop(ParentLoop: TMessageLoopGI): Boolean;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aHuman,
   GI_GI,
   ThreadCalc,
@@ -1584,11 +1585,11 @@ begin
     end;
     if not GetPlayer.InNormalSpace then
       aCalc.WaitForTurnCalculationUI;
-    RestoreTemporaryShopStock;
+    ReturnShopStock;
     MainPanel.EndTurnClicked(Sender);
     if ExitCode = 0 then
     begin
-      BuildTemporaryShopSlotGrid;
+      OpenShopStock;
       if not GetPlayer.InNormalSpace then
         aCalc.WaitForTurnCalculationUI;
       RefreshGoodsDisplay;

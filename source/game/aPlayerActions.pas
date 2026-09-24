@@ -73,6 +73,28 @@ function RunScriptItemsAct(
 procedure RunScriptTurns;
 // The engine wears when the player lands on an uninhabited planet.
 procedure ApplyLandingWear;
+procedure OrderNone;
+// Jumps to Star and forgets a pending auto-battle target.
+procedure OrderJumpTo(Star: TObject);
+procedure OrderTeleportTo(Star: TObject);
+// Opens a black hole from the player's position to Star and heads into it (the Star
+// Destroyer's bridge). Returns the hole.
+function CreateJumpHoleTo(Star: TObject): TObject;
+
+const
+  // Takeoff flags.
+  tfEndAutomaticControl = 1;
+  tfReturnShopStock = 2;
+  // Keep the player docked when the takeoff order does not take.
+  tfStopWithoutOrder = 4;
+// Leaves the planet or station: the takeoff order, the scripts that react to it and the
+// star's objects. Returns whether the player took off.
+function Takeoff(Flags: Integer): Boolean;
+// A hyperspace day passed: the human's star becomes the one the player is now in.
+// SetInHyperspace is for the arcade battle, which ends outside hyperspace.
+procedure HyperspaceStep(SetInHyperspace: Boolean);
+procedure ReturnShopStock;
+procedure OpenShopStock;
 
 // The in-space day, before the player-star job: the orders it needs first, then the
 // player's own day.
@@ -101,6 +123,7 @@ uses
   aShopStock,
   aScript,
   aConst,
+  aGalaxyEvent,
   aGalaxyStruct,
   ThreadCalc,
   Globals;
@@ -672,6 +695,196 @@ begin
   SubmitCommand(NewCommand(ckLandingWear));
 end;
 
+procedure ExecuteOrderNone(const Command: TPlayerCommand);
+begin
+  Actor(Command).OrderNone(False);
+end;
+
+procedure OrderNone;
+begin
+  SubmitCommand(NewCommand(ckOrderNone));
+end;
+
+procedure ExecuteOrderJump(const Command: TPlayerCommand);
+begin
+  Actor(Command).OrderJump(RefObject(Command, 0) as TStar, False);
+  LocalHuman.PendingPlayerFollowTarget := nil;
+end;
+
+procedure OrderJumpTo(Star: TObject);
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckOrderJump);
+  AddRef(Command, Star);
+  SubmitCommand(Command);
+end;
+
+procedure ExecuteOrderTeleport(const Command: TPlayerCommand);
+var
+  P: TPlayer;
+begin
+  P := Actor(Command);
+  P.OrderTeleport(RefObject(Command, 0) as TStar, P.Position, 10, False);
+  LocalHuman.PendingPlayerFollowTarget := nil;
+end;
+
+procedure OrderTeleportTo(Star: TObject);
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckOrderTeleport);
+  AddRef(Command, Star);
+  SubmitCommand(Command);
+end;
+
+var
+  CreatedHole: THole;
+
+// Moved from TfGalaxy2.JumpClicked; the screen sets the hole's look.
+procedure ExecuteCreateJumpHole(const Command: TPlayerCommand);
+var
+  P: TPlayer;
+  Hole: THole;
+  Angle, Radius: Double;
+  Event: TGalaxyEvent;
+begin
+  P := Actor(Command);
+  Hole := THole.Create;
+  Hole.InitializeGraphic('');
+  Hole.Star1 := P.CurrentStar;
+  Angle := ArcTan2(P.Position.X, -P.Position.Y);
+  Radius :=
+      Max(
+          P.CurrentStar.SafeRadius + 100,
+          Sqrt(PointDistanceSquared(P.Position, MakePointF(0, 0))) + 200
+      );
+  Hole.Position1 := MakePointF(Sin(Angle) * Radius, -Cos(Angle) * Radius);
+  Hole.Star2 := RefObject(Command, 0) as TStar;
+  Angle := HeadingDegreesToRadians(SeededRandomIntRange(0, 359, Galaxy.RandomState));
+  Radius := SeededRandomIntRange(1000, 2000, Galaxy.RandomState);
+  Hole.Position2 := MakePointF(Sin(Angle) * Radius, -Cos(Angle) * Radius);
+  Hole.CreatedTurn := Galaxy.CurrentTurn - 190;
+  Hole.HoleType := 1;
+  Galaxy.Holes.Add(Hole);
+  Hole.ArcadeMapName := 'SkipAB';
+  P.OrderJumpHole(Hole, False);
+  P.GetHull.Energy := Max(0, P.GetHull.Energy - 600);
+  Event := AddGalaxyEvent('PlayerCreatedStarDestroyerBH');
+  Event.AddData(Hole.Id);
+  Event.AddData(Hole.CreatedTurn);
+  LocalHuman.PendingPlayerFollowTarget := nil;
+  CreatedHole := Hole;
+end;
+
+function CreateJumpHoleTo(Star: TObject): TObject;
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckCreateJumpHole);
+  AddRef(Command, Star);
+  SubmitCommand(Command);
+  Result := CreatedHole;
+end;
+
+var
+  TookOff: Boolean;
+
+// Moved from TfHangar.TryTakeOff, TfPlanetNO.TakeoffClicked and
+// TfPanelRuins.TakeOffForStationTravel, which differ only in the flags.
+procedure ExecuteTakeoff(const Command: TPlayerCommand);
+var
+  P: TPlayer;
+  Flags, I: Integer;
+begin
+  P := Actor(Command);
+  Flags := IntArg(Command, 0);
+  if (Flags and tfEndAutomaticControl) <> 0 then
+    LocalHuman.PlayerAutomaticControl := False;
+  PruneExpiredPersistentPlayerMessages;
+  P.OrderTakeoff;
+  TookOff := P.Order = soTakeoff;
+  if not TookOff and ((Flags and tfStopWithoutOrder) <> 0) then
+    Exit;
+  for I := 0 to Galaxy.Scripts.Count - 1 do
+    TScript(Galaxy.Scripts[I]).RunTurnCode;
+  LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
+  if (Flags and tfReturnShopStock) <> 0 then
+    RestoreTemporaryShopStock;
+  RunGlobalScriptsForContext(P.CurrentStar, 1);
+  if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
+    Galaxy.EnableDominatorSurfaces
+  else
+    Galaxy.DisableDominatorSurfaces;
+end;
+
+function Takeoff(Flags: Integer): Boolean;
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckTakeoff);
+  AddInt(Command, Flags);
+  SubmitCommand(Command);
+  Result := TookOff;
+end;
+
+// Moved from TfJump.AdvanceTravel and TfAB.FinishCampaignTransition; the screens draw the
+// new star's background.
+procedure ExecuteHyperspaceStep(const Command: TPlayerCommand);
+var
+  P: TPlayer;
+  PreviousStar: TStar;
+begin
+  P := Actor(Command);
+  Galaxy.ClearJumpGates;
+  PreviousStar := LocalHuman.PlayerStar;
+  LocalHuman.PlayerStar := P.CurrentStar;
+  LocalHuman.PlayerStar.RebuildShipMovementPaths;
+  PreviousStar.RebuildShipMovementPaths;
+  if (Cardinal(P.OrderStateData) and $FFFF) = 1 then
+  begin
+    PruneExpiredPersistentPlayerMessages;
+    RunGlobalScriptsForContext(P.CurrentStar, 3);
+  end;
+  if IntArg(Command, 0) <> 0 then
+    P.InHyperspace := True;
+end;
+
+procedure HyperspaceStep(SetInHyperspace: Boolean);
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckHyperspaceStep);
+  AddInt(Command, Ord(SetInHyperspace));
+  SubmitCommand(Command);
+end;
+
+procedure ExecuteReturnShopStock(const Command: TPlayerCommand);
+begin
+  RestoreTemporaryShopStock;
+end;
+
+procedure ReturnShopStock;
+begin
+  SubmitCommand(NewCommand(ckReturnShopStock));
+end;
+
+// The grid is padded to the columns the shop screen shows, so the command carries them.
+procedure ExecuteOpenShopStock(const Command: TPlayerCommand);
+begin
+  ShopVisibleColumnCount := IntArg(Command, 0);
+  BuildTemporaryShopSlotGrid;
+end;
+
+procedure OpenShopStock;
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckOpenShopStock);
+  AddInt(Command, ShopVisibleColumnCount);
+  SubmitCommand(Command);
+end;
+
 // Moved verbatim from TfStarMap.EndTurnClicked.
 procedure ExecuteApplyPendingOrders(const Command: TPlayerCommand);
 var
@@ -749,4 +962,12 @@ initialization
   RegisterCommand(ckScriptItemsAct, @ExecuteScriptItemsAct);
   RegisterCommand(ckRunScriptTurns, @ExecuteRunScriptTurns);
   RegisterCommand(ckLandingWear, @ExecuteLandingWear);
+  RegisterCommand(ckOrderNone, @ExecuteOrderNone);
+  RegisterCommand(ckOrderJump, @ExecuteOrderJump);
+  RegisterCommand(ckOrderTeleport, @ExecuteOrderTeleport);
+  RegisterCommand(ckCreateJumpHole, @ExecuteCreateJumpHole);
+  RegisterCommand(ckTakeoff, @ExecuteTakeoff);
+  RegisterCommand(ckHyperspaceStep, @ExecuteHyperspaceStep);
+  RegisterCommand(ckReturnShopStock, @ExecuteReturnShopStock);
+  RegisterCommand(ckOpenShopStock, @ExecuteOpenShopStock);
 end.

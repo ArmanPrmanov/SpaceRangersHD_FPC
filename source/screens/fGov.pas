@@ -124,6 +124,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aSession,
   aHuman,
   GI_MessageBox,
@@ -396,10 +397,10 @@ begin
     begin
       SelectMusic;
       if LocalHuman.TemporaryShopSlots <> nil then
-        RestoreTemporaryShopStock;
+        ReturnShopStock;
       RunGlobalScriptsForContext(GetPlayer.CurrentStar, 0);
       PruneExpiredPersistentPlayerMessages;
-      BuildTemporaryShopSlotGrid;
+      OpenShopStock;
     end;
     Stage := 3;
     if (GetPlayer = nil)
@@ -805,12 +806,12 @@ begin
       and (GetPlayer.PendingDockDialogue <= 1) then
   begin
     aCalc.WaitForTurnCalculationUI;
-    RestoreTemporaryShopStock;
+    ReturnShopStock;
     MainPanel.EndTurnClicked(Sender);
     MainPanel.RebuildMessageButtons(False);
     if ExitCode = 0 then
     begin
-      BuildTemporaryShopSlotGrid;
+      OpenShopStock;
       UpdatePortraitAnimation(True);
       RefreshGovernmentDialog;
       aCalc.WaitForTurnCalculationUI;

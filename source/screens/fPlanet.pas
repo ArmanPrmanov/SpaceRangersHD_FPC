@@ -33,6 +33,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aSession,
   aHuman,
   Math,
@@ -134,10 +135,10 @@ begin
   begin
     SelectMusic;
     if LocalHuman.TemporaryShopSlots <> nil then
-      RestoreTemporaryShopStock;
+      ReturnShopStock;
     RunGlobalScriptsForContext(GetPlayer.CurrentStar, 0);
     PruneExpiredPersistentPlayerMessages;
-    BuildTemporaryShopSlotGrid;
+    OpenShopStock;
   end;
   Galaxy.ReleaseItemGraphics;
   GetByName('MainPanel').KeyDownCallback := MainPanelKeyDown;
@@ -403,14 +404,14 @@ end;
 procedure TfPlanet.EndTurnClicked(Sender: TObjectGI);
 begin
   aCalc.WaitForTurnCalculationUI;
-  RestoreTemporaryShopStock;
+  ReturnShopStock;
   MainPanel.EndTurnClicked(Sender);
   RefreshPlanetInfo;
   RefreshTextQuestPrompt;
   MainPanel.RebuildMessageButtons(False);
   if ExitCode = 0 then
   begin
-    BuildTemporaryShopSlotGrid;
+    OpenShopStock;
     aCalc.WaitForTurnCalculationUI;
   end;
 end;

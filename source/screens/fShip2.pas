@@ -320,6 +320,7 @@ function CompareStoredItems(
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aSession,
   aHuman,
   GI_GI,
@@ -6425,12 +6426,12 @@ begin
             or (TWeapon(SelectedHoldItem).GetWeaponInfo.Availability
                 <> waNotSoldAndNodeRepair)) then
     begin
-      RestoreTemporaryShopStock;
+      ReturnShopStock;
       if GetPlayer.CurrentPlanet <> nil then
         GetPlayer.CurrentPlanet.EquipmentShop.Add(SelectedHoldItem)
       else
         (GetPlayer.DockedTo as TRuins).EquipmentShop.Add(SelectedHoldItem);
-      BuildTemporaryShopSlotGrid;
+      OpenShopStock;
     end
     else if not (SelectedHoldItem is TCountableItem)
         or ((SelectedHoldItem as TCountableItem).StackCount = 0) then
@@ -10031,12 +10032,12 @@ var
           and (not (Item is TWeapon)
               or (TWeapon(Item).GetWeaponInfo.Availability <> waNotSoldAndNodeRepair)) then
       begin
-        RestoreTemporaryShopStock;
+        ReturnShopStock;
         if GetPlayer.CurrentPlanet <> nil then
           GetPlayer.CurrentPlanet.EquipmentShop.Add(Item)
         else
           (GetPlayer.DockedTo as TRuins).EquipmentShop.Add(Item);
-        BuildTemporaryShopSlotGrid;
+        OpenShopStock;
       end
       else
         Item.Free;
