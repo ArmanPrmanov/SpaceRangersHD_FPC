@@ -225,6 +225,7 @@ procedure DonateMilitaryResearchMaterial(Series: TDominatorSeries; Amount: Integ
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aDialogActions,
   aSession,
   aHuman,
   BreakMessageGIException,
@@ -2149,11 +2150,7 @@ end;
 procedure TfTalk.RunScriptAnswer(Answer: PtrInt);
 begin
   ClearChoices(False);
-  Session.ScriptDialogIndex := -1;
-  CurrentScript.ExecuteDialogAnswer(Answer);
-  if Session.ScriptDialogIndex < 0 then
-    RaiseWideMessage('I_Script');
-  CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
+  ScriptAnswer(Answer);
 end;
 
 procedure TfTalk.RunScriptAnswerKeepingScroll(Answer: PtrInt);

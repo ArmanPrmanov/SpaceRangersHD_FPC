@@ -124,6 +124,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aDialogActions,
   aPlayerActions,
   aSession,
   aHuman,
@@ -1489,11 +1490,7 @@ end;
 procedure TfGov.RunScriptAnswer(Answer: PtrInt);
 begin
   ClearDialogChoices;
-  Session.ScriptDialogIndex := -1;
-  CurrentScript.ExecuteDialogAnswer(Answer);
-  if Session.ScriptDialogIndex < 0 then
-    RaiseWideMessage('I_Script');
-  CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
+  ScriptAnswer(Answer);
 end;
 procedure TfGov.RunScriptAnswerKeepingScroll(Answer: PtrInt);
 begin

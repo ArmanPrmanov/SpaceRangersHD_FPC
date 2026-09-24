@@ -347,6 +347,7 @@ function ApplyRecentDominionOrderSurcharge(Cost: Single): Integer;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aDialogActions,
   aPlayerActions,
   aSession,
   aHuman,
@@ -3613,11 +3614,7 @@ end;
 procedure TfRuinsTalk.RunScriptAnswer(Answer: PtrInt);
 begin
   ClearChoices;
-  Session.ScriptDialogIndex := -1;
-  CurrentScript.ExecuteDialogAnswer(Answer);
-  if Session.ScriptDialogIndex < 0 then
-    RaiseWideMessage('I_Script');
-  CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
+  ScriptAnswer(Answer);
 end;
 
 procedure TfRuinsTalk.RunScriptAnswerKeepingScroll(Answer: PtrInt);
