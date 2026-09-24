@@ -49,6 +49,8 @@ type
     PlayerHoldShip: TShip;
     // Prices while trading with a ship in space.
     TradeRows: array[0..7] of TGoodsShopTradeRow;
+    // Whether the star map shows its weapon panel.
+    StarMapWeaponPanelOpen: Boolean;
   end;
 var
   LocalHuman: THumanState;

@@ -4610,7 +4610,7 @@ end;
 
 procedure TfAB.BeginBattleExit;
 begin
-  StarMapWeaponPanelOpen := False;
+  LocalHuman.StarMapWeaponPanelOpen := False;
   if Galaxy <> nil then
   begin
     aCalc.WaitForTurnCalculationUI;

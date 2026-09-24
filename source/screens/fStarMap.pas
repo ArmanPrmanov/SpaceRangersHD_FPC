@@ -2870,7 +2870,7 @@ begin
   StandardInfoPanel.SetActive(False);
   SpaceProcess.Space.ScrollChangedCallback := MapScrollChanged;
   MainPanel.Show;
-  WeaponPanel.SetActive(StarMapWeaponPanelOpen);
+  WeaponPanel.SetActive(LocalHuman.StarMapWeaponPanelOpen);
   MapControls.LeftButtonDownCallback := MapLeftButtonDown;
   ConfigureMiddleButtonAction;
   MapControls.RightButtonDownCallback := MapRightButtonDown;
@@ -2889,7 +2889,7 @@ begin
   RebuildPartnerButtons;
   MainPanel.SetDateRange(Galaxy.CurrentTurn, Galaxy.CurrentTurn);
   MainPanel.RefreshDate;
-  if StarMapWeaponPanelOpen then
+  if LocalHuman.StarMapWeaponPanelOpen then
     WeaponPanelProgress := 1.0
   else
     WeaponPanelProgress := 0.0;
@@ -6083,8 +6083,8 @@ procedure TfStarMap.ToggleWeaponPanelClicked(Sender: TObjectGI);
 begin
   if Mode = smmOrders then
   begin
-    StarMapWeaponPanelOpen := not StarMapWeaponPanelOpen;
-    if StarMapWeaponPanelOpen then
+    LocalHuman.StarMapWeaponPanelOpen := not LocalHuman.StarMapWeaponPanelOpen;
+    if LocalHuman.StarMapWeaponPanelOpen then
       AnimateWeaponPanel(1)
     else
       AnimateWeaponPanel(-1);
@@ -6774,8 +6774,8 @@ begin
           WeaponPanelRestTop + WeaponPanel.ClientSize.Y - Round(WeaponPanel.ClientSize.Y * Progress)
       )
   );
-  ShowSpacePanelButton.SetActive(not StarMapWeaponPanelOpen);
-  HideSpacePanelButton.SetActive(StarMapWeaponPanelOpen);
+  ShowSpacePanelButton.SetActive(not LocalHuman.StarMapWeaponPanelOpen);
+  HideSpacePanelButton.SetActive(LocalHuman.StarMapWeaponPanelOpen);
 end;
 procedure TfStarMap.AnimateWeaponPanel(Target: Integer);
 begin

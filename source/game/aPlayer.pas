@@ -2147,7 +2147,7 @@ begin
                   RandomState
               );
           SetMoney(TargetValue + Money);
-          SoundManager.PlaySound('Sound.Sell');
+          SimEvents.PlaySound('Sound.Sell');
           AddOrUpdatePlayerBubble(
               0,
               Galaxy.CurrentTurn,
@@ -2196,7 +2196,7 @@ begin
                 RandomState
             );
         JettisonCargoGoodsTowardTargetValue(TargetValue);
-        SoundManager.PlaySound('Sound.Sell');
+        SimEvents.PlaySound('Sound.Sell');
         AddOrUpdatePlayerBubble(
             0,
             Galaxy.CurrentTurn,

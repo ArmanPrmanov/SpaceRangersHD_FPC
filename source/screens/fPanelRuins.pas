@@ -226,7 +226,7 @@ begin
   GetPlayer.OrderTakeoff;
   for Index := 0 to Galaxy.Scripts.Count - 1 do
     TScript(Galaxy.Scripts[Index]).RunTurnCode;
-  StarMapWeaponPanelOpen := False;
+  LocalHuman.StarMapWeaponPanelOpen := False;
   FilmCameraFollow := True;
   LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
   RestoreTemporaryShopStock;
@@ -239,7 +239,7 @@ begin
   if ExitScreenLoop then
     Exit;
   QueueGalaxyTurnCalculation;
-  StarMapWeaponPanelOpen := False;
+  LocalHuman.StarMapWeaponPanelOpen := False;
   StarMapScreen.ResumeMode := smrTurnFilm;
   ScreenLoadMode := 2;
   PostLoadScreenId := screenStarMap;

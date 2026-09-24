@@ -1110,7 +1110,7 @@ begin
   CurrentTurn := 0;
   PirateCount := 0;
   TransportCount := 0;
-  StarMapWeaponPanelOpen := True;
+  LocalHuman.StarMapWeaponPanelOpen := True;
   for I := 0 to 2 do
   begin
     DominatorResearch[I].Progress := 0;
@@ -5063,7 +5063,7 @@ begin
             3,
             Galaxy.GenerationSeed + NearestPlanet.GenerationSeed + Cardinal(Galaxy.CurrentTurn)
         );
-    SoundManager.PlaySound('Sound.Sell');
+    SimEvents.PlaySound('Sound.Sell');
     GetPlayer.SetMoney(GetPlayer.Money + MineralValue);
     Text := LocalizedColorText('GalaxyNews.Star.Asteroid.Kill.' + IntToStr(MessageVariant));
     ReplaceTextToken(Text, '<Money>', IntToStr(MineralValue), '<color=255,240,100>');
@@ -10954,7 +10954,7 @@ begin
         and ((GetPlayer <> Ship)
             or ((Ship.CurrentPlanet = nil) and (Ship.DockedTo = nil))
             or (Ship.ConsecutiveDockedDays <= 2)
-            or (CurrentScreenId = screenPlanetQuest)) then
+            or (HumanScreen = screenPlanetQuest)) then
     begin
       AccumulateControlPresence;
       if (GetPlayer = Ship) or (GetPlayer = Ship.PartnerShip) then
@@ -11536,7 +11536,7 @@ begin
         and ((GetPlayer <> Ship)
             or ((Ship.CurrentPlanet = nil) and (Ship.DockedTo = nil))
             or (Ship.ConsecutiveDockedDays <= 2)
-            or (CurrentScreenId = screenPlanetQuest)) then
+            or (HumanScreen = screenPlanetQuest)) then
     begin
       CountShipStanding;
       if (Ship is TKling) and (Ship.CurrentStanding = ssDominator) then
@@ -14582,7 +14582,7 @@ begin
         begin
           Ship := Self.Ships[Index];
           if Ship.InNormalSpace
-              and ((GetPlayer <> Ship) or (Byte(GlobalsV.CurrentScreenId) = 16)) then
+              and ((GetPlayer <> Ship) or (HumanScreen = screenStarMap)) then
             for i := 0 to (Ship.Inventory.Count - 1) do
             begin
               Item := Ship.Inventory[i];
@@ -14699,7 +14699,7 @@ begin
         Stage := 2971;
         if Ship.DestroyQueued
             and ((Cardinal(Cardinal(Count) shr 2) = Cardinal(PathStep))
-                and ((GetPlayer <> Ship) or (Byte(GlobalsV.CurrentScreenId) = 16))) then
+                and ((GetPlayer <> Ship) or (HumanScreen = screenStarMap))) then
         begin
           Ship.ScriptItemsAct(satOnDeath, nil, nil, 0);
           Ship.GetHull.HullPoints := 0;
@@ -15376,7 +15376,7 @@ begin
       Ship := Self.Ships[Index];
       if Ship.DestroyQueued
           and (not Ship.IsHullDestroyed
-              and ((GetPlayer <> Ship) or (Byte(GlobalsV.CurrentScreenId) = 16))) then
+              and ((GetPlayer <> Ship) or (HumanScreen = screenStarMap))) then
       begin
         Ship.ScriptItemsAct(satOnDeath, nil, nil, 0);
         Ship.GetHull.HullPoints := 0;

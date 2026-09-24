@@ -631,7 +631,7 @@ begin
   Result := True;
   for I := 0 to Galaxy.Scripts.Count - 1 do
     TScript(Galaxy.Scripts[I]).RunTurnCode;
-  StarMapWeaponPanelOpen := False;
+  LocalHuman.StarMapWeaponPanelOpen := False;
   FilmCameraFollow := True;
   LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
   RestoreTemporaryShopStock;

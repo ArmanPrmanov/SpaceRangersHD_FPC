@@ -238,6 +238,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  SimEvents,
   aHuman,
   TextQuest,
   EC_Cache,
@@ -4546,7 +4547,7 @@ begin
           and not Quest.Successful then
       begin
         if (Quest.QuestType <> qtPlanetQuest)
-            or (CurrentScreenId <> screenPlanetQuest)
+            or (HumanScreen <> screenPlanetQuest)
             or not (Quest.ObjectiveTarget is TPlanet)
             or (GetPlayer.CurrentPlanet <> (Quest.ObjectiveTarget as TPlanet)) then
         begin

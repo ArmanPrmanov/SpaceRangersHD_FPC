@@ -688,6 +688,7 @@ function MigrateSavedItemType(ItemType: Byte): TItemType;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  SimEvents,
   aHuman,
   GlobalsV,
   aPlanet,
@@ -7934,12 +7935,7 @@ begin
   if BrokenFlag <> 0 then
     Exit;
   Ship := nil;
-  if GetInnermostScreenLoop = HangarScreen then
-    Ship := HangarScreen.SelectedShip
-  else if GetInnermostScreenLoop = ScannerScreen then
-    Ship := ScannerScreen.ShipToInspect
-  else if GetInnermostScreenLoop = ShipScreen then
-    Ship := LocalHuman.PlayerHoldShip;
+  Ship := TShip(InspectedShip);
   if Ship = nil then
     Exit;
   if Ship.CanBoostArtefact(Ord(GetEffectiveType), nil, True) then

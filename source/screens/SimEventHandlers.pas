@@ -14,7 +14,8 @@ uses
   GR_Main,
   Globals,
   GlobalsV,
-  aGalaxy;
+  aGalaxy,
+  aHuman;
 
 procedure SwitchScreen(Screen: TGameScreenId);
 begin
@@ -56,6 +57,32 @@ begin
   EquipmentShopScreen.UpdateScrollButtons;
 end;
 
+procedure PlayUiSound(const Name: WideString);
+begin
+  SoundManager.PlaySound(Name);
+end;
+
+function OpenScreen: TGameScreenId;
+begin
+  Result := CurrentScreenId;
+end;
+
+function ShipOnOpenScreen: TObject;
+begin
+  Result := nil;
+  if GetInnermostScreenLoop = HangarScreen then
+    Result := HangarScreen.SelectedShip
+  else if GetInnermostScreenLoop = ScannerScreen then
+    Result := ScannerScreen.ShipToInspect
+  else if GetInnermostScreenLoop = ShipScreen then
+    Result := LocalHuman.PlayerHoldShip;
+end;
+
+function IsTalkScreenOpen: Boolean;
+begin
+  Result := (TalkScreen <> nil) and (TalkScreen.ParentLoop <> nil);
+end;
+
 procedure InstallSimEventHandlers;
 begin
   ScreenRequestHandler := SwitchScreen;
@@ -63,5 +90,9 @@ begin
   PlayerResultHandler := RecordScore;
   PlayerShipReleaseHandler := WaitForPlayerShipScreens;
   ShopStockChangedHandler := RefreshShopGoods;
+  SoundHandler := PlayUiSound;
+  HumanScreenHandler := OpenScreen;
+  InspectedShipHandler := ShipOnOpenScreen;
+  TalkScreenOpenHandler := IsTalkScreenOpen;
 end;
 end.

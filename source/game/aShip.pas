@@ -2418,7 +2418,7 @@ begin
         or ((aGalaxy.Galaxy.StasisModEnabled = 1) and (GetPlayer = Self)) then
     begin
       if ((CurrentPlanet <> nil) or (DockedTo <> nil))
-          and not ((GetPlayer = Self) and (GlobalsV.CurrentScreenId = screenPlanetQuest)) then
+          and not ((GetPlayer = Self) and (HumanScreen = screenPlanetQuest)) then
         Inc(ConsecutiveDockedDays)
       else
         ConsecutiveDockedDays := 0;
@@ -15861,7 +15861,7 @@ begin
       or (GetPlayer.CurrentStar <> CurrentStar)
       or (TurnCalculationPhase
           in [tcpIdle, tcpGalaxyFinished, tcpPlayerStarFinished, tcpPlayerStarPrepared])
-      or (CurrentScreenId <> screenStarMap)
+      or (HumanScreen <> screenStarMap)
       or (Galaxy.SpecialSimulationMode <> 0) then
   begin
     Result := False;
@@ -18126,7 +18126,7 @@ var
       array[0..7] of Byte; // Native keeps eight unused bytes before backend string temporaries.
 begin
   Stage := 0;
-  if (ActionType = satOnLeavingForm) and ((TalkScreen = nil) or (TalkScreen.ParentLoop = nil)) then
+  if (ActionType = satOnLeavingForm) and not TalkScreenOpen then
     WaitForTurnCalculation;
   Info := nil;
   try

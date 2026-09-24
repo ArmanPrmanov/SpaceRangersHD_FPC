@@ -262,7 +262,6 @@ var
   SkipVideo: Boolean = False;
   SkipIntro: Boolean = False;
   NewGameGenerationThread: TThreadCreateNewGame;
-  StarMapWeaponPanelOpen: Boolean;
   PrimaryFilm: TEFilm;
   SecondaryFilm: TEFilm;
   TrailingFilmEffects: TEFilmEnd;

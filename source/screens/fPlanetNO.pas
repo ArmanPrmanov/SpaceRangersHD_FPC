@@ -363,7 +363,7 @@ begin
     else
     begin
       CalculateGalaxyTurnAndWait;
-      StarMapWeaponPanelOpen := False;
+      LocalHuman.StarMapWeaponPanelOpen := False;
       StarMapScreen.ResumeMode := smrTurnFilm;
       ScreenLoadMode := 2;
       PostLoadScreenId := screenStarMap;

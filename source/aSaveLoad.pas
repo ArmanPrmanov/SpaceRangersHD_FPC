@@ -281,7 +281,7 @@ begin
       GameState.AddIntegerValue(Ord(SaveManagerReturnScreenId));
       GameState.AddIntegerValue(StarMapScreen.GetMapCenter.X);
       GameState.AddIntegerValue(StarMapScreen.GetMapCenter.Y);
-      GameState.AddBoolean(StarMapWeaponPanelOpen);
+      GameState.AddBoolean(LocalHuman.StarMapWeaponPanelOpen);
       GameState.AddAnsiChar(#0);
       GameState.AddBoolean(FilmCameraFollow);
       GameState.AddAnsiChar(#0);
@@ -474,7 +474,7 @@ begin
       Center.Y := Buffer.GetInt32;
       SpaceViewPosition := PointToPointF(Center);
       StarMapScreen.SetMapCenterManually(Center);
-      StarMapWeaponPanelOpen := Buffer.GetBoolean;
+      LocalHuman.StarMapWeaponPanelOpen := Buffer.GetBoolean;
       Buffer.GetByte;
       FilmCameraFollow := Buffer.GetBoolean;
       Buffer.GetByte;

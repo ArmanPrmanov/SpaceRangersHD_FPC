@@ -1,8 +1,9 @@
 # Root globals (Globals, GlobalsV, GR_Main) that simulation units use, by kind.
-# session: game state; film: the turn's recording; data: game data loaded at start;
-# settings: user options; ui: screens and presentation. tools/check_layers.py fails when a
-# simulation unit uses a root global that is not listed here, or a ui global that is not
-# in the allowlist. Phase 2 of ROADMAP.md groups these by kind.
+# session: game state; film: the turn's recording; scene: scene objects and templates that
+# simulation objects own (Ship.Graphic and the like; separating them is beyond Phase 2);
+# app: the application is quitting; data: game data loaded at start; settings: user
+# options; ui: screens and presentation. tools/check_layers.py fails when a simulation unit
+# uses a root global that is not listed here, or a ui global that is not in the allowlist.
 session  ApplyEditableSaveOnLoad
 session  EditableSaveBlock
 session  ForcedPlanetQuestId
@@ -42,6 +43,14 @@ film     PreviousFilmActivity
 film     PrimaryFilm
 film     SecondaryFilm
 film     TrailingFilmEffects
+scene    BlazerShipTemplates
+scene    CurrentPixelFormat
+scene    KellerShipTemplates
+scene    PirateClanShipTemplates
+scene    RaceShipTemplates
+scene    SpaceProcess
+scene    TerronShipTemplates
+app      ExitScreenLoop
 data     CacheDataRoot
 data     GameDataConfig
 data     GeneratedSatelliteBaseRadius
@@ -72,11 +81,8 @@ settings UserSettingsConfig
 ui       AboutScreen
 ui       ArcadeBattleScreen
 ui       AuxRenderBuffer
-ui       BlazerShipTemplates
-ui       CurrentPixelFormat
 ui       CurrentScreenId
 ui       EquipmentShopScreen
-ui       ExitScreenLoop
 ui       FullFrameRedrawRequested
 ui       GalaxyScreen
 ui       GameScreenHeight
@@ -84,11 +90,8 @@ ui       GameScreenWidth
 ui       GoodsShopScreen
 ui       GovernmentScreen
 ui       HangarScreen
-ui       KellerShipTemplates
 ui       MusicManager
-ui       PirateClanShipTemplates
 ui       QuestReturnScreenId
-ui       RaceShipTemplates
 ui       RegisteredScreens
 ui       RequestedScreenId
 ui       RuinsTalkScreen
@@ -98,9 +101,6 @@ ui       ScannerTarget
 ui       ShipReturnScreenId
 ui       ShipScreen
 ui       SoundManager
-ui       SpaceProcess
 ui       SpaceViewPosition
 ui       StarMapScreen
-ui       StarMapWeaponPanelOpen
 ui       TalkScreen
-ui       TerronShipTemplates
