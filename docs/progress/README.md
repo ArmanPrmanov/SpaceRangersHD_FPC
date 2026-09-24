@@ -11,16 +11,14 @@ has got.
 
 ## Status
 
-- Phase: 0 and 1 done (item 7, cross-target drift, skipped); second-human
-  spike done (branch `spike/second-human`, not for merging). Phase 2 in
-  progress: `source/game` and `source/core` are separated from the UI
-  (one documented exception). The 66 violations left are the script
-  builtins in `aScript`/`aScriptFun`. CI is not used: the workflow exists
-  but the repository is not connected to a runner, so tests run locally
-  (`tools/test.py`, `tools/unit_tests.py`, `tools/check_layers.py`).
-- Next: split the UI script builtins out of `aScriptFun`. Decide whether
-  the `Session`/`Settings`/`UiState` records happen (about 11,200 sites; see
-  the latest entry).
+- Phase: 0, 1 and 2 done. Phase 1 item 7 (cross-target drift) was skipped.
+  The second-human spike is done (branch `spike/second-human`, not for
+  merging). In Phase 2, the game and core layers are separated from the UI;
+  the 66 UI script builtins stay allowlisted until Phase 5. CI is not used:
+  the workflow exists but the repository is not connected to a runner, so
+  tests run locally (`tools/test.py`, `tools/unit_tests.py`,
+  `tools/check_layers.py`).
+- Next: Phase 3 (player commands and replay).
 - Open issues: chaotic mode is seeded from the clock, not the save (a
   deliberate deviation, see the Phase 1 entry); a save with the object
   reference table is untested in the original game; `format.py --check`

@@ -133,18 +133,23 @@ findings to pick which units to separate, and leave the rest alone.
    subscribe differently. Start with `aGalaxy`, `aShip`, `aSaveLoad`.
    The turn thread must never wait on a screen: today it sleeps until the
    score screen is dismissed when the player dies.
-2. **Group the globals.** Move unit-level variables into three records:
-   `Session` (galaxy, players, turn phase), `Settings` (what `GlobalsV` mostly
-   holds) and `UiState`. Same names at first, accessed through the record, so
-   the change is mechanical. This makes it visible which globals the simulation
-   touches. The local player's state (`PlayerStar`,
-   `PendingPlayerFollowTarget`, `PlayerAutomaticControl`, `PlayerOldQuests`,
-   the message bubbles and the `TStar` player-visit fields) goes into a
-   per-human record, since Phase 4 needs one per human.
-3. **Enforce the direction.** Add a check to `tools/` that fails if a unit under
+2. **Group the globals.** The local human's state goes into a per-human
+   record (`LocalHuman` in `aHuman`), since Phase 4 needs one per human. This
+   covers `PlayerStar`, `PendingPlayerFollowTarget`, `PlayerAutomaticControl`,
+   `PlayerOldQuests`, the message bubbles, the open shop, the hold order and the
+   conversation. The session globals the simulation uses go into `Session`
+   (`aSession`). Settings, data and UI globals stay where they are; the
+   globals the simulation uses are classified in `tools/layers_globals.txt`
+   instead. Moving every global would rewrite about 11,200 sites. The `TStar`
+   player-visit fields stay on `TStar`: they are star-level aggregates, and
+   Phase 4 changes their update condition to "a human is here".
+3. **Enforce the direction.** `tools/check_layers.py` fails if a unit under
    `source/game`, `source/core` or `source/script` uses a unit under
-   `source/screens` or `source/ui`. Start with an allowlist of current
-   violations and shrink it.
+   `source/screens`, `source/ui` or `source/arcade`, or a root global
+   classified as UI. It starts with an allowlist of current violations, which
+   shrinks. The UI script builtins in `aScriptFun` stay on the allowlist until
+   Phase 5. Routing a script's dialog to the right client decides how to
+   split them.
 
 Smaller clean-ups to fold in when a unit is already open:
 
@@ -241,6 +246,9 @@ Model: **host-authoritative, state streaming.** Only the host runs the day.
   compressed; a full snapshot only on join or when a client has no base. The
   save writer is the serialiser, so no per-object replication code is needed.
 - Joining is the same path: the host sends a full snapshot.
+- The snapshot must not touch screens. `SaveGameToMemorySnapshot` closes and
+  reopens them, so the host needs a writer built from `TGalaxy.SaveToBuffer`
+  plus the per-human state.
 - Deltas are computed on the uncompressed state. Compressed bytes change
   almost entirely even when little in the game changed, and a byte-for-byte
   diff breaks when lists change length. Use a diff that handles inserted

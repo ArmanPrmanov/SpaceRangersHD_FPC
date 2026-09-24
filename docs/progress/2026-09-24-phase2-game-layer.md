@@ -68,3 +68,30 @@
     UI unit, then either move the state (to `LocalHuman` or a game unit),
     move the presentation code (a subclass or helper), or route it through
     `SimEvents`.
+
+## Later in the session: decisions and close of Phase 2
+
+- Decided with the project owner:
+  - Group only the session globals. They moved into `Session` (`aSession`)
+    and the conversation data into `LocalHuman` (6b785ab, 1,310 sites).
+    Settings, data and ui globals stay put; the classification table covers
+    them.
+  - The UI script builtins stay on the allowlist until Phase 5.
+  - ROADMAP.md items 2 and 3 were rewritten to match. Phase 5 now notes
+    that the host needs a snapshot writer that does not touch screens.
+- Phase 2 is done. Its end state:
+  - Game and core units use no UI units or ui globals, except
+    `aPlayer -> RequestedScreenId`.
+  - The allowlist has 67 entries: 66 script builtins and that one
+    exception.
+  - Local human state is in `LocalHuman`, session state in `Session`.
+  - The turn reaches the UI only through `SimEvents`.
+- Notes for Phase 3:
+  - Commands will replace calls from the UI into the simulation. The
+    handlers in `SimEvents` go the other way; keep the two apart.
+  - The turn thread still waits for the UI in three places: dialogues
+    (`Session.TalkRequestEvent`), script UI requests and the dead player's
+    jump/arcade screen (`ReleasePlayerShip`). Each wait is now a handler's or
+    an event's policy, so a host can answer without waiting.
+  - `Galaxy` and `TurnCalculationPhase` are still unit-level variables in
+    game units. They are simulation state already and were left alone.
