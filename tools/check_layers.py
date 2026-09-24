@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Check that simulation units do not use UI units.
+"""Check that simulation units do not use UI units or UI globals.
 
 Units under source/game, source/core and source/script must not name a unit under
-source/screens, source/ui or source/arcade in a uses clause. Existing violations are listed in
-tools/layers_allowlist.txt; the check fails on a violation that is not listed, and on
-a listed one that no longer exists, so the list only shrinks. Pass --update to rewrite
-the list after removing violations.
+source/screens, source/ui or source/arcade in a uses clause. They also reach the UI through
+the root units' globals (Globals, GlobalsV, GR_Main): every root global they use must be
+classified in tools/layers_globals.txt, and they must not use one classified as ui.
+
+Existing violations are listed in tools/layers_allowlist.txt; the check fails on a violation
+that is not listed, and on a listed one that no longer exists, so the list only shrinks.
+Pass --update to rewrite the list after removing violations.
 """
 
 import argparse
@@ -16,11 +19,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "source"
 ALLOWLIST = Path(__file__).with_name("layers_allowlist.txt")
+GLOBAL_KINDS = Path(__file__).with_name("layers_globals.txt")
 SIMULATION = ("game", "core", "script")
 PRESENTATION = ("screens", "ui", "arcade")
+ROOT_UNITS = ("Globals", "GlobalsV", "GR_Main")
 
 COMMENT = re.compile(r"\{[^}]*\}|\(\*.*?\*\)|//[^\n]*", re.DOTALL)
 USES = re.compile(r"\buses\b(.*?);", re.IGNORECASE | re.DOTALL)
+VAR_BLOCK = re.compile(
+    r"^(?:var|threadvar)\b(.*?)(?=^(?:type|const|var|threadvar|procedure|function)\b)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
+VAR_NAMES = re.compile(r"^\s{2}(\w+(?:\s*,\s*\w+)*)\s*:", re.MULTILINE)
+# A bare name, or one qualified by its root unit. A field of the same name after a dot does
+# not count.
+NAME = re.compile(
+    r"(?:(?<![.\w])|" + "|".join(rf"(?<=\b{unit}\.)" for unit in ROOT_UNITS) + r")(\w+)\b"
+)
 
 
 def units_in(layers: tuple[str, ...]) -> dict[str, Path]:
@@ -31,25 +46,55 @@ def units_in(layers: tuple[str, ...]) -> dict[str, Path]:
     }
 
 
+def source_text(path: Path) -> str:
+    return COMMENT.sub(" ", path.read_text(encoding="utf-8", errors="replace"))
+
+
 def used_units(path: Path) -> set[str]:
     # Both branches of a conditional uses clause count: directives are stripped as comments.
-    text = COMMENT.sub(" ", path.read_text(encoding="utf-8", errors="replace"))
     names = set()
-    for clause in USES.findall(text):
+    for clause in USES.findall(source_text(path)):
         for entry in clause.split(","):
-            name = entry.split()[0] if entry.split() else ""
-            names.add(name.lower())
+            words = entry.split()
+            names.add(words[0].lower() if words else "")
     return names
 
 
-def violations() -> set[str]:
+def root_globals() -> set[str]:
+    names = set()
+    for unit in ROOT_UNITS:
+        text = source_text(SOURCE / f"{unit}.pas")
+        interface = text[: text.lower().index("\nimplementation")] + "\nprocedure"
+        for block in VAR_BLOCK.findall(interface):
+            for group in VAR_NAMES.findall(block):
+                names.update(name.strip() for name in group.split(","))
+    return names
+
+
+def global_kinds() -> dict[str, str]:
+    kinds = {}
+    for line in GLOBAL_KINDS.read_text(encoding="utf-8").splitlines():
+        if line.strip() and not line.startswith("#"):
+            kind, name = line.split()
+            kinds[name] = kind
+    return kinds
+
+
+def violations() -> tuple[set[str], set[str]]:
     simulation = units_in(SIMULATION)
     presentation = units_in(PRESENTATION)
-    found = set()
-    for unit, path in simulation.items():
+    names = root_globals()
+    kinds = global_kinds()
+    found, unclassified = set(), set()
+    for path in simulation.values():
         for used in used_units(path) & presentation.keys():
             found.add(f"{path.stem} -> {presentation[used].stem}")
-    return found
+        for name in set(NAME.findall(source_text(path))) & names:
+            if name not in kinds:
+                unclassified.add(f"{path.stem} -> {name}")
+            elif kinds[name] == "ui":
+                found.add(f"{path.stem} -> {name}")
+    return found, unclassified
 
 
 def read_allowlist() -> set[str]:
@@ -61,7 +106,8 @@ def read_allowlist() -> set[str]:
 
 def write_allowlist(entries: set[str]) -> None:
     header = [
-        "# Simulation units that still use UI units. Written by tools/check_layers.py --update.",
+        "# Simulation units that still use UI units or ui globals (tools/layers_globals.txt).",
+        "# Written by tools/check_layers.py --update.",
         "# Remove entries by removing the dependency; never add one by hand.",
     ]
     ordered = sorted(entries, key=str.lower)
@@ -72,19 +118,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update", action="store_true", help="Rewrite the allowlist.")
     args = parser.parse_args()
-    found = violations()
+    found, unclassified = violations()
+    for entry in sorted(unclassified, key=str.lower):
+        print(f"root global not classified in {GLOBAL_KINDS.name}: {entry}")
     if args.update:
         write_allowlist(found)
         print(f"{len(found)} allowed violations written to {ALLOWLIST.relative_to(ROOT)}")
-        return 0
+        return 1 if unclassified else 0
     allowed = read_allowlist()
     new = sorted(found - allowed, key=str.lower)
     gone = sorted(allowed - found, key=str.lower)
     for entry in new:
-        print(f"new dependency on a UI unit: {entry}")
+        print(f"new dependency on a UI unit or global: {entry}")
     for entry in gone:
         print(f"removed, delete from the allowlist (or run --update): {entry}")
-    if new or gone:
+    if new or gone or unclassified:
         return 1
     print(f"ok: {len(found)} allowed violations remain")
     return 0

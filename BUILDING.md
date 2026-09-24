@@ -166,9 +166,11 @@ writes each hashed state so two runs can be diffed.
 
 `python tools/check_layers.py` fails when a unit under `source/game`, `source/core` or
 `source/script` uses a unit under `source/screens`, `source/ui` or `source/arcade`
-(minigames). The violations that
-remain are listed in `tools/layers_allowlist.txt`. When you remove one, run the check with
-`--update` so the list gets shorter. The simulation reaches the UI through handlers in
+(minigames), or a root global (`Globals`, `GlobalsV`, `GR_Main`) that
+`tools/layers_globals.txt` classifies as `ui`. Every root global that the simulation uses
+must be classified there. The violations that remain are listed in
+`tools/layers_allowlist.txt`. When you remove one, run the check with `--update` so the
+list gets shorter. The simulation reaches the UI through handlers in
 [SimEvents](source/game/SimEvents.pas), which the UI installs at startup.
 
 ## Threads
