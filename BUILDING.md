@@ -164,6 +164,12 @@ hashes every turn, since hashing runs the save writer and must change nothing. T
 of address; `unresolved` counts references it could not name. `--sim-dump`
 writes each hashed state so two runs can be diffed.
 
+`python tools/check_layers.py` fails when a unit under `source/game`, `source/core` or
+`source/script` uses a unit under `source/screens` or `source/ui`. The violations that
+remain are listed in `tools/layers_allowlist.txt`. When you remove one, run the check with
+`--update` so the list gets shorter. The simulation reaches the UI through handlers in
+[SimEvents](source/game/SimEvents.pas), which the UI installs at startup.
+
 ## Threads
 
 The turn thread (`TThreadCalc`) runs the day while the UI thread plays the film.
