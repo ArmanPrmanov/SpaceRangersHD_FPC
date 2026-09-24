@@ -39,6 +39,8 @@ procedure LoadGameFromSaveBuffer(Buffer: TBufEC);
 function LoadGameFromFile(FileName: WideString): Boolean;
 procedure SaveGameToMemorySnapshot;
 procedure RestoreGameFromMemorySnapshot;
+procedure WriteGameCheckpoint(Buffer: TBufEC);
+procedure ReadGameCheckpoint(Buffer: TBufEC);
 procedure InitializeSaveWriter;
 procedure FinalizeSaveWriter;
 procedure LinkRecoveredTypes;
@@ -47,6 +49,9 @@ implementation
 uses
   aSession,
   aHold,
+  aItem,
+  aObjectRefs,
+  Classes,
   aHuman,
   aCalc,
   RTLFileSystem,
@@ -60,6 +65,7 @@ uses
   EC_Str,
   EC_BlockPar,
   aGalaxy,
+  aGalaxyEvent,
   aConst,
   aPlayer,
   GR_Main,
@@ -812,6 +818,327 @@ begin
   MemorySnapshotActive := False;
   Galaxy.RunConfigOnLoadHandlers;
 end;
+
+// CHANGE: ENHANCEMENT - The state a command log checkpoint holds (CommandLog): what the
+// memory snapshot holds, plus the per-human and session state the simulation reads between
+// days. Unlike a save it does not prepare the galaxy, touch screens or count as a save or a
+// load, so writing one changes nothing and reading one gives back the same state.
+const
+  CheckpointVersion = 1;
+
+procedure WriteShipId(Buffer: TBufEC; Ship: TShip);
+begin
+  if (Ship <> nil) and Galaxy.ContainsShipReference(Ship) then
+    Buffer.AddDWord(Ship.Id)
+  else
+    Buffer.AddDWord(0);
+end;
+
+// A loaded game would drift from the one it was saved from: a save rounds some values the
+// game keeps at higher precision (an equipment's condition and the captain's health are
+// Doubles saved as Singles, as in the original game), and it leaves out caches that the
+// game refreshes only now and then (a ship's wealth and strength). Checkpoints carry the
+// exact values by object id; objects that share an id are matched in the order aObjectRefs
+// lists them.
+type
+  TExactKind = (ekEquipment, ekShip);
+
+function ExactKindOf(Instance: TObject; out Kind: TExactKind): Boolean;
+begin
+  Result := True;
+  if Instance is TEquipment then
+    Kind := ekEquipment
+  else if Instance is TShip then
+    Kind := ekShip
+  else
+    Result := False;
+end;
+
+function ExactId(Instance: TObject): Cardinal;
+begin
+  if Instance is TItem then
+    Result := Cardinal(TItem(Instance).Id)
+  else
+    Result := Cardinal(TShip(Instance).Id);
+end;
+
+procedure WriteExactFields(Buffer: TBufEC; Instance: TObject; Kind: TExactKind);
+var
+  Ship: TShip;
+  I: Integer;
+begin
+  if Kind = ekEquipment then
+    Buffer.AddDouble(TEquipment(Instance).ConditionPercent)
+  else
+  begin
+    Ship := TShip(Instance);
+    Buffer.AddInt32(Ship.Wealth);
+    Buffer.AddSingle(Ship.WealthInBestRanger);
+    Buffer.AddSingle(Ship.Strength);
+    Buffer.AddSingle(Ship.StrengthInBestRanger);
+    Buffer.AddSingle(Ship.StrengthInAverageRanger);
+    Buffer.AddDouble(Ship.MovementDirection);
+    for I := 1 to 24 do
+      Buffer.AddDouble(Ship.CaptainHealth[I].Progress);
+    Buffer.AddDouble(Ship.RadiationHealth[1].Progress);
+  end;
+end;
+
+procedure ReadExactFields(Buffer: TBufEC; Instance: TObject; Kind: TExactKind);
+var
+  Ship: TShip;
+  I: Integer;
+begin
+  if Kind = ekEquipment then
+    TEquipment(Instance).ConditionPercent := Buffer.GetDouble
+  else
+  begin
+    Ship := TShip(Instance);
+    Ship.Wealth := Buffer.GetInt32;
+    Ship.WealthInBestRanger := Buffer.GetSingle;
+    Ship.Strength := Buffer.GetSingle;
+    Ship.StrengthInBestRanger := Buffer.GetSingle;
+    Ship.StrengthInAverageRanger := Buffer.GetSingle;
+    Ship.MovementDirection := Buffer.GetDouble;
+    for I := 1 to 24 do
+      Ship.CaptainHealth[I].Progress := Buffer.GetDouble;
+    Ship.RadiationHealth[1].Progress := Buffer.GetDouble;
+  end;
+end;
+
+// The objects that have exact values, each once, in listing order.
+procedure ListExactObjects(Objects: TList);
+var
+  Listed: TList;
+  I: Integer;
+  Kind: TExactKind;
+begin
+  Listed := TList.Create;
+  try
+    ListIdentifiedObjects(Listed);
+    for I := 0 to Listed.Count - 1 do
+      if ExactKindOf(TObject(Listed[I]), Kind) and (Objects.IndexOf(Listed[I]) < 0) then
+        Objects.Add(Listed[I]);
+  finally
+    Listed.Free
+  end;
+end;
+
+procedure WriteExactValues(Buffer: TBufEC);
+var
+  Objects: TList;
+  I: Integer;
+  Kind: TExactKind;
+begin
+  Objects := TList.Create;
+  try
+    ListExactObjects(Objects);
+    Buffer.AddInt32(Objects.Count);
+    for I := 0 to Objects.Count - 1 do
+    begin
+      ExactKindOf(TObject(Objects[I]), Kind);
+      Buffer.AddByte(Ord(Kind));
+      Buffer.AddDWord(ExactId(TObject(Objects[I])));
+      WriteExactFields(Buffer, TObject(Objects[I]), Kind);
+    end;
+  finally
+    Objects.Free
+  end;
+end;
+
+// Orders by kind, then id; a stable sort keeps objects that share both in listing order.
+function CompareExact(Left, Right: TObject): Integer;
+var
+  LeftKind, RightKind: TExactKind;
+begin
+  ExactKindOf(Left, LeftKind);
+  ExactKindOf(Right, RightKind);
+  if LeftKind <> RightKind then
+    Exit(Ord(LeftKind) - Ord(RightKind));
+  if ExactId(Left) < ExactId(Right) then
+    Result := -1
+  else if ExactId(Left) > ExactId(Right) then
+    Result := 1
+  else
+    Result := 0;
+end;
+
+procedure ReadExactValues(Buffer: TBufEC);
+var
+  Objects: TList;
+  Used: array of Boolean;
+  I, J, Low, High, Middle, Count: Integer;
+  Kind, FoundKind: TExactKind;
+  Id: Cardinal;
+  Found: TObject;
+begin
+  Objects := TList.Create;
+  try
+    ListExactObjects(Objects);
+    for I := 1 to Objects.Count - 1 do
+    begin
+      J := I;
+      while (J > 0) and (CompareExact(TObject(Objects[J - 1]), TObject(Objects[J])) > 0) do
+      begin
+        Objects.Exchange(J - 1, J);
+        Dec(J);
+      end;
+    end;
+    SetLength(Used, Objects.Count);
+    Count := Buffer.GetInt32;
+    for I := 0 to Count - 1 do
+    begin
+      Kind := TExactKind(Buffer.GetByte);
+      Id := Buffer.GetUInt32;
+      Low := 0;
+      High := Objects.Count;
+      while Low < High do
+      begin
+        Middle := (Low + High) div 2;
+        ExactKindOf(TObject(Objects[Middle]), FoundKind);
+        if (FoundKind < Kind) or ((FoundKind = Kind) and (ExactId(TObject(Objects[Middle])) < Id)) then
+          Low := Middle + 1
+        else
+          High := Middle;
+      end;
+      Found := nil;
+      while Low < Objects.Count do
+      begin
+        ExactKindOf(TObject(Objects[Low]), FoundKind);
+        if (FoundKind <> Kind) or (ExactId(TObject(Objects[Low])) <> Id) then
+          Break;
+        if not Used[Low] then
+        begin
+          Found := TObject(Objects[Low]);
+          Used[Low] := True;
+          Break;
+        end;
+        Inc(Low);
+      end;
+      if Found = nil then
+        raise Exception.Create('Checkpoint names an object the galaxy does not hold');
+      ReadExactFields(Buffer, Found, Kind);
+    end;
+  finally
+    Objects.Free
+  end;
+end;
+
+procedure WriteGameCheckpoint(Buffer: TBufEC);
+var
+  I, Count: Integer;
+  Message: TMessagePlayer;
+  Entry: TPlayerHoldUnit;
+begin
+  Buffer.AddInt32(CheckpointVersion);
+  Buffer.AddBoolean(Session.PlayerStarDayPrepared);
+  Buffer.AddBoolean(LocalHuman.StarMapWeaponPanelOpen);
+  Buffer.AddBoolean(LocalHuman.PlayerAutomaticControl);
+  Buffer.AddBoolean(LocalHuman.PlayerEquipmentBrokenThisTurn);
+  Buffer.AddByte(LocalHuman.PlayerDialogueRequestCount);
+  Buffer.AddDWord(LocalHuman.ShownPlayerTips);
+  Buffer.AddDWord(ChaoticRandomState);
+  Count := CountPersistentPlayerMessages;
+  Buffer.AddIntegerValue(Count);
+  Message := LocalHuman.FirstPersistentPlayerMessage;
+  while Message <> nil do
+  begin
+    Message.SaveToBuffer(Buffer);
+    Message := Message.Next;
+  end;
+  if LocalHuman.PlayerHoldEntries = nil then
+    Count := 0
+  else
+    Count := LocalHuman.PlayerHoldEntries.Count;
+  Buffer.AddInt32(Count);
+  for I := 0 to Count - 1 do
+  begin
+    Entry := LocalHuman.PlayerHoldEntries[I];
+    Buffer.AddByte(Byte(Entry.Kind));
+    Buffer.AddByte(Entry.GoodsIndex);
+    Buffer.AddDWord(Entry.ItemId);
+  end;
+  // Write the counters so that loading them gives back the ones the galaxy has now.
+  Dec(Galaxy.SaveCount);
+  Dec(Galaxy.LoadCount);
+  try
+    Galaxy.SaveToBuffer(Buffer);
+  finally
+    Inc(Galaxy.LoadCount);
+  end;
+  WriteExactValues(Buffer);
+  WriteShipId(Buffer, LocalHuman.TalkShip);
+  if (LocalHuman.TalkPlanet <> nil) and Galaxy.ContainsPlanetReference(LocalHuman.TalkPlanet) then
+    Buffer.AddDWord(LocalHuman.TalkPlanet.Id)
+  else
+    Buffer.AddDWord(0);
+  WriteShipId(Buffer, LocalHuman.PendingPlayerFollowTarget);
+end;
+
+procedure ReadGameCheckpoint(Buffer: TBufEC);
+var
+  I, Count: Integer;
+  Message: TMessagePlayer;
+  Entry: TPlayerHoldUnit;
+  Event: TObject;
+  PresentationSeed: Integer;
+  Prepared, WeaponPanelOpen, AutomaticControl, EquipmentBroken: Boolean;
+  DialogueRequestCount: Byte;
+  ChaoticState: Cardinal;
+begin
+  if Buffer.GetInt32 <> CheckpointVersion then
+    raise Exception.Create('Unknown checkpoint version');
+  Prepared := Buffer.GetBoolean;
+  WeaponPanelOpen := Buffer.GetBoolean;
+  AutomaticControl := Buffer.GetBoolean;
+  EquipmentBroken := Buffer.GetBoolean;
+  DialogueRequestCount := Buffer.GetByte;
+  // TGalaxy.Create reseeds the presentation stream; keep it as it was.
+  PresentationSeed := System.RandSeed;
+  if Galaxy <> nil then
+    Galaxy.Free;
+  Galaxy := TGalaxy.Create;
+  System.RandSeed := PresentationSeed;
+  Session.LoadedSaveVersion := CurrentSaveVersion;
+  Session.PlayerStarDayPrepared := Prepared;
+  LocalHuman.StarMapWeaponPanelOpen := WeaponPanelOpen;
+  LocalHuman.PlayerAutomaticControl := AutomaticControl;
+  LocalHuman.PlayerEquipmentBrokenThisTurn := EquipmentBroken;
+  LocalHuman.PlayerDialogueRequestCount := DialogueRequestCount;
+  LocalHuman.ShownPlayerTips := Buffer.GetUInt32;
+  ChaoticState := Buffer.GetUInt32;
+  Count := Buffer.GetInt32;
+  for I := 0 to Count - 1 do
+  begin
+    Message := CreatePersistentPlayerMessage;
+    Message.LoadFromBuffer(Buffer);
+  end;
+  InitializePlayerHoldView;
+  Count := Buffer.GetInt32;
+  for I := 0 to Count - 1 do
+  begin
+    Entry := TPlayerHoldUnit.Create;
+    LocalHuman.PlayerHoldEntries.Add(Entry);
+    Entry.Kind := TPlayerHoldKind(Buffer.GetByte);
+    Entry.GoodsIndex := Buffer.GetByte;
+    Entry.ItemId := Buffer.GetUInt32;
+  end;
+  // The writer stored one less than the load count, which loading adds back.
+  Galaxy.LoadFromBuffer(Buffer);
+  Event := TObject(Galaxy.GalaxyEvents.Last);
+  if (Event is TGalaxyEvent) and (TGalaxyEvent(Event).EventType = 'SaveLoaded') then
+  begin
+    Galaxy.GalaxyEvents.Extract(Event);
+    Event.Free;
+  end;
+  ReadExactValues(Buffer);
+  LocalHuman.TalkShip := Galaxy.IdToShip(Buffer.GetUInt32, False);
+  LocalHuman.TalkPlanet := Galaxy.IdToPlanet(Buffer.GetUInt32, False);
+  LocalHuman.PendingPlayerFollowTarget := Galaxy.IdToShip(Buffer.GetUInt32, False);
+  // Loading seeds the chaotic stream from the clock.
+  ChaoticRandomState := ChaoticState;
+end;
+
 procedure InitializeSaveWriter;
 begin
   SaveWriter := TSaver.Create;

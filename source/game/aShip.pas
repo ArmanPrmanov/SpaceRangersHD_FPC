@@ -853,6 +853,7 @@ function CalculateRoundedFuelCost(Amount: Integer; OwnerId: Byte): Integer;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  SaveTrace,
   aSession,
   aHold,
   aHuman,
@@ -1172,6 +1173,7 @@ var
   Info: PCustomShipInfo;
   Reserved: array[0..3] of Byte; // Native unreferenced slot before managed cleanup temporaries.
 begin
+  TraceSave('ship', Cardinal(Id), Buffer.DataSize);
   Buffer.AddDWord(Id);
   Buffer.AddWideStringZ(Name);
   Buffer.AddWideStringZ(TypeNameOverrideKey);
@@ -1232,6 +1234,7 @@ begin
     Buffer.AddAnsiChar(AnsiChar(Item.ItemType));
     Item.SaveToBuffer(Buffer);
   end;
+  TraceSave('ship.status', Cardinal(Id), Buffer.DataSize);
   if StatBonuses = nil then
     Buffer.AddWideChar(#0)
   else
@@ -1315,6 +1318,7 @@ begin
     Buffer.AddDWord(PartnerShip.Id);
     Buffer.AddDWord(Max(0, PartnershipDaysRemaining));
   end;
+  TraceSave('ship.order', Cardinal(Id), Buffer.DataSize);
   Buffer.AddBoolean(AfterburnerActive);
   Buffer.AddSingle(MovementDirection);
   Buffer.AddAnsiChar(AnsiChar(Order));
@@ -1382,6 +1386,7 @@ begin
   // CHANGE: CLEANUP - Generate the legacy money mirror only when writing a save.
   Buffer.AddDWord(Cardinal(Money) xor $A4A576AD);
   Buffer.AddWideChar(WideChar(LiberationGroupRouteIndex));
+  TraceSave('ship.health', Cardinal(Id), Buffer.DataSize);
   for I := 1 to 24 do
   begin
     Buffer.AddSingle(CaptainHealth[I].Progress);
@@ -1407,6 +1412,7 @@ begin
     Buffer.AddIntegerValue(RadiationHealth[I].ExpireTurn);
     Buffer.AddIntegerValue(RadiationHealth[I].ApplicationCount);
   end;
+  TraceSave('ship.tail', Cardinal(Id), Buffer.DataSize);
   Buffer.AddAnsiChar(AnsiChar(TechKnowledge));
   Buffer.AddIntegerValue(TradeLossBalance);
   Buffer.AddIntegerValue(TradeExperience);

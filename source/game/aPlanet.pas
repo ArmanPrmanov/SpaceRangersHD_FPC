@@ -206,6 +206,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  SaveTrace,
   aSession,
   aHuman,
   SimulationThread,
@@ -1855,6 +1856,7 @@ var
   Item: TItem;
   Entry: PPlanetSurfaceLootEntry;
 begin
+  TraceSave('planet', Cardinal(Id), Buffer.DataSize);
   Buffer.AddDWord(Self.Id);
   Buffer.AddIntegerValue(Self.GenerationSeed);
   Buffer.AddDWord(Self.RandomState);

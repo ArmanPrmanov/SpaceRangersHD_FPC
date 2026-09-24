@@ -794,6 +794,7 @@ procedure UpdateTurnFilmActivity(
 implementation
 
 uses
+  SaveTrace,
   aSession,
   aHuman,
   ObserverHooks,
@@ -4348,6 +4349,7 @@ var
   Drop: PMovingDropItemEntry;
   Missile: TMissile;
 begin
+  TraceSave('star', Cardinal(Id), Buffer.DataSize);
   Buffer.AddDWord(Id);
   Buffer.AddIntegerValue(GenerationSeed);
   Buffer.AddDWord(RandomState);

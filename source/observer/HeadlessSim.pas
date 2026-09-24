@@ -16,6 +16,8 @@ type
     RoundTrip: Boolean;
     Seed: Cardinal;
     DumpDirectory: AnsiString;
+    // Write a checkpoint after this turn and continue from it (0: never).
+    ReloadAt: Integer;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 implementation
@@ -31,6 +33,7 @@ uses
   aGalaxyEvent,
   aObjectRefs,
   aSaveLoad,
+  SaveTrace,
   ThreadCalc,
   ObserverSimulation;
 
@@ -66,6 +69,15 @@ begin
   end;
 end;
 
+var
+  // Where each object starts in the state being dumped (SaveTrace).
+  TraceLines: TStringList;
+
+procedure RecordTrace(const Kind: AnsiString; Id: Cardinal; Offset: Integer);
+begin
+  TraceLines.Add(Format('%d %s:%d', [Offset, Kind, Id]));
+end;
+
 procedure Emit(const Line: AnsiString);
 begin
   WriteLn(Line);
@@ -90,9 +102,22 @@ procedure EmitHash(Turn: Integer; const DumpDirectory: AnsiString);
 var
   State: TBufEC;
 begin
-  State := SerializeGalaxy;
+  if DumpDirectory <> '' then
+  begin
+    TraceLines := TStringList.Create;
+    SaveTraceHook := @RecordTrace;
+  end;
+  try
+    State := SerializeGalaxy;
+  finally
+    SaveTraceHook := nil;
+  end;
   try
     DumpBuffer(DumpDirectory, Format('turn-%.4d.bin', [Turn]), State);
+    if TraceLines <> nil then
+      TraceLines.SaveToFile(
+          IncludeTrailingPathDelimiter(DumpDirectory) + Format('turn-%.4d.index', [Turn])
+      );
     Emit(
         Format(
             'turn %d day=%d hash=%s bytes=%d unresolved=%d',
@@ -101,6 +126,7 @@ begin
         )
     );
   finally
+    FreeAndNil(TraceLines);
     State.Free
   end;
 end;
@@ -265,6 +291,22 @@ begin
   end;
 end;
 
+// A checkpoint must give back a game that plays on as the one it was written from.
+procedure ReloadFromCheckpoint;
+var
+  Buffer: TBufEC;
+begin
+  Buffer := TBufEC.Create;
+  try
+    WriteGameCheckpoint(Buffer);
+    Buffer.SetPosition(0);
+    ReadGameCheckpoint(Buffer);
+  finally
+    Buffer.Free
+  end;
+  Emit(Format('reloaded day=%d', [Galaxy.CurrentTurn]));
+end;
+
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 var
   Turn: Integer;
@@ -290,6 +332,8 @@ begin
   for Turn := 1 to Options.Turns do
   begin
     SimulateParkedTurn;
+    if Turn = Options.ReloadAt then
+      ReloadFromCheckpoint;
     if Options.Hash and (not Options.HashLastOnly or (Turn = Options.Turns)) then
       EmitHash(Turn, Options.DumpDirectory);
   end;

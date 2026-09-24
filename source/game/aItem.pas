@@ -688,6 +688,7 @@ function MigrateSavedItemType(ItemType: Byte): TItemType;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  SaveTrace,
   aSession,
   SimEvents,
   aHuman,
@@ -756,6 +757,7 @@ end;
 
 procedure TItem.SaveToBuffer(Buffer: TBufEC);
 begin
+  TraceSave('item', Cardinal(Id), Buffer.DataSize);
   Buffer.AddDWord(Id);
   Buffer.AddAnsiChar(AnsiChar(ItemType));
   Buffer.AddSingle(Position.X);

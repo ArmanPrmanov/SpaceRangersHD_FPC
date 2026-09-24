@@ -177,6 +177,8 @@ begin
       Simulation.Turns := StrToInt(Copy(Argument, 13, MaxInt))
     else if Pos('--sim-seed=', Argument) = 1 then
       Simulation.Seed := StrToDWord(Copy(Argument, 12, MaxInt))
+    else if Pos('--sim-reload-at=', Argument) = 1 then
+      Simulation.ReloadAt := StrToInt(Copy(Argument, 17, MaxInt))
     else if Pos('--sim-dump=', Argument) = 1 then
       Simulation.DumpDirectory := ExpandFileName(Copy(Argument, 12, MaxInt))
     else if Argument = '--sim-hash' then

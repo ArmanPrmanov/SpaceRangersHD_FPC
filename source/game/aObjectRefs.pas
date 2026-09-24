@@ -8,9 +8,13 @@ unit aObjectRefs;
 // The same identities let the headless runner hash state without addresses.
 interface
 uses
+  Classes,
   EC_Buf;
 // Indexes every addressable object of the current galaxy by a stable key.
 procedure CollectObjectIdentities;
+// Appends the indexed objects to List in a fixed order, the same for a galaxy and its
+// loaded copy, and leaves them indexed.
+procedure ListIdentifiedObjects(List: TList);
 // The key of the object at Value, '' for a plain number, or 'unresolved' for a
 // large value that names no collected object (counted in UnresolvedObjectCount).
 function ObjectIdentity(Value: PtrUInt): WideString;
@@ -25,7 +29,6 @@ uses
   aHuman,
   aSession,
   SysUtils,
-  Classes,
   contnrs,
   EC_Expression,
   Globals,
@@ -169,7 +172,7 @@ begin
   end;
 end;
 
-procedure CollectObjectIdentities;
+procedure CollectUnsortedIdentities;
 var
   I, J, K: Integer;
   Star: TStar;
@@ -225,6 +228,21 @@ begin
     for J := 0 to ListCount(Star.MovingDropItems) - 1 do
       AddItem(PointerToTMovingDropItemEntry(Star.MovingDropItems[J]).Payload);
   end;
+end;
+
+procedure CollectObjectIdentities;
+begin
+  CollectUnsortedIdentities;
+  SortIdentities(0, IdentityCount - 1);
+end;
+
+procedure ListIdentifiedObjects(List: TList);
+var
+  I: Integer;
+begin
+  CollectUnsortedIdentities;
+  for I := 0 to IdentityCount - 1 do
+    List.Add(Pointer(Identities[I].Address));
   SortIdentities(0, IdentityCount - 1);
 end;
 
