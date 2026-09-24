@@ -365,6 +365,7 @@ uses
   aPirate,
   aPath,
   aPlayerActions,
+  aTalkActions,
   fTalk,
   fGoodsShop2,
   aTranclucator,
@@ -1406,7 +1407,7 @@ begin
           raise Exception.Create('Error GetLastError()=' + IntToStr(Int64(GetLastError)))
         else if WaitResult = WAIT_OBJECT_0 + 1 then
         begin
-          Session.ScriptDialogIndex := -1;
+          ResetScriptDialog;
           RunTalkDialogs;
           WaitForTurnOrTalk;
         end;
@@ -2229,10 +2230,10 @@ begin
       if (GetPlayer.CurrentStar = Ship.CurrentStar) and Ship.InNormalSpace then
         if PointDistance(GetPlayer.Position, Ship.Position) <= GetPlayer.GetRadarRange then
         begin
-          LocalHuman.TalkShip := Ship;
-          LocalHuman.TalkScripted := False;
-          Session.ScriptDialogIndex := -1;
+          // CHANGE: ENHANCEMENT - The conversation starts as a command (aTalkActions), after
+          // waiting for the turn job rather than before.
           aCalc.WaitForTurnCalculationUI;
+          BeginTalk(Ship, False);
           RunTalkDialogs;
           aCalc.WaitForTurnCalculationUI;
           BreakUiMessage;
@@ -3415,11 +3416,10 @@ begin
       begin
         HideLargeHelp;
         TalkUnresolved := False;
-        CurrentScript := nil;
-        Session.ScriptDialogIndex := -1;
-        LocalHuman.TalkShip := CursorObject as TShip;
-        LocalHuman.TalkScripted := False;
+        // CHANGE: ENHANCEMENT - The conversation starts as a command (aTalkActions), after
+        // waiting for the turn job rather than before.
         aCalc.WaitForTurnCalculationUI;
+        BeginTalk(CursorObject as TShip, True);
         RunTalkDialogs;
         ClearPathOverlay(True);
         BuildPlayerPath;
@@ -3577,10 +3577,10 @@ begin
     begin
       if PointDistance(GetPlayer.Position, TerronShip.Position) <= GetPlayer.GetRadarRange then
       begin
-        LocalHuman.TalkShip := TerronShip;
-        LocalHuman.TalkScripted := False;
-        Session.ScriptDialogIndex := -1;
+        // CHANGE: ENHANCEMENT - The conversation starts as a command (aTalkActions), after
+        // waiting for the turn job rather than before.
         aCalc.WaitForTurnCalculationUI;
+        BeginTalk(TerronShip, False);
         RunTalkDialogs;
         aCalc.WaitForTurnCalculationUI;
       end;
@@ -3962,10 +3962,10 @@ begin
             else
             begin
               HideLargeHelp;
-              LocalHuman.TalkShip := Ship;
-              LocalHuman.TalkScripted := False;
-              Session.ScriptDialogIndex := -1;
+              // CHANGE: ENHANCEMENT - The conversation starts as a command (aTalkActions), after
+              // waiting for the turn job rather than before.
               aCalc.WaitForTurnCalculationUI;
+              BeginTalk(Ship, False);
               RunTalkDialogs;
               ClearPathOverlay(True);
               BuildPlayerPath;
