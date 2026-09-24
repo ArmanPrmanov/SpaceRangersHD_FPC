@@ -1395,9 +1395,16 @@ begin
   Buffer.AddIntegerValue(WarDeltaWin[2]);
   Buffer.AddIntegerValue(WarDeltaWin[0]);
   Buffer.AddIntegerValue(0); // Empty legacy integrity-snapshot buffer.
-  Buffer.AddIntegerValue(High(SpaceBackgroundEntries) + 1);
+  // CHANGE: ENHANCEMENT - The state hash (aObjectRefs) leaves out what only the screens use:
+  // the space background, drawn from the presentation stream, and the hangar's slot order.
+  if Assigned(SnapshotObjectIdentity) then
+    Buffer.AddIntegerValue(0)
+  else
+    Buffer.AddIntegerValue(High(SpaceBackgroundEntries) + 1);
   for I := 0 to High(SpaceBackgroundEntries) do
   begin
+    if Assigned(SnapshotObjectIdentity) then
+      Break;
     Buffer.AddIntegerValue(SpaceBackgroundEntries[I].ImageIndex);
     Buffer.AddSingle(SpaceBackgroundEntries[I].OrbitCenter.X);
     Buffer.AddSingle(SpaceBackgroundEntries[I].OrbitCenter.Y);
@@ -1412,7 +1419,10 @@ begin
     Buffer.AddIntegerValue(SpaceBackgroundEntries[I].FrameIndex);
   end;
   for I := 0 to 8 do
-    Buffer.AddDWord(LocalHuman.HangarShipIds[I]);
+    if Assigned(SnapshotObjectIdentity) then
+      Buffer.AddDWord(0)
+    else
+      Buffer.AddDWord(LocalHuman.HangarShipIds[I]);
   Buffer.AddIntegerValue(0);
   Buffer.AddIntegerValue(0);
   Buffer.AddIntegerValue(0);
