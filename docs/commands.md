@@ -1,0 +1,88 @@
+# Player commands
+
+Every change a human makes to the game goes through a command (ROADMAP.md,
+Phase 3). A screen builds a command and submits it. The command's executor,
+in the game layer, does what the screen used to do itself. The command log
+records the command, and the headless runner replays it.
+
+- `source/game/aCommands.pas`: the command record, its encoding, and
+  `SubmitCommand` / `ExecuteCommand`.
+- `source/game/aPlayerActions.pas`: travel, orders and the day. This is the
+  model to follow.
+- `source/CommandLog.pas`: the recorder (`--record-commands=PATH`) and the
+  headless replay (`--replay-commands=PATH`).
+
+## Converting a UI action
+
+1. **Find what changes the game.** This means writes to galaxy objects, the
+   player, `LocalHuman` fields the simulation reads, and `Session`. It also
+   includes calls that run scripts: `ScriptItemsAct`, `RunTurnCode`,
+   `RunActionCode`, `CallDialog*`, `ExecuteDialogAnswer`. Many are implicit:
+   look at `OnOpen`, `OnClose`, hover and refresh code, not only buttons.
+   Pure presentation (images, sounds, scroll, which panel is open) stays in
+   the screen.
+2. **Move the change into an executor.** Move the code verbatim. The
+   executor gets the acting ranger from the command (`Actor(Command)`),
+   never from the screen. It must not touch controls.
+3. **Pass inputs as arguments.**
+   - Objects are passed by id with `AddRef`: stars, planets, ships, items,
+     holes, constellations, asteroids and missiles.
+   - Items in the open shop's grid (`LocalHuman.TemporaryShopSlots`) are not
+     in any galaxy list. Pass the slot index plus the item id, and check
+     both.
+   - Integers go in with `AddInt`, floats with `AddFloat`/`AddPoint` (sent
+     bit for bit), and text with `Command.Text`.
+   - A value the screen computed from UI state, such as a layout width or a
+     quote shown in a dialog, travels in the command. A value computed from
+     game state is computed again in the executor.
+4. **Keep decisions where they were.** The screen may still decide which
+   command to send from what the player selected. The executor redoes
+   checks that depend on game state, exactly as the screen did.
+5. **Return results through a unit variable.** An example is
+   `ScriptItemsActResult`. The screen reads it right after
+   `SubmitCommand`.
+6. **Keep the order of effects.** If a screen changes the game, shows a
+   dialog, then changes it again, that is two commands with the dialog in
+   between.
+
+Each actions unit declares its kinds as constants in its own range and
+registers them in `initialization` with
+`RegisterCommand(Kind, 'Name', @Executor)`. Never renumber a kind: the
+numbers are part of the log format.
+
+| Range | Unit |
+| --- | --- |
+| 0–99 | `aPlayerActions`: travel, orders, the day |
+| 100–199 | shops: equipment, goods, hangar |
+| 200–299 | the ship and hold screen (`fShip2`) |
+| 300–399 | conversations (`fTalk`, script dialogs) |
+| 400–499 | planets and the government (`fGov`, `fPlanet`, `fPlanetNO`, `fInfo`, `fRewards`, `fJournal`) |
+| 500–599 | stations (`fRuinsTalk`) |
+| 600–699 | text quests, arcade battles, cheats, UI scripts |
+
+Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
+
+## Threads
+
+- The UI thread submits commands while no turn job runs. It also submits
+  them while the turn thread waits for it, which happens during a
+  conversation (`BeginTurnWaitForUi`).
+- A command submitted on the turn thread is part of the job and is not
+  recorded.
+- Keep the `aCalc.WaitForTurnCalculationUI` calls the screen already makes
+  before changing the game.
+
+## Checking a conversion
+
+- `python tools/build.py --target windows`, `python tools/unit_tests.py`,
+  `python tools/check_layers.py`.
+- `python tools/test.py --game-dir=...` runs the save tests and replays
+  `tests/replays/*.srcl`. The goldens must not change.
+- The recorder hashes the state after each command and before the next one.
+  If the two differ, something that is not a command changed the game. The
+  recorder then writes a checkpoint and names the screen that was open.
+  Replaying a recorded session (`--replay-commands=... --replay-verbose`)
+  lists them. Checkpoints and `diverged` records are what is left to
+  convert.
+- Game state the save leaves out, such as a path or a cache, is not in the
+  hash. A missed change to it shows up later as a divergence after a job.
