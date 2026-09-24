@@ -39,7 +39,7 @@ procedure ProcessPlayerStarTurn;
 implementation
 uses
   SimulationThread,
-  GI_MessageLoop,
+  SimEvents,
   aCalc,
   Windows,
   MMSystem,
@@ -106,9 +106,7 @@ begin
     begin
       AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
       LogExceptionBackTrace;
-      RequestedScreenId := screenNone;
-      TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
-      ExitScreenLoop := True;
+      NotifyTurnFailed;
       raise Exception.Create('Error in procedure ThCa label = ' + IntToStr(Stage));
     end;
   end;

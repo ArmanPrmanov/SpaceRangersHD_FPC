@@ -866,7 +866,7 @@ uses
   EC_Mem,
   aEFilmEnd,
   SE_Weapon,
-  fScore,
+  SimEvents,
   SE_Ruins,
   Achievements,
   SE_GAIEffect,
@@ -4989,7 +4989,7 @@ begin
   begin
     Event := AddGalaxyEvent('PlayerDeath');
     Event.AddTextData('KilledByBeamWeapon');
-    ScoreScreen.RecordPlayerResult(False);
+    SimEvents.RecordPlayerResult(False);
   end;
 end;
 
@@ -5061,7 +5061,7 @@ begin
     TryAddAchievementProgress('ROCKET', 1);
   if (GetPlayer = Self) and (GetHull.HullPoints < 1) then
   begin
-    ScoreScreen.RecordPlayerResult(False);
+    SimEvents.RecordPlayerResult(False);
     Event := AddGalaxyEvent('PlayerDeath');
     Event.AddTextData('KilledByMissile');
   end;
@@ -5897,7 +5897,7 @@ begin
   Result := ApplyDamage(SourceShip, Damage, -1, DamageColor, InterceptorDamageFlags);
   if (GetPlayer = Self) and (GetHull.HullPoints < 1) then
   begin
-    ScoreScreen.RecordPlayerResult(False);
+    SimEvents.RecordPlayerResult(False);
     Event := AddGalaxyEvent('PlayerDeath');
     Event.AddTextData('KilledByInterceptor');
   end;
@@ -5981,7 +5981,7 @@ begin
   Result := Damage;
   if (GetPlayer = Self) and (GetHull.HullPoints < 1) then
   begin
-    ScoreScreen.RecordPlayerResult(False);
+    SimEvents.RecordPlayerResult(False);
     Event := AddGalaxyEvent('PlayerDeath');
     Event.AddTextData('KilledByAsteroid');
   end;
@@ -6091,7 +6091,7 @@ begin
         NotifyCompanionDeath;
       if GetPlayer = Self then
       begin
-        ScoreScreen.RecordPlayerResult(False);
+        SimEvents.RecordPlayerResult(False);
         Event := AddGalaxyEvent('PlayerDeath');
         Event.AddTextData('KilledByExplosion');
       end;
@@ -6162,7 +6162,7 @@ begin
         NotifyCompanionDeath;
       if GetPlayer = Self then
       begin
-        ScoreScreen.RecordPlayerResult(False);
+        SimEvents.RecordPlayerResult(False);
         Event := AddGalaxyEvent('PlayerDeath');
         Event.AddTextData('KilledBySunDamage');
       end;

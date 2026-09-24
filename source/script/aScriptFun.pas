@@ -738,7 +738,7 @@ uses
   fCount2,
   fCustom,
   SE_Ship2,
-  fScore,
+  SimEvents,
   fAbout,
   fPanelMain,
   fGoodsShop2,
@@ -11906,7 +11906,7 @@ begin
   end
   else
   begin
-    ScoreScreen.RecordPlayerResult(GetPlayer <> nil);
+    SimEvents.RecordPlayerResult(GetPlayer <> nil);
     AboutScreen.ReturnToScores := True;
     RequestedScreenId := screenAbout;
     TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);

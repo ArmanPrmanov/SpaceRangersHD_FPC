@@ -4,7 +4,6 @@ aGalaxy -> fEquipmentShop
 aGalaxy -> fGoodsShop2
 aGalaxy -> fGov
 aGalaxy -> fHangar
-aGalaxy -> fScore
 aGalaxy -> fShip2
 aGalaxy -> GI_GraphButton
 aGalaxy -> GI_Label
@@ -13,7 +12,6 @@ aGalaxy -> GI_Panel
 aItem -> fShip2
 aPlanet -> fEquipmentShop
 aPlayer -> fEquipmentShop
-aPlayer -> GI_MessageLoop
 aRuins -> fEquipmentShop
 aSaveLoad -> fChameleon
 aSaveLoad -> fCount2
@@ -62,7 +60,6 @@ aScriptFun -> fListBox
 aScriptFun -> fPanelMain
 aScriptFun -> fRuinsTalk
 aScriptFun -> fScaner
-aScriptFun -> fScore
 aScriptFun -> fShip2
 aScriptFun -> fStarMap
 aScriptFun -> fTalk
@@ -74,8 +71,6 @@ aScriptFun -> GI_MessageBox
 aScriptFun -> GI_MessageLoop
 aShip -> fEquipmentShop
 aShip -> fGoodsShop2
-aShip -> fScore
 aShip -> fShip2
 Robot -> fPanelLoad
 Robot -> GI_MessageLoop
-ThreadCalc -> GI_MessageLoop

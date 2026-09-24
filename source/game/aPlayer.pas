@@ -250,7 +250,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aCalc,
-  GI_MessageLoop,
+  SimEvents,
   aNormalShip,
   SysUtils,
   GR_Main,
@@ -4231,8 +4231,7 @@ begin
     BuildTemporaryShopSlotGrid;
   end;
   RuinsMode := SelectedMode;
-  RequestedScreenId := screenRuinsTalk;
-  TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
+  RequestScreen(screenRuinsTalk);
 end;
 
 procedure TPlayer.CloseRuinsModeScreen;
@@ -4260,7 +4259,8 @@ begin
       RequestedScreenId := screenPlanetNO;
     ExitRuinsMode;
   end;
-  TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
+  // CHANGE: CLEANUP - The screen is chosen above, before the waits for the turn job.
+  RequestScreen(RequestedScreenId);
 end;
 
 procedure TPlayer.ExitRuinsMode;

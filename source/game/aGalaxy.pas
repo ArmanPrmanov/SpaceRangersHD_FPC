@@ -792,7 +792,6 @@ procedure UpdateTurnFilmActivity(
 implementation
 
 uses
-  SimulationThread,
   ObserverHooks,
   SE_Garbage,
   SE_Sputnik,
@@ -827,7 +826,7 @@ uses
   aKling,
   aMissile,
   aShip,
-  fScore,
+  SimEvents,
   aPirate,
   aEFilm,
   SE_Hole,
@@ -15747,7 +15746,7 @@ begin
             GetPlayer.ProcessShipDestructionQuests(Ship);
             if GetPlayer = Ship then
             begin
-              Globals.ScoreScreen.RecordPlayerResult(False);
+              SimEvents.RecordPlayerResult(False);
               DeathEvent := AddGalaxyEvent('PlayerDeath');
               TGalaxyEvent(DeathEvent).AddTextData('StationDestroyed');
             end;
@@ -15813,16 +15812,8 @@ begin
           StationDestroyed := 1;
         if GetPlayer = Ship then
         begin
-          Globals.ScoreScreen.RecordPlayerResult(False);
-          // CHANGE: ENHANCEMENT - The UI shows the score screen while the turn thread waits.
-          InterlockedIncrement(TurnYieldedToUi);
-          try
-            while ((Byte(GlobalsV.CurrentScreenId) = 19) or (Byte(GlobalsV.CurrentScreenId) = 21))
-                and (Galaxy.ScoreScreenDismissed = 0) do
-              SysUtils.Sleep(1);
-          finally
-            InterlockedDecrement(TurnYieldedToUi);
-          end;
+          SimEvents.RecordPlayerResult(False);
+          ReleasePlayerShip;
           Galaxy.ScoreScreenDismissed := 0;
         end;
         Self.Ships.Delete(Index);

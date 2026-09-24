@@ -61,7 +61,8 @@ uses
   ThreadCalc,
   aSaveLoad,
   ObserverHost,
-  HeadlessSim;
+  HeadlessSim,
+  SimEventHandlers;
 
 var
   ApplicationEvents: TAD;
@@ -512,6 +513,7 @@ begin
       if AvailableLanguageCodes = '' then
         AvailableLanguageCodes := SelectedLanguage;
       InitializeScreens;
+      InstallSimEventHandlers;
       TimerPeriodStarted := timeBeginPeriod(1) = 0;
       if SimulationMode then
       begin
