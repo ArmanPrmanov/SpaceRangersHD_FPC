@@ -60,6 +60,8 @@ function RunJournal(ParentLoop: TMessageLoopGI): Boolean;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlanetActions,
+  aPlayerActions,
   aHuman,
   ThreadCalc,
   aCalc,
@@ -179,7 +181,7 @@ begin
   JournalSelected := not JournalSelected;
   ToggleJournalNews(nil);
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
   aCalc.WaitForTurnCalculationUI;
 end;
 
@@ -187,7 +189,7 @@ procedure TfJournal.OnClose;
 begin
   aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
   InfoPanel.FreeOwnedChildren;
   MainPanel.OnClose;
 end;
@@ -576,7 +578,7 @@ begin
       = mbgResultOK then
   begin
     if GetPlayer <> nil then
-      GetPlayer.DeleteJournalRecord(Sender.UserValue);
+      DeleteJournalRecord(Sender.UserValue);
     Position := InfoPanel.VerticalScrollBar.Position;
     RebuildJournalEntries;
     if Position < InfoPanel.VerticalScrollBar.Minimum then
@@ -600,7 +602,7 @@ begin
               mbgOK or mbgCancel or mbgQuestion)
           = mbgResultOK then
       begin
-        GetPlayer.ClearJournal;
+        ClearJournal;
         RebuildJournalEntries;
         BreakUiMessage;
       end;
@@ -613,7 +615,7 @@ begin
               mbgOK or mbgCancel or mbgQuestion)
           = mbgResultOK then
       begin
-        GetPlayer.TrimNewsEntries(0);
+        ClearNews;
         RebuildNewsEntries;
         BreakUiMessage;
       end;
@@ -834,7 +836,7 @@ begin
   begin
     if Length(SysUtils.Trim(Text)) > 0 then
     begin
-      GetPlayer.AddJournalRecord(Text);
+      AddJournalRecord(Text);
       SoundManager.PlaySound('Sound.UserMsgAdd');
       SetText('');
       RebuildJournalEntries;

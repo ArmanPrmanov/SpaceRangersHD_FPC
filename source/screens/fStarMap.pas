@@ -308,6 +308,7 @@ procedure LinkRecoveredTypes;
 implementation
 
 uses
+  aPlanetActions,
   aSession,
   StarScene,
   aHuman,
@@ -762,6 +763,8 @@ var
   MapIndex: Integer;
   StartText, WinText, LossText, TerronName: WideString;
   BattleFailed: Boolean;
+  Statistics: TPlanetBattleStatistics;
+  BattleIndex, BattleMode: Integer;
 begin
   if (GetPlayer <> nil) and (Byte(GetPlayer.RuinsMode) > 0) then
     LeaveBridge;
@@ -856,29 +859,14 @@ begin
   end
   else if PlanetBattleState in [2, 4] then
   begin
-    SetLength(GetPlayer.PlanetBattleHistory, High(GetPlayer.PlanetBattleHistory) + 1 + 1);
-    with GetPlayer.PlanetBattleHistory[High(GetPlayer.PlanetBattleHistory)] do
-    begin
-      MapId := PlanetBattleMapId;
-      Statistics[0] := RobotBattleStatistics[0];
-      Statistics[1] := RobotBattleStatistics[1];
-      Statistics[2] := RobotBattleStatistics[2];
-      Statistics[3] := RobotBattleStatistics[3];
-      Statistics[4] := RobotBattleStatistics[4];
-      Statistics[5] := RobotBattleStatistics[5];
-      ResultCode := 1;
-      CompletionMode := PlanetBattleState;
-      DateTurn := Galaxy.CurrentTurn;
-    end;
-    Galaxy.TerronLandingLockTurn := 0;
+    // CHANGE: ENHANCEMENT - The battle's result is one command that carries what the
+    // battle reported (docs/commands.md); the camera follows from before it.
+    for BattleIndex := 0 to 5 do
+      Statistics[BattleIndex] := RobotBattleStatistics[BattleIndex];
+    BattleMode := PlanetBattleState;
     PlanetBattleState := 0;
-    GetPlayer.OrderTakeoff;
     FilmCameraFollow := True;
-    LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
-    if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
-      Galaxy.EnableDominatorSurfaces
-    else
-      Galaxy.DisableDominatorSurfaces;
+    FinishTerronBattle(BattleMode, PlanetBattleMapId, Statistics);
     CalculatePlayerStarTurnAndWait;
     if ExitScreenLoop then
       Exit;
@@ -902,35 +890,19 @@ begin
   end
   else if PlanetBattleState = 3 then
   begin
-    SetLength(GetPlayer.PlanetBattleHistory, High(GetPlayer.PlanetBattleHistory) + 1 + 1);
-    with GetPlayer.PlanetBattleHistory[High(GetPlayer.PlanetBattleHistory)] do
-    begin
-      MapId := PlanetBattleMapId;
-      Statistics[0] := RobotBattleStatistics[0];
-      Statistics[1] := RobotBattleStatistics[1];
-      Statistics[2] := RobotBattleStatistics[2];
-      Statistics[3] := RobotBattleStatistics[3];
-      Statistics[4] := RobotBattleStatistics[4];
-      Statistics[5] := RobotBattleStatistics[5];
-      ResultCode := 1;
-      CompletionMode := PlanetBattleState;
-      DateTurn := Galaxy.CurrentTurn;
-    end;
-    Inc(GetPlayer.PlanetBattles);
+    // CHANGE: ENHANCEMENT - The battle's result is one command that carries what the
+    // battle reported (docs/commands.md); the completion data and the achievement come
+    // first, the camera follows from before it.
+    for BattleIndex := 0 to 5 do
+      Statistics[BattleIndex] := RobotBattleStatistics[BattleIndex];
+    BattleMode := PlanetBattleState;
     PlanetBattleState := 0;
     LoadRobotScreen.LoadCompletionData;
     LoadRobotScreen.RecordCompletion(PlanetBattleMapId, -RobotBattleStatistics[0] div 1000, 2);
     LoadRobotScreen.SaveCompletionData;
     TryAddAchievementProgress('IRONMAN', 1);
-    if TerronShip <> nil then
-      TerronShip.DestroyQueued := True;
-    GetPlayer.OrderTakeoff;
     FilmCameraFollow := True;
-    LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
-    if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
-      Galaxy.EnableDominatorSurfaces
-    else
-      Galaxy.DisableDominatorSurfaces;
+    FinishTerronBattle(BattleMode, PlanetBattleMapId, Statistics);
     CalculatePlayerStarTurnAndWait;
     if ExitScreenLoop then
       Exit;

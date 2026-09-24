@@ -118,6 +118,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aPlayerActions,
+  aPlanetActions,
   aHuman,
   aCalc,
   aScript,
@@ -411,7 +412,7 @@ begin
   SetFocusedControl(nil);
   ShowNews;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
   aCalc.WaitForTurnCalculationUI;
 end;
 
@@ -419,7 +420,7 @@ procedure TfInfo.OnClose;
 begin
   aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
   InfoPanel.FreeOwnedChildren;
   MainPanel.OnClose;
   LoadPanel.OnClose;
@@ -1659,7 +1660,7 @@ var
                       Ship.CurrentPlanet.Name);
         if Ship.IsInPrison then
           Description := Description + #13#10 + LocalizedText('FormInfo.InPrison');
-        Ship.DaysSincePlayerSeen := 0;
+        MarkShipSeen(Ship);
         Heading :=
             WrapTextInColor(
                 '- ' + WrapTextInColor(Ship.GetFullName(' '), '<color=255,240,100>') + ' -',
@@ -2915,7 +2916,7 @@ begin
           taxCenter,
           ''
       );
-      GetPlayer.SetMoney(GetPlayer.Money - 3);
+      PayInfoSearch;
       SoundManager.PlaySound('Sound.Sell');
       SetFocusedControl(nil);
     end

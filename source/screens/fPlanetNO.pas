@@ -49,8 +49,8 @@ type
     ProbeSignalTimer: PCallbackTimerGI;
     ProbeSignalSound: TSoundBufferControl;
     ProbeSignalCount: Integer;
-    HeldSatellite: TSatellite;
-    HeldSatelliteOrigin: Integer;
+    // CHANGE: ENHANCEMENT - The held satellite and where it came from moved to aPlanetActions
+    // (PlanetHeldSatellite, PlanetHeldSatelliteOrigin), so a replay has them.
     HoveringSurfaceLoot: Boolean;
     NewSurfaceLootDiscovered: Boolean;
     Gap7956: array[0..1] of Byte;
@@ -105,6 +105,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aPlayerActions,
+  aPlanetActions,
   aHuman,
   fGalaxy2,
   Windows,
@@ -276,7 +277,7 @@ begin
   CloseResearchPanel;
   DispatchPendingScriptRequests;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
   aCalc.WaitForTurnCalculationUI;
 end;
 
@@ -285,7 +286,7 @@ begin
   if RequestedScreenId <> screenLoad then
     aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
   CloseResearchPanel;
   MainPanel.OnClose;
   LoadPanel.OnClose;
@@ -304,11 +305,11 @@ begin
       or HasPendingScriptRequests then
     Exit;
   aCalc.WaitForTurnCalculationUI;
-  GetPlayer.RefreshDerivedStats(True);
+  RefreshPlayerStats;
   aCalc.WaitForTurnCalculationUI;
-  if (HeldSatellite <> nil)
-      and (HeldSatelliteOrigin = 0)
-      and (GetPlayer.GetCargoFreeSpace < HeldSatellite.Weight) then
+  if (PlanetHeldSatellite <> nil)
+      and (PlanetHeldSatelliteOrigin = 0)
+      and (GetPlayer.GetCargoFreeSpace < PlanetHeldSatellite.Weight) then
   begin
     ShowMessageBoxGI(Self, LocalizedText('FormRuins.ShipOvercharging'), mbgCancel or mbgError);
     Exit;
@@ -596,7 +597,7 @@ begin
   if (ExitCode = 0) and ResearchPanelVisible then
   begin
     aCalc.WaitForTurnCalculationUI;
-    GetPlayer.AssignSatelliteIndicesFromHoldOrder;
+    ArrangeSatellites(saAssignFromHold);
     aCalc.WaitForTurnCalculationUI;
     RefreshResearchPanel;
   end;
@@ -641,9 +642,7 @@ begin
   SatelliteInventoryPageStart := 0;
   SatellitePanelNeedsLayout := True;
   aCalc.WaitForTurnCalculationUI;
-  GetPlayer.RepairDuplicateSatelliteTrajectoryIndices;
-  GetPlayer.CompactSatelliteTrajectoryIndices;
-  GetPlayer.AssignSatelliteIndicesFromHoldOrder;
+  ArrangeSatellites(saRepairDuplicates or saCompact or saAssignFromHold);
   aCalc.WaitForTurnCalculationUI;
   ResearchPanelVisible := True;
   for I := 0 to 5 do
@@ -1009,7 +1008,7 @@ begin
       begin
         UpdateItemInfoPopup(Entry.Item);
         HoveringSurfaceLoot := True;
-        if (HeldSatellite = nil) and not IsCursorImageSelected('Take') then
+        if (PlanetHeldSatellite = nil) and not IsCursorImageSelected('Take') then
           SetCursorByName('Take');
         if SelectedTrajectoryIndex >= 0 then
         begin
@@ -1292,7 +1291,7 @@ begin
   end;
   SatellitePanelNeedsLayout := False;
   aCalc.WaitForTurnCalculationUI;
-  GetPlayer.RepairDuplicateSatelliteTrajectoryIndices;
+  ArrangeSatellites(saRepairDuplicates);
   aCalc.WaitForTurnCalculationUI;
   for I := 0 to 5 do
   begin
@@ -1526,34 +1525,22 @@ var
 begin
   aCalc.WaitForTurnCalculationUI;
   Item := GetPlayer.FindSatelliteByTrajectoryIndex(SatelliteInventoryPageStart + Sender.UserValue);
-  if (HeldSatellite = nil) and (Item <> nil) then
+  if ((PlanetHeldSatellite = nil) and (Item <> nil)) or (PlanetHeldSatellite <> nil) then
   begin
-    HeldSatellite := Item;
-    HeldSatelliteOrigin := 0;
-    GetPlayer.Inventory.Delete(GetPlayer.Inventory.IndexOf(Item));
-    GetPlayer.RefreshDerivedStats(True);
-    UpdateActionCursor(False);
-    RefreshResearchPanel;
-    SoundManager.PlaySound('Sound.SlotGet');
-    PostMouseMoveMessage;
-  end
-  else if HeldSatellite <> nil then
-  begin
-    if Item <> nil then
-      GetPlayer.InsertSatelliteTrajectoryIndex(SatelliteInventoryPageStart + Sender.UserValue);
-    SoundManager.PlaySound('Sound.SlotPut');
-    GetPlayer.Inventory.Add(HeldSatellite);
-    (TObject(HeldSatellite) as TSatellite).TrajectoryIndex :=
-        SatelliteInventoryPageStart + Sender.UserValue;
-    (TObject(HeldSatellite) as TSatellite).TargetPlanet := nil;
-    HeldSatellite := nil;
-    GetPlayer.RefreshDerivedStats(True);
-    GetPlayer
-        .RemoveEmptySatelliteTrajectoryIndex(SatelliteInventoryPageStart + Sender.UserValue + 1);
-    GetPlayer.ArrangeHoldSatellitesByTrajectoryIndex;
-    UpdateActionCursor(False);
-    RefreshResearchPanel;
-    PostMouseMoveMessage;
+    if ClickSatelliteSlot(SatelliteInventoryPageStart + Sender.UserValue) = ssTaken then
+    begin
+      UpdateActionCursor(False);
+      RefreshResearchPanel;
+      SoundManager.PlaySound('Sound.SlotGet');
+      PostMouseMoveMessage;
+    end
+    else
+    begin
+      SoundManager.PlaySound('Sound.SlotPut');
+      UpdateActionCursor(False);
+      RefreshResearchPanel;
+      PostMouseMoveMessage;
+    end;
   end;
   aCalc.WaitForTurnCalculationUI;
   GetPlayer.RefreshStorageBubbles;
@@ -1566,7 +1553,7 @@ var
   I: Integer;
   Entry: PPlanetSurfaceLootEntry;
   Cell: TPoint;
-  Item: TSatellite;
+  Outcome: Integer;
 begin
   if GetPlayer.CurrentPlanet.SurfaceLootEntries <> nil then
     for I := 0 to GetPlayer.CurrentPlanet.SurfaceLootEntries.Count - 1 do
@@ -1592,30 +1579,7 @@ begin
             end;
             SoundManager.PlaySound('Sound.PlanetGet');
             aCalc.WaitForTurnCalculationUI;
-            if Entry.Item is TArtefactTranclucator then
-              (TObject((Entry.Item as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip :=
-                  GetPlayer;
-            if Entry.Item is TGoods then
-            begin
-              Inc(
-                  GetPlayer.CargoGoods[Ord(Entry.Item.ItemType)].Count,
-                  (Entry.Item as TGoods).Quantity
-              );
-              Entry.Item.Free;
-            end
-            else if Entry.Item is TArtefact then
-              GetPlayer.Artefacts.Add(Entry.Item)
-            else
-              GetPlayer.Inventory.Add(Entry.Item);
-            GetPlayer.RefreshDerivedStats(True);
-            GetPlayer.CurrentPlanet.SurfaceLootEntries.Delete(I);
-            if GetPlayer.CurrentPlanet.SurfaceLootEntries.Count <= 0 then
-            begin
-              GetPlayer.CurrentPlanet.SurfaceLootEntries.Free;
-              GetPlayer.CurrentPlanet.SurfaceLootEntries := nil;
-            end;
-            Entry.Item := nil;
-            Dispose(Entry);
+            PickUpSurfaceLoot(I, Entry.Item);
             aCalc.WaitForTurnCalculationUI;
             UpdateActionCursor(False);
             RefreshResearchPanel;
@@ -1625,31 +1589,16 @@ begin
         end;
     end;
   if (SelectedTrajectoryIndex >= 0)
-      and ((HeldSatellite <> nil) or (FindDeployedSatellite(SelectedTrajectoryIndex) <> nil)) then
+      and ((PlanetHeldSatellite <> nil) or (FindDeployedSatellite(SelectedTrajectoryIndex) <> nil)) then
   begin
-    HeldSatelliteOrigin := 1;
+    // CHANGE: ENHANCEMENT - The origin is set in the command, after the wait for the turn.
     aCalc.WaitForTurnCalculationUI;
-    Item := FindDeployedSatellite(SelectedTrajectoryIndex);
-    if Item <> nil then
-      GetPlayer.Satellites.Delete(GetPlayer.Satellites.IndexOf(Item));
-    if HeldSatellite <> nil then
-    begin
-      SoundManager.PlaySound('Sound.SlotPut');
-      GetPlayer.Satellites.Add(HeldSatellite);
-      if Item <> nil then
-      begin
-        Item.TrajectoryIndex := (TObject(HeldSatellite) as TSatellite).TrajectoryIndex;
-        HeldSatelliteOrigin := 0;
-      end;
-      (TObject(HeldSatellite) as TSatellite).TrajectoryIndex := SelectedTrajectoryIndex;
-      (TObject(HeldSatellite) as TSatellite).TargetPlanet := GetPlayer.CurrentPlanet;
-      HeldSatellite := nil;
-    end
-    else if Item <> nil then
+    Outcome := ClickSatelliteOrbit(SelectedTrajectoryIndex);
+    if Outcome = soPut then
+      SoundManager.PlaySound('Sound.SlotPut')
+    else if Outcome = soTaken then
       SoundManager.PlaySound('Sound.SlotGet');
     aCalc.WaitForTurnCalculationUI;
-    if Item <> nil then
-      HeldSatellite := Item;
     SelectedTrajectoryIndex := -1;
     UpdateActionCursor(False);
     RefreshResearchPanel;
@@ -1668,8 +1617,8 @@ end;
 
 procedure TfPlanetNO.UpdateActionCursor(ForceHand: Boolean);
 begin
-  if HeldSatellite <> nil then
-    SetCursorImage('GI,' + HeldSatellite.GetBitmapResourceName + 's', Classes.Point(16, 16))
+  if PlanetHeldSatellite <> nil then
+    SetCursorImage('GI,' + PlanetHeldSatellite.GetBitmapResourceName + 's', Classes.Point(16, 16))
   else if (SelectedTrajectoryIndex >= 0)
       and (FindDeployedSatellite(SelectedTrajectoryIndex) <> nil) then
   begin
@@ -1686,27 +1635,22 @@ begin
   end
   else if not IsCursorImageSelected('Main') then
     SetCursorByName('Main');
-  GetByName('Glow').SetActive(HeldSatellite <> nil);
+  GetByName('Glow').SetActive(PlanetHeldSatellite <> nil);
 end;
 
 procedure TfPlanetNO.ReturnHeldSatellite;
 begin
-  if HeldSatellite = nil then
+  if PlanetHeldSatellite = nil then
     Exit;
   aCalc.WaitForTurnCalculationUI;
-  if HeldSatelliteOrigin = 0 then
+  if aPlanetActions.ReturnHeldSatellite = 0 then
   begin
-    GetPlayer.Inventory.Add(HeldSatellite);
-    HeldSatellite := nil;
-    GetPlayer.RefreshDerivedStats(True);
     UpdateActionCursor(False);
     RefreshResearchPanel;
     PostMouseMoveMessage;
   end
   else
   begin
-    GetPlayer.Satellites.Add(HeldSatellite);
-    HeldSatellite := nil;
     SatellitePanelNeedsLayout := True;
     SelectedTrajectoryIndex := -1;
     UpdateActionCursor(False);
@@ -2047,7 +1991,7 @@ begin
   begin
     if ResearchPanelVisible then
     begin
-      if HeldSatellite <> nil then
+      if PlanetHeldSatellite <> nil then
         ReturnHeldSatellite
       else
         CloseResearchPanel;

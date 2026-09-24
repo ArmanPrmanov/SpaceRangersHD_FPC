@@ -27,12 +27,9 @@ type
     NextChoiceTop: PtrInt;
     AnimationRestartRequested: Boolean;
     GapED: array[0..2] of Byte;
-    QuestOffer: TQuest;
-    QuestNegotiationLevel: Integer;
-    QuestRewardStep: Integer;
-    QuestDurationStep: Integer;
-    ScriptDialogNames: TStringsEC;
-    ScriptDialogCursor: Integer;
+    // CHANGE: ENHANCEMENT - The quest being negotiated and the planet scripts the dialog
+    // walks through moved to aPlanetActions (GovernmentQuestOffer, GovernmentDialogNames),
+    // so a replay has them.
     PlanetBattleMapId: Integer;
     PendingTransition: Integer;
     UseHdPortrait: Boolean;
@@ -125,7 +122,9 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aDialogActions,
+  aPlanetActions,
   aPlayerActions,
+  aTalkActions,
   aSession,
   aHuman,
   GI_MessageBox,
@@ -168,26 +167,26 @@ uses
   aNormalShip,
   Robot,
   fPlanetQuest;
-// Preserve the native receiver evaluation before the bounded payment,
-// with the clamp cells allocated before the receiver cell.
-procedure PayBailMoney(Ship: TShip); inline;
+// What the robot battle reported, as a command carries it.
+function BattleStatistics: TPlanetBattleStatistics;
 var
-  Remaining, Payment: Integer;
-  Player: TPlayer;
+  I: Integer;
 begin
-  Player := GetPlayer;
-  Remaining := GetPlayer.Money - Ship.GetPrisonReleaseCost;
-  if Remaining < 0 then
-    Payment := 0
-  else
-    Payment := Remaining;
-  Player.SetMoney(Payment);
+  for I := 0 to 5 do
+    Result[I] := RobotBattleStatistics[I];
+end;
+// Planet battle history entries of a declined battle carry no statistics.
+function NoBattleStatistics: TPlanetBattleStatistics;
+var
+  I: Integer;
+begin
+  for I := 0 to 5 do
+    Result[I] := 0;
 end;
 constructor TfGov.Create;
 begin
   inherited Create;
   PlanetPanel := TfPanelPlanet.Create;
-  ScriptDialogNames := TStringsEC.Create;
   LoadPanel := TfPanelLoad.Create;
 end;
 destructor TfGov.Destroy;
@@ -201,11 +200,6 @@ begin
   begin
     PlanetPanel.Free;
     PlanetPanel := nil;
-  end;
-  if ScriptDialogNames <> nil then
-  begin
-    ScriptDialogNames.Free;
-    ScriptDialogNames := nil;
   end;
   inherited Destroy;
 end;
@@ -369,9 +363,8 @@ end;
 procedure TfGov.OnOpen;
 var
   Owner: Byte;
-  MapIndex, Money, ExperienceAwarded: Integer;
+  MapIndex, Money: Integer;
   Text, WinText, LossText, TerronName: WideString;
-  Event: TGalaxyEvent;
   Stage: Integer;
   Failed: Boolean;
   Portrait: TObjectGI;
@@ -399,8 +392,8 @@ begin
       SelectMusic;
       if LocalHuman.TemporaryShopSlots <> nil then
         ReturnShopStock;
-      RunGlobalScriptsForContext(GetPlayer.CurrentStar, 0);
-      PruneExpiredPersistentPlayerMessages;
+      RunGlobalScripts(GetPlayer.CurrentStar, 0);
+      PruneMessages;
       OpenShopStock;
     end;
     Stage := 3;
@@ -408,15 +401,13 @@ begin
         or ((GetPlayer.CurrentPlanet <> nil)
             and (GetPlayer.CurrentStar.ControlFaction = sfDominators)) then
     begin
-      Event := AddGalaxyEvent('PlayerDeath');
-      Event.AddTextData('PlanetCaptured');
-      Session.GameEndReason := 2;
+      ReportPlanetCaptured;
       RequestedScreenId := screenGameEnd;
       RequestClose(1);
       Exit;
     end;
     if GetPlayer.PendingDockDialogue = 1 then
-      GetPlayer.PendingDockDialogue := 0;
+      EnterGovernment;
     Stage := 4;
     for Owner := 0 to 7 do
     begin
@@ -608,25 +599,13 @@ begin
       Stage := 13;
       MapIndex := FindRobotMapById(PlanetBattleMapId);
       Money :=
-          RoundAndTruncateToTens(
-              Min(
-                  GetPlayer.Wealth * 0.03,
-                  Min(
-                      Galaxy.ComputeScaledAverageMoney(2) * 7,
-                      Galaxy.ComputeScaledHugeMoney(2) * 1.5
-                  )
-              )
+          ApplyPlanetBattleResult(
+              PendingTransition,
+              GovernmentBattleDifficulty,
+              PlanetBattleMapId
           );
-      Money := Round(Money * GalaxyDifficultyTuning[Galaxy.DifficultyLevels[5]].ArcadeRewardScale);
-      case GovernmentBattleDifficulty of
-        1: Money := RoundAndTruncateToTens(Money * 0.5);
-        2: Money := RoundAndTruncateToTens(Money * 0.2);
-        3: Money := RoundAndTruncateToTens(Money * 0.1);
-      end;
       Stage := 14;
-      GetPlayer.SetMoney(GetPlayer.Money + Money);
       SoundManager.PlaySound('Sound.Sell');
-      GetPlayer.CurrentPlanet.ChangeRelationToRanger(GetPlayer, -40);
       DialogText := RobotMapDefinitions[MapIndex].GovTextLoss;
       ReplaceTextToken(DialogText, '<Star>', GetPlayer.CurrentStar.Name, '<color=255,240,100>');
       ReplaceTextToken(DialogText, '<Planet>', GetPlayer.CurrentPlanet.Name, '<color=255,240,100>');
@@ -635,50 +614,27 @@ begin
       Stage := 15;
       BuildGovernmentChoices(True);
       Stage := 16;
-      SetLength(GetPlayer.PlanetBattleHistory, High(GetPlayer.PlanetBattleHistory) + 1 + 1);
-      with GetPlayer.PlanetBattleHistory[High(GetPlayer.PlanetBattleHistory)] do
-      begin
-        MapId := PlanetBattleMapId;
-        Statistics[0] := RobotBattleStatistics[0];
-        Statistics[1] := RobotBattleStatistics[1];
-        Statistics[2] := RobotBattleStatistics[2];
-        Statistics[3] := RobotBattleStatistics[3];
-        Statistics[4] := RobotBattleStatistics[4];
-        Statistics[5] := RobotBattleStatistics[5];
-        ResultCode := GovernmentBattleDifficulty;
-        CompletionMode := PendingTransition;
-        DateTurn := Galaxy.CurrentTurn;
-      end;
-      GetPlayer.LastPlanetBattleTurn := Galaxy.CurrentTurn;
+      RecordPlanetBattle(
+          PlanetBattleMapId,
+          GovernmentBattleDifficulty,
+          PendingTransition,
+          pbSetLastTurn,
+          BattleStatistics
+      );
     end
     else if PendingTransition = 3 then
     begin
       Stage := 17;
       MapIndex := FindRobotMapById(PlanetBattleMapId);
+      // CHANGE: ENHANCEMENT - The reward, GrantPlanetQuestReward and the event are one
+      // command, run before the text; the text reads names only.
       Money :=
-          RoundAndTruncateToTens(Max(GetPlayer.Wealth * 0.03, Galaxy.ComputeScaledBigMoney(2)));
-      Money := Round(Money * GalaxyDifficultyTuning[Galaxy.DifficultyLevels[5]].QuestMoneyFactor);
-      if GetPlayer.IsHealthEffectActive(23) then
-        Money :=
-            Round(
-                SeededRandomFloatRange(
-                        (Integer(GetPlayer.CurrentPlanet.GenerationSeed) + Galaxy.CurrentTurn)
-                            div 33,
-                        1.3,
-                        2.3)
-                    * Money
-            );
-      Inc(
-          Money,
-          Round(Money * (Integer(GetPlayer.GetEffectiveSkillLevel(psCharisma)) and $7F) * 0.1)
-      );
-      case GovernmentBattleDifficulty of
-        1: Money := RoundAndTruncateToTens(Money * 4.0);
-        2: Money := RoundAndTruncateToTens(Money * 1.6);
-        3: Money := RoundAndTruncateToTens(Money * 0.8);
-      end;
+          ApplyPlanetBattleResult(
+              PendingTransition,
+              GovernmentBattleDifficulty,
+              PlanetBattleMapId
+          );
       Stage := 18;
-      GetPlayer.SetMoney(GetPlayer.Money + Money);
       SoundManager.PlaySound('Sound.LiberationSystem');
       Stage := 19;
       DialogText := RobotMapDefinitions[MapIndex].GovTextWin;
@@ -686,33 +642,18 @@ begin
       ReplaceTextToken(DialogText, '<Planet>', GetPlayer.CurrentPlanet.Name, '<color=255,240,100>');
       ReplaceTextToken(DialogText, '<Player>', GetPlayer.Name, '<color=255,240,100>');
       ReplaceTextToken(DialogText, '<Money>', WideString(IntToStr(Money)), '<color=255,240,100>');
-      DialogText :=
-          DialogText
-              + GetPlayer.GrantPlanetQuestReward(GovernmentBattleDifficulty, ExperienceAwarded);
-      Event := AddGalaxyEvent('PlayerFinishesPlanetaryBattle');
-      Event.AddData(PlanetBattleMapId);
-      Event.AddData(Money);
-      Event.AddData(ExperienceAwarded);
+      DialogText := DialogText + PlanetText;
       Stage := 20;
       BuildGovernmentChoices(True);
       Stage := 21;
-      SetLength(GetPlayer.PlanetBattleHistory, High(GetPlayer.PlanetBattleHistory) + 1 + 1);
-      with GetPlayer.PlanetBattleHistory[High(GetPlayer.PlanetBattleHistory)] do
-      begin
-        MapId := PlanetBattleMapId;
-        Statistics[0] := RobotBattleStatistics[0];
-        Statistics[1] := RobotBattleStatistics[1];
-        Statistics[2] := RobotBattleStatistics[2];
-        Statistics[3] := RobotBattleStatistics[3];
-        Statistics[4] := RobotBattleStatistics[4];
-        Statistics[5] := RobotBattleStatistics[5];
-        ResultCode := GovernmentBattleDifficulty;
-        CompletionMode := PendingTransition;
-        DateTurn := Galaxy.CurrentTurn;
-      end;
+      RecordPlanetBattle(
+          PlanetBattleMapId,
+          GovernmentBattleDifficulty,
+          PendingTransition,
+          pbSetLastTurn or pbCountBattle,
+          BattleStatistics
+      );
       Stage := 22;
-      GetPlayer.LastPlanetBattleTurn := Galaxy.CurrentTurn;
-      Inc(GetPlayer.PlanetBattles);
       TryAddAchievementProgress('IRONMAN', 1);
       Stage := 23;
       LoadRobotScreen.LoadCompletionData;
@@ -725,7 +666,7 @@ begin
     else if PendingTransition = 4 then
     begin
       Stage := 24;
-      GetPlayer.CurrentPlanet.SetRelationLevelToRanger(GetPlayer, rlBad);
+      ApplyPlanetBattleResult(PendingTransition, GovernmentBattleDifficulty, PlanetBattleMapId);
       DialogText :=
           PickLocalizedTextVariant(
               'FormGov.PlanetBattle.GovAfterCancel',
@@ -749,21 +690,13 @@ begin
           ChoosePrisonInsteadOfBattle
       );
       Stage := 25;
-      SetLength(GetPlayer.PlanetBattleHistory, High(GetPlayer.PlanetBattleHistory) + 1 + 1);
-      with GetPlayer.PlanetBattleHistory[High(GetPlayer.PlanetBattleHistory)] do
-      begin
-        MapId := PlanetBattleMapId;
-        Statistics[0] := RobotBattleStatistics[0];
-        Statistics[1] := RobotBattleStatistics[1];
-        Statistics[2] := RobotBattleStatistics[2];
-        Statistics[3] := RobotBattleStatistics[3];
-        Statistics[4] := RobotBattleStatistics[4];
-        Statistics[5] := RobotBattleStatistics[5];
-        ResultCode := GovernmentBattleDifficulty;
-        CompletionMode := PendingTransition;
-        DateTurn := Galaxy.CurrentTurn;
-      end;
-      GetPlayer.LastPlanetBattleTurn := Galaxy.CurrentTurn;
+      RecordPlanetBattle(
+          PlanetBattleMapId,
+          GovernmentBattleDifficulty,
+          PendingTransition,
+          pbSetLastTurn,
+          BattleStatistics
+      );
     end;
     Stage := 26;
     if PendingTransition = 0 then
@@ -778,7 +711,7 @@ begin
     MainPanel.RebuildMessageButtons(False);
     Stage := 29;
     if GetPlayer <> nil then
-      GetPlayer.ScriptItemsAct($18, nil, nil, 0);
+      RunScriptItemsAct(GetPlayer, $18, nil, nil, 0);
     aCalc.WaitForTurnCalculationUI;
   except
     on E: Exception do
@@ -792,14 +725,13 @@ procedure TfGov.OnClose;
 begin
   if Galaxy <> nil then
     aCalc.WaitForTurnCalculationUI;
-  if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct($19, nil, nil, 0);
+  // CHANGE: ENHANCEMENT - The item scripts, the dialog index and the planet scripts'
+  // dialog list are one command, run before the load panel closes.
+  LeaveGovernment;
   LoadPanel.OnClose;
-  Session.ScriptDialogIndex := -1;
   ClearDialogChoices;
   MainPanel.OnClose;
   PlanetPanel.OnClose;
-  ScriptDialogNames.Clear;
 end;
 procedure TfGov.EndTurnClicked(Sender: TObjectGI);
 begin
@@ -1208,41 +1140,24 @@ begin
 end;
 procedure TfGov.RefreshGovernmentDialog;
 var
-  I, J: Integer;
-  Planet: TPlanet;
-  Ship: TShip;
+  Outcome: Integer;
 begin
   if IsTurnCalculationRunningUI then
     WaitForTurnCalculationUI;
   if ExitCode = 0 then
   begin
-    if GetPlayer.InPrison then
+    Outcome := RefreshGovernment(HasPendingScriptRequests);
+    if Outcome = grPrisonReleased then
     begin
       if GetPlayer.CurrentPlanet.OwnerId <> Byte(oiPirate) then
         DialogText := LocalizedColorText('FormGov.Prison.GovAfterPrison')
       else
         DialogText := LocalizedColorText('FormGov.PirateClanPrison.GovAfterPrison');
-      GetPlayer.InPrison := False;
-      Inc(GetPlayer.PrisonStaysCompleted);
       TryAddAchievementProgress('PRISON', 1);
-      for I := 0 to Galaxy.Planets.Count - 1 do
-      begin
-        Planet := Galaxy.Planets[I];
-        for J := 0 to Planet.Warriors.Count - 1 do
-        begin
-          Ship := Planet.Warriors[J];
-          if GetPlayer = Ship.EnemyShip then
-            Ship.EnemyShip := nil;
-          if GetPlayer.EnemyShip = Ship then
-            GetPlayer.EnemyShip := nil;
-        end;
-      end;
       ClearDialogChoices;
       AddChoice(LocalizedColorText('FormGov.I_Continue'), 0, ContinueAfterPrison);
     end
-    else if (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) = rlHostile)
-        and not HasPendingScriptRequests
-        and not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+    else if Outcome = grHostile then
     begin
       if GetPlayer.OwnerId <> Byte(oiPirate) then
         DialogText := LocalizedColorText('FormGov.Prison.GovBeforePrison')
@@ -1254,9 +1169,9 @@ begin
       else
         AddChoice(LocalizedColorText('FormGov.PirateClanPrison.PlayerGoToPrison'), 0, EnterPrison);
     end
-    else if GetPlayer.PendingLiberationCeremonyPlanet = GetPlayer.CurrentPlanet then
+    else if Outcome = grLiberation then
     begin
-      DialogText := TNormalShip(GetPlayer).CollectLiberationRewards;
+      DialogText := PlanetText;
       ClearDialogChoices;
       AddChoice(
           LocalizedColorText('FormGov.PlayerAfterCongratulationsLiberator'),
@@ -1275,62 +1190,22 @@ procedure TfGov.BuildGovernmentChoices(SkipScriptResponseText: Boolean);
 var
   Script: TScript;
   Text, Mode: WideString;
-  I, J, Selected, Priority, PartCount: Integer;
-  Swapped: Pointer;
+  I, Selected, Priority, PartCount, Outcome: Integer;
 begin
-  ClearScriptDialogRules;
+  // CHANGE: ENHANCEMENT - The choices are cleared before the dialog rules, which the
+  // command clears; clearing the choices does not read them.
   ClearDialogChoices;
-  GetPlayer.CurrentPlanet.CollectScriptDialogChoices(ScriptDialogNames);
-  ScriptDialogCursor := 0;
-  Script := nil;
-  Session.ScriptDialogIndex := -1;
-  while ScriptDialogCursor < ScriptDialogNames.GetCount do
-  begin
-    Script := TScript(ScriptDialogNames.GetDataAt(ScriptDialogCursor));
-    Script.CallDialogByVariable(ScriptDialogNames.GetTextAt(ScriptDialogCursor));
-    if Session.ScriptDialogIndex >= 0 then
-      Break;
-    Inc(ScriptDialogCursor);
-  end;
-  if GetPlayer.TryTurnInAnyQuest(Text) then
-    DialogText := Text;
+  BeginGovernmentDialog;
+  Outcome := PlanetOutcome;
+  Script := GovernmentScript;
+  if GovernmentQuestTurnedIn then
+    DialogText := PlanetText;
   if Session.ScriptDialogIndex < 0 then
   begin
-    for I := 0 to Galaxy.Scripts.Count - 1 do
-    begin
-      Script := Galaxy.Scripts[I];
-      Script.RunAuxiliaryCode;
-    end;
+    RunScriptsAuxiliaryCode;
     if ScriptDialogOverrides.Count > 0 then
     begin
-      Selected := 0;
-      Priority := PScriptDialogOverride(ScriptDialogOverrides[0]).Priority;
-      for I := 0 to ScriptDialogOverrides.Count - 1 do
-        if PScriptDialogOverride(ScriptDialogOverrides[I]).Priority > Priority then
-        begin
-          Selected := I;
-          Priority := PScriptDialogOverride(ScriptDialogOverrides[I]).Priority;
-        end;
-      Script := PScriptDialogOverride(ScriptDialogOverrides[Selected]).Script;
-      Script
-          .InitCode
-          .LocalVar
-          .GetVar('GAnswerData')
-          .SetDword(PScriptDialogOverride(ScriptDialogOverrides[Selected]).AnswerData);
-      Text := PScriptDialogOverride(ScriptDialogOverrides[Selected]).DialogName;
-      if Text <> '' then
-      begin
-        Script.CallDialogByVariable(Text);
-        if Session.ScriptDialogIndex < 0 then
-          AppendLogLineThreadSafe(
-              AnsiString(
-                  Script.ScriptFileName
-                      + ' has overriden dialog with '
-                      + Text
-                      + ' but it failed to start'
-              )
-          );
-      end;
+      Script := ApplyGovernmentDialogOverride;
       if Session.ScriptDialogIndex < 0 then
         AddBuiltinGovernmentChoices
       else
@@ -1353,15 +1228,7 @@ begin
             end;
       if Selected >= 0 then
         DialogText := PScriptDialogInjection(ScriptDialogInjections[Selected]).Text;
-      for I := 1 to ScriptDialogInjections.Count - 1 do
-        for J := ScriptDialogInjections.Count - 1 downto I do
-          if PScriptDialogInjection(ScriptDialogInjections[J]).Priority
-              > PScriptDialogInjection(ScriptDialogInjections[J - 1]).Priority then
-          begin
-            Swapped := ScriptDialogInjections[J];
-            ScriptDialogInjections[J] := ScriptDialogInjections[J - 1];
-            ScriptDialogInjections[J - 1] := Swapped;
-          end;
+      SortTalkDialogInjections;
       for I := 0 to ScriptDialogInjections.Count - 1 do
       begin
         if not PScriptDialogInjection(ScriptDialogInjections[I]).ReplaceGreeting then
@@ -1396,13 +1263,10 @@ begin
       AddBuiltinGovernmentChoices;
     end;
   end
-  else if not Script.SkipGreeting then
+  else if Outcome = gdContinue then
     AddChoice(LocalizedColorText('FormGov.I_Continue'), PtrInt(Script), StartScriptMessage)
   else
-  begin
-    Script.SkipGreeting := False;
     StartScriptMessage(PtrInt(Script));
-  end;
 end;
 procedure TfGov.AddBuiltinGovernmentChoices;
 begin
@@ -1430,17 +1294,8 @@ procedure TfGov.ContinueScriptDialog;
 var
   Script: TScript;
 begin
-  Session.ScriptDialogIndex := -1;
-  Inc(ScriptDialogCursor);
-  Script := nil;
-  while ScriptDialogCursor < ScriptDialogNames.GetCount do
-  begin
-    Script := ScriptDialogNames.GetDataAt(ScriptDialogCursor);
-    Script.CallDialogByVariable(ScriptDialogNames.GetTextAt(ScriptDialogCursor));
-    if Session.ScriptDialogIndex >= 0 then
-      Break;
-    Inc(ScriptDialogCursor);
-  end;
+  ContinueGovernmentDialog;
+  Script := GovernmentScript;
   if Session.ScriptDialogIndex < 0 then
     BuildGovernmentChoices(True)
   else
@@ -1477,15 +1332,14 @@ begin
   AddChoice(LocalizedColorText('FormGov.I_QuestReject'), 0, RejectQuest);
   AddChoice(LocalizedColorText('FormGov.I_QuestEasy'), 0, MakeQuestEasier);
   AddChoice(LocalizedColorText('FormGov.I_QuestDifficult'), 0, MakeQuestHarder);
-  if QuestOffer.QuestType = qtPlanetQuest then
+  if GovernmentQuestOffer.QuestType = qtPlanetQuest then
     AddChoice(LocalizedColorText('FormGov.I_PlanetQuestClose'), 0, PermanentlyDeclineQuest);
   AddChoice(LocalizedColorText('FormGov.I_Exit'), 0, ReturnToPlanet);
 end;
 procedure TfGov.StartScriptMessage(Action: PtrInt);
 begin
   ClearDialogChoices;
-  CurrentScript := TScript(Action);
-  CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
+  TalkScriptMessage(TScript(Action), False);
 end;
 procedure TfGov.RunScriptAnswer(Answer: PtrInt);
 begin
@@ -1503,82 +1357,48 @@ begin
   CaptureGalaxyPreview(Self);
   SaveManagerReturnScreenId := FormToId(Self);
   SaveGameToFile(SaveManagerScreen.GetAutoSavePath, 'as');
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   if not HangarScreen.TryTakeOff then
     RequestedScreenId := screenHangar;
   RequestClose(1);
 end;
 procedure TfGov.RunScriptPlanetAnswer(Answer: PtrInt);
 begin
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   RequestedScreenId := screenPlanet;
   RequestClose(1);
 end;
 procedure TfGov.RunScriptGoodsAnswer(Answer: PtrInt);
 begin
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   RequestedScreenId := screenGoodsShop;
   RequestClose(1);
 end;
 procedure TfGov.RunScriptShopAnswer(Answer: PtrInt);
 begin
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   RequestedScreenId := screenEquipmentShop;
   RequestClose(1);
 end;
 procedure TfGov.RunScriptHangarAnswer(Answer: PtrInt);
 begin
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   RequestedScreenId := screenHangar;
   RequestClose(1);
 end;
 procedure TfGov.RunScriptNewsExitAnswer(Answer: PtrInt);
 begin
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   RequestedScreenId := screenInfo;
   RequestClose(1);
 end;
 procedure TfGov.EnterPrison(Action: PtrInt);
-var
-  I: Integer;
-  Ship: TShip;
 begin
   CaptureSavePreview;
   CaptureGalaxyPreview(Self);
   SaveManagerReturnScreenId := FormToId(Self);
   SaveGameToFile(SaveManagerScreen.GetAutoSavePath, 'as');
-  GetPlayer.InPrison := True;
-  GetPlayer.CurrentSystemKills.Normal := 0;
-  GetPlayer.CurrentSystemKills.Pirate := 0;
-  if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
-  begin
-    if MainPiratePlanet <> nil then
-      MainPiratePlanet.ChangeRelationToRanger(GetPlayer, 80)
-    else
-      GetPlayer.CurrentPlanet.ChangeRelationToRanger(GetPlayer, 80);
-  end
-  else
-  begin
-    GetPlayer.CurrentPlanet.ChangeRelationToRanger(GetPlayer, 80);
-    GetPlayer.ChangePlanetRelations(nil, rcmRaiseTo, 20, TOwnerMask(PlanetOwnerMasks.Coalition));
-    GetPlayer.ChangePlanetRelations(
-        GetPlayer.CurrentStar.Constellation,
-        rcmIncrease,
-        30,
-        TOwnerMask(PlanetOwnerMasks.Coalition)
-    );
-  end;
-  for I := 0 to GetPlayer.CurrentStar.Ships.Count - 1 do
-  begin
-    Ship := GetPlayer.CurrentStar.Ships[I];
-    if ((Ship.TypeId = stWarrior) or ((Ship.TypeId = stPirate) and (TPirate(Ship).PirateType <> 0)))
-        and (GetPlayer = Ship.EnemyShip) then
-    begin
-      Ship.EnemyShip := nil;
-      if GetPlayer = Ship.OrderTarget then
-        Ship.OrderNone(False);
-    end;
-  end;
+  aPlanetActions.EnterPrison;
   StandaloneQuestMode := False;
   QuestReturnScreenId := FormToId(Self);
   RequestedScreenId := screenPlanetQuest;
@@ -1651,34 +1471,10 @@ begin
 end;
 procedure TfGov.PayBribe(Action: PtrInt);
 var
-  Cost, RelationDeficit: Integer;
+  Cost: Integer;
 begin
-  RelationDeficit := 100 - (Integer(GetPlayer.CurrentPlanet.RelationToShip(GetPlayer)) and $7F);
-  Cost :=
-      Round(
-          RemapClamped(RelationDeficit, 0, 100, 1, 5)
-              * (Galaxy.AverageRangerCapital div 100)
-              * OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].FuelPriceFactor
-      );
-  GetPlayer.SetMoney(GetPlayer.Money - Cost);
+  Cost := aPlanetActions.PayBribe;
   SoundManager.PlaySound('Sound.Sell');
-  if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
-  begin
-    if MainPiratePlanet <> nil then
-      MainPiratePlanet.ChangeRelationToRanger(GetPlayer, 100)
-    else
-      GetPlayer.CurrentPlanet.ChangeRelationToRanger(GetPlayer, 100);
-  end
-  else
-  begin
-    GetPlayer.CurrentPlanet.ChangeRelationToRanger(GetPlayer, 100);
-    GetPlayer.ChangePlanetRelations(
-        GetPlayer.CurrentStar,
-        rcmIncrease,
-        20,
-        TOwnerMask(PlanetOwnerMasks.Coalition)
-    );
-  end;
   DialogText :=
       PickLocalizedTextVariant(
           'FormGov.Bribe.QuestionOk',
@@ -1699,8 +1495,7 @@ begin
 end;
 procedure TfGov.RequestQuest(Action: PtrInt);
 var
-  ResponseText: WideString;
-  MapIndex, MapId: Integer;
+  MapIndex, MapId, Outcome: Integer;
 begin
   if (GetPlayer.CurrentPlanet.CurrentStar.Battle <> 0)
       and (GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate)) then
@@ -1723,12 +1518,10 @@ begin
   end
   else
   begin
-    if GetPlayer.DeclinePlanetBattleOffers then
-      MapId := -1
-    else
-      MapId := GetPlayer.SelectPlanetBattleMap;
-    if (MapId >= 0) and (Session.ForcedPlanetQuestId < 0) then
+    Outcome := aPlanetActions.RequestQuest;
+    if Outcome = rqPlanetBattle then
     begin
+      MapId := GovernmentBattleMapId;
       MapIndex := FindRobotMapById(MapId);
       DialogText := RobotMapDefinitions[MapIndex].GovTextStart;
       ReplaceTextToken(DialogText, '<Star>', GetPlayer.CurrentStar.Name, '<color=255,240,100>');
@@ -1747,53 +1540,46 @@ begin
       );
       AddChoice(LocalizedColorText('FormGov.I_Exit'), 0, ReturnToPlanet);
     end
-    else if not GetPlayer.GenerateQuestOffer(QuestOffer, ResponseText) then
+    else if Outcome = rqRefused then
     begin
-      DialogText := ResponseText;
+      DialogText := PlanetText;
       BuildGovernmentChoices(True);
     end
     else
     begin
-      QuestNegotiationLevel := 0;
-      DialogText := GetPlayer.BuildQuestText(QuestOffer, qtkOffer);
-      if (QuestOffer.QuestType = qtPlanetQuest) and (QuestOffer.QuestNumber >= 10000) then
+      DialogText := GetPlayer.BuildQuestText(GovernmentQuestOffer, qtkOffer);
+      if (GovernmentQuestOffer.QuestType = qtPlanetQuest)
+          and (GovernmentQuestOffer.QuestNumber >= 10000) then
         if (LanguageDataConfig.GetBlock('PlanetQuest').CountBlocks('PlanetQuestLic') <= 0)
             or (LanguageDataConfig
                     .GetBlock('PlanetQuest')
                     .GetBlock('PlanetQuestLic')
-                    .GetParamOrMarker(WideString(IntToStr(QuestOffer.QuestNumber)))
-                <> PlanetQuestScreen.GetQuestContentHash(QuestOffer.QuestNumber)) then
+                    .GetParamOrMarker(WideString(IntToStr(GovernmentQuestOffer.QuestNumber)))
+                <> PlanetQuestScreen.GetQuestContentHash(GovernmentQuestOffer.QuestNumber)) then
           DialogText :=
               DialogText
                   + #13#10
                   + ' '
                   + #13#10
                   + LocalizedText('FormGov.QuestCertificate.NotCertificate');
-      QuestRewardStep := Round(QuestOffer.RewardMoney * 0.3);
-      QuestDurationStep := Round((QuestOffer.DeadlineTurn - Galaxy.CurrentTurn) * 0.5);
       BuildQuestOfferChoices;
     end;
   end;
 end;
 procedure TfGov.MakeQuestEasier(Action: PtrInt);
 begin
-  Dec(QuestNegotiationLevel);
-  case QuestOffer.QuestType of
-    qtSendLetter..qtPlanetQuest: Inc(QuestOffer.DeadlineTurn, QuestDurationStep);
-    qtDefendSystem..qtDefendShip: Dec(QuestOffer.DeadlineTurn, QuestDurationStep);
-  end;
-  Dec(QuestOffer.RewardMoney, QuestRewardStep);
+  NegotiateQuest(-1);
   DialogText :=
       LocalizedColorText('FormGov.CheckQuest.Easy')
           + #13#10
-          + GetPlayer.BuildQuestText(QuestOffer, qtkOffer);
-  if QuestNegotiationLevel <= -1 then
+          + GetPlayer.BuildQuestText(GovernmentQuestOffer, qtkOffer);
+  if GovernmentQuestLevel <= -1 then
   begin
     ClearDialogChoices;
     AddChoice(LocalizedColorText('FormGov.I_QuestAccept'), 0, AcceptQuest);
     AddChoice(LocalizedColorText('FormGov.I_QuestReject'), 0, RejectQuest);
     AddChoice(LocalizedColorText('FormGov.I_QuestDifficult'), 0, MakeQuestHarder);
-    if QuestOffer.QuestType = qtPlanetQuest then
+    if GovernmentQuestOffer.QuestType = qtPlanetQuest then
       AddChoice(LocalizedColorText('FormGov.I_PlanetQuestClose'), 0, PermanentlyDeclineQuest);
     AddChoice(LocalizedColorText('FormGov.I_Exit'), 0, ReturnToPlanet);
   end
@@ -1802,23 +1588,18 @@ begin
 end;
 procedure TfGov.MakeQuestHarder(Action: PtrInt);
 begin
-  Inc(QuestNegotiationLevel);
-  case QuestOffer.QuestType of
-    qtSendLetter..qtPlanetQuest: Dec(QuestOffer.DeadlineTurn, QuestDurationStep);
-    qtDefendSystem..qtDefendShip: Inc(QuestOffer.DeadlineTurn, QuestDurationStep);
-  end;
-  Inc(QuestOffer.RewardMoney, QuestRewardStep);
+  NegotiateQuest(1);
   DialogText :=
       LocalizedColorText('FormGov.CheckQuest.Difficult')
           + #13#10
-          + GetPlayer.BuildQuestText(QuestOffer, qtkOffer);
-  if QuestNegotiationLevel >= 1 then
+          + GetPlayer.BuildQuestText(GovernmentQuestOffer, qtkOffer);
+  if GovernmentQuestLevel >= 1 then
   begin
     ClearDialogChoices;
     AddChoice(LocalizedColorText('FormGov.I_QuestAccept'), 0, AcceptQuest);
     AddChoice(LocalizedColorText('FormGov.I_QuestReject'), 0, RejectQuest);
     AddChoice(LocalizedColorText('FormGov.I_QuestEasy'), 0, MakeQuestEasier);
-    if QuestOffer.QuestType = qtPlanetQuest then
+    if GovernmentQuestOffer.QuestType = qtPlanetQuest then
       AddChoice(LocalizedColorText('FormGov.I_PlanetQuestClose'), 0, PermanentlyDeclineQuest);
     AddChoice(LocalizedColorText('FormGov.I_Exit'), 0, ReturnToPlanet);
   end
@@ -1826,29 +1607,8 @@ begin
     BuildQuestOfferChoices;
 end;
 procedure TfGov.AcceptQuest(Action: PtrInt);
-var
-  Quest: PQuest;
-  Item: TUselessItem;
 begin
-  New(Quest);
-  Quest^ := QuestOffer;
-  Quest.Description := GetPlayer.BuildQuestText(Quest^, qtkOffer);
-  Quest.CompletionText := GetPlayer.BuildQuestText(Quest^, qtkCompletion);
-  GetPlayer.Quests.Add(Quest);
-  GetPlayer.PublishQuestStatus(Quest, 0);
-  if Quest.QuestType = qtSendLetter then
-  begin
-    Item := TUselessItem.Create;
-    Item.Init(
-        LookupLocalizedTextByKey(
-            WideString('Quest.SendLetter.' + IntToStr(Quest.QuestNumber) + '.SysName')
-        ),
-        dsBlazer,
-        0,
-        False
-    );
-    GetPlayer.Inventory.Add(Item);
-  end;
+  aPlanetActions.AcceptQuest;
   DialogText :=
       PickLocalizedTextVariant(
           'FormGov.AfterPlayerTakeQuest',
@@ -1864,39 +1624,16 @@ begin
   AddChoice(LocalizedColorText('FormGov.I_Exit'), 0, ReturnToPlanet);
 end;
 procedure TfGov.PermanentlyDeclineQuest(Action: PtrInt);
-var
-  Quest: PPlayerOldQuest;
 begin
   DialogText := LocalizedColorText('FormGov.GovAfterPlanetQuestClose');
-  New(Quest);
-  Quest.QuestType := QuestOffer.QuestType;
-  Quest.QuestNumber := QuestOffer.QuestNumber;
-  Quest.Planet := QuestOffer.Planet;
-  Quest.Description := 'PlanetQuestClose';
-  Quest.Successful := False;
-  Quest.Declined := True;
-  LocalHuman.PlayerOldQuests.Add(Quest);
+  DeclineQuestPermanently;
   BuildGovernmentChoices(True);
 end;
 procedure TfGov.DeclinePlanetBattle(Action: PtrInt);
 begin
   PlanetBattleMapId := Action;
   DialogText := LocalizedColorText('FormGov.GovAfterBattlePlanetQuestClose');
-  SetLength(GetPlayer.PlanetBattleHistory, High(GetPlayer.PlanetBattleHistory) + 1 + 1);
-  with GetPlayer.PlanetBattleHistory[High(GetPlayer.PlanetBattleHistory)] do
-  begin
-    MapId := PlanetBattleMapId;
-    Statistics[0] := 0;
-    Statistics[1] := 0;
-    Statistics[2] := 0;
-    Statistics[3] := 0;
-    Statistics[4] := 0;
-    Statistics[5] := 0;
-    ResultCode := 1;
-    CompletionMode := 0;
-    DateTurn := Galaxy.CurrentTurn;
-  end;
-  GetPlayer.LastPlanetBattleTurn := Galaxy.CurrentTurn;
+  RecordPlanetBattle(PlanetBattleMapId, 1, 0, pbSetLastTurn, NoBattleStatistics);
   BuildGovernmentChoices(True);
 end;
 procedure TfGov.ConfirmDeclineAllPlanetBattles(Action: PtrInt);
@@ -1917,7 +1654,7 @@ end;
 procedure TfGov.DeclineAllPlanetBattles(Action: PtrInt);
 begin
   DialogText := LocalizedColorText('FormGov.I_PlanetBattleRejectAllConfirmAfterYes');
-  GetPlayer.DeclinePlanetBattleOffers := True;
+  aPlanetActions.DeclineAllPlanetBattles;
   BuildGovernmentChoices(True);
 end;
 procedure TfGov.CancelDeclineAllPlanetBattles(Action: PtrInt);
@@ -2014,7 +1751,7 @@ begin
 end;
 procedure TfGov.ChoosePrisonInsteadOfBattle(Action: PtrInt);
 begin
-  GetPlayer.CurrentPlanet.SetRelationLevelToRanger(GetPlayer, rlHostile);
+  ChoosePrison;
   if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
   begin
     DialogText :=
@@ -2080,20 +1817,8 @@ begin
   AddChoice(LocalizedColorText('FormGov.BuyMap.PlayerNO'), 0, DeclineMapOffer);
 end;
 procedure TfGov.BuyMap(Action: PtrInt);
-var
-  Cost: Integer;
 begin
-  Cost :=
-      RoundAndTruncateToTens(
-          Min(
-                  GetPlayer.Wealth div 40,
-                  Galaxy.ComputeScaledBigMoney(GetPlayer.CurrentPlanet.OwnerId))
-              + 50
-      );
-  GetPlayer.SetMoney(GetPlayer.Money - Cost);
-  (TObject(GetPlayer.CurrentPlanet.FindUnchartedNeighborConstellation) as TConstellation).Visible :=
-      True;
-  GetPlayer.AchievementStats.CheckMapBuilderAchievement;
+  aPlanetActions.BuyMap;
   SoundManager.PlaySound('Sound.Sell');
   DialogText :=
       PickLocalizedTextVariant(
@@ -2175,15 +1900,8 @@ var
   Ship: TShip;
 begin
   Ship := TShip(Action);
-  if Ship.IsInPrison then
-  begin
-    PayBailMoney(Ship);
-    Ship.ClearPrisonTerm;
-    Ship.ChangeRelationToRanger(GetPlayer, 100);
-    Ship.OrderTakeoff;
-    Inc(GetPlayer.AchievementStats.PrisonersBailedOut);
+  if aPlanetActions.PayPrisonBail(Ship) then
     TrySetAchievementProgress('PRISONBAIL', GetPlayer.AchievementStats.PrisonersBailedOut);
-  end;
   SoundManager.PlaySound('Sound.Sell');
   DialogText := LocalizedColorText('FormGov.GuarantPrison.PlanetAfterOk');
   BuildGovernmentChoices(True);
@@ -2210,11 +1928,7 @@ var
   PartCount: Integer;
 begin
   Injection := PScriptDialogInjection(Answer);
-  if Injection.ActionCode <> '' then
-  begin
-    CurrentScript := Injection.ActionScript;
-    ExecuteScriptText(Injection.ActionCode, CurrentScript.InitCode.LocalVar);
-  end;
+  RunInjectedAnswerAction(Injection);
   Text := Injection.Answer;
   PartCount := CountDelimitedPartsW(Text, '~');
   if PartCount > 1 then
@@ -2224,14 +1938,8 @@ begin
       RememberChoiceScroll;
   end;
   ClearDialogChoices;
-  CurrentScript := Injection.Script;
-  CurrentScript.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Injection.AnswerData);
-  Session.ScriptDialogIndex := -1;
-  CurrentScript.CallDialogByVariable(Injection.DialogName);
-  if Session.ScriptDialogIndex < 0 then
-    BuildGovernmentChoices(True)
-  else
-    CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
+  if not RunGovernmentInjectedDialog(Injection) then
+    BuildGovernmentChoices(True);
 end;
 procedure TfGov.RunInjectedAnswerKeepingScroll(Answer: PtrInt);
 begin
@@ -2241,7 +1949,7 @@ end;
 procedure TfGov.RunScriptRestartAnswer(Answer: PtrInt);
 begin
   DialogText := '';
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   RefreshGovernmentDialog;
 end;
 procedure TfGov.AddScriptRestartChoice(Caption: WideString);

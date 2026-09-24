@@ -120,6 +120,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aPlayerActions,
+  aPlanetActions,
   aSession,
   aHuman,
   Math,
@@ -470,8 +471,6 @@ begin
 end;
 
 procedure TfPanelMain.EndTurnClicked(Sender: TObjectGI);
-var
-  Event: TGalaxyEvent;
 begin
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
@@ -521,9 +520,7 @@ begin
       or ((GetPlayer.CurrentPlanet <> nil)
           and (GetPlayer.CurrentPlanet.OwnerId = Byte(oiDominator))) then
   begin
-    Event := AddGalaxyEvent('PlayerDeath');
-    Event.AddTextData('PlanetCaptured');
-    Session.GameEndReason := 2;
+    ReportPlanetCaptured;
     RequestedScreenId := screenGameEnd;
     Screen.RequestClose(1);
   end

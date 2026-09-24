@@ -34,6 +34,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aPlayerActions,
+  aPlanetActions,
   aSession,
   aHuman,
   Math,
@@ -119,8 +120,6 @@ begin
 end;
 
 procedure TfPlanet.OnOpen;
-var
-  Event: TGalaxyEvent;
 begin
   if not MusicInPlanetEnabled then
     MusicManager.RequestFadeOut;
@@ -136,8 +135,8 @@ begin
     SelectMusic;
     if LocalHuman.TemporaryShopSlots <> nil then
       ReturnShopStock;
-    RunGlobalScriptsForContext(GetPlayer.CurrentStar, 0);
-    PruneExpiredPersistentPlayerMessages;
+    RunGlobalScripts(GetPlayer.CurrentStar, 0);
+    PruneMessages;
     OpenShopStock;
   end;
   Galaxy.ReleaseItemGraphics;
@@ -150,9 +149,7 @@ begin
       or ((GetPlayer.CurrentPlanet <> nil)
           and (GetPlayer.CurrentStar.ControlFaction = sfDominators)) then
   begin
-    Event := AddGalaxyEvent('PlayerDeath');
-    Event.AddTextData('PlanetCaptured');
-    Session.GameEndReason := 2;
+    ReportPlanetCaptured;
     RequestedScreenId := screenGameEnd;
     RequestClose(1);
     Exit;
@@ -183,7 +180,7 @@ begin
   end;
   MainPanel.RebuildMessageButtons(False);
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
   aCalc.WaitForTurnCalculationUI;
 end;
 
@@ -191,7 +188,7 @@ procedure TfPlanet.OnClose;
 begin
   aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
   MainPanel.OnClose;
   PlanetPanel.OnClose;
   LoadPanel.OnClose;
