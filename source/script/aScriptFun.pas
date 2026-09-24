@@ -16117,7 +16117,7 @@ begin
   av[0].SetInt(-1);
   if (High(av) > 2) and (av[3].GetInt >= 0) then
   begin
-    Entry := TInterfaceStateOverride.Create;
+    Entry := InterfaceStateOverrideClass.Create;
     Galaxy.InterfaceStateOverrides.Add(Entry);
     Entry.Initialize(FormName, Path, av[3].GetInt);
   end;
@@ -16174,7 +16174,7 @@ begin
   av[0].SetString('');
   if (High(av) > 2) and (av[3].GetString <> '') then
   begin
-    Entry := TInterfaceTextOverride.Create;
+    Entry := InterfaceTextOverrideClass.Create;
     Galaxy.InterfaceTextOverrides.Add(Entry);
     Entry.Initialize(FormName, Path, av[3].GetString);
   end;
@@ -16264,7 +16264,7 @@ begin
   av[0].SetString('');
   if (High(av) > 2) and (av[3].GetString <> '') then
   begin
-    Entry := TInterfaceImageOverride.Create;
+    Entry := InterfaceImageOverrideClass.Create;
     Galaxy.InterfaceImageOverrides.Add(Entry);
     Entry.Initialize(FormName, Path, av[3].GetString);
   end;
@@ -16317,7 +16317,7 @@ begin
   end;
   if (X <> 0) or (Y <> 0) or (Z <> 0) then
   begin
-    Entry := TInterfacePosOverride.Create;
+    Entry := InterfacePosOverrideClass.Create;
     Galaxy.InterfacePositionOverrides.Add(Entry);
     Entry.Initialize(FormName, Path, X, Y, Z);
   end;
@@ -16368,7 +16368,7 @@ begin
   end;
   if (X <> 0) or (Y <> 0) then
   begin
-    Entry := TInterfaceSizeOverride.Create;
+    Entry := InterfaceSizeOverrideClass.Create;
     Galaxy.InterfaceSizeOverrides.Add(Entry);
     Entry.Initialize(FormName, Path, X, Y);
   end;

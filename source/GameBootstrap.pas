@@ -62,7 +62,8 @@ uses
   aSaveLoad,
   ObserverHost,
   HeadlessSim,
-  SimEventHandlers;
+  SimEventHandlers,
+  InterfaceOverrideViews;
 
 var
   ApplicationEvents: TAD;
