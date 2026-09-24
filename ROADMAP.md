@@ -35,7 +35,7 @@ Two existing pieces make the plan realistic:
 - The observer already advances the simulation with no player input:
   [TObserverWorker.Execute](source/observer/ObserverSimulation.pas#L62) runs the
   player-star job, then the galaxy job, with hooks for capture.
-- [SaveGameToMemorySnapshot](source/game/aSaveLoad.pas#L549) already serialises
+- [SaveGameToMemorySnapshot](source/aSaveLoad.pas#L565) already serialises
   the whole game to memory. That is a join/resync payload for free.
 
 ## Principles

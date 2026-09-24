@@ -12,7 +12,7 @@
 
 - Prevent ship flicker near path endpoints on ARM64. [TSPath.ResampleBezierRange](source/core/aPath.pas#L431).
 - Use bilinear background resizing to avoid brightness grids. [TGraphBufGR.RescaleBilinearRgba](source/graphics/GR_GraphBuf.pas#L1466).
-- Close a complete temporary save before replacing its destination. [TSaver.Execute](source/game/aSaveLoad.pas#L103).
+- Close a complete temporary save before replacing its destination. [TSaver.Execute](source/aSaveLoad.pas#L106).
 - Clamp invalid arcade portal counts. [TfAB.ABSpaceBuild](source/arcade/ab_MainForm.pas#L2077).
 
 ## Performance
@@ -24,7 +24,7 @@
 - Cache sequential compressed-package reads. [TPackFileEC.ReadEntrySlot](source/resources/EC_HsFile.pas#L540).
 - Cache star-hover thumbnails within a turn. [TfStarMap.LoadStarThumbnail](source/screens/fStarMap.pas#L385).
 - Reduce travel loading-screen waits. [TfLoad.OnOpen](source/screens/fLoad.pas#L289), [TfJump.OnOpen](source/screens/fJump.pas#L97).
-- Use faster autosave compression, producing somewhat larger files. [TSaver.Execute](source/game/aSaveLoad.pas#L103).
+- Use faster autosave compression, producing somewhat larger files. [TSaver.Execute](source/aSaveLoad.pas#L106).
 - Use OKGF's native math on non-x86 targets and exact x87 math on x86.
   [OKGF backend selection](native/CMakeLists.txt#L8).
 
@@ -37,7 +37,7 @@
 - Use readable source literals for commands and editable-state keys.
   [TGalaxy.SaveEditableState](source/game/aGalaxy.pas#L2443), [TShip.LoadFromBlock](source/game/aShip.pas#L1960).
 - Keep suspension snapshots in plain memory.
-  [SaveGameToMemorySnapshot](source/game/aSaveLoad.pas#L549).
+  [SaveGameToMemorySnapshot](source/aSaveLoad.pas#L565).
 - Remove unreachable scan/RSA paths, ineffective checks, and empty callbacks.
   [HandleApplicationDeactivated](source/GameApplication.pas#L86), [TPolyLineGI.PrepareFrameDraw](source/graphics/GI_PolyLine.pas#L418).
 

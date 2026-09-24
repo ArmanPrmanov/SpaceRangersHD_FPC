@@ -1,33 +1,5 @@
 # Simulation units that still use UI units. Written by tools/check_layers.py --update.
 # Remove entries by removing the dependency; never add one by hand.
-aSaveLoad -> ab_MainForm
-aSaveLoad -> fChameleon
-aSaveLoad -> fCount2
-aSaveLoad -> fEquipmentShop
-aSaveLoad -> fGalaxy2
-aSaveLoad -> fGameLoad
-aSaveLoad -> fGameMenu
-aSaveLoad -> fGoodsShop2
-aSaveLoad -> fGov
-aSaveLoad -> fHangar
-aSaveLoad -> fInfo
-aSaveLoad -> fJournal
-aSaveLoad -> fJump
-aSaveLoad -> fLoad
-aSaveLoad -> fPlanet
-aSaveLoad -> fPlanetNO
-aSaveLoad -> fRating2
-aSaveLoad -> fRewards
-aSaveLoad -> fRuinsTalk
-aSaveLoad -> fSaveManager
-aSaveLoad -> fScaner
-aSaveLoad -> fSelectFace
-aSaveLoad -> fShip2
-aSaveLoad -> fStarMap
-aSaveLoad -> fTalk
-aSaveLoad -> GI_Main
-aSaveLoad -> GI_MessageBox
-aSaveLoad -> GI_MessageLoop
 aScript -> BreakMessageGIException
 aScript -> fPanelMain
 aScript -> fShip2
