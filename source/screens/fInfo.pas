@@ -133,6 +133,7 @@ uses
   aRuins,
   fRuinsTalk,
   fEquipmentShop,
+  aShopStock,
   aGalaxyStruct,
   GI_GAI,
   fShip2,

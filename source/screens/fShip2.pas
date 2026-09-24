@@ -386,6 +386,7 @@ uses
   aRuins,
   aGalaxyStruct,
   fEquipmentShop,
+  aShopStock,
   GI_PanelScrollBar,
   GI_ScrollBar,
   EC_Struct,

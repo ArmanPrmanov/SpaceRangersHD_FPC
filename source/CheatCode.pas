@@ -126,6 +126,7 @@ uses
   fPanelMain,
   aGalaxyStruct,
   fEquipmentShop,
+  aShopStock,
   fScore,
   fAbout,
   fHangar,

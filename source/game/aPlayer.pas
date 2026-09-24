@@ -261,7 +261,7 @@ uses
   aScript,
   aKling,
   aConst,
-  fEquipmentShop,
+  aShopStock,
   GlobalsV,
   aTranclucator;
 

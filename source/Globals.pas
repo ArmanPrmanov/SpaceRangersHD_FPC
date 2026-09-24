@@ -52,6 +52,7 @@ uses
   fHangar,
   fRuinsTalk,
   fEquipmentShop,
+  aShopStock,
   fSaveManager,
   GI_GraphButton,
   GI_MessageLoop,

@@ -264,7 +264,7 @@ uses
   SysUtils,
   Globals,
   aScript,
-  fEquipmentShop,
+  aShopStock,
   EC_Str,
   aAsteroid,
   aMissile,
@@ -638,7 +638,7 @@ var
   I: Integer;
   Text: WideString;
   Item: TItem;
-  Slot: TShopSlot;
+  Slot: TShopStockSlot;
   ShopBlock: TBlockParEC;
 begin
   inherited SaveToBlock(Block);
@@ -667,7 +667,7 @@ begin
   else if (GetPlayer.DockedTo = Self) and (TemporaryShopSlots <> nil) then
     for I := 0 to TemporaryShopSlots.Count - 1 do
     begin
-      Slot := TShopSlot(TemporaryShopSlots[I]);
+      Slot := TShopStockSlot(TemporaryShopSlots[I]);
       Item := Slot.Item;
       if Item <> nil then
       begin
@@ -696,7 +696,7 @@ var
   Item: TItem;
   Kind: Byte;
   Entry: PStorageEntry;
-  Slot: TShopSlot;
+  Slot: TShopStockSlot;
   ShopBlock: TBlockParEC;
 begin
   inherited LoadFromBlock(Block);
@@ -724,7 +724,7 @@ begin
   else if (GetPlayer.DockedTo = Self) and (TemporaryShopSlots <> nil) then
     for I := 0 to TemporaryShopSlots.Count - 1 do
     begin
-      Slot := TShopSlot(TemporaryShopSlots[I]);
+      Slot := TShopStockSlot(TemporaryShopSlots[I]);
       Item := Slot.Item;
       if Item <> nil then
       begin

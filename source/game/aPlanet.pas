@@ -228,7 +228,7 @@ uses
   aTranclucator,
   aTransport,
   aWarrior,
-  fEquipmentShop;
+  aShopStock;
 
 constructor TSputnik.Create;
 begin
@@ -2149,7 +2149,7 @@ var
   Ship: TShip;
   Entry: PPlanetSurfaceLootEntry;
   Item: TItem;
-  Slot: TShopSlot;
+  Slot: TShopStockSlot;
 begin
   Block.AddParam('PlanetName', Name);
   Block.AddParam('Owner', aConst.OwnerInfo[OwnerId].InternalName);
@@ -2179,10 +2179,10 @@ begin
       end;
     end
     else if GetPlayer.CurrentPlanet = Self then
-      if fEquipmentShop.TemporaryShopSlots <> nil then
-        for i := 0 to fEquipmentShop.TemporaryShopSlots.Count - 1 do
+      if aShopStock.TemporaryShopSlots <> nil then
+        for i := 0 to aShopStock.TemporaryShopSlots.Count - 1 do
         begin
-          Slot := fEquipmentShop.TemporaryShopSlots[i];
+          Slot := aShopStock.TemporaryShopSlots[i];
           Item := Slot.Item;
           if Item <> nil then
           begin
@@ -2265,7 +2265,7 @@ var
   ItemType: TItemType;
   ShipType: Byte;
   Storage: PStorageEntry;
-  Slot: TShopSlot;
+  Slot: TShopStockSlot;
   OldOwner, Owner, OldRace: Byte;
   OldSeries, Series: TDominatorSeries;
 begin
@@ -2313,10 +2313,10 @@ begin
       end;
     end
     else if GetPlayer.CurrentPlanet = Self then
-      if fEquipmentShop.TemporaryShopSlots <> nil then
-        for i := 0 to fEquipmentShop.TemporaryShopSlots.Count - 1 do
+      if aShopStock.TemporaryShopSlots <> nil then
+        for i := 0 to aShopStock.TemporaryShopSlots.Count - 1 do
         begin
-          Slot := fEquipmentShop.TemporaryShopSlots[i];
+          Slot := aShopStock.TemporaryShopSlots[i];
           Item := Slot.Item;
           if Item <> nil then
           begin
@@ -2336,8 +2336,8 @@ begin
             Item := CreateDefaultItemByType(ItemType);
             if Item <> nil then
             begin
-              if (fEquipmentShop.TemporaryShopSlots <> nil)
-                  and (fEquipmentShop.TemporaryShopPlanet = Self) then
+              if (aShopStock.TemporaryShopSlots <> nil)
+                  and (aShopStock.TemporaryShopPlanet = Self) then
               begin
                 RestoreTemporaryShopStock;
                 EquipmentShop.Add(Item);

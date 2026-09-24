@@ -127,6 +127,7 @@ uses
   GI_MessageBox,
   aGalaxyEvent,
   fEquipmentShop,
+  aShopStock,
   fGalaxy2,
   Classes,
   SysUtils,

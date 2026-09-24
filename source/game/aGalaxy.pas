@@ -837,7 +837,7 @@ uses
   aPlanet,
   fShip2,
   fHangar,
-  fEquipmentShop,
+  aShopStock,
   aPlayer,
   GI_GI,
   GI_GAI,
@@ -1153,7 +1153,7 @@ var
   Template: TScriptTemplUnit;
   Script: TScript;
   Group: TGroup;
-  ShopSlot: TShopSlot;
+  ShopSlot: TShopStockSlot;
   Hole: THole;
   Career: Byte;
   News: PPlanetNewsEntry;
@@ -1538,7 +1538,7 @@ var
   Template: TScriptTemplUnit;
   Script: TScript;
   Group: TGroup;
-  ShopSlot: TShopSlot;
+  ShopSlot: TShopStockSlot;
   Hole: THole;
   Career: Byte;
   News: PPlanetNewsEntry;
@@ -1762,7 +1762,7 @@ begin
       TemporaryShopSlots := TList.Create;
       for I := 0 to Count - 1 do
       begin
-        ShopSlot := TShopSlot.Create;
+        ShopSlot := ShopSlotClass.Create;
         TemporaryShopSlots.Add(ShopSlot);
         ShopSlot.LoadFromBuffer(Buffer, Self);
       end;
@@ -3545,12 +3545,12 @@ begin
       end;
     end;
   end;
-  if fEquipmentShop.TemporaryShopSlots <> nil then
-    for i := 0 to fEquipmentShop.TemporaryShopSlots.Count - 1 do
-      if TShopSlot(fEquipmentShop.TemporaryShopSlots[i]).Item <> nil then
-        if Cardinal(TShopSlot(fEquipmentShop.TemporaryShopSlots[i]).Item.Id) = Id then
+  if aShopStock.TemporaryShopSlots <> nil then
+    for i := 0 to aShopStock.TemporaryShopSlots.Count - 1 do
+      if TShopStockSlot(aShopStock.TemporaryShopSlots[i]).Item <> nil then
+        if Cardinal(TShopStockSlot(aShopStock.TemporaryShopSlots[i]).Item.Id) = Id then
         begin
-          Result := TShopSlot(fEquipmentShop.TemporaryShopSlots[i]).Item;
+          Result := TShopStockSlot(aShopStock.TemporaryShopSlots[i]).Item;
           Exit;
         end;
   for k := 0 to Self.StoredItems.Count - 1 do

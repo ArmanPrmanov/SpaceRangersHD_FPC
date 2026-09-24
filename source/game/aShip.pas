@@ -860,7 +860,7 @@ uses
   aGroup,
   fShip2,
   aGalaxyEvent,
-  fEquipmentShop,
+  aShopStock,
   fGoodsShop2,
   ThreadCalc,
   EC_Mem,
@@ -11954,9 +11954,7 @@ begin
   if RestoreStock then
   begin
     BuildTemporaryShopSlotGrid;
-    EquipmentShopScreen.ClearGoodsControls;
-    EquipmentShopScreen.BuildGoodsControls;
-    EquipmentShopScreen.UpdateScrollButtons;
+    NotifyShopStockChanged;
   end;
   if GeneratedBatch then
     Offers.Free;

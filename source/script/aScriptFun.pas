@@ -707,6 +707,7 @@ uses
   aEFilm,
   fStarMap,
   fEquipmentShop,
+  aShopStock,
   GR_Sound,
   aTranclucator,
   aPirate,

@@ -94,6 +94,7 @@ uses
   aItem,
   aScript,
   fEquipmentShop,
+  aShopStock,
   GI_Panel,
   SE_Ruins,
   aRanger,

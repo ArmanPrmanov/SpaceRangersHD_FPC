@@ -61,6 +61,7 @@ uses
   aSaveLoad,
   aScript,
   fEquipmentShop,
+  aShopStock,
   fGalaxy2,
   fSaveManager,
   fShip2,

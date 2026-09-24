@@ -33,6 +33,7 @@ uses
   Math,
   aRanger,
   fEquipmentShop,
+  aShopStock,
   fGalaxy2,
   Classes,
   Windows,

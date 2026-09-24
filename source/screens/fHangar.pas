@@ -89,6 +89,7 @@ uses
   fLoad,
   WorkerErrors,
   fEquipmentShop,
+  aShopStock,
   Windows,
   Math,
   aRanger,

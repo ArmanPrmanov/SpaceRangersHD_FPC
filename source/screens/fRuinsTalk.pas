@@ -365,6 +365,7 @@ uses
   GlobalsV,
   GR_Main,
   fEquipmentShop,
+  aShopStock,
   aPlayer,
   aShip,
   Math,

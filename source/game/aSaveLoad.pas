@@ -75,6 +75,7 @@ uses
   GI_MessageLoop,
   fGov,
   fEquipmentShop,
+  aShopStock,
   fCount2,
   fRating2,
   fJournal,
