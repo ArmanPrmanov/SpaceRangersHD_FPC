@@ -983,6 +983,7 @@ begin
   BaseSkills[5] := 0;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 procedure TPlayer.ApplyCharacterPreset(Planet: TPlanet; InitialMoney, CharacterPreset: Integer);
 var
   I, Quantity: Integer;
@@ -1230,15 +1231,15 @@ begin
           OwnerId
       );
       New(Entry);
-      GetPlayer.StorageEntries.Add(Entry);
+      Self.StorageEntries.Add(Entry);
       Entry.Item := TGoods.Create;
       Quantity := NextRandomIntRange(7, 17, RandomState);
       (Entry.Item as TGoods).Init(t_Luxury, Quantity);
       Entry.Item.Cost := Quantity * (GoodsMarket[3].AveragePrice div 4);
-      if GetPlayer.DockedTo <> nil then
-        Entry.LocationOwner := GetPlayer.DockedTo
+      if Self.DockedTo <> nil then
+        Entry.LocationOwner := Self.DockedTo
       else
-        Entry.LocationOwner := GetPlayer.CurrentPlanet;
+        Entry.LocationOwner := Self.CurrentPlanet;
       Entry.SlotIndex := 0;
     end;
     10:
@@ -1268,15 +1269,15 @@ begin
               .ConditionPercent :=
           NextRandomIntRange(60, 90, RandomState);
       New(Entry);
-      GetPlayer.StorageEntries.Add(Entry);
+      Self.StorageEntries.Add(Entry);
       Entry.Item := TGoods.Create;
       Quantity := NextRandomIntRange(4, 10, RandomState);
       (Entry.Item as TGoods).Init(t_Narcotics, Quantity);
       Entry.Item.Cost := Quantity * (GoodsMarket[7].AveragePrice div 2);
-      if GetPlayer.DockedTo <> nil then
-        Entry.LocationOwner := GetPlayer.DockedTo
+      if Self.DockedTo <> nil then
+        Entry.LocationOwner := Self.DockedTo
       else
-        Entry.LocationOwner := GetPlayer.CurrentPlanet;
+        Entry.LocationOwner := Self.CurrentPlanet;
       Entry.SlotIndex := 0;
     end;
     11:
@@ -1331,15 +1332,15 @@ begin
               .ConditionPercent :=
           NextRandomIntRange(20, 80, RandomState);
       New(Entry);
-      GetPlayer.StorageEntries.Add(Entry);
+      Self.StorageEntries.Add(Entry);
       Entry.Item := TGoods.Create;
       Quantity := NextRandomIntRange(100, 200, RandomState);
       (Entry.Item as TGoods).Init(t_Minerals, Quantity);
       Entry.Item.Cost := Quantity * (GoodsMarket[4].AveragePrice div 2);
-      if GetPlayer.DockedTo <> nil then
-        Entry.LocationOwner := GetPlayer.DockedTo
+      if Self.DockedTo <> nil then
+        Entry.LocationOwner := Self.DockedTo
       else
-        Entry.LocationOwner := GetPlayer.CurrentPlanet;
+        Entry.LocationOwner := Self.CurrentPlanet;
       Entry.SlotIndex := 0;
     end;
     13:
@@ -1551,15 +1552,15 @@ begin
           OwnerId
       );
       New(Entry);
-      GetPlayer.StorageEntries.Add(Entry);
+      Self.StorageEntries.Add(Entry);
       Entry.Item := TGoods.Create;
       Quantity := NextRandomIntRange(14, 20, RandomState);
       (Entry.Item as TGoods).Init(t_Narcotics, Quantity);
       Entry.Item.Cost := Quantity * (GoodsMarket[7].AveragePrice div 2);
-      if GetPlayer.DockedTo <> nil then
-        Entry.LocationOwner := GetPlayer.DockedTo
+      if Self.DockedTo <> nil then
+        Entry.LocationOwner := Self.DockedTo
       else
-        Entry.LocationOwner := GetPlayer.CurrentPlanet;
+        Entry.LocationOwner := Self.CurrentPlanet;
       Entry.SlotIndex := 0;
     end;
     21:
@@ -1630,15 +1631,15 @@ begin
           OwnerId
       );
       New(Entry);
-      GetPlayer.StorageEntries.Add(Entry);
+      Self.StorageEntries.Add(Entry);
       Entry.Item := TGoods.Create;
       Quantity := NextRandomIntRange(15, 30, RandomState);
       (Entry.Item as TGoods).Init(t_Luxury, Quantity);
       Entry.Item.Cost := Quantity * (GoodsMarket[3].AveragePrice div 2);
-      if GetPlayer.DockedTo <> nil then
-        Entry.LocationOwner := GetPlayer.DockedTo
+      if Self.DockedTo <> nil then
+        Entry.LocationOwner := Self.DockedTo
       else
-        Entry.LocationOwner := GetPlayer.CurrentPlanet;
+        Entry.LocationOwner := Self.CurrentPlanet;
       Entry.SlotIndex := 0;
     end;
     24:
@@ -1663,15 +1664,15 @@ begin
           OwnerId
       );
       New(Entry);
-      GetPlayer.StorageEntries.Add(Entry);
+      Self.StorageEntries.Add(Entry);
       Entry.Item := TGoods.Create;
       Quantity := NextRandomIntRange(10, 20, RandomState);
       (Entry.Item as TGoods).Init(t_Alcohol, Quantity);
       Entry.Item.Cost := Quantity * (GoodsMarket[5].AveragePrice div 2);
-      if GetPlayer.DockedTo <> nil then
-        Entry.LocationOwner := GetPlayer.DockedTo
+      if Self.DockedTo <> nil then
+        Entry.LocationOwner := Self.DockedTo
       else
-        Entry.LocationOwner := GetPlayer.CurrentPlanet;
+        Entry.LocationOwner := Self.CurrentPlanet;
       Entry.SlotIndex := 0;
     end;
     25:
@@ -1722,11 +1723,12 @@ begin
   RefreshDerivedStats(True);
   RefreshGraphicSize;
   RefreshAssignedItemSlots;
-  HomePlanet.ChangeRelationToRanger(GetPlayer, 100);
+  HomePlanet.ChangeRelationToRanger(Self, 100);
   for I := 1 to 24 do
     StatusEffectSourceNames[I] := '';
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 procedure TPlayer.NextDay;
 var
   I, J, LastDisease, FirstDisease, TargetValue: Integer;
@@ -2078,7 +2080,7 @@ begin
           RadiationHealth[I].Progress := 0.0;
         end;
       Stage := 10;
-      StimulantExcess := CountActiveStimulants - GetPlayer.GetTotalStatBonus(Ord(bonStimCapacity));
+      StimulantExcess := CountActiveStimulants - Self.GetTotalStatBonus(Ord(bonStimCapacity));
       if StimulantExcess >= 2 then
       begin
         I := 6;
@@ -2235,15 +2237,16 @@ begin
   end;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 procedure TPlayer.RechargeTransmitters;
 var
   Item: TItem;
   Transmitter: TArtefactTransmitter;
   I: Integer;
 begin
-  for I := 0 to GetPlayer.Artefacts.Count - 1 do
+  for I := 0 to Self.Artefacts.Count - 1 do
   begin
-    Item := TItem(GetPlayer.Artefacts[I]);
+    Item := TItem(Self.Artefacts[I]);
     if Item.ItemType = t_ArtefactTransmitter then
     begin
       Transmitter := Item as TArtefactTransmitter;
@@ -2501,6 +2504,7 @@ begin
     Result := False;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 function TPlayer.HasDeployedSatellites: Boolean;
 var
   I: Integer;
@@ -2508,7 +2512,7 @@ var
 begin
   for I := 0 to Satellites.Count - 1 do
   begin
-    Satellite := TSatellite(GetPlayer.Satellites[I]);
+    Satellite := TSatellite(Self.Satellites[I]);
     if Satellite.TargetPlanet <> nil then
     begin
       Result := True;
@@ -2518,6 +2522,7 @@ begin
   Result := False;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 function TPlayer.HasSatelliteOnPlanet(Planet: TPlanet): Boolean;
 var
   I: Integer;
@@ -2525,7 +2530,7 @@ var
 begin
   for I := 0 to Satellites.Count - 1 do
   begin
-    Satellite := GetPlayer.Satellites[I];
+    Satellite := Self.Satellites[I];
     if Satellite.TargetPlanet = Planet then
     begin
       Result := True;
@@ -2567,6 +2572,7 @@ begin
       );
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 function TPlayer.BuildDeployedSatelliteSummary(var LineCount: Integer): WideString;
 var
   I, J, HeaderCount, Condition, ExplorationTurns: Integer;
@@ -2584,7 +2590,7 @@ begin
     Planet := TPlanet(Galaxy.Planets[I]);
     for J := 0 to Satellites.Count - 1 do
     begin
-      Satellite := TSatellite(GetPlayer.Satellites[J]);
+      Satellite := TSatellite(Self.Satellites[J]);
       if Satellite.TargetPlanet = Planet then
       begin
         if HeaderCount = 0 then
@@ -2727,6 +2733,7 @@ begin
   Result := Text;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 function TPlayer.GetSatelliteExplorationTurns(Satellite: TSatellite): Integer;
 var
   I, Water, Land, Hill: Integer;
@@ -2742,9 +2749,9 @@ begin
   Water := 0;
   Land := 0;
   Hill := 0;
-  for I := 0 to GetPlayer.Satellites.Count - 1 do
+  for I := 0 to Self.Satellites.Count - 1 do
   begin
-    Probe := TSatellite(GetPlayer.Satellites[I]);
+    Probe := TSatellite(Self.Satellites[I]);
     if (Satellite.TargetPlanet = Probe.TargetPlanet) and (Probe.BrokenFlag = 0) then
     begin
       Water := Min(Planet.WaterTiles - Planet.WaterExplored, Water + Probe.WaterExplorationRate);
@@ -2771,6 +2778,7 @@ begin
   Result := True;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 procedure TPlayer.ReportIdleSatellites(Star: TStar);
 var
   I, J, Remaining: Integer;
@@ -2784,9 +2792,9 @@ begin
   Planets[1] := nil;
   Planets[2] := nil;
   Planets[3] := nil;
-  for I := 0 to GetPlayer.Satellites.Count - 1 do
+  for I := 0 to Self.Satellites.Count - 1 do
   begin
-    Satellite := TSatellite(GetPlayer.Satellites[I]);
+    Satellite := TSatellite(Self.Satellites[I]);
     if (Satellite.TargetPlanet <> nil)
         and ((TObject(Satellite.TargetPlanet) as TPlanet).CurrentStar = Star) then
     begin
@@ -3039,6 +3047,7 @@ begin
   end;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 function TPlayer.GetShipRatingComparison(Ship: TShip): Byte;
 var
   Ranger: TRanger;
@@ -3051,8 +3060,8 @@ begin
     case Round(
         RemapClamped(
             Ranger.TotalExperience,
-            GetPlayer.PlaceInRating / 3,
-            3 * GetPlayer.PlaceInRating,
+            Self.PlaceInRating / 3,
+            3 * Self.PlaceInRating,
             0,
             100
         )) of
@@ -3069,6 +3078,7 @@ begin
   end;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 function TPlayer.GetShipRankComparison(Ship: TShip): Byte;
 var
   Normal: TNormalShip;
@@ -3077,7 +3087,7 @@ begin
   if Ship is TNormalShip then
   begin
     Normal := Ship as TNormalShip;
-    case Normal.Rank - GetPlayer.Rank of
+    case Normal.Rank - Self.Rank of
       -7..-2: Result := 1;
       -1: Result := 2;
       0: Result := 3;
@@ -3089,6 +3099,7 @@ begin
   end;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 function TPlayer.GetShipPirateRankComparison(Ship: TShip): Byte;
 var
   Normal: TNormalShip;
@@ -3097,7 +3108,7 @@ begin
   if Ship is TNormalShip then
   begin
     Normal := Ship as TNormalShip;
-    case Normal.PirateRank - GetPlayer.PirateRank of
+    case Normal.PirateRank - Self.PirateRank of
       -8..-2: Result := 1;
       -1: Result := 2;
       0: Result := 3;
@@ -3109,10 +3120,11 @@ begin
   end;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 function TPlayer.GetShipStrengthComparison(Ship: TShip): Byte;
 begin
   Result := 0;
-  case Round(RemapClamped(Ship.Strength, GetPlayer.Strength / 3, GetPlayer.Strength * 3, 0, 100)) of
+  case Round(RemapClamped(Ship.Strength, Self.Strength / 3, Self.Strength * 3, 0, 100)) of
     0..20: Result := 1;
     21..40: Result := 2;
     41..60: Result := 3;
@@ -3123,6 +3135,7 @@ begin
   end;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 function TPlayer.BuildTranclucatorStorageSummary(var LineCount: Integer): WideString;
 var
   I, J, HeaderCount: Integer;
@@ -3141,7 +3154,7 @@ begin
     begin
       Ship := TShip(Star.Ships[J]);
       if Ship.TypeId = stTranclucator then
-        if ((Ship as TTranclucator).OwnerShip = GetPlayer) and not Ship.IsHullDestroyed then
+        if ((Ship as TTranclucator).OwnerShip = Self) and not Ship.IsHullDestroyed then
         begin
           if HeaderCount = 0 then
           begin
@@ -3540,6 +3553,7 @@ begin
   RemovePlayerBubbleByKey('sys_storage');
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 function TPlayer.SelectPlanetBattleMap: Integer;
 var
   I, MapIndex, Count: Integer;
@@ -3547,7 +3561,7 @@ var
 begin
   Result := -1;
   if IsInstallFeatureEnabled('Robot') then
-    if GetPlayer.IsOnPlanet
+    if Self.IsOnPlanet
         and ((Galaxy.BlazerSeriesResolvedTurn <= 0)
             or (Galaxy.KellerSeriesResolvedTurn <= 0)
             or (Galaxy.TerronSeriesResolvedTurn <= 0)) then
@@ -3591,12 +3605,12 @@ begin
               Continue;
             if RobotMapDefinitions[I].AfterLiberation then
             begin
-              if not ((Galaxy.CurrentTurn - GetPlayer.CurrentStar.LastLiberationRewardsTurn <= 40)
-                  and (GetPlayer.CurrentStar.LastLiberationRewardsTurn
-                      <= GetPlayer.CurrentStar.LastDominatorPresenceTurn)) then
+              if not ((Galaxy.CurrentTurn - Self.CurrentStar.LastLiberationRewardsTurn <= 40)
+                  and (Self.CurrentStar.LastLiberationRewardsTurn
+                      <= Self.CurrentStar.LastDominatorPresenceTurn)) then
                 Continue;
             end
-            else if not (Galaxy.CurrentTurn - GetPlayer.CurrentStar.LastDominatorPresenceTurn
+            else if not (Galaxy.CurrentTurn - Self.CurrentStar.LastDominatorPresenceTurn
                 in [30..120]) then
               Continue;
           end;
@@ -3676,6 +3690,7 @@ begin
   end;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 procedure TPlayer.ApplyEquipmentConfiguration(Index: Integer);
   function IsEmpty: Boolean; // @addr $590150 @ida "bool __cdecl $name(void *ParentFrame);" @note "Nested in ApplyEquipmentConfiguration; caller-popped static link, player -4 and preset index -8."
   var
@@ -3777,7 +3792,7 @@ procedure TPlayer.ApplyEquipmentConfiguration(Index: Integer);
   ); // @addr $590424 @ida "void __usercall $name(PStorageEntry Entry@<eax>, void *ParentFrame@<^0>);" @note "Nested in ApplyEquipmentConfiguration; caller-popped static link, player -4 and preset index -8."
   begin
     Entry.Item := nil;
-    GetPlayer.StorageEntries.Delete(GetPlayer.StorageEntries.IndexOf(Entry));
+    Self.StorageEntries.Delete(Self.StorageEntries.IndexOf(Entry));
     Dispose(Entry);
   end;
   procedure TakeStoredItem(
@@ -4179,10 +4194,11 @@ begin
   Result := inherited CalculateSpeed;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 procedure TPlayer.CreateRuinsProxy;
 begin
   RuinsProxy := TRuins.Create;
-  (RuinsProxy as TRuins).Init(rstMilitaryBase, GetPlayer.CurrentStar, '');
+  (RuinsProxy as TRuins).Init(rstMilitaryBase, Self.CurrentStar, '');
   CurrentStar.Ships.Delete(CurrentStar.Ships.IndexOf(RuinsProxy));
 end;
 
@@ -4313,6 +4329,7 @@ begin
   Result := True;
 end;
 
+// CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
 function TPlayer.CanScanShip(Ship: TShip): Boolean;
 begin
   Result := True;
@@ -4322,12 +4339,12 @@ begin
       Result := False
     else if (Ship is TKling) and not Ship.HasIndependentScriptFaction then
     begin
-      if (GetPlayer.GetScanner = nil)
-          or (GetPlayer.GetScanner.OwnerId <> Byte(oiDominator))
-          or (GetPlayer.GetScanner.DominatorSeries <> TKling(Ship).DominatorSeries) then
+      if (Self.GetScanner = nil)
+          or (Self.GetScanner.OwnerId <> Byte(oiDominator))
+          or (Self.GetScanner.DominatorSeries <> TKling(Ship).DominatorSeries) then
         Result := False;
     end;
-    Result := GetPlayer.ScriptItemsAct($12, Ship, nil, Ord(Result)) <> 0;
+    Result := Self.ScriptItemsAct($12, Ship, nil, Ord(Result)) <> 0;
   end;
 end;
 
