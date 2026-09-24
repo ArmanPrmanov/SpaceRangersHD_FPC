@@ -63,6 +63,7 @@ procedure LinkRecoveredTypes;
 implementation
 
 uses
+  aHuman,
   EC_CacheGAI,
   Windows,
   SysUtils,
@@ -124,7 +125,7 @@ var
   I, Count: Integer;
   Gate: TGateSE;
 begin
-  PlayerStar.QueueSpaceImageLoads(PendingLoads, Owner);
+  LocalHuman.PlayerStar.QueueSpaceImageLoads(PendingLoads, Owner);
   if SputnikShow then
   begin
     Count := SatelliteRenderTemplates.Count;
@@ -142,7 +143,7 @@ begin
     if TCGaiControlEC(SpaceImageTemplates[I].CacheControl) <> nil then
       TCGaiControlEC(SpaceImageTemplates[I].CacheControl).QueueLoadIfMissing(PendingLoads);
 
-  GlobalCache.QueueNamedLoadIfMissing(PendingLoads, 'GAI', PlayerStar.GetBackgroundImagePath(I));
+  GlobalCache.QueueNamedLoadIfMissing(PendingLoads, 'GAI', LocalHuman.PlayerStar.GetBackgroundImagePath(I));
   QueueConfiguredLoadingAssets(PendingLoads, 'Space');
   if SoundEnabled then
     QueueConfiguredLoadingAssets(PendingLoads, 'SpaceSound');
@@ -151,7 +152,7 @@ begin
 end;
 procedure QueueHyperspaceLoadingAssets(PendingLoads: TList; Owner: TObjectGI);
 begin
-  PlayerStar.QueueHyperspaceShipImageLoads(PendingLoads, Owner);
+  LocalHuman.PlayerStar.QueueHyperspaceShipImageLoads(PendingLoads, Owner);
   RemoveDuplicateCacheLoads(PendingLoads);
 end;
 procedure QueueArcadeLoadingAssets(PendingLoads: TList; Owner: TObjectGI);

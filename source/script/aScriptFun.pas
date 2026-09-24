@@ -661,6 +661,7 @@ procedure InitializeScriptBuiltinsAndConstants(Scope: TVarArrayEC);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   StrUtils,
   DateUtils,
   GameNative,
@@ -970,7 +971,7 @@ procedure SF_AutoBattle(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) <> 1 then
     raise Exception.Create('Error.Script AutoBattle');
-  PendingPlayerFollowTarget := TShip(av[1].GetDword);
+  LocalHuman.PendingPlayerFollowTarget := TShip(av[1].GetDword);
 end;
 procedure SF_GetOwner(av: array of TVarEC; code: TCodeEC);
 var
@@ -2405,7 +2406,7 @@ begin
     Ship.OrderJump(TStar(av[2].GetDword), Absolute);
     Ship.AbsoluteScriptOrder := SavedOrderLock;
     if GetPlayer = Ship then
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
     if (GetPlayer = Ship)
         and (GetInnermostScreenLoop = StarMapScreen)
         and (StarMapScreen.Mode = smmOrders) then
@@ -2434,7 +2435,7 @@ begin
     Ship.OrderLanding(TObject(av[2].GetDword), Absolute);
     Ship.AbsoluteScriptOrder := SavedOrderLock;
     if GetPlayer = Ship then
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
     if (GetPlayer = Ship)
         and (GetInnermostScreenLoop = StarMapScreen)
         and (StarMapScreen.Mode = smmOrders) then
@@ -8857,7 +8858,7 @@ begin
     Ship.OrderNone(False);
     Ship.AbsoluteScriptOrder := SavedOrderLock;
     if GetPlayer = Ship then
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
     if (GetPlayer = Ship)
         and (GetInnermostScreenLoop = StarMapScreen)
         and (StarMapScreen.Mode = smmOrders) then
@@ -8909,7 +8910,7 @@ begin
     end;
     Ship.AbsoluteScriptOrder := SavedOrderLock;
     if GetPlayer = Ship then
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
     if (GetPlayer = Ship)
         and (GetInnermostScreenLoop = StarMapScreen)
         and (StarMapScreen.Mode = smmOrders) then
@@ -8948,7 +8949,7 @@ begin
         Ship.OrderTeleport(TStar(av[2].GetDword), Destination, TransitionData, Absolute);
         Ship.AbsoluteScriptOrder := SavedOrderLock;
         if GetPlayer = Ship then
-          PendingPlayerFollowTarget := nil;
+          LocalHuman.PendingPlayerFollowTarget := nil;
         if (GetPlayer = Ship)
             and (GetInnermostScreenLoop = StarMapScreen)
             and (StarMapScreen.Mode = smmOrders) then
@@ -9030,7 +9031,7 @@ begin
     Ship.OrderJumpHole(Hole, Absolute);
     Ship.AbsoluteScriptOrder := SavedOrderLock;
     if GetPlayer = Ship then
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
     if (GetPlayer = Ship)
         and (GetInnermostScreenLoop = StarMapScreen)
         and (StarMapScreen.Mode = smmOrders) then
@@ -10040,7 +10041,7 @@ begin
   end
   else
   begin
-    if (GetPlayer = Ship) and (PendingPlayerFollowTarget <> nil) then
+    if (GetPlayer = Ship) and (LocalHuman.PendingPlayerFollowTarget <> nil) then
       av[0].SetInt(-1)
     else
       av[0].SetInt(Ord(Ship.Order));
@@ -10085,14 +10086,14 @@ begin
   Ship := TShip(av[1].GetDword);
   if Ship <> nil then
   begin
-    if (GetPlayer = Ship) and (PendingPlayerFollowTarget <> nil) then
-      av[0].SetDword(PtrUInt(PendingPlayerFollowTarget))
+    if (GetPlayer = Ship) and (LocalHuman.PendingPlayerFollowTarget <> nil) then
+      av[0].SetDword(PtrUInt(LocalHuman.PendingPlayerFollowTarget))
     else
       av[0].SetDword(PtrUInt(Ship.OrderTarget));
     if High(av) > 1 then
     begin
-      if (GetPlayer = Ship) and (PendingPlayerFollowTarget <> nil) then
-        PendingPlayerFollowTarget := TShip(av[2].GetDword)
+      if (GetPlayer = Ship) and (LocalHuman.PendingPlayerFollowTarget <> nil) then
+        LocalHuman.PendingPlayerFollowTarget := TShip(av[2].GetDword)
       else
         Ship.OrderTarget := TObject(av[2].GetDword);
     end;
@@ -13043,8 +13044,8 @@ begin
   TShip(av[1].GetDword).TransferToStar(TStar(av[2].GetDword));
   if TShip(av[1].GetDword) = GetPlayer then
   begin
-    PlayerStar := GetPlayer.CurrentStar;
-    PlayerStar.RefreshMovementStepParameters;
+    LocalHuman.PlayerStar := GetPlayer.CurrentStar;
+    LocalHuman.PlayerStar.RefreshMovementStepParameters;
   end;
 end;
 procedure SF_IsFilm(av: array of TVarEC; code: TCodeEC);
@@ -13065,7 +13066,7 @@ begin
     raise Exception.Create('Error.Script FilmFlags');
   if av[1].GetDword <= 3 then
   begin
-    Star := PlayerStar;
+    Star := LocalHuman.PlayerStar;
     Kind := av[1].GetDword;
     Arg := 2;
   end
@@ -13148,7 +13149,7 @@ begin
   if High(av) >= 11 then
     Variant := av[11].GetInt;
   Effect := TWeaponSE.Create(Name, Point(0, 0), ShotVisual, Variant);
-  if (PlayerStar <> nil) and PlayerStar.RecordingTurnFilm then
+  if (LocalHuman.PlayerStar <> nil) and LocalHuman.PlayerStar.RecordingTurnFilm then
   begin
     if PrimaryFilm <> nil then
     begin
@@ -13211,7 +13212,7 @@ begin
             SourceFilm := Item.FilmObject;
         end;
       end;
-      Step := PlayerStar.CurrentStepIndex;
+      Step := LocalHuman.PlayerStar.CurrentStepIndex;
       Film := PrimaryFilm.AddObject(0, Effect);
       PrimaryFilm.SetWeaponEndpoints(Step, Film, SourceFilm, TargetFilm);
       PrimaryFilm.SetWeaponHit(Step, Film, Word(Color), Damage, Destroyed, PlaySound);
@@ -13313,12 +13314,12 @@ begin
     Scale := av[4].GetInt * 0.01
   else
     Scale := 1;
-  if (PlayerStar <> nil) and PlayerStar.RecordingTurnFilm then
+  if (LocalHuman.PlayerStar <> nil) and LocalHuman.PlayerStar.RecordingTurnFilm then
   begin
     if PrimaryFilm <> nil then
     begin
       Effect := TGAIEffectSE.Create('Effect.' + Name, Point(0, 0));
-      Step := PlayerStar.CurrentStepIndex;
+      Step := LocalHuman.PlayerStar.CurrentStepIndex;
       Film := PrimaryFilm.AddObject(0, Effect);
       PrimaryFilm.SetEffectImagePosition(Step, Film, Point(X, Y));
       PrimaryFilm.SetEffectDurationScale(Step, Film, Scale);
@@ -13379,7 +13380,7 @@ var
 begin
   if High(av) < 2 then
     raise Exception.Create('Error.Script FilmSound');
-  if (PlayerStar <> nil) and PlayerStar.RecordingTurnFilm and (PrimaryFilm <> nil) then
+  if (LocalHuman.PlayerStar <> nil) and LocalHuman.PlayerStar.RecordingTurnFilm and (PrimaryFilm <> nil) then
   begin
     Text := av[1].GetString;
     Obj := TObject(av[2].GetDword);
@@ -13411,7 +13412,7 @@ begin
       if Item <> nil then
         FilmObject := Item.FilmObject;
     end;
-    Step := PlayerStar.CurrentStepIndex;
+    Step := LocalHuman.PlayerStar.CurrentStepIndex;
     PrimaryFilm.PlayObjectSound(Step, FilmObject, Text);
   end;
 end;
@@ -13735,10 +13736,10 @@ var
   Index: Integer;
 begin
   av[0].SetInt(0);
-  if (PlayerOldQuests <> nil) and (PlayerOldQuests.Count > 0) then
-    for Index := 0 to PlayerOldQuests.Count - 1 do
+  if (LocalHuman.PlayerOldQuests <> nil) and (LocalHuman.PlayerOldQuests.Count > 0) then
+    for Index := 0 to LocalHuman.PlayerOldQuests.Count - 1 do
     begin
-      Quest := PPlayerOldQuest(PlayerOldQuests[Index]);
+      Quest := PPlayerOldQuest(LocalHuman.PlayerOldQuests[Index]);
       if (High(av) < 1) or (TQuestType(av[1].GetInt) = Quest.QuestType) then
         if Quest.Successful then
           av[0].SetInt(av[0].GetInt + 1);
@@ -13755,10 +13756,10 @@ begin
     raise Exception.Create('Error.Script QuestsStatusByNom');
   Kind := TQuestType(av[1].GetInt);
   Number := av[2].GetInt;
-  if (PlayerOldQuests <> nil) and (PlayerOldQuests.Count > 0) then
-    for Index := 0 to PlayerOldQuests.Count - 1 do
+  if (LocalHuman.PlayerOldQuests <> nil) and (LocalHuman.PlayerOldQuests.Count > 0) then
+    for Index := 0 to LocalHuman.PlayerOldQuests.Count - 1 do
     begin
-      OldQuest := PPlayerOldQuest(PlayerOldQuests[Index]);
+      OldQuest := PPlayerOldQuest(LocalHuman.PlayerOldQuests[Index]);
       if (OldQuest.QuestType = Kind) and (OldQuest.QuestNumber = Number) then
       begin
         if OldQuest.Successful then

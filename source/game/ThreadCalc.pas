@@ -38,6 +38,7 @@ procedure WaitForTurnCalculation;
 procedure ProcessPlayerStarTurn;
 implementation
 uses
+  aHuman,
   SimulationThread,
   SimEvents,
   aCalc,
@@ -93,7 +94,7 @@ begin
             or ((GetPlayer.Order = soTakeoff)
                 and ((GetPlayer.CurrentPlanet <> nil) or (GetPlayer.DockedTo <> nil)))
             or (GetPlayer.InHyperspace and (Cardinal(GetPlayer.OrderStateData and $FFFF) <= 1));
-    PlayerStar.NextDay(RecordFilm);
+    LocalHuman.PlayerStar.NextDay(RecordFilm);
     Stage := 2;
     if Galaxy.StasisModEnabled <> 1 then
       Galaxy.CompleteDay(RecordFilm);
@@ -211,7 +212,7 @@ begin
     try
       PrimaryFilm.Clear;
       if Galaxy.StasisModEnabled <> 1 then
-        PlayerStar.PrepareNextDay;
+        LocalHuman.PlayerStar.PrepareNextDay;
     except
       on E: Exception do
       begin

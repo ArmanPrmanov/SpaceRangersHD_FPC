@@ -102,6 +102,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   GI_Main,
   aKling,
   SysUtils,
@@ -199,10 +200,10 @@ begin
     SkillLevels[Ord(Skill)] := GetPlayer.GetBaseSkillLevel(Skill);
   ScoreTags.Clear;
   GenerationSeed := Galaxy.GenerationSeed;
-  SetLength(QuestResults, PlayerOldQuests.Count);
-  for I := 0 to PlayerOldQuests.Count - 1 do
+  SetLength(QuestResults, LocalHuman.PlayerOldQuests.Count);
+  for I := 0 to LocalHuman.PlayerOldQuests.Count - 1 do
   begin
-    Quest := PlayerOldQuests[I];
+    Quest := LocalHuman.PlayerOldQuests[I];
     QuestResults[I].Successful := Quest.Successful;
     QuestResults[I].QuestType := Quest.QuestType;
     QuestResults[I].QuestNumber := Quest.QuestNumber;

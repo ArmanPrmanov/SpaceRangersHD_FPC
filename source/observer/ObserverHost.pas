@@ -6,6 +6,7 @@ interface
 procedure RunObserver(const SavePath: AnsiString);
 implementation
 uses
+  aHuman,
   SysUtils,
   Classes,
   Math,
@@ -496,7 +497,7 @@ begin
   begin
     S := TObserverScene.Create(Self, TObserverSystem(Recording.Systems[I]));
     Scenes.Add(S);
-    if S.Data.Id = PlayerStar.Id then
+    if S.Data.Id = LocalHuman.PlayerStar.Id then
       FocusedSystem := I;
   end;
   BuildLayout;

@@ -222,6 +222,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   GI_GI,
   aKling,
   Windows,
@@ -3625,9 +3626,9 @@ begin
       else
       begin
         Galaxy.ClearJumpGates;
-        SavedStar := PlayerStar;
-        PlayerStar := GetPlayer.CurrentStar;
-        PlayerStar.RebuildShipMovementPaths;
+        SavedStar := LocalHuman.PlayerStar;
+        LocalHuman.PlayerStar := GetPlayer.CurrentStar;
+        LocalHuman.PlayerStar.RebuildShipMovementPaths;
         SavedStar.RebuildShipMovementPaths;
         if (Cardinal(GetPlayer.OrderStateData) and $FFFF) = 1 then
         begin

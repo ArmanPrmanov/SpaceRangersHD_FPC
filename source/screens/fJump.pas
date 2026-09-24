@@ -35,6 +35,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   EC_Cache,
   EC_Struct,
   aGalaxyStruct,
@@ -249,9 +250,9 @@ begin
       Exit;
     end;
     Galaxy.ClearJumpGates;
-    PreviousStar := PlayerStar;
-    PlayerStar := GetPlayer.CurrentStar;
-    PlayerStar.RebuildShipMovementPaths;
+    PreviousStar := LocalHuman.PlayerStar;
+    LocalHuman.PlayerStar := GetPlayer.CurrentStar;
+    LocalHuman.PlayerStar.RebuildShipMovementPaths;
     PreviousStar.RebuildShipMovementPaths;
     if (Cardinal(GetPlayer.OrderStateData) and $FFFF) = 1 then
     begin
@@ -274,9 +275,9 @@ begin
       Exit;
     end;
     Galaxy.ClearJumpGates;
-    PreviousStar := PlayerStar;
-    PlayerStar := GetPlayer.CurrentStar;
-    PlayerStar.RebuildShipMovementPaths;
+    PreviousStar := LocalHuman.PlayerStar;
+    LocalHuman.PlayerStar := GetPlayer.CurrentStar;
+    LocalHuman.PlayerStar.RebuildShipMovementPaths;
     PreviousStar.RebuildShipMovementPaths;
     if (Cardinal(GetPlayer.OrderStateData) and $FFFF) = 1 then
     begin

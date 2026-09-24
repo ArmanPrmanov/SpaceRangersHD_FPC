@@ -308,6 +308,7 @@ procedure LinkRecoveredTypes;
 implementation
 
 uses
+  aHuman,
   EC_Cache,
   GI_GI,
   GI_Main,
@@ -869,7 +870,7 @@ begin
     PlanetBattleState := 0;
     GetPlayer.OrderTakeoff;
     FilmCameraFollow := True;
-    PlayerStar.RefreshSpaceObjectPositions;
+    LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
     if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
       Galaxy.EnableDominatorSurfaces
     else
@@ -921,7 +922,7 @@ begin
       TerronShip.DestroyQueued := True;
     GetPlayer.OrderTakeoff;
     FilmCameraFollow := True;
-    PlayerStar.RefreshSpaceObjectPositions;
+    LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
     if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
       Galaxy.EnableDominatorSurfaces
     else
@@ -962,14 +963,14 @@ begin
     UpdateRectsEnabled := True;
     MapControls.Invalidate;
     UpdateRectsEnabled := False;
-    PlayerStar.OpenSpaceScene(MapControls, GetByName('MapPanel'), Self);
+    LocalHuman.PlayerStar.OpenSpaceScene(MapControls, GetByName('MapPanel'), Self);
     if ResumeMode <> smrTurnFilm then
-      PlayerStar.RefreshSpaceObjectPositions;
+      LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
     BuildSpaceBackground(
         GetByName('StarField') as TStarFieldGI,
         GetByName('SpaceImg') as TSpaceImgGI,
-        PlayerStar.GenerationSeed,
-        PlayerStar.BackgroundImage
+        LocalHuman.PlayerStar.GenerationSeed,
+        LocalHuman.PlayerStar.BackgroundImage
     );
     MapScrollTimer := ScheduleCallbackTimer(ScrollTime, ScrollTime, ScrollMap);
     with GetByName('StarFieldImg') as TStarFieldImgGI do
@@ -1028,7 +1029,7 @@ begin
       SetCursorActive(True);
       ShipToInspect := nil;
       HideLargeHelp;
-      PlayerStar.RefreshMovementStepParameters;
+      LocalHuman.PlayerStar.RefreshMovementStepParameters;
       if GetPlayer <> nil then
         GetPlayer.ScriptItemsAct($18, nil, nil, 0);
       aCalc.WaitForTurnCalculationUI;
@@ -1186,8 +1187,8 @@ var
   Colors: array[0..15] of Cardinal;
 begin
   Seed := StepRandomSeed(Seed);
-  Radius := Round(PlayerStar.ComputeMapDiameter div 2);
-  Diameter := PlayerStar.ComputeMapDiameter;
+  Radius := Round(LocalHuman.PlayerStar.ComputeMapDiameter div 2);
+  Diameter := LocalHuman.PlayerStar.ComputeMapDiameter;
   Scale := RemapClamped(Radius, 2500.0, 4500.0, 1.0, 2.0);
   Count := Round(Scale * 2000.0);
   for Index := 0 to 3 do
@@ -1231,7 +1232,7 @@ begin
   end;
   StarField.MarkViewDirty;
   StarField.Invalidate;
-  System.RandSeed := PlayerStar.GenerationSeed;
+  System.RandSeed := LocalHuman.PlayerStar.GenerationSeed;
   Count := Round(RemapClamped(Scale, 1.0, 2.0, 1.0, 2.0));
   if (GlobalsV.SpaceImage = 1) and (Count > 1) then
     Count := 1;
@@ -1373,7 +1374,7 @@ begin
     begin
       if GetPlayer.CalculateSpeed = 0 then
         GetPlayer.OrderNone(False);
-      if PendingPlayerFollowTarget <> nil then
+      if LocalHuman.PendingPlayerFollowTarget <> nil then
         GetPlayer.ProcessPendingPlayerFollowTargeting;
       PreviousFilmActivity := 0;
       MainPanel.TryAutoTurnSave;
@@ -1383,7 +1384,7 @@ begin
       ClearPathOverlay(False);
       StopOrderMode;
       BreakOnNextFilm := IsVirtualKeyDown(VK_SHIFT);
-      PlayerAutomaticControl := False;
+      LocalHuman.PlayerAutomaticControl := False;
       FilmCameraFollow := ViewFollowShip;
       if not PlayerStarDayPrepared then
         AppendLogLineThreadSafe('Not calc NextDay header');
@@ -1688,10 +1689,10 @@ begin
   LandingTurns := -1;
   if Ship = TerronShip then
     Exit;
-  if (Ship.Order = soFollowShip) or ((Ship = GetPlayer) and (PendingPlayerFollowTarget <> nil)) then
+  if (Ship.Order = soFollowShip) or ((Ship = GetPlayer) and (LocalHuman.PendingPlayerFollowTarget <> nil)) then
   begin
-    if (Ship = GetPlayer) and (PendingPlayerFollowTarget <> nil) then
-      TargetShip := PendingPlayerFollowTarget
+    if (Ship = GetPlayer) and (LocalHuman.PendingPlayerFollowTarget <> nil) then
+      TargetShip := LocalHuman.PendingPlayerFollowTarget
     else
       TargetShip := Ship.OrderTarget as TShip;
     if TargetShip.IsOnPlanet then
@@ -1843,7 +1844,7 @@ begin
       Node := LastNode.Next;
     end;
     if (Ship.Order = soLand)
-        and not ((Ship = GetPlayer) and (PendingPlayerFollowTarget <> nil)) then
+        and not ((Ship = GetPlayer) and (LocalHuman.PendingPlayerFollowTarget <> nil)) then
     begin
       if Ship.OrderTarget is TShip then
         EndPosition :=
@@ -1859,7 +1860,7 @@ begin
     EndImage := TgaiGI.Create(Owner);
     if not DelayEndImage then
     begin
-      if (PendingPlayerFollowTarget <> nil) and (Ship = GetPlayer) then
+      if (LocalHuman.PendingPlayerFollowTarget <> nil) and (Ship = GetPlayer) then
         EndImage.SetImagePath('Bm.PI.PathEndAutoBattle')
       else if Ship.Order = soFollowShip then
       begin
@@ -1883,7 +1884,7 @@ begin
     end
     else
     begin
-      if (PendingPlayerFollowTarget <> nil) and (Ship = GetPlayer) then
+      if (LocalHuman.PendingPlayerFollowTarget <> nil) and (Ship = GetPlayer) then
       begin
         EndImage.SetImagePath(InitialImagePath);
         EndImage.HelpText := 'Bm.PI.PathEndAutoBattle';
@@ -2381,10 +2382,10 @@ begin
     Exit;
   end;
   Point := MapControls.ToLocalPoint(GetCursorPoint);
-  Count := PlayerStar.Missiles.Count;
+  Count := LocalHuman.PlayerStar.Missiles.Count;
   for Index := 0 to Count - 1 do
   begin
-    Missile := TMissile(PlayerStar.Missiles[Index]);
+    Missile := TMissile(LocalHuman.PlayerStar.Missiles[Index]);
     if (Missile <> nil)
         and (Missile.GetGraphObject <> nil)
         and Missile.GetGraphObject.HitTestCursor then
@@ -2399,10 +2400,10 @@ begin
       Exit;
     end;
   end;
-  Count := PlayerStar.Ships.Count;
+  Count := LocalHuman.PlayerStar.Ships.Count;
   for Index := 0 to Count - 1 do
   begin
-    Ship := TShip(PlayerStar.Ships[Index]);
+    Ship := TShip(LocalHuman.PlayerStar.Ships[Index]);
     if not (Ship is TRuins)
         and (Ship <> nil)
         and (Ship.Graphic <> nil)
@@ -2418,10 +2419,10 @@ begin
       Exit;
     end;
   end;
-  Count := PlayerStar.Items.Count;
+  Count := LocalHuman.PlayerStar.Items.Count;
   for Index := 0 to Count - 1 do
   begin
-    Item := TItem(PlayerStar.Items[Index]);
+    Item := TItem(LocalHuman.PlayerStar.Items[Index]);
     if (Item <> nil) and (Item.GetGraphObject <> nil) and Item.GetGraphObject.HitTestCursor then
     begin
       HitObjectPosition :=
@@ -2434,10 +2435,10 @@ begin
       Exit;
     end;
   end;
-  Count := PlayerStar.Ships.Count;
+  Count := LocalHuman.PlayerStar.Ships.Count;
   for Index := 0 to Count - 1 do
   begin
-    Ship := TShip(PlayerStar.Ships[Index]);
+    Ship := TShip(LocalHuman.PlayerStar.Ships[Index]);
     if (Ship is TRuins)
         and (Ship <> nil)
         and (Ship.Graphic <> nil)
@@ -2453,10 +2454,10 @@ begin
       Exit;
     end;
   end;
-  Count := PlayerStar.Asteroids.Count;
+  Count := LocalHuman.PlayerStar.Asteroids.Count;
   for Index := 0 to Count - 1 do
   begin
-    Asteroid := TAsteroid(PlayerStar.Asteroids[Index]);
+    Asteroid := TAsteroid(LocalHuman.PlayerStar.Asteroids[Index]);
     if (Asteroid <> nil)
         and (Asteroid.GraphObject <> nil)
         and Asteroid.GraphObject.HitTestCursor then
@@ -2471,10 +2472,10 @@ begin
       Exit;
     end;
   end;
-  Count := PlayerStar.Planets.Count;
+  Count := LocalHuman.PlayerStar.Planets.Count;
   for Index := 0 to Count - 1 do
   begin
-    Planet := TPlanet(PlayerStar.Planets[Index]);
+    Planet := TPlanet(LocalHuman.PlayerStar.Planets[Index]);
     if Planet.Graphic.IsRuins then
     begin
       if Planet.Graphic.HitTestCursor then
@@ -2502,21 +2503,21 @@ begin
       Exit;
     end;
   end;
-  if Point.X * Point.X + Point.Y * Point.Y < Sqr(PlayerStar.Radius) then
+  if Point.X * Point.X + Point.Y * Point.Y < Sqr(LocalHuman.PlayerStar.Radius) then
   begin
     HitObjectPosition :=
         Classes.Point(
-            Round(PlayerStar.Graphic.Position.X) - GetMapCenter.X,
-            Round(PlayerStar.Graphic.Position.Y) - GetMapCenter.Y
+            Round(LocalHuman.PlayerStar.Graphic.Position.X) - GetMapCenter.X,
+            Round(LocalHuman.PlayerStar.Graphic.Position.Y) - GetMapCenter.Y
         );
     HitObjectSize := Classes.Point(300, 300);
-    Result := PlayerStar;
+    Result := LocalHuman.PlayerStar;
     Exit;
   end;
   for Index := 0 to Galaxy.Holes.Count - 1 do
   begin
     Hole := THole(Galaxy.Holes[Index]);
-    if ((Hole.Star1 = PlayerStar) or (Hole.Star2 = PlayerStar)) and (Hole.Graphic <> nil) then
+    if ((Hole.Star1 = LocalHuman.PlayerStar) or (Hole.Star2 = LocalHuman.PlayerStar)) and (Hole.Graphic <> nil) then
     begin
       if PointDistanceSquared(Hole.Graphic.Position, PointToPointF(Point))
           < Sqr(THoleSE(Hole.Graphic).HitRadius) then
@@ -3169,7 +3170,7 @@ begin
     else if CursorObject is THole then
     begin
       // Kept by the native routine despite the outer hole exclusion.
-      if THole(CursorObject).Star1 = PlayerStar then
+      if THole(CursorObject).Star1 = LocalHuman.PlayerStar then
         TargetPosition := THole(CursorObject).Position1
       else
         TargetPosition := THole(CursorObject).Position2;
@@ -3286,7 +3287,7 @@ begin
   if CursorObject = nil then
   begin
     ClearPathOverlay(True);
-    PendingPlayerFollowTarget := nil;
+    LocalHuman.PendingPlayerFollowTarget := nil;
     aCalc.WaitForTurnCalculationUI;
     GetPlayer.OrderMove(Destination, False);
     GetPlayer.BuildOrderMovementPath(999999);
@@ -3331,7 +3332,7 @@ begin
     Location := CursorObject as TPlanet;
     ClearPathOverlay(True);
     aCalc.WaitForTurnCalculationUI;
-    PendingPlayerFollowTarget := nil;
+    LocalHuman.PendingPlayerFollowTarget := nil;
     if not (((GetPlayer.Order = soLand) and (GetPlayer.OrderTarget = Location))
         or ((CursorObject as TPlanet).OwnerId = Byte(oiDominator))
         or ((GetPlayer.CurrentStar.Status.CustomFaction <> '')
@@ -3354,7 +3355,7 @@ begin
     Hole := CursorObject as THole;
     ClearPathOverlay(True);
     aCalc.WaitForTurnCalculationUI;
-    PendingPlayerFollowTarget := nil;
+    LocalHuman.PendingPlayerFollowTarget := nil;
     if not ((GetPlayer.Order = soJumpHole) and (GetPlayer.OrderTarget = Hole)) then
     begin
       GetPlayer.OrderJumpHole(Hole, False);
@@ -3377,7 +3378,7 @@ begin
     Ship := CursorObject as TShip;
     ClearPathOverlay(True);
     aCalc.WaitForTurnCalculationUI;
-    PendingPlayerFollowTarget := nil;
+    LocalHuman.PendingPlayerFollowTarget := nil;
     if HadWeapons and (GetPlayer <> CursorObject) then
     begin
       Mode := 0;
@@ -3566,7 +3567,7 @@ begin
       aCalc.WaitForTurnCalculationUI;
       GetPlayer.OrderNone(False);
       if GetPlayer.CanSelectShipTarget(CursorObject as TShip) then
-        PendingPlayerFollowTarget := CursorObject as TShip;
+        LocalHuman.PendingPlayerFollowTarget := CursorObject as TShip;
       aCalc.WaitForTurnCalculationUI;
       BuildShipPathOverlay(GetPlayer, False, '');
       ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveAuto'));
@@ -3575,14 +3576,14 @@ begin
     begin
       ClearPathOverlay(True);
       aCalc.WaitForTurnCalculationUI;
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
       GetPlayer.OrderNone(False);
       aCalc.WaitForTurnCalculationUI;
     end
     else
     begin
       Mode := 0;
-      if PendingPlayerFollowTarget = Ship then
+      if LocalHuman.PendingPlayerFollowTarget = Ship then
         Mode := 1
       else if (GetPlayer.Order = soFollowShip) and (GetPlayer.OrderTarget = Ship) then
       begin
@@ -3635,18 +3636,18 @@ begin
         if Mode = 1 then
         begin
           GetPlayer.OrderNone(False);
-          PendingPlayerFollowTarget := CursorObject as TShip;
+          LocalHuman.PendingPlayerFollowTarget := CursorObject as TShip;
           ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveAuto'));
         end
         else if Mode = 2 then
         begin
-          PendingPlayerFollowTarget := nil;
+          LocalHuman.PendingPlayerFollowTarget := nil;
           GetPlayer.OrderFollowShip(Ship, 0, False);
           ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveNear'));
         end
         else if Mode = 3 then
         begin
-          PendingPlayerFollowTarget := nil;
+          LocalHuman.PendingPlayerFollowTarget := nil;
           GetPlayer.OrderFollowShip(Ship, 1, False);
           ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveShot'));
         end;
@@ -3828,7 +3829,7 @@ begin
       Hole := CursorObject as THole;
       ClearPathOverlay(True);
       aCalc.WaitForTurnCalculationUI;
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
       GetPlayer.OrderJumpHole(Hole, False);
       GetPlayer.OrderDestination := Destination;
       GetPlayer.BuildOrderMovementPath(999999);
@@ -3841,7 +3842,7 @@ begin
       Ship := CursorObject as TShip;
       ClearPathOverlay(True);
       aCalc.WaitForTurnCalculationUI;
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
       GetPlayer.OrderLanding(Ship, False);
       GetPlayer.OrderDestination := SubtractPointsF(Destination, Ship.Position);
       aCalc.WaitForTurnCalculationUI;
@@ -3854,7 +3855,7 @@ begin
       ClearPathOverlay(True);
       Ship := CursorObject as TShip;
       FollowMode := 0;
-      if PendingPlayerFollowTarget = Ship then
+      if LocalHuman.PendingPlayerFollowTarget = Ship then
         FollowMode := 1
       else if (GetPlayer.Order = soFollowShip) and (GetPlayer.OrderTarget = Ship) then
       begin
@@ -3889,18 +3890,18 @@ begin
       if FollowMode = 1 then
       begin
         GetPlayer.OrderNone(False);
-        PendingPlayerFollowTarget := CursorObject as TShip;
+        LocalHuman.PendingPlayerFollowTarget := CursorObject as TShip;
         ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveAuto'));
       end
       else if FollowMode = 2 then
       begin
-        PendingPlayerFollowTarget := nil;
+        LocalHuman.PendingPlayerFollowTarget := nil;
         GetPlayer.OrderFollowShip(Ship, 0, False);
         ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveNear'));
       end
       else if FollowMode = 3 then
       begin
-        PendingPlayerFollowTarget := nil;
+        LocalHuman.PendingPlayerFollowTarget := nil;
         GetPlayer.OrderFollowShip(Ship, 1, False);
         ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveShot'));
       end;
@@ -3913,7 +3914,7 @@ begin
       Planet := CursorObject as TPlanet;
       ClearPathOverlay(True);
       aCalc.WaitForTurnCalculationUI;
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
       if ((CursorObject as TPlanet).OwnerId <> Byte(oiDominator))
           and ((GetPlayer.CurrentStar.Status.CustomFaction = '')
               or ((CursorObject as TPlanet).OwnerId = Byte(oiUninhabited))) then
@@ -3939,7 +3940,7 @@ begin
       CameraVector.X := Round(TItem(CursorObject).Position.X + Scale * CameraVector.X);
       CameraVector.Y := Round(TItem(CursorObject).Position.Y + Scale * CameraVector.Y);
       aCalc.WaitForTurnCalculationUI;
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
       GetPlayer.OrderMove(CameraVector, False);
       if CanCargoHookHandleItem(TItem(CursorObject), GetPlayer)
           and not GetPlayer.IsRecentlyDroppedItem(TItem(CursorObject)) then
@@ -4077,7 +4078,7 @@ begin
         begin
           ClearPathOverlay(True);
           FollowMode := 0;
-          if PendingPlayerFollowTarget = Ship then
+          if LocalHuman.PendingPlayerFollowTarget = Ship then
             FollowMode := 1
           else if (GetPlayer.Order = soFollowShip) and (GetPlayer.OrderTarget = Ship) then
           begin
@@ -4114,18 +4115,18 @@ begin
           if FollowMode = 1 then
           begin
             GetPlayer.OrderNone(False);
-            PendingPlayerFollowTarget := CursorObject as TShip;
+            LocalHuman.PendingPlayerFollowTarget := CursorObject as TShip;
             ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveAuto'));
           end
           else if FollowMode = 2 then
           begin
-            PendingPlayerFollowTarget := nil;
+            LocalHuman.PendingPlayerFollowTarget := nil;
             GetPlayer.OrderFollowShip(Ship, 0, False);
             ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveNear'));
           end
           else if FollowMode = 3 then
           begin
-            PendingPlayerFollowTarget := nil;
+            LocalHuman.PendingPlayerFollowTarget := nil;
             GetPlayer.OrderFollowShip(Ship, 1, False);
             ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveShot'));
           end;
@@ -4495,9 +4496,9 @@ begin
           ItemObject := Obj as TItem;
           if ItemObject.ScriptItem <> nil then
             TScriptItem(ItemObject.ScriptItem)
-                .RunActionCode(satOnShowingItemInfo, nil, PlayerStar, nil, 0);
+                .RunActionCode(satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil, 0);
           if ItemObject is TEquipmentWithActCode then
-            RunItemConfigActionCode(ItemObject, satOnShowingItemInfo, nil, PlayerStar, nil, 0);
+            RunItemConfigActionCode(ItemObject, satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil, 0);
         end;
         GetByName('InfoStdGB').SetActive(False);
         with GetByName('InfoStdImage') as TImageGI do
@@ -4865,9 +4866,9 @@ begin
         ItemObject := Obj as TItem;
         if ItemObject.ScriptItem <> nil then
           TScriptItem(ItemObject.ScriptItem)
-              .RunActionCode(satOnShowingItemInfo, nil, PlayerStar, nil, 0);
+              .RunActionCode(satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil, 0);
         if ItemObject is TEquipmentWithActCode then
-          RunItemConfigActionCode(ItemObject, satOnShowingItemInfo, nil, PlayerStar, nil, 0);
+          RunItemConfigActionCode(ItemObject, satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil, 0);
       end;
       with GetByName('InfoItemImage') as TImageGI do
       begin
@@ -5937,9 +5938,9 @@ begin
   NearestDistance := 1.0E20;
   NearestShip := nil;
   FarthestShip := nil;
-  for Index := 0 to PlayerStar.Ships.Count - 1 do
+  for Index := 0 to LocalHuman.PlayerStar.Ships.Count - 1 do
   begin
-    Ship := PlayerStar.Ships[Index];
+    Ship := LocalHuman.PlayerStar.Ships[Index];
     if not Ship.IsOutsideStarSpace and (Ship is TKling) then
     begin
       Distance := PointDistance(GetPlayer.Position, Ship.Position);
@@ -6659,7 +6660,7 @@ begin
       Point := TPlanet(Obj).GetPosition
     else if CursorObject is THole then
     begin
-      if THole(Obj).Star1 = PlayerStar then
+      if THole(Obj).Star1 = LocalHuman.PlayerStar then
         Point := THole(Obj).Position1
       else
         Point := THole(Obj).Position2;
@@ -6880,12 +6881,12 @@ var
   Ship: TShip;
 begin
   if (Mode = smmOrders)
-      and ((GetPlayer.Order = soFollowShip) or (PendingPlayerFollowTarget <> nil)) then
+      and ((GetPlayer.Order = soFollowShip) or (LocalHuman.PendingPlayerFollowTarget <> nil)) then
   begin
     ClearPathOverlay(True);
-    if PendingPlayerFollowTarget <> nil then
+    if LocalHuman.PendingPlayerFollowTarget <> nil then
     begin
-      Ship := PendingPlayerFollowTarget;
+      Ship := LocalHuman.PendingPlayerFollowTarget;
       FollowMode := 1;
     end
     else if Byte(GetPlayer.OrderStateData) = 1 then
@@ -6917,18 +6918,18 @@ begin
     if FollowMode = 1 then
     begin
       GetPlayer.OrderNone(False);
-      PendingPlayerFollowTarget := Ship;
+      LocalHuman.PendingPlayerFollowTarget := Ship;
       ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveAuto'));
     end
     else if FollowMode = 2 then
     begin
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
       GetPlayer.OrderFollowShip(Ship, 0, False);
       ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveNear'));
     end
     else if FollowMode = 3 then
     begin
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
       GetPlayer.OrderFollowShip(Ship, 1, False);
       ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveShot'));
     end;
@@ -7238,7 +7239,7 @@ begin
         ReleaseAllTextureSurfaces;
       end
       else if (GetPlayer <> nil)
-          and not PlayerAutomaticControl
+          and not LocalHuman.PlayerAutomaticControl
           and GetPlayer.IsOnPlanet
           and not GetPlayer.Graphic.IsAttachedToSpace then
       begin
@@ -7263,7 +7264,7 @@ begin
         ReleaseAllTextureSurfaces;
       end
       else if (GetPlayer <> nil)
-          and not PlayerAutomaticControl
+          and not LocalHuman.PlayerAutomaticControl
           and GetPlayer.IsDockedToShip
           and not GetPlayer.Graphic.IsAttachedToSpace then
       begin

@@ -774,8 +774,6 @@ var
   ReservedMessageCounter: Integer = 0;
   TurnsSinceLastShipMessage: Cardinal = 0;
   Galaxy: TGalaxy;
-  PlayerStar: TStar;
-  PlayerDialogueRequestCount: Byte;
   WingmenPendingLeadershipPenalty: TList;
   CameraSpeed: Integer = 10;
   FastCameraSpeed: Integer = 20;
@@ -792,6 +790,7 @@ procedure UpdateTurnFilmActivity(
 implementation
 
 uses
+  aHuman,
   ObserverHooks,
   SE_Garbage,
   SE_Sputnik,
@@ -1064,7 +1063,7 @@ begin
   JumpGates.Free;
   JumpGates := nil;
   SetPlayer(nil, Self);
-  PlayerStar := nil;
+  LocalHuman.PlayerStar := nil;
   if DominatorSpawnPlanet <> nil then
   begin
     DominatorSpawnPlanet.Free;
@@ -1332,10 +1331,10 @@ begin
   for Difficulty := 0 to 7 do
     Buffer.AddAnsiChar(AnsiChar(DifficultyLevels[Difficulty]));
   Buffer.AddDWord(GetPlayer.Id);
-  if PendingPlayerFollowTarget = nil then
+  if LocalHuman.PendingPlayerFollowTarget = nil then
     Buffer.AddDWord(0)
   else
-    Buffer.AddDWord(PendingPlayerFollowTarget.Id);
+    Buffer.AddDWord(LocalHuman.PendingPlayerFollowTarget.Id);
   if BlazerShip = nil then
     Buffer.AddDWord(0)
   else
@@ -1348,7 +1347,7 @@ begin
     Buffer.AddDWord(0)
   else
     Buffer.AddDWord(TerronShip.Id);
-  Buffer.AddDWord(PlayerStar.Id);
+  Buffer.AddDWord(LocalHuman.PlayerStar.Id);
   Buffer.AddDWord(PieceCreatorTargetStarId);
   for Career := 0 to 2 do
   begin
@@ -1357,11 +1356,11 @@ begin
     else
       Buffer.AddDWord((EminentCareerShips[Career] as TShip).Id);
   end;
-  Count := PlayerOldQuests.Count;
+  Count := LocalHuman.PlayerOldQuests.Count;
   Buffer.AddWideChar(WideChar(Count));
   for I := 0 to Count - 1 do
   begin
-    OldQuest := PlayerOldQuests[I];
+    OldQuest := LocalHuman.PlayerOldQuests[I];
     if OldQuest.Planet = nil then
       Buffer.AddDWord(0)
     else
@@ -1833,11 +1832,11 @@ begin
     for Difficulty := 0 to 7 do
       DifficultyLevels[Difficulty] := Buffer.GetByte;
     PlayerRangerIndex := Buffer.GetUInt32;
-    PendingPlayerFollowTarget := TShip(Buffer.GetUInt32);
+    LocalHuman.PendingPlayerFollowTarget := TShip(Buffer.GetUInt32);
     BlazerShip := TKling(Buffer.GetUInt32);
     KellerShip := TKling(Buffer.GetUInt32);
     TerronShip := TKling(Buffer.GetUInt32);
-    PlayerStar := TStar(Buffer.GetUInt32);
+    LocalHuman.PlayerStar := TStar(Buffer.GetUInt32);
     PieceCreatorTargetStarId := Buffer.GetUInt32;
     Stage := 14;
     for Career := 0 to 2 do
@@ -1889,23 +1888,23 @@ begin
     if KellerTargetStar <> nil then
       KellerTargetStar := TObject(IdToStar(Cardinal(KellerTargetStar))) as TStar;
     Stage := 23;
-    PendingPlayerFollowTarget :=
-        TObject(IdToShip(Cardinal(PendingPlayerFollowTarget), True)) as TShip;
+    LocalHuman.PendingPlayerFollowTarget :=
+        TObject(IdToShip(Cardinal(LocalHuman.PendingPlayerFollowTarget), True)) as TShip;
     BlazerShip := TObject(IdToShip(Cardinal(BlazerShip), True)) as TKling;
     KellerShip := TObject(IdToShip(Cardinal(KellerShip), True)) as TKling;
     TerronShip := TObject(IdToShip(Cardinal(TerronShip), True)) as TKling;
-    PlayerStar := TObject(IdToStar(Cardinal(PlayerStar))) as TStar;
+    LocalHuman.PlayerStar := TObject(IdToStar(Cardinal(LocalHuman.PlayerStar))) as TStar;
     Stage := 24;
     for Career := 0 to 2 do
       EminentCareerShips[Career] :=
           TObject(IdToShip(Cardinal(EminentCareerShips[Career]), True)) as TRanger;
     Stage := 25;
-    if PlayerOldQuests <> nil then
+    if LocalHuman.PlayerOldQuests <> nil then
     begin
-      PlayerOldQuests.Free;
-      PlayerOldQuests := nil;
+      LocalHuman.PlayerOldQuests.Free;
+      LocalHuman.PlayerOldQuests := nil;
     end;
-    PlayerOldQuests := TList.Create;
+    LocalHuman.PlayerOldQuests := TList.Create;
     Count := Buffer.GetWord;
     Stage := 26;
     if (Count < 0) or (Count > 10000) then
@@ -1913,7 +1912,7 @@ begin
     for I := 0 to Count - 1 do
     begin
       New(OldQuest);
-      PlayerOldQuests.Add(OldQuest);
+      LocalHuman.PlayerOldQuests.Add(OldQuest);
       OldQuest.Planet := TPlanet(Buffer.GetUInt32);
       OldQuest.Planet := TObject(IdToPlanet(Cardinal(OldQuest.Planet))) as TPlanet;
       OldQuest.QuestType := TQuestType(Buffer.GetByte);
@@ -2779,7 +2778,7 @@ begin
       Stage := 9;
       UpdateConstellationMilitaryStats;
       Stage := 10;
-      PlayerDialogueRequestCount := 0;
+      LocalHuman.PlayerDialogueRequestCount := 0;
       Inc(ReservedMessageCounter);
       Inc(TurnsSinceLastShipMessage);
       if CurrentTurn mod 365 = 0 then
@@ -2864,7 +2863,7 @@ begin
   begin
     GetPlayer.AfterburnerActive := False;
     GetPlayer.RefreshDerivedStats(True);
-    PlayerStar.InterruptLongTravel := True;
+    LocalHuman.PlayerStar.InterruptLongTravel := True;
   end;
   if GetPlayer <> nil then
   begin
@@ -3815,18 +3814,18 @@ begin
   end;
   MinRadius := MinRadius div 2;
   MaxRadius := MaxRadius div 2;
-  StarRadius := PlayerStar.MapDiameter div 2;
+  StarRadius := LocalHuman.PlayerStar.MapDiameter div 2;
   // The native formula requires differing extrema; retain that assumption.
-  RadiusFraction := (PlayerStar.MapDiameter div 2 - MinRadius) / (MaxRadius - MinRadius);
+  RadiusFraction := (LocalHuman.PlayerStar.MapDiameter div 2 - MinRadius) / (MaxRadius - MinRadius);
   if SpaceImage <= 1 then
     Density := 0.5
   else
     Density := 1;
   EntryIndex := 0;
   Capacity := 500;
-  NearDepth := RemapClamped(PlayerStar.MapDiameter div 2, MinRadius, MaxRadius, 5.1, 7.1);
-  FarDepth := RemapClamped(PlayerStar.MapDiameter div 2, MinRadius, MaxRadius, 7, 10);
-  DepthScale := RemapClamped(PlayerStar.MapDiameter div 2, MinRadius, MaxRadius, 1, 1.5);
+  NearDepth := RemapClamped(LocalHuman.PlayerStar.MapDiameter div 2, MinRadius, MaxRadius, 5.1, 7.1);
+  FarDepth := RemapClamped(LocalHuman.PlayerStar.MapDiameter div 2, MinRadius, MaxRadius, 7, 10);
+  DepthScale := RemapClamped(LocalHuman.PlayerStar.MapDiameter div 2, MinRadius, MaxRadius, 1, 1.5);
   SetLength(SpaceBackgroundEntries, Capacity);
   if BackgroundIndex < 10 then
     Style := GameDataConfig.GetBlockByPath('StyleGarbage').GetParam('0' + IntToStr(BackgroundIndex))
@@ -3901,7 +3900,7 @@ begin
   for I := 0 to GroupCount - 1 do
   begin
     repeat
-      J := Round(PlayerStar.MapDiameter * 0.8);
+      J := Round(LocalHuman.PlayerStar.MapDiameter * 0.8);
       Center.X := RandomIntRange(-J, J);
       Center.Y := RandomIntRange(-J, J);
       Center.Z := FarDepth + RandomFloatRange(2.05, 3) * DepthScale;
@@ -4990,7 +4989,7 @@ begin
     begin
       Entry := MovingDropItems[MovingDropItems.Count - 1 - I];
       Radius := SeededRandomIntRange(50, 150, Seed);
-      if (PlayerStar = Self) and (CurrentStepIndex > SimulationStepCount - 20) then
+      if (LocalHuman.PlayerStar = Self) and (CurrentStepIndex > SimulationStepCount - 20) then
         Radius := 5;
       Seed := StepRandomSeed(Seed);
       Jitter := SeededRandomUnitFloat(Seed) * 0.3 - 0.15;
@@ -5798,7 +5797,7 @@ begin
     Result := False;
     Exit;
   end;
-  if PlayerStar.KeepFilmRunning then
+  if LocalHuman.PlayerStar.KeepFilmRunning then
   begin
     Result := True;
     Exit;
@@ -5809,24 +5808,24 @@ begin
     Result := False;
     Exit;
   end;
-  if PlayerEquipmentBrokenThisTurn then
+  if LocalHuman.PlayerEquipmentBrokenThisTurn then
   begin
     Result := False;
     Exit;
   end;
-  if (PendingPlayerFollowTarget <> nil) and (GetPlayer.GetHullIntegrityPercent < 25) then
+  if (LocalHuman.PendingPlayerFollowTarget <> nil) and (GetPlayer.GetHullIntegrityPercent < 25) then
   begin
     Result := False;
     Exit;
   end;
-  if PlayerAutomaticControl
-      or ((PendingPlayerFollowTarget <> nil) and not PlayerStar.InterruptLongTravel) then
+  if LocalHuman.PlayerAutomaticControl
+      or ((LocalHuman.PendingPlayerFollowTarget <> nil) and not LocalHuman.PlayerStar.InterruptLongTravel) then
     Result := True
   else
   begin
     GetPlayer.BuildOrderMovementPath(200);
-    if not PlayerStar.PlayerCombatOccurred
-        and not PlayerStar.InterruptLongTravel
+    if not LocalHuman.PlayerStar.PlayerCombatOccurred
+        and not LocalHuman.PlayerStar.InterruptLongTravel
         and (GetPlayer.GetMovementPathTurnCount > 0)
         and ((GetPlayer.Order <> soMove)
             or (PointDistanceSquared(GetPlayer.Position, GetPlayer.OrderDestination) > 19600)) then
@@ -5851,12 +5850,12 @@ begin
   Result := 0;
   if GetPlayer = nil then
     Exit;
-  if PlayerStar.PlayerCombatOccurred or PlayerStar.InterruptLongTravel then
+  if LocalHuman.PlayerStar.PlayerCombatOccurred or LocalHuman.PlayerStar.InterruptLongTravel then
     Exit;
   if GetPlayer.PickupTargets <> nil then
     Exit;
-  if PendingPlayerFollowTarget <> nil then
-    Destination := PendingPlayerFollowTarget.Position
+  if LocalHuman.PendingPlayerFollowTarget <> nil then
+    Destination := LocalHuman.PendingPlayerFollowTarget.Position
   else if GetPlayer.Order = soMove then
     Destination := GetPlayer.OrderDestination
   else if GetPlayer.Order = soJump then
@@ -8699,9 +8698,9 @@ var
   I: Integer;
   Quest: PPlayerOldQuest;
 begin
-  for I := PlayerOldQuests.Count - 1 downto 0 do
+  for I := LocalHuman.PlayerOldQuests.Count - 1 downto 0 do
   begin
-    Quest := PlayerOldQuests[I];
+    Quest := LocalHuman.PlayerOldQuests[I];
     if (QuestType = Quest.QuestType) and (QuestNumber = Quest.QuestNumber) then
     begin
       Result := True;
@@ -12958,7 +12957,7 @@ var
       Ship.RefreshDerivedStats(True);
     end
     else if (Item.ItemType in [t_FuelTanks..t_CustomWeapon])
-        and (PlayerAutomaticControl
+        and (LocalHuman.PlayerAutomaticControl
             or ((GetPlayer <> Ship) and (Ship.TypeId <> stTranclucator))) then
     begin
       Ship.AutoEquipInventory;
@@ -13559,7 +13558,7 @@ begin
                         OwnerShip.ClearMovementPath;
                         if (Angle < 175.0)
                             and ((OwnerShip.Speed >= 200)
-                                and (OwnerShip.CurrentStar = PlayerStar)) then
+                                and (OwnerShip.CurrentStar = LocalHuman.PlayerStar)) then
                         begin
                           Distance :=
                               1.0
@@ -13586,7 +13585,7 @@ begin
       end;
     end;
     Stage := 16;
-    if PlayerStar = Self then
+    if LocalHuman.PlayerStar = Self then
       Self.AvoidShipPathCollisions;
     Stage := 17;
     if RecordFilm then
@@ -14293,7 +14292,7 @@ begin
                         150,
                         Self.GenerationSeed * Cardinal(Galaxy.CurrentTurn) * Cardinal(Item.Id)
                     );
-                if (PlayerStar = Self) and (Count - 20 < PathStep) then
+                if (LocalHuman.PlayerStar = Self) and (Count - 20 < PathStep) then
                   Distance := 5.0;
                 Angle :=
                     SeededRandomUnitFloat(
@@ -14399,7 +14398,7 @@ begin
                         Cardinal((TObject(MovingDrop^.Payload) as TItem).Id)
                             * (Self.GenerationSeed * Cardinal(Galaxy.CurrentTurn))
                     );
-                if (PlayerStar = Self) and (Count - 20 < PathStep) then
+                if (LocalHuman.PlayerStar = Self) and (Count - 20 < PathStep) then
                   Distance := 5.0;
                 WorkScale :=
                     SeededRandomUnitFloat(
@@ -16016,11 +16015,11 @@ begin
     Stage := 44;
     if (GetPlayer <> nil)
         and ((GetPlayer.CurrentStar = Self)
-            and ((aRanger.PendingPlayerFollowTarget <> nil)
-                and ((aRanger.PendingPlayerFollowTarget.CurrentStar <> Self)
-                    or not aRanger.PendingPlayerFollowTarget.InNormalSpace))) then
+            and ((LocalHuman.PendingPlayerFollowTarget <> nil)
+                and ((LocalHuman.PendingPlayerFollowTarget.CurrentStar <> Self)
+                    or not LocalHuman.PendingPlayerFollowTarget.InNormalSpace))) then
     begin
-      aRanger.PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
       GetPlayer.OrderNone(False);
     end;
     Self.RecordingTurnFilm := False;

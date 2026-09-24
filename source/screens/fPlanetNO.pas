@@ -104,6 +104,7 @@ const
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   fGalaxy2,
   Windows,
   aTranclucator,
@@ -346,7 +347,7 @@ begin
   for I := 0 to Galaxy.Scripts.Count - 1 do
     TScript(Galaxy.Scripts[I]).RunTurnCode;
   StarMapScreen.SetMapCenterManually(TruncatePointF(GetPlayer.Position));
-  PlayerStar.RefreshSpaceObjectPositions;
+  LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
   RunGlobalScriptsForContext(GetPlayer.CurrentStar, 1);
   if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
     Galaxy.EnableDominatorSurfaces

@@ -82,6 +82,7 @@ procedure ProcessSystemLiberationRewards(SourceShip: TNormalShip; Star: TStar);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   EC_Str,
   aGalaxyEvent,
   Classes,
@@ -268,7 +269,7 @@ begin
         and InNormalSpace
         and GetPlayer.InNormalSpace
         and (PointDistance(Position, GetPlayer.Position) < GetRadarRange)
-        and not PlayerAutomaticControl
+        and not LocalHuman.PlayerAutomaticControl
         and not GetPlayer.ProcessPendingPlayerFollowTargeting
         and (ScriptShip = nil)
         and (LiberationGroup = nil) then
@@ -1319,7 +1320,7 @@ begin
               if Planet.IsCoalitionOwned then
                 Planet.ChangeRelationToRanger(Ship, 100);
             end;
-          if Ship.InNormalSpace and ((GetPlayer <> Ship) or PlayerAutomaticControl) then
+          if Ship.InNormalSpace and ((GetPlayer <> Ship) or LocalHuman.PlayerAutomaticControl) then
             Ship.OrderLanding(CeremonyPlanet, True);
           LogPlayerEvent(Ship);
         end;
@@ -1412,7 +1413,7 @@ begin
               if (GetPlayer = Ship) and (GetPlayer.PirateLicenseTicks > 0) then
                 Inc(GetPlayer.PirateLicenseCash, Round(Galaxy.AverageRangerCapital / 1000));
             end;
-          if Ship.InNormalSpace and ((GetPlayer <> Ship) or PlayerAutomaticControl) then
+          if Ship.InNormalSpace and ((GetPlayer <> Ship) or LocalHuman.PlayerAutomaticControl) then
             Ship.OrderLanding(CeremonyPlanet, True);
           LogPlayerEvent(Ship);
           if GetPlayer = Ship then

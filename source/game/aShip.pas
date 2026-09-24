@@ -853,6 +853,7 @@ function CalculateRoundedFuelCost(Amount: Integer; OwnerId: Byte): Integer;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   SimulationThread,
   ObserverHooks,
   SE_Process,
@@ -1026,8 +1027,8 @@ var
   Storage: PStorageEntry;
   SavedAbsoluteOrder: Byte;
 begin
-  if PendingPlayerFollowTarget = Self then
-    PendingPlayerFollowTarget := nil;
+  if LocalHuman.PendingPlayerFollowTarget = Self then
+    LocalHuman.PendingPlayerFollowTarget := nil;
   if (TerronShip = Self) and not DestroyQueued then
     Galaxy.TerronLandingLockTurn := 0;
   if ScriptShip <> nil then
@@ -3498,7 +3499,7 @@ begin
     begin
       Ship.TransferToStar(Star);
       if GetPlayer = Ship then
-        PlayerStar := Star;
+        LocalHuman.PlayerStar := Star;
     end;
     Dec(I);
   end;
@@ -3716,7 +3717,7 @@ procedure TShip.CancelInvalidTravelOrder;
   procedure Cancel; // @addr 0x752B64 @ida "void __cdecl $name(void *ParentFrame);" @note "Caller-popped static link; ship at ParentFrame-4."
   begin
     if GetPlayer = Self then
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
     OrderNone(False);
   end;
 begin
@@ -6510,7 +6511,7 @@ begin
     if GetPlayer = Self then
     begin
       OrderNone(False);
-      PendingPlayerFollowTarget := Target;
+      LocalHuman.PendingPlayerFollowTarget := Target;
     end
     else
       OrderFollowShip(EnemyShip, 1, True);
@@ -6529,7 +6530,7 @@ begin
     if GetPlayer = Ally then
     begin
       GetPlayer.OrderNone(False);
-      PendingPlayerFollowTarget := Target;
+      LocalHuman.PendingPlayerFollowTarget := Target;
     end
     else
       Ally.OrderFollowShip(Ally.EnemyShip, 1, True);
@@ -6628,13 +6629,13 @@ begin
   begin
     if TypeId = stRanger then
       (Self as TRanger).AddPirateCareerActivity(2);
-    if (GetPlayer = Target) and not PlayerAutomaticControl then
+    if (GetPlayer = Target) and not LocalHuman.PlayerAutomaticControl then
     begin
       if Cardinal(ReservedMessageCounter) < 7 then
         Exit;
       ReservedMessageCounter := 0;
-      Inc(PlayerDialogueRequestCount);
-      if PlayerDialogueRequestCount > 1 then
+      Inc(LocalHuman.PlayerDialogueRequestCount);
+      if LocalHuman.PlayerDialogueRequestCount > 1 then
         Exit;
     end;
     if (GetCargoHook <> nil)
@@ -6646,7 +6647,7 @@ begin
         Result := True;
       if (GetPlayer.CurrentStar = CurrentStar)
           and (Result or (NextRandomUnitFloat(RandomState) > 0.8))
-          and ((GetPlayer <> Target) or PlayerAutomaticControl) then
+          and ((GetPlayer <> Target) or LocalHuman.PlayerAutomaticControl) then
         NotifyCargoDemand(Target, Response);
     end
     else
@@ -6656,7 +6657,7 @@ begin
         Result := True;
       if (GetPlayer.CurrentStar = CurrentStar)
           and (Result or (NextRandomUnitFloat(RandomState) > 0.8))
-          and ((GetPlayer <> Target) or PlayerAutomaticControl) then
+          and ((GetPlayer <> Target) or LocalHuman.PlayerAutomaticControl) then
         NotifyMoneyDemand(Target, Response, Amount);
     end;
   end;
@@ -6669,9 +6670,9 @@ var
   Missile: TMissile;
   Other: TShip;
 begin
-  if ((GetPlayer = Ship) and (PendingPlayerFollowTarget = Self))
-      or ((GetPlayer = Self) and (PendingPlayerFollowTarget = Ship)) then
-    PendingPlayerFollowTarget := nil;
+  if ((GetPlayer = Ship) and (LocalHuman.PendingPlayerFollowTarget = Self))
+      or ((GetPlayer = Self) and (LocalHuman.PendingPlayerFollowTarget = Ship)) then
+    LocalHuman.PendingPlayerFollowTarget := nil;
   if EnemyShip = Ship then
     EnemyShip := nil;
   if Ship.EnemyShip = Self then
@@ -6798,19 +6799,19 @@ begin
                 or not (Target is TNormalShip)
                 or (Target.OwnerId <> Byte(oiPirate))) then
         begin
-          if (GetPlayer = Other) and not PlayerAutomaticControl then
+          if (GetPlayer = Other) and not LocalHuman.PlayerAutomaticControl then
           begin
             if Cardinal(ReservedMessageCounter) < 7 then
               Continue;
             ReservedMessageCounter := 0;
-            Inc(PlayerDialogueRequestCount);
-            if PlayerDialogueRequestCount > 1 then
+            Inc(LocalHuman.PlayerDialogueRequestCount);
+            if LocalHuman.PlayerDialogueRequestCount > 1 then
               Continue;
           end;
           if (Other.BuildAttackRequestResponse(Self, Response, Target)
                   or (NextRandomUnitFloat(RandomState) > 0.8))
               and (GetPlayer.CurrentStar = CurrentStar)
-              and ((GetPlayer <> Other) or PlayerAutomaticControl) then
+              and ((GetPlayer <> Other) or LocalHuman.PlayerAutomaticControl) then
           begin
             NotifyAttackRequest(Other, Response, Target);
             Break;
@@ -11325,7 +11326,7 @@ begin
                   .ShipId :=
               Id;
       end;
-      PlayerEquipmentBrokenThisTurn := True;
+      LocalHuman.PlayerEquipmentBrokenThisTurn := True;
     end;
     if (GetPlayer = Self)
         and (Item is TSatellite)
@@ -13075,7 +13076,7 @@ begin
           if GetPlayer = Self then
             TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
           FilmAlphaStep := -(510 / MovementPath.NodeCount);
-          if PlayerStar = CurrentStar then
+          if LocalHuman.PlayerStar = CurrentStar then
           begin
             Point := MovementPath.ActiveHead.Position;
             Angle := MovementPath.ActiveHead.Heading;
@@ -13239,7 +13240,7 @@ begin
           InitializeFilm(0);
           if GetPlayer = Self then
             TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, True);
-          if PlayerStar = CurrentStar then
+          if LocalHuman.PlayerStar = CurrentStar then
           begin
             Distance := PointDistance(Position, OrderDestination);
             Gate :=
@@ -14068,7 +14069,7 @@ var
   Node: PSPathNode;
 begin
   JumpDeparturePathCommitted := False;
-  if (PlayerStar = CurrentStar) and (GetPlayer = Self) then
+  if (LocalHuman.PlayerStar = CurrentStar) and (GetPlayer = Self) then
     MovementSpeed := Max(0.5, MovementSpeed);
   MovementDirection := WrapHeadingDegrees(MovementDirection);
   ClearMovementPath;
@@ -14271,7 +14272,7 @@ begin
             );
         if ((Angle >= 125) and (Speed > 200)) or (Angle >= 175) then
         begin
-          if (Angle < 175) and (Speed >= 200) and (PlayerStar = CurrentStar) then
+          if (Angle < 175) and (Speed >= 200) and (LocalHuman.PlayerStar = CurrentStar) then
           begin
             Distance := 1 / Sqrt(Position.X * Position.X + Position.Y * Position.Y);
             Point.X := Position.X + Position.X * Distance * 10000;
@@ -14309,7 +14310,7 @@ var
 begin
   AppendTurningPath(Destination, False, MaximumNodes);
   AppendStraightPath(Destination, MaximumNodes);
-  if (PlayerStar = CurrentStar)
+  if (LocalHuman.PlayerStar = CurrentStar)
       and (MovementPath.NodeCount < 200)
       and ((GetPlayer.CurrentPlanet = nil)
           or ((GetPlayer.CurrentPlanet <> nil) and (GetPlayer.Order = soTakeoff))) then
@@ -14341,7 +14342,7 @@ var
   Step: Single;
 begin
   AppendStarAvoidingPath(Destination, MaximumNodes);
-  if (PlayerStar = CurrentStar)
+  if (LocalHuman.PlayerStar = CurrentStar)
       and (MovementPath.NodeCount < 200)
       and ((GetPlayer.CurrentPlanet = nil)
           or ((GetPlayer.CurrentPlanet <> nil) and (GetPlayer.Order = soTakeoff))) then
@@ -14382,7 +14383,7 @@ begin
     Node.Heading := 0;
     Angle := Angle + Step;
   end;
-  if (CurrentStar = PlayerStar) and (MovementPath.NodeCount < 200) then
+  if (CurrentStar = LocalHuman.PlayerStar) and (MovementPath.NodeCount < 200) then
     MovementPath.ResampleBezierRange(MovementPath.ActiveHead, MovementPath.ActiveTail, 200);
 end;
 
@@ -14630,7 +14631,7 @@ begin
   begin
     Point := MovementPath.ActiveTail.Position;
     Heading := MovementPath.ActiveTail.Heading;
-    if PlayerStar = CurrentStar then
+    if LocalHuman.PlayerStar = CurrentStar then
       I := Min(100, MovementPath.NodeCount mod 200);
   end;
   Count := CurrentStar.MovementStepCount;
@@ -16153,7 +16154,7 @@ var
 begin
   if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
   begin
-    if (GetPlayer = Leader) and not PlayerAutomaticControl and not Leader.NoTalk then
+    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
     begin
       ShowPlayerDialogue(tkPartnerBreak, LookupTalkText('Talk.Partner.MateBreak'), 0);
       GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
@@ -16194,7 +16195,7 @@ var
 begin
   if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
   begin
-    if (GetPlayer = Leader) and not PlayerAutomaticControl and not Leader.NoTalk then
+    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
     begin
       if GetPlayer.GetEffectiveSkillLevel(psLeadership) > GetPlayer.CountWingmen then
         ShowPlayerDialogue(tkPartnerEnd, LookupTalkText('Talk.Partner.MateTheEnd'), 0)
@@ -16242,7 +16243,7 @@ var
 begin
   if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
   begin
-    if (GetPlayer = Leader) and not PlayerAutomaticControl and not Leader.NoTalk then
+    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
     begin
       ShowPlayerDialogue(tkPartnerRiot, LookupTalkText('Talk.Partner.MateRiot'), 0);
       GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
@@ -16300,7 +16301,7 @@ var
 begin
   if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
   begin
-    if (GetPlayer = Leader) and not PlayerAutomaticControl and not Leader.NoTalk then
+    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
     begin
       ShowPlayerDialogue(tkPartnerBreak, LookupTalkText('Talk.Pirate.MateBreakRelation'), 0);
       GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
@@ -16341,7 +16342,7 @@ var
 begin
   if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
   begin
-    if (GetPlayer = Leader) and not PlayerAutomaticControl and not Leader.NoTalk then
+    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
     begin
       ShowPlayerDialogue(tkPartnerBreak, LookupTalkText('Talk.Pirate.MateBreakRating'), 0);
       GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
@@ -16382,7 +16383,7 @@ var
 begin
   if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
   begin
-    if (GetPlayer = Leader) and not PlayerAutomaticControl and not Leader.NoTalk then
+    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
     begin
       if GetPlayer.GetEffectiveSkillLevel(psLeadership) > GetPlayer.CountWingmen then
         ShowPlayerDialogue(tkPartnerEnd, LookupTalkText('Talk.Pirate.MateTheEnd'), 0)
@@ -16430,7 +16431,7 @@ var
 begin
   if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
   begin
-    if (GetPlayer = Leader) and not PlayerAutomaticControl and not Leader.NoTalk then
+    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
     begin
       ShowPlayerDialogue(tkPartnerRiot, LookupTalkText('Talk.Pirate.MateRiot'), 0);
       GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
@@ -17606,7 +17607,7 @@ begin
         and ((GetPlayer <> Self)
             or (Ship.GetRelationLevelToShip(Self) <= rlHostile)
             or (EnemyShip = Ship)
-            or (PendingPlayerFollowTarget = Ship))
+            or (LocalHuman.PendingPlayerFollowTarget = Ship))
         and (Sqr(Ship.Position.X) + Sqr(Ship.Position.Y)
             >= CurrentStar.DamageRadius * CurrentStar.DamageRadius)
         and (PointDistanceSquared(Position, Ship.Position) <= 1000000)

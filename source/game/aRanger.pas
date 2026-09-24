@@ -228,9 +228,6 @@ type
     procedure RefreshPlayerQuestTargets;
   end;
 var
-  PendingPlayerFollowTarget: TShip = nil;
-  PlayerAutomaticControl: Boolean = False;
-  PlayerEquipmentBrokenThisTurn: Boolean = False;
   RangerSkillBonusEvaluationWeights: array[0..2] of array[22..27] of Integer =
       ((70, 70, 100, 100, 50, 50), (100, 80, 80, 80, 70, 50), (80, 100, 100, 80, 50, 80));
   RangerSlotBonusEvaluationWeights: array[0..2] of array[13..20] of Integer = (
@@ -238,10 +235,10 @@ var
       (100, 150, 150, 500, 150, 150, 30, 50),
       (120, 120, 200, 500, 200, 100, 30, 30)
   );
-  PlayerOldQuests: TList;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   TextQuest,
   EC_Cache,
   EC_CacheBuf,
@@ -283,13 +280,13 @@ begin
     end;
   if GetPlayer = Self then
   begin
-    for I := PlayerOldQuests.Count - 1 downto 0 do
+    for I := LocalHuman.PlayerOldQuests.Count - 1 downto 0 do
     begin
-      OldQuest := PPlayerOldQuest(PlayerOldQuests[I]);
-      PlayerOldQuests.Delete(I);
+      OldQuest := PPlayerOldQuest(LocalHuman.PlayerOldQuests[I]);
+      LocalHuman.PlayerOldQuests.Delete(I);
       Dispose(OldQuest);
     end;
-    PlayerOldQuests.Clear;
+    LocalHuman.PlayerOldQuests.Clear;
   end;
   RangerIndex := Galaxy.Rangers.IndexOf(Self);
   for I := 0 to Galaxy.Stars.Count - 1 do
@@ -757,7 +754,7 @@ begin
     ProcessQuestTimersAndOutcomes;
     if GetPlayer = Self then
     begin
-      PlayerEquipmentBrokenThisTurn := False;
+      LocalHuman.PlayerEquipmentBrokenThisTurn := False;
       if not ProcessPendingPlayerFollowTargeting then
         Exit;
     end;
@@ -1079,7 +1076,7 @@ var
   I: Integer;
   Weapon: TWeapon;
 begin
-  if PlayerAutomaticControl then
+  if LocalHuman.PlayerAutomaticControl then
   begin
     Result := True;
     AutoEquipInventory;
@@ -1087,13 +1084,13 @@ begin
   end;
   if (EnemyShip <> nil) and (EnemyShip.CurrentStar <> CurrentStar) then
     EnemyShip := nil;
-  if PendingPlayerFollowTarget <> nil then
+  if LocalHuman.PendingPlayerFollowTarget <> nil then
   begin
-    if PendingPlayerFollowTarget.InNormalSpace
+    if LocalHuman.PendingPlayerFollowTarget.InNormalSpace
         and InNormalSpace
-        and (PendingPlayerFollowTarget.CurrentStar = CurrentStar) then
+        and (LocalHuman.PendingPlayerFollowTarget.CurrentStar = CurrentStar) then
     begin
-      OrderFollowShip(PendingPlayerFollowTarget, 1, False);
+      OrderFollowShip(LocalHuman.PendingPlayerFollowTarget, 1, False);
       for I := 1 to WeaponCount do
       begin
         Weapon := Weapons[I];
@@ -1101,14 +1098,14 @@ begin
             and (not (Byte(Weapon.GetWeaponInfo.ShotType) in [Ord(wstTorpedo)..Ord(wstRocket)])
                 or (Weapon.Ammo > 0))
             and (GetWeaponRange(Weapon) * GetWeaponRange(Weapon)
-                >= PointDistanceSquared(Position, PendingPlayerFollowTarget.Position)) then
-          Weapon.Target := PendingPlayerFollowTarget
+                >= PointDistanceSquared(Position, LocalHuman.PendingPlayerFollowTarget.Position)) then
+          Weapon.Target := LocalHuman.PendingPlayerFollowTarget
         else
           Weapon.Target := nil;
       end;
     end
     else
-      PendingPlayerFollowTarget := nil;
+      LocalHuman.PendingPlayerFollowTarget := nil;
   end;
   Result := False;
 end;
@@ -3570,10 +3567,10 @@ begin
   NextDemandTurn := LastPlayerExtortionTurn + 30;
   if OtherShip is TRanger then
     ReactToExtortionDemand(OtherShip);
-  if ((GetPlayer <> OtherShip) or (PlayerAutomaticControl <> False))
+  if ((GetPlayer <> OtherShip) or (LocalHuman.PlayerAutomaticControl <> False))
       and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
     EnemyShip := OtherShip;
-  if (GetPlayer = Self) and not PlayerAutomaticControl then
+  if (GetPlayer = Self) and not LocalHuman.PlayerAutomaticControl then
   begin
     if OtherShip.ShowPlayerDialogue(
             tkMoneyDemand,
@@ -3588,7 +3585,7 @@ begin
     begin
       AcceptMoneyDemand;
       Result := True;
-      PlayerStar.InterruptLongTravel := True;
+      LocalHuman.PlayerStar.InterruptLongTravel := True;
       GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, OtherShip, nil, 0);
     end;
   end
@@ -3687,17 +3684,17 @@ begin
   Result := False;
   if OtherShip is TRanger then
     ReactToExtortionDemand(OtherShip);
-  if ((GetPlayer <> OtherShip) or (PlayerAutomaticControl <> False))
+  if ((GetPlayer <> OtherShip) or (LocalHuman.PlayerAutomaticControl <> False))
       and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
     EnemyShip := OtherShip;
-  if (GetPlayer = Self) and not PlayerAutomaticControl then
+  if (GetPlayer = Self) and not LocalHuman.PlayerAutomaticControl then
   begin
     if OtherShip.ShowPlayerDialogue(tkGoodsDemand, OtherShip.LookupTalkText('Talk.Goods.Send'), 0)
         <> 0 then
     begin
       AcceptCargoDemand;
       Result := True;
-      PlayerStar.InterruptLongTravel := True;
+      LocalHuman.PlayerStar.InterruptLongTravel := True;
       GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, OtherShip, nil, 0);
     end;
   end
@@ -3775,7 +3772,7 @@ begin
   NextDemandTurn := LastPlayerExtortionTurn + 30;
   if OtherShip is TRanger then
     (OtherShip as TRanger).AddTraderCareerActivity(1);
-  if (GetPlayer = Self) and not PlayerAutomaticControl then
+  if (GetPlayer = Self) and not LocalHuman.PlayerAutomaticControl then
   begin
     if Cardinal(ReservedMessageCounter) < 7 then
       Exit;
@@ -3788,7 +3785,7 @@ begin
     begin
       AcceptTrucePayment;
       Result := True;
-      PlayerStar.InterruptLongTravel := True;
+      LocalHuman.PlayerStar.InterruptLongTravel := True;
       GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, OtherShip, nil, 0);
     end;
   end
@@ -3838,7 +3835,7 @@ begin
     else
       (Requester as TRanger).AddPirateCareerActivity(8);
   end;
-  if (GetPlayer = Self) and not PlayerAutomaticControl then
+  if (GetPlayer = Self) and not LocalHuman.PlayerAutomaticControl then
   begin
     if Requester.ShowPlayerDialogue(
             tkAttack,
@@ -3853,7 +3850,7 @@ begin
     begin
       SetJointAttackTarget(Requester, Target);
       Result := True;
-      PlayerStar.InterruptLongTravel := True;
+      LocalHuman.PlayerStar.InterruptLongTravel := True;
       GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Requester, nil, 0);
     end;
   end
@@ -4664,9 +4661,9 @@ var
   Quest: PPlayerOldQuest;
 begin
   Result := 0;
-  for I := 0 to PlayerOldQuests.Count - 1 do
+  for I := 0 to LocalHuman.PlayerOldQuests.Count - 1 do
   begin
-    Quest := PPlayerOldQuest(PlayerOldQuests[I]);
+    Quest := PPlayerOldQuest(LocalHuman.PlayerOldQuests[I]);
     if not Quest.Successful
         and not Quest.Declined
         and (Quest.Planet.OwnerId = OwnerId)
@@ -4742,7 +4739,7 @@ begin
     OldQuest.Description := Quest.Description;
     OldQuest.Successful := Quest.Successful;
     OldQuest.Declined := False;
-    PlayerOldQuests.Add(OldQuest);
+    LocalHuman.PlayerOldQuests.Add(OldQuest);
   end;
   Quests.Delete(Index);
   Dispose(Quest);
@@ -7002,9 +6999,9 @@ begin
     if Result then
       Exit;
   end;
-  if PlayerOldQuests.Count > 0 then
+  if LocalHuman.PlayerOldQuests.Count > 0 then
   begin
-    OldQuest := PPlayerOldQuest(PlayerOldQuests[PlayerOldQuests.Count - 1]);
+    OldQuest := PPlayerOldQuest(LocalHuman.PlayerOldQuests[LocalHuman.PlayerOldQuests.Count - 1]);
     if Pos(Ship.Name, OldQuest.Description) > 0 then
       Result := True;
   end;

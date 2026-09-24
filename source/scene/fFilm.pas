@@ -84,6 +84,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   aCalc,
   SysUtils,
   Math,
@@ -382,17 +383,17 @@ var
 begin
   Obj :=
       CurrentFilm.FindObject(
-          ClassSEtoName(PlayerStar.Graphic),
-          PlayerStar.Graphic.GraphKey,
-          PlayerStar.Id
+          ClassSEtoName(LocalHuman.PlayerStar.Graphic),
+          LocalHuman.PlayerStar.Graphic.GraphKey,
+          LocalHuman.PlayerStar.Id
       );
   if (Obj <> nil) and (Obj.SceneObject <> nil) then
     (Obj.SceneObject as TStarSE)
-        .SetSequenceFrameIndex(TStarSE(PlayerStar.Graphic).GetSequenceFrameIndex);
-  Count := PlayerStar.Planets.Count;
+        .SetSequenceFrameIndex(TStarSE(LocalHuman.PlayerStar.Graphic).GetSequenceFrameIndex);
+  Count := LocalHuman.PlayerStar.Planets.Count;
   for Index := 0 to Count - 1 do
   begin
-    Planet := TPlanet(PlayerStar.Planets[Index]);
+    Planet := TPlanet(LocalHuman.PlayerStar.Planets[Index]);
     Obj :=
         CurrentFilm.FindObject(ClassSEtoName(Planet.Graphic), Planet.Graphic.GraphKey, Planet.Id);
     if (Obj <> nil) and (Obj.SceneObject <> nil) then
@@ -419,10 +420,10 @@ begin
       end;
     end;
   end;
-  Count := PlayerStar.Asteroids.Count;
+  Count := LocalHuman.PlayerStar.Asteroids.Count;
   for Index := 0 to Count - 1 do
   begin
-    Asteroid := TAsteroid(PlayerStar.Asteroids[Index]);
+    Asteroid := TAsteroid(LocalHuman.PlayerStar.Asteroids[Index]);
     Obj :=
         CurrentFilm.FindObject(
             ClassSEtoName(Asteroid.GraphObject),
@@ -445,17 +446,17 @@ var
 begin
   Obj :=
       CurrentFilm.FindObject(
-          ClassSEtoName(PlayerStar.Graphic),
-          PlayerStar.Graphic.GraphKey,
-          PlayerStar.Id
+          ClassSEtoName(LocalHuman.PlayerStar.Graphic),
+          LocalHuman.PlayerStar.Graphic.GraphKey,
+          LocalHuman.PlayerStar.Id
       );
   if (Obj <> nil) and (Obj.SceneObject <> nil) then
-    TStarSE(PlayerStar.Graphic)
+    TStarSE(LocalHuman.PlayerStar.Graphic)
         .SetSequenceFrameIndex((Obj.SceneObject as TStarSE).GetSequenceFrameIndex);
-  Count := PlayerStar.Planets.Count;
+  Count := LocalHuman.PlayerStar.Planets.Count;
   for Index := 0 to Count - 1 do
   begin
-    Planet := TPlanet(PlayerStar.Planets[Index]);
+    Planet := TPlanet(LocalHuman.PlayerStar.Planets[Index]);
     Obj :=
         CurrentFilm.FindObject(ClassSEtoName(Planet.Graphic), Planet.Graphic.GraphKey, Planet.Id);
     if (Obj <> nil) and (Obj.SceneObject <> nil) then
@@ -482,10 +483,10 @@ begin
       end;
     end;
   end;
-  Count := PlayerStar.Asteroids.Count;
+  Count := LocalHuman.PlayerStar.Asteroids.Count;
   for Index := 0 to Count - 1 do
   begin
-    Asteroid := TAsteroid(PlayerStar.Asteroids[Index]);
+    Asteroid := TAsteroid(LocalHuman.PlayerStar.Asteroids[Index]);
     Obj :=
         CurrentFilm.FindObject(
             ClassSEtoName(Asteroid.GraphObject),

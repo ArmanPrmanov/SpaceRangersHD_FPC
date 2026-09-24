@@ -30,6 +30,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   Math,
   aRanger,
   fEquipmentShop,
@@ -220,14 +221,14 @@ begin
   SaveGameToFile(SaveManagerScreen.GetAutoSavePath, 'as');
   if MusicManager.CategoryOverride = '' then
     MusicManager.RequestFadeOut;
-  PlayerAutomaticControl := False;
+  LocalHuman.PlayerAutomaticControl := False;
   PruneExpiredPersistentPlayerMessages;
   GetPlayer.OrderTakeoff;
   for Index := 0 to Galaxy.Scripts.Count - 1 do
     TScript(Galaxy.Scripts[Index]).RunTurnCode;
   StarMapWeaponPanelOpen := False;
   FilmCameraFollow := True;
-  PlayerStar.RefreshSpaceObjectPositions;
+  LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
   RestoreTemporaryShopStock;
   RunGlobalScriptsForContext(GetPlayer.CurrentStar, 1);
   if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then

@@ -124,6 +124,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   GI_MessageBox,
   aGalaxyEvent,
   fEquipmentShop,
@@ -1875,7 +1876,7 @@ begin
   Quest.Description := 'PlanetQuestClose';
   Quest.Successful := False;
   Quest.Declined := True;
-  PlayerOldQuests.Add(Quest);
+  LocalHuman.PlayerOldQuests.Add(Quest);
   BuildGovernmentChoices(True);
 end;
 procedure TfGov.DeclinePlanetBattle(Action: PtrInt);

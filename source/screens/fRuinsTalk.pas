@@ -347,6 +347,7 @@ function ApplyRecentDominionOrderSurcharge(Cost: Single): Integer;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   Achievements,
   aKling,
   aPirate,
@@ -9426,9 +9427,9 @@ begin
           '<color=255,240,100>'
       );
     CompletedQuests := 0;
-    for I := 0 to PlayerOldQuests.Count - 1 do
+    for I := 0 to LocalHuman.PlayerOldQuests.Count - 1 do
     begin
-      Quest := PlayerOldQuests[I];
+      Quest := LocalHuman.PlayerOldQuests[I];
       if Quest.Successful then
         Inc(CompletedQuests);
     end;

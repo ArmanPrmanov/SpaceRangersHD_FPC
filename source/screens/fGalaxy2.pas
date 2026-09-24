@@ -95,6 +95,7 @@ procedure CaptureGalaxyPreview(ParentLoop: TMessageLoopGI);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   GI_GI,
   ThreadCalc,
   aCalc,
@@ -1382,7 +1383,7 @@ begin
   end
   else
     aCalc.WaitForTurnCalculationUI;
-  PendingPlayerFollowTarget := nil;
+  LocalHuman.PendingPlayerFollowTarget := nil;
   aCalc.WaitForTurnCalculationUI;
   SpaceViewPosition := GetPlayer.Position;
   RequestedScreenId := screenStarMap;

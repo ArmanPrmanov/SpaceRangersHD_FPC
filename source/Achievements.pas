@@ -164,6 +164,7 @@ procedure FreeAchievementData(Data: PAchievementData);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   aRanger,
   aShip,
   aTranclucator,
@@ -330,10 +331,10 @@ var
   Quest: PPlayerOldQuest;
 begin
   if GetPlayer <> nil then
-    if PlayerOldQuests <> nil then
-      for I := 0 to PlayerOldQuests.Count - 1 do
+    if LocalHuman.PlayerOldQuests <> nil then
+      for I := 0 to LocalHuman.PlayerOldQuests.Count - 1 do
       begin
-        Quest := PlayerOldQuests[I];
+        Quest := LocalHuman.PlayerOldQuests[I];
         if Quest.Successful then
           Exit;
       end;

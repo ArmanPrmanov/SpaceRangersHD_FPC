@@ -225,6 +225,7 @@ procedure DonateMilitaryResearchMaterial(Series: TDominatorSeries; Amount: Integ
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   BreakMessageGIException,
   aGalaxyEvent,
   Globals,
@@ -4119,7 +4120,7 @@ begin
     if not (Ship.TargetingRestriction in [1, 2]) then
       if (TalkShip.OrderTarget = Ship)
           and (TalkShip.GetRelationLevelToShip(Ship) = rlHostile)
-          and ((GetPlayer.OrderTarget = Ship) or (PendingPlayerFollowTarget = Ship))
+          and ((GetPlayer.OrderTarget = Ship) or (LocalHuman.PendingPlayerFollowTarget = Ship))
           and (GetPlayer.GetRelationLevelToShip(Ship) = rlHostile) then
         Result := True
       else if (GetPlayer <> Ship)
@@ -4145,7 +4146,7 @@ begin
           );
           Result := True;
         end
-        else if PendingPlayerFollowTarget = Ship then
+        else if LocalHuman.PendingPlayerFollowTarget = Ship then
         begin
           AddChoice(
               '- '

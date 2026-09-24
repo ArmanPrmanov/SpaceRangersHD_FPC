@@ -26,6 +26,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   Classes,
   Windows,
   SysUtils,
@@ -248,7 +249,7 @@ begin
     end;
     Galaxy.InitializeCampaignState;
     NewGameGenerationStage := 1;
-    PlayerStar := nil;
+    LocalHuman.PlayerStar := nil;
     Stage := 1;
 
     for I := 1 to GalaxyStarCount do
@@ -429,7 +430,7 @@ begin
     Player := TPlayer.Create;
     Player.PortraitFaceId := CaptainPortraitIndex;
     Planet := HomePlanet;
-    PlayerStar := Planet.CurrentStar;
+    LocalHuman.PlayerStar := Planet.CurrentStar;
     case CharacterPreset of
       1:
       begin
@@ -542,7 +543,7 @@ begin
     SetPlayer(Player, Galaxy);
     GetPlayer.HomePlanet.ChangeRelationToRanger(GetPlayer, 100);
     GetPlayer.Name := PlayerName;
-    PlayerOldQuests := aMyFunction.TObjectList.Create;
+    LocalHuman.PlayerOldQuests := aMyFunction.TObjectList.Create;
     LastLoadedPlayerName := PlayerName;
     Stage := 8;
 

@@ -17,6 +17,7 @@ procedure ParkObserverPlayer;
 procedure SimulateParkedTurn;
 implementation
 uses
+  aHuman,
   SysUtils,
   Math,
   Globals,
@@ -36,7 +37,7 @@ var
   I: Integer;
 begin
   P := GetPlayer;
-  if (P = nil) or (PlayerStar = nil) then
+  if (P = nil) or (LocalHuman.PlayerStar = nil) then
     raise Exception.Create('Observer requires a campaign save with a player.');
   if Galaxy.StasisModEnabled = 1 then
     raise Exception.Create('Disable stasis before starting observer mode.');
@@ -46,16 +47,16 @@ begin
   // observer never writes a save. No landing/travel actions or quests are run.
   if P.InNormalSpace then
   begin
-    if PlayerStar.Planets.Count = 0 then
+    if LocalHuman.PlayerStar.Planets.Count = 0 then
       raise Exception.Create('Observer needs a planet in the starting system to park the player.');
-    P.CurrentPlanet := TPlanet(PlayerStar.Planets[0]);
+    P.CurrentPlanet := TPlanet(LocalHuman.PlayerStar.Planets[0]);
     P.DockedTo := nil;
   end;
   P.OrderNone(False);
   for I := 1 to P.WeaponCount do
     P.Weapons[I].Target := nil;
-  PlayerAutomaticControl := False;
-  PendingPlayerFollowTarget := nil;
+  LocalHuman.PlayerAutomaticControl := False;
+  LocalHuman.PendingPlayerFollowTarget := nil;
   PlayerStarDayPrepared := False;
   TurnSaveStep := 0;
 end;

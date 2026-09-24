@@ -86,6 +86,7 @@ const
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   fLoad,
   WorkerErrors,
   fEquipmentShop,
@@ -633,7 +634,7 @@ begin
     TScript(Galaxy.Scripts[I]).RunTurnCode;
   StarMapWeaponPanelOpen := False;
   FilmCameraFollow := True;
-  PlayerStar.RefreshSpaceObjectPositions;
+  LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
   RestoreTemporaryShopStock;
   RunGlobalScriptsForContext(GetPlayer.CurrentStar, 1);
   if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
@@ -1025,7 +1026,7 @@ begin
     end;
   end;
   aCalc.WaitForTurnCalculationUI;
-  PlayerAutomaticControl := False;
+  LocalHuman.PlayerAutomaticControl := False;
   (GetByName('ButRepair') as TGraphButtonGI).SetDisabled(True);
   (GetByName('ButRefuel') as TGraphButtonGI).SetDisabled(True);
   (GetByName('ButTakeOff') as TGraphButtonGI).SetDisabled(True);

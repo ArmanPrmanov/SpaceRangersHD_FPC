@@ -101,6 +101,7 @@ function EstimateCpuClockMHz: Double;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   aCalc,
   GameNative,
   SimpleSteamApi,
@@ -2311,7 +2312,7 @@ begin
   begin
     SpaceImage := GetOptionValue('SpaceImage');
     if (Galaxy <> nil) and (SpaceImage > 0) then
-      Galaxy.GenerateSpaceBackground(PlayerStar.BackgroundImage);
+      Galaxy.GenerateSpaceBackground(LocalHuman.PlayerStar.BackgroundImage);
     UserSettingsConfig.SetOrAddParam('SpaceImage', WideString(IntToStr(SpaceImage)));
   end;
   SputnikShow := Boolean(GetOptionValue('SputnikShow'));
