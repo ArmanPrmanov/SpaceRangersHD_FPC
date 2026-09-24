@@ -7244,18 +7244,17 @@ begin
       begin
         Stage := 17;
         StopTurnFilm(True);
+        // CHANGE: BUGFIX - Wear the engine before the galaxy job starts, not while it runs.
+        if (GetPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited)) and (GetPlayer.GetEngine <> nil) then
+          GetPlayer.ApplyItemDegradation(
+              GetPlayer.GetEngine,
+              idkUse,
+              NextRandomUnitFloat(GetPlayer.RandomState) * 15
+          );
         if not IsTurnCalculationRunningUI and (TurnCalculationPhase = tcpPlayerStarFinished) then
           QueueGalaxyTurnCalculation;
         if GetPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited) then
-        begin
-          if GetPlayer.GetEngine <> nil then
-            GetPlayer.ApplyItemDegradation(
-                GetPlayer.GetEngine,
-                idkUse,
-                NextRandomUnitFloat(GetPlayer.RandomState) * 15
-            );
-          RequestedScreenId := screenPlanetNO;
-        end
+          RequestedScreenId := screenPlanetNO
         else
           RequestedScreenId := screenPlanet;
         LoadPanel.SelectBackgroundStyle(0);

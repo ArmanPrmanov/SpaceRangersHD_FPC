@@ -176,6 +176,7 @@ function DecrementWrappedValue(Value: Integer; Minimum: Integer; Maximum: Intege
 implementation
 uses
   ObserverHooks,
+  SimulationThread,
   EC_Str,
   aGalaxy,
   Math;
@@ -282,6 +283,9 @@ function NextRandomIntRange(BoundA, BoundB: Integer; var Seed: Cardinal): Intege
 var
   OldSeed: Cardinal;
 begin
+  {$IFOPT C+}
+  CheckSimulationThread('NextRandom'); // CHANGE: ENHANCEMENT - Debug thread check.
+  {$ENDIF}
   if (Galaxy <> nil) and Galaxy.IsChaoticRandomEnabled then
     Result := ChaoticRandomIntRange(BoundA, BoundB)
   else
@@ -301,6 +305,9 @@ function NextRandomFloatRange(BoundA, BoundB: Double; var Seed: Cardinal): Doubl
 var
   OldSeed: Cardinal;
 begin
+  {$IFOPT C+}
+  CheckSimulationThread('NextRandom'); // CHANGE: ENHANCEMENT - Debug thread check.
+  {$ENDIF}
   if (Galaxy <> nil) and Galaxy.IsChaoticRandomEnabled then
     Result := ChaoticRandomFloatRange(BoundA, BoundB)
   else
@@ -317,6 +324,9 @@ function NextRandomUnitFloat(var Seed: Cardinal): Double;
 var
   OldSeed: Cardinal;
 begin
+  {$IFOPT C+}
+  CheckSimulationThread('NextRandom'); // CHANGE: ENHANCEMENT - Debug thread check.
+  {$ENDIF}
   if (Galaxy <> nil) and Galaxy.IsChaoticRandomEnabled then
     Result := ChaoticRandomFloatRange(0, 1)
   else

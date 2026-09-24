@@ -206,6 +206,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  SimulationThread,
   Windows,
   GI_Tail,
   GR_Main,
@@ -3574,6 +3575,8 @@ begin
 end;
 
 function TPlanet.RequestDialog: Boolean;
+var
+  WaitResult: Cardinal;
 begin
   if ExitScreenLoop or not GetPlayer.InNormalSpace then
   begin
@@ -3584,8 +3587,15 @@ begin
   TalkPlanet := Self;
   TalkScripted := True;
   ResetEvent(TalkCompletedEvent);
-  SetEvent(TalkRequestEvent);
-  if WaitForSingleObject(TalkCompletedEvent, INFINITE) <> WAIT_OBJECT_0 then
+  // CHANGE: ENHANCEMENT - The UI runs the dialogue while the turn thread waits.
+  InterlockedIncrement(TurnYieldedToUi);
+  try
+    SetEvent(TalkRequestEvent);
+    WaitResult := WaitForSingleObject(TalkCompletedEvent, INFINITE);
+  finally
+    InterlockedDecrement(TurnYieldedToUi);
+  end;
+  if WaitResult <> WAIT_OBJECT_0 then
   begin
     Result := False;
     ResetEvent(TalkRequestEvent);

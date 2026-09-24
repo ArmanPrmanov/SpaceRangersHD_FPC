@@ -141,6 +141,8 @@ def pascal_flags(release: bool, *platform_paths: Path, root: Path = ROOT) -> lis
     return [
         *PASCAL_FLAGS,
         "-O4" if release else "-O2",
+        # Debug builds compile assertions, including the simulation thread check.
+        *([] if release else ["-Sa"]),
         # -O4 enables field reordering and fast math; override it afterward.
         "-OoNOORDERFIELDS",
         "-OoNOFASTMATH",

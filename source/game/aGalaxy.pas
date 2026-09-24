@@ -792,6 +792,7 @@ procedure UpdateTurnFilmActivity(
 implementation
 
 uses
+  SimulationThread,
   ObserverHooks,
   SE_Garbage,
   SE_Sputnik,
@@ -15813,9 +15814,15 @@ begin
         if GetPlayer = Ship then
         begin
           Globals.ScoreScreen.RecordPlayerResult(False);
-          while ((Byte(GlobalsV.CurrentScreenId) = 19) or (Byte(GlobalsV.CurrentScreenId) = 21))
-              and (Galaxy.ScoreScreenDismissed = 0) do
-            SysUtils.Sleep(1);
+          // CHANGE: ENHANCEMENT - The UI shows the score screen while the turn thread waits.
+          InterlockedIncrement(TurnYieldedToUi);
+          try
+            while ((Byte(GlobalsV.CurrentScreenId) = 19) or (Byte(GlobalsV.CurrentScreenId) = 21))
+                and (Galaxy.ScoreScreenDismissed = 0) do
+              SysUtils.Sleep(1);
+          finally
+            InterlockedDecrement(TurnYieldedToUi);
+          end;
           Galaxy.ScoreScreenDismissed := 0;
         end;
         Self.Ships.Delete(Index);

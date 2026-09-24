@@ -8,6 +8,8 @@ uses
   SysUtils,
   aGalaxy,
   aMyFunction,
+  CPDiapClass,
+  SimulationThread,
   TestSupport;
 const
   // AdvanceRandomSeed maps these seeds to themselves, so they take its fallback step.
@@ -42,8 +44,63 @@ begin
   CheckHex(711474624, Seed, Format('NextRandomIntRange(%d, %d) final seed', [BoundA, BoundB]));
 end;
 
+procedure CheckTextQuestRandom;
+var
+  i: Integer;
+  First: array[0..9] of Int64;
+  Value: Double;
+begin
+  TextQuestRandomState := 42;
+  for i := 0 to High(First) do
+  begin
+    First[i] := TextQuestRandom(7);
+    Check((First[i] >= 0) and (First[i] < 7), Format('TextQuestRandom(7) #%d in range', [i]));
+  end;
+  TextQuestRandomState := 42;
+  for i := 0 to High(First) do
+    CheckInt(First[i], TextQuestRandom(7), Format('TextQuestRandom(7) #%d repeats', [i]));
+  CheckInt(0, TextQuestRandom(0), 'TextQuestRandom(0)');
+  CheckInt(0, TextQuestRandom(-5), 'TextQuestRandom(-5)');
+  Check(TextQuestRandom(Int64(1) shl 40) < Int64(1) shl 40, 'TextQuestRandom(2^40) in range');
+  for i := 1 to 100 do
+  begin
+    Value := TextQuestRandom;
+    Check((Value >= 0) and (Value < 1), 'TextQuestRandom float in [0, 1)');
+  end;
+end;
+
+// The check is compiled only with assertions (debug builds and these tests).
+procedure CheckSimulationThreadCheck;
+var
+  Before: Integer;
+begin
+  {$IFOPT C+}
+  Before := SimulationThreadViolations;
+  CheckSimulationThread('test idle');
+  CheckInt(Before, SimulationThreadViolations, 'no turn running');
+  TurnJobRunning := True;
+  try
+    InTurnJob := True;
+    CheckSimulationThread('test turn thread');
+    InTurnJob := False;
+    CheckInt(Before, SimulationThreadViolations, 'turn thread during a turn');
+    Inc(TurnYieldedToUi);
+    CheckSimulationThread('test yielded');
+    Dec(TurnYieldedToUi);
+    CheckInt(Before, SimulationThreadViolations, 'turn waiting for the UI');
+    CheckSimulationThread('test violation');
+    CheckInt(Before + 1, SimulationThreadViolations, 'other thread during a turn');
+  finally
+    TurnJobRunning := False;
+    InTurnJob := False;
+  end;
+  {$ENDIF}
+end;
+
 procedure RunRandomTests;
 begin
+  CheckTextQuestRandom;
+  CheckSimulationThreadCheck;
   // Chaotic-random mode reads the galaxy; without one every helper is deterministic.
   Check(Galaxy = nil, 'Galaxy is nil for RNG tests');
 

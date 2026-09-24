@@ -25,6 +25,7 @@ type
   TThreadCalc = class(TThreadEC)
     Job: TTurnCalculationJob;
     procedure Execute; override;
+    procedure RunJob;
   end;
 var
   AdaptiveBeginCalcNextTurn: Single = 0.5;
@@ -37,6 +38,7 @@ procedure WaitForTurnCalculation;
 procedure ProcessPlayerStarTurn;
 implementation
 uses
+  SimulationThread,
   GI_MessageLoop,
   aCalc,
   Windows,
@@ -111,7 +113,20 @@ begin
     end;
   end;
 end;
+// CHANGE: ENHANCEMENT - Mark the turn job for the debug thread check.
 procedure TThreadCalc.Execute;
+begin
+  InTurnJob := True;
+  TurnJobRunning := True;
+  try
+    RunJob;
+  finally
+    TurnJobRunning := False;
+    InTurnJob := False;
+  end;
+end;
+
+procedure TThreadCalc.RunJob;
 var
   ControlWord: Word;
 

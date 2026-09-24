@@ -853,6 +853,7 @@ function CalculateRoundedFuelCost(Amount: Integer; OwnerId: Byte): Integer;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  SimulationThread,
   ObserverHooks,
   SE_Process,
   aCalc,
@@ -2253,6 +2254,7 @@ end;
 // CHANGE: CLEANUP - Store money directly and notify achievements after an update.
 procedure TShip.SetMoney(Value: Integer);
 begin
+  CheckSimulationThread('TShip.SetMoney'); // CHANGE: ENHANCEMENT - Debug thread check.
   if Value > 100000000 then
     Value := 100000000
   else if Value < 0 then
@@ -12518,6 +12520,7 @@ end;
 
 procedure TShip.OrderNone(OverrideScriptOrder: Boolean);
 begin
+  CheckSimulationThread('TShip.OrderNone'); // CHANGE: ENHANCEMENT - Debug thread check.
   if (AbsoluteScriptOrder > 0) and not OverrideScriptOrder then
     Exit;
   OrderAbsolute := False;
@@ -12528,6 +12531,7 @@ end;
 
 procedure TShip.OrderMove(Destination: TPointF; Absolute: Boolean);
 begin
+  CheckSimulationThread('TShip.OrderMove'); // CHANGE: ENHANCEMENT - Debug thread check.
   if AbsoluteScriptOrder > 0 then
     Exit;
   if not HasPositiveSpeed then
@@ -12576,6 +12580,7 @@ end;
 
 procedure TShip.OrderJump(Star: TStar; Absolute: Boolean);
 begin
+  CheckSimulationThread('TShip.OrderJump'); // CHANGE: ENHANCEMENT - Debug thread check.
   if (AbsoluteScriptOrder > 0) or (CurrentStar = Star) then
     Exit;
   if not HasPositiveSpeed then
@@ -12592,6 +12597,7 @@ end;
 
 procedure TShip.OrderJumpHole(Hole: THole; Absolute: Boolean);
 begin
+  CheckSimulationThread('TShip.OrderJumpHole'); // CHANGE: ENHANCEMENT - Debug thread check.
   if not HasPositiveSpeed then
   begin
     OrderNone(False);
@@ -12619,6 +12625,7 @@ procedure TShip.OrderTeleport(
     Absolute: Boolean
 );
 begin
+  CheckSimulationThread('TShip.OrderTeleport'); // CHANGE: ENHANCEMENT - Debug thread check.
   if AbsoluteScriptOrder > 0 then
     Exit;
   Order := soTeleport;
@@ -12630,6 +12637,7 @@ end;
 
 procedure TShip.OrderLanding(Location: TObject; Absolute: Boolean);
 begin
+  CheckSimulationThread('TShip.OrderLanding'); // CHANGE: ENHANCEMENT - Debug thread check.
   if AbsoluteScriptOrder > 0 then
     Exit;
   if Location = nil then
@@ -12656,6 +12664,7 @@ var
   Ship: TShip;
   DY, DX: Single;
 begin
+  CheckSimulationThread('TShip.OrderTakeoff'); // CHANGE: ENHANCEMENT - Debug thread check.
   if AbsoluteScriptOrder > 0 then
     Exit;
   if not HasPositiveSpeed then
@@ -12743,6 +12752,7 @@ end;
 
 procedure TShip.OrderFollowShip(Ship: TShip; FollowMode: Byte; Absolute: Boolean);
 begin
+  CheckSimulationThread('TShip.OrderFollowShip'); // CHANGE: ENHANCEMENT - Debug thread check.
   if AbsoluteScriptOrder > 0 then
     Exit;
   OrderNone(False);
@@ -15846,6 +15856,7 @@ end;
 function TShip.OpenPlayerConversation(RespectChameleon: Boolean): Boolean;
 var
   Handles: array[0..1] of Windows.THandle;
+  WaitResult: Cardinal;
 begin
   if ExitScreenLoop
       or not GetPlayer.InNormalSpace
@@ -15869,11 +15880,18 @@ begin
   TalkPlanet := nil;
   TalkScripted := RespectChameleon;
   ResetEvent(TalkCompletedEvent);
-  SetEvent(TalkRequestEvent);
-  SetEvent(ScriptUiRequestEvent);
   Handles[0] := TalkCompletedEvent;
   Handles[1] := ScriptUiAbortEvent;
-  if WaitForMultipleObjects(Length(Handles), @Handles[0], False, INFINITE) <> WAIT_OBJECT_0 then
+  // CHANGE: ENHANCEMENT - The UI runs the conversation while the turn thread waits.
+  InterlockedIncrement(TurnYieldedToUi);
+  try
+    SetEvent(TalkRequestEvent);
+    SetEvent(ScriptUiRequestEvent);
+    WaitResult := WaitForMultipleObjects(Length(Handles), @Handles[0], False, INFINITE);
+  finally
+    InterlockedDecrement(TurnYieldedToUi);
+  end;
+  if WaitResult <> WAIT_OBJECT_0 then
   begin
     Result := False;
     TalkScripted := False;

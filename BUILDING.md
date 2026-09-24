@@ -164,6 +164,15 @@ hashes every turn, since hashing runs the save writer and must change nothing. T
 of address; `unresolved` counts references it could not name. `--sim-dump`
 writes each hashed state so two runs can be diffed.
 
+## Threads
+
+The turn thread (`TThreadCalc`) runs the day while the UI thread plays the film.
+The UI thread must not change simulation state while a turn job runs, except while
+the turn thread waits for it (a dialogue or the score screen). Debug builds compile
+assertions (`-Sa`) and log the first violation at each checked site to the session
+log with a backtrace: money, ship orders and seeded random draws.
+[CheckSimulationThread](source/core/SimulationThread.pas).
+
 ## Formatting
 
 Install [pasfmt](https://github.com/integrated-application-development/pasfmt),
