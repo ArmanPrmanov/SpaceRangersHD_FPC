@@ -6,9 +6,10 @@ unit aShopStock;
 {$A8}
 
 // CHANGE: CLEANUP - The equipment stock the player has open in a shop, moved out of
-// fEquipmentShop. While the shop is open, its items live in this grid instead of the
-// planet's or station's EquipmentShop list, and the galaxy save writes the grid. The
-// screen adds its images in a subclass of TShopStockSlot and sets ShopSlotClass.
+// fEquipmentShop. While the shop is open, its items live in a slot grid
+// (LocalHuman.TemporaryShopSlots) instead of the planet's or station's EquipmentShop list,
+// and the galaxy save writes the grid. The screen adds its images in a subclass of
+// TShopStockSlot and sets ShopSlotClass.
 interface
 uses
   Classes,
@@ -34,15 +35,13 @@ var
   // The screen widens the grid with the window, which adds empty slots.
   ShopGridRowCount: Integer = 4;
   ShopVisibleColumnCount: Integer = 6;
-  TemporaryShopSlots: TList = nil;
-  TemporaryShopPlanet: TPlanet = nil;
-  TemporaryShopStation: TRuins = nil;
 procedure TemporaryShopStockHook(Argument: Pointer);
 procedure BuildTemporaryShopSlotGrid;
 procedure RestoreTemporaryShopStock;
 procedure ClearTemporaryShopSlotGrid;
 implementation
 uses
+  aHuman,
   aConst,
   aPlayer;
 
@@ -60,18 +59,18 @@ var
 begin
   TemporaryShopStockHook(nil);
   ClearTemporaryShopSlotGrid;
-  TemporaryShopSlots := TList.Create;
+  LocalHuman.TemporaryShopSlots := TList.Create;
   if GetPlayer.CurrentPlanet <> nil then
   begin
     for I := 0 to GetPlayer.CurrentPlanet.EquipmentShop.Count - 1 do
     begin
       Item := TItem(GetPlayer.CurrentPlanet.EquipmentShop[I]);
       Slot := ShopSlotClass.Create;
-      TemporaryShopSlots.Add(Slot);
+      LocalHuman.TemporaryShopSlots.Add(Slot);
       Slot.Item := Item;
     end;
     GetPlayer.CurrentPlanet.EquipmentShop.Clear;
-    TemporaryShopPlanet := GetPlayer.CurrentPlanet;
+    LocalHuman.TemporaryShopPlanet := GetPlayer.CurrentPlanet;
   end
   else
   begin
@@ -84,20 +83,20 @@ begin
     begin
       Item := TItem(Station.EquipmentShop[I]);
       Slot := ShopSlotClass.Create;
-      TemporaryShopSlots.Add(Slot);
+      LocalHuman.TemporaryShopSlots.Add(Slot);
       Slot.Item := Item;
     end;
     Station.EquipmentShop.Clear;
-    TemporaryShopStation := Station;
+    LocalHuman.TemporaryShopStation := Station;
   end;
-  for I := 0 to TemporaryShopSlots.Count - 2 do
+  for I := 0 to LocalHuman.TemporaryShopSlots.Count - 2 do
   begin
-    Slot := TemporaryShopSlots[I];
+    Slot := LocalHuman.TemporaryShopSlots[I];
     if Slot.Item = nil then
       Continue;
-    for J := I + 1 to TemporaryShopSlots.Count - 1 do
+    for J := I + 1 to LocalHuman.TemporaryShopSlots.Count - 1 do
     begin
-      Other := TemporaryShopSlots[J];
+      Other := LocalHuman.TemporaryShopSlots[J];
       if Other.Item = nil then
         Continue;
       if Slot.Item.ItemType in [t_Hull..t_CustomWeapon] then
@@ -118,21 +117,21 @@ begin
     end;
   end;
   EmptyCount := 0;
-  if TemporaryShopSlots.Count < ShopVisibleColumnCount * ShopGridRowCount then
-    EmptyCount := ShopVisibleColumnCount * ShopGridRowCount - TemporaryShopSlots.Count
-  else if TemporaryShopSlots.Count mod ShopGridRowCount <> 0 then
-    EmptyCount := ShopGridRowCount - TemporaryShopSlots.Count mod ShopGridRowCount;
+  if LocalHuman.TemporaryShopSlots.Count < ShopVisibleColumnCount * ShopGridRowCount then
+    EmptyCount := ShopVisibleColumnCount * ShopGridRowCount - LocalHuman.TemporaryShopSlots.Count
+  else if LocalHuman.TemporaryShopSlots.Count mod ShopGridRowCount <> 0 then
+    EmptyCount := ShopGridRowCount - LocalHuman.TemporaryShopSlots.Count mod ShopGridRowCount;
   for I := 1 to EmptyCount do
   begin
     Slot := ShopSlotClass.Create;
     Slot.Item := nil;
-    TemporaryShopSlots.Add(Slot);
+    LocalHuman.TemporaryShopSlots.Add(Slot);
   end;
   EmptyCount := 0;
   for Y := 0 to ShopGridRowCount - 1 do
-    for X := 0 to TemporaryShopSlots.Count div ShopGridRowCount - 1 do
+    for X := 0 to LocalHuman.TemporaryShopSlots.Count div ShopGridRowCount - 1 do
     begin
-      Slot := TemporaryShopSlots[EmptyCount];
+      Slot := LocalHuman.TemporaryShopSlots[EmptyCount];
       Slot.GridPoint := Classes.Point(X, Y);
       Inc(EmptyCount);
     end;
@@ -143,27 +142,27 @@ var
   I, Count: Integer;
   Slot: TShopStockSlot;
 begin
-  if TemporaryShopSlots = nil then
+  if LocalHuman.TemporaryShopSlots = nil then
     Exit;
-  if TemporaryShopPlanet <> nil then
+  if LocalHuman.TemporaryShopPlanet <> nil then
   begin
-    Count := TemporaryShopSlots.Count;
+    Count := LocalHuman.TemporaryShopSlots.Count;
     for I := 0 to Count - 1 do
     begin
-      Slot := TemporaryShopSlots[I];
+      Slot := LocalHuman.TemporaryShopSlots[I];
       if Slot.Item <> nil then
-        TemporaryShopPlanet.EquipmentShop.Add(Slot.Item);
+        LocalHuman.TemporaryShopPlanet.EquipmentShop.Add(Slot.Item);
       Slot.Item := nil;
     end;
   end
-  else if TemporaryShopStation <> nil then
+  else if LocalHuman.TemporaryShopStation <> nil then
   begin
-    Count := TemporaryShopSlots.Count;
+    Count := LocalHuman.TemporaryShopSlots.Count;
     for I := 0 to Count - 1 do
     begin
-      Slot := TemporaryShopSlots[I];
+      Slot := LocalHuman.TemporaryShopSlots[I];
       if Slot.Item <> nil then
-        TemporaryShopStation.EquipmentShop.Add(Slot.Item);
+        LocalHuman.TemporaryShopStation.EquipmentShop.Add(Slot.Item);
       Slot.Item := nil;
     end;
   end;
@@ -175,19 +174,19 @@ var
   I, Count: Integer;
   Slot: TShopStockSlot;
 begin
-  if TemporaryShopSlots <> nil then
+  if LocalHuman.TemporaryShopSlots <> nil then
   begin
-    Count := TemporaryShopSlots.Count;
+    Count := LocalHuman.TemporaryShopSlots.Count;
     for I := 0 to Count - 1 do
     begin
-      Slot := TemporaryShopSlots[I];
+      Slot := LocalHuman.TemporaryShopSlots[I];
       Slot.Free;
     end;
-    TemporaryShopSlots.Clear;
-    TemporaryShopSlots.Free;
-    TemporaryShopSlots := nil;
-    TemporaryShopPlanet := nil;
-    TemporaryShopStation := nil;
+    LocalHuman.TemporaryShopSlots.Clear;
+    LocalHuman.TemporaryShopSlots.Free;
+    LocalHuman.TemporaryShopSlots := nil;
+    LocalHuman.TemporaryShopPlanet := nil;
+    LocalHuman.TemporaryShopStation := nil;
   end;
 end;
 

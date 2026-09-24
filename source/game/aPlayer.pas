@@ -249,6 +249,7 @@ procedure SetPlayer(Player: TPlayer; Galaxy: TGalaxy);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   aCalc,
   SimEvents,
   aNormalShip,
@@ -4219,7 +4220,7 @@ begin
     Exit;
   if RuinsMode = 0 then
   begin
-    if TemporaryShopSlots <> nil then
+    if LocalHuman.TemporaryShopSlots <> nil then
       RestoreTemporaryShopStock;
     RuinsSavedPlanet := CurrentPlanet;
     RuinsSavedDockedTo := DockedTo;
@@ -4240,7 +4241,7 @@ begin
   if (RuinsSavedPlanet = nil) and (RuinsSavedDockedTo = nil) then
   begin
     RequestedScreenId := screenStarMap;
-    if TemporaryShopSlots <> nil then
+    if LocalHuman.TemporaryShopSlots <> nil then
     begin
       aCalc.WaitForTurnCalculationUI;
       CurrentPlanet := nil;
@@ -4266,7 +4267,7 @@ end;
 procedure TPlayer.ExitRuinsMode;
 begin
   aCalc.WaitForTurnCalculationUI;
-  if TemporaryShopSlots <> nil then
+  if LocalHuman.TemporaryShopSlots <> nil then
   begin
     CurrentPlanet := nil;
     DockedTo := RuinsProxy;

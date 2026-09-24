@@ -391,10 +391,10 @@ begin
     else
       SoundSection := GetPlayer.CurrentPlanet.RaceId + 1;
     Stage := 2;
-    if GetPlayer.CurrentPlanet <> TemporaryShopPlanet then
+    if GetPlayer.CurrentPlanet <> LocalHuman.TemporaryShopPlanet then
     begin
       SelectMusic;
-      if TemporaryShopSlots <> nil then
+      if LocalHuman.TemporaryShopSlots <> nil then
         RestoreTemporaryShopStock;
       RunGlobalScriptsForContext(GetPlayer.CurrentStar, 0);
       PruneExpiredPersistentPlayerMessages;

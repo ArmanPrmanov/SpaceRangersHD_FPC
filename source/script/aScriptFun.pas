@@ -3697,7 +3697,7 @@ begin
   else if Obj is TPlanet then
   begin
     Planet := Obj as TPlanet;
-    if (GetPlayer.CurrentPlanet = Planet) and (TemporaryShopSlots <> nil) then
+    if (GetPlayer.CurrentPlanet = Planet) and (LocalHuman.TemporaryShopSlots <> nil) then
     begin
       if FindShopSlotByItem(Item) = nil then
         av[0].SetInt(0)
@@ -7089,8 +7089,8 @@ begin
   Item := TItem(av[2].GetDword);
   av[0].SetInt(0);
   Refresh :=
-      (TemporaryShopSlots <> nil)
-          and ((TemporaryShopPlanet = Shop) or (TemporaryShopStation = Shop));
+      (LocalHuman.TemporaryShopSlots <> nil)
+          and ((LocalHuman.TemporaryShopPlanet = Shop) or (LocalHuman.TemporaryShopStation = Shop));
   if Item <> nil then
   begin
     if Shop is TPlanet then
@@ -7137,8 +7137,8 @@ begin
   if Shop <> nil then
   begin
     Refresh :=
-        (TemporaryShopSlots <> nil)
-            and ((TemporaryShopPlanet = Shop) or (TemporaryShopStation = Shop));
+        (LocalHuman.TemporaryShopSlots <> nil)
+            and ((LocalHuman.TemporaryShopPlanet = Shop) or (LocalHuman.TemporaryShopStation = Shop));
     if Refresh then
       RestoreTemporaryShopStock;
     if Shop is TPlanet then
@@ -7516,12 +7516,12 @@ begin
   if High(av) = 1 then
   begin
     Count := 0;
-    if (TemporaryShopSlots <> nil)
+    if (LocalHuman.TemporaryShopSlots <> nil)
         and ((GetPlayer.CurrentPlanet = Shop) or (GetPlayer.DockedTo = Shop)) then
     begin
-      for Index := 0 to TemporaryShopSlots.Count - 1 do
-        if TemporaryShopSlots[Index] <> nil then
-          if TShopSlot(TemporaryShopSlots[Index]).Item <> nil then
+      for Index := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
+        if LocalHuman.TemporaryShopSlots[Index] <> nil then
+          if TShopSlot(LocalHuman.TemporaryShopSlots[Index]).Item <> nil then
             Inc(Count);
     end
     else
@@ -7534,18 +7534,18 @@ begin
   begin
     Wanted := av[2].GetInt;
     av[0].SetDword(0);
-    if (TemporaryShopSlots <> nil)
+    if (LocalHuman.TemporaryShopSlots <> nil)
         and ((GetPlayer.CurrentPlanet = Shop) or (GetPlayer.DockedTo = Shop)) then
     begin
       Count := -1;
-      for Index := 0 to TemporaryShopSlots.Count - 1 do
-        if TemporaryShopSlots[Index] <> nil then
-          if TShopSlot(TemporaryShopSlots[Index]).Item <> nil then
+      for Index := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
+        if LocalHuman.TemporaryShopSlots[Index] <> nil then
+          if TShopSlot(LocalHuman.TemporaryShopSlots[Index]).Item <> nil then
           begin
             Inc(Count);
             if Count = Wanted then
             begin
-              av[0].SetDword(PtrUInt(TShopSlot(TemporaryShopSlots[Index]).Item));
+              av[0].SetDword(PtrUInt(TShopSlot(LocalHuman.TemporaryShopSlots[Index]).Item));
               Break;
             end;
           end;
@@ -8776,7 +8776,7 @@ begin
         end
         else if (Ship.DockedTo <> nil) and (Ship is TRanger) then
           (Ship as TRanger).LastDockedNonPlanetLocation := Ship.DockedTo;
-        if (GetPlayer = Ship) and (TemporaryShopSlots <> nil) then
+        if (GetPlayer = Ship) and (LocalHuman.TemporaryShopSlots <> nil) then
           RestoreTemporaryShopStock;
         Ship.CurrentPlanet := Planet;
         Ship.DockedTo := Station;
@@ -10897,7 +10897,7 @@ begin
   Star := TStar(av[2].GetDword);
   Origin := TStar(av[3].GetDword);
   State := av[4].GetDword;
-  if (GetPlayer = Ship) and (TemporaryShopSlots <> nil) then
+  if (GetPlayer = Ship) and (LocalHuman.TemporaryShopSlots <> nil) then
     RestoreTemporaryShopStock;
   I := Ship.CurrentStar.Ships.IndexOf(Ship);
   if I >= 0 then
@@ -13039,7 +13039,7 @@ procedure SF_ShipChangeStar(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) < 2 then
     raise Exception.Create('Error.Script ShipChangeStar');
-  if (TShip(av[1].GetDword) = GetPlayer) and (TemporaryShopSlots <> nil) then
+  if (TShip(av[1].GetDword) = GetPlayer) and (LocalHuman.TemporaryShopSlots <> nil) then
     RestoreTemporaryShopStock;
   TShip(av[1].GetDword).TransferToStar(TStar(av[2].GetDword));
   if TShip(av[1].GetDword) = GetPlayer then

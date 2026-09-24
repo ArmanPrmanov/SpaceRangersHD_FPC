@@ -33,6 +33,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   Math,
   aCalc,
   Classes,
@@ -128,10 +129,10 @@ begin
     SoundSection := 0
   else
     SoundSection := GetPlayer.CurrentPlanet.RaceId + 1;
-  if GetPlayer.CurrentPlanet <> TemporaryShopPlanet then
+  if GetPlayer.CurrentPlanet <> LocalHuman.TemporaryShopPlanet then
   begin
     SelectMusic;
-    if TemporaryShopSlots <> nil then
+    if LocalHuman.TemporaryShopSlots <> nil then
       RestoreTemporaryShopStock;
     RunGlobalScriptsForContext(GetPlayer.CurrentStar, 0);
     PruneExpiredPersistentPlayerMessages;

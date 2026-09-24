@@ -99,6 +99,7 @@ function GetShopItemIconName(Item: TItem): WideString;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   GI_Main,
   ThreadCalc,
   aCalc,
@@ -134,10 +135,10 @@ var
   Count, I: Integer;
   Slot: TShopSlot;
 begin
-  Count := TemporaryShopSlots.Count;
+  Count := LocalHuman.TemporaryShopSlots.Count;
   for I := 0 to Count - 1 do
   begin
-    Slot := TemporaryShopSlots[I];
+    Slot := LocalHuman.TemporaryShopSlots[I];
     if (Slot.GridPoint.X = Point.X) and (Slot.GridPoint.Y = Point.Y) then
     begin
       Result := Slot;
@@ -151,10 +152,10 @@ function FindShopSlotByItem(Item: TItem): TShopSlot;
 var
   I: Integer;
 begin
-  for I := 0 to TemporaryShopSlots.Count - 1 do
-    if TShopSlot(TemporaryShopSlots[I]).Item = Item then
+  for I := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
+    if TShopSlot(LocalHuman.TemporaryShopSlots[I]).Item = Item then
     begin
-      Result := TemporaryShopSlots[I];
+      Result := LocalHuman.TemporaryShopSlots[I];
       Exit;
     end;
   Result := nil;
@@ -401,10 +402,10 @@ begin
   RestoreTemporaryShopStock;
   if GetPlayer <> nil then
   begin
-    SavedSlots := TemporaryShopSlots;
-    TemporaryShopSlots := nil;
+    SavedSlots := LocalHuman.TemporaryShopSlots;
+    LocalHuman.TemporaryShopSlots := nil;
     GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
-    TemporaryShopSlots := SavedSlots;
+    LocalHuman.TemporaryShopSlots := SavedSlots;
   end;
   BuildTemporaryShopSlotGrid;
   BuildGoodsControls;
@@ -429,12 +430,12 @@ begin
   aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
     GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
-  if TemporaryShopSlots <> nil then
+  if LocalHuman.TemporaryShopSlots <> nil then
   begin
-    Count := TemporaryShopSlots.Count;
+    Count := LocalHuman.TemporaryShopSlots.Count;
     for I := 0 to Count - 1 do
     begin
-      Slot := TemporaryShopSlots[I];
+      Slot := LocalHuman.TemporaryShopSlots[I];
       if Slot.SlotImage <> nil then
       begin
         Slot.SlotImage.Free;
@@ -502,10 +503,10 @@ var
 begin
   UnknownEC := 0;
   ContentColumnCount := 0;
-  Count := TemporaryShopSlots.Count;
+  Count := LocalHuman.TemporaryShopSlots.Count;
   for I := 0 to Count - 1 do
   begin
-    Slot := TemporaryShopSlots[I];
+    Slot := LocalHuman.TemporaryShopSlots[I];
     if ContentColumnCount <= Slot.GridPoint.X then
       ContentColumnCount := Slot.GridPoint.X + 1;
   end;
@@ -730,12 +731,12 @@ var
   Panel: TPanelGI;
   Child, Current: TObjectGI;
 begin
-  if TemporaryShopSlots <> nil then
+  if LocalHuman.TemporaryShopSlots <> nil then
   begin
-    Count := TemporaryShopSlots.Count;
+    Count := LocalHuman.TemporaryShopSlots.Count;
     for I := 0 to Count - 1 do
     begin
-      Slot := TemporaryShopSlots[I];
+      Slot := LocalHuman.TemporaryShopSlots[I];
       if Slot.SlotImage <> nil then
       begin
         Slot.SlotImage.Free;
@@ -1304,14 +1305,14 @@ var
   Slot: TShopSlot;
   Attempts: Integer;
 begin
-  if TemporaryShopSlots.IndexOf(PreviewSlot) >= 0 then
+  if LocalHuman.TemporaryShopSlots.IndexOf(PreviewSlot) >= 0 then
     ScheduleSlotPreviewStop(PreviewSlot);
   PreviewSlot := nil;
   Attempts := 20;
   while Attempts > 0 do
   begin
-    I := RandomIntRange(0, TemporaryShopSlots.Count - 1);
-    Slot := TemporaryShopSlots[I];
+    I := RandomIntRange(0, LocalHuman.TemporaryShopSlots.Count - 1);
+    Slot := LocalHuman.TemporaryShopSlots[I];
     if Slot.Item <> nil then
     begin
       StartSlotAnimatedPreview(Slot);
@@ -1378,7 +1379,7 @@ begin
       CancelCallbackTimer(OpenPreviewTimer);
       OpenPreviewTimer := nil;
     end;
-    if TemporaryShopSlots.IndexOf(PreviewSlot) >= 0 then
+    if LocalHuman.TemporaryShopSlots.IndexOf(PreviewSlot) >= 0 then
       ScheduleSlotPreviewStop(PreviewSlot);
     PreviewSlot := nil;
     if ItemInfoTimer <> nil then

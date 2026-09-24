@@ -206,6 +206,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   SimulationThread,
   Windows,
   GI_Tail,
@@ -2179,10 +2180,10 @@ begin
       end;
     end
     else if GetPlayer.CurrentPlanet = Self then
-      if aShopStock.TemporaryShopSlots <> nil then
-        for i := 0 to aShopStock.TemporaryShopSlots.Count - 1 do
+      if LocalHuman.TemporaryShopSlots <> nil then
+        for i := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
         begin
-          Slot := aShopStock.TemporaryShopSlots[i];
+          Slot := LocalHuman.TemporaryShopSlots[i];
           Item := Slot.Item;
           if Item <> nil then
           begin
@@ -2313,10 +2314,10 @@ begin
       end;
     end
     else if GetPlayer.CurrentPlanet = Self then
-      if aShopStock.TemporaryShopSlots <> nil then
-        for i := 0 to aShopStock.TemporaryShopSlots.Count - 1 do
+      if LocalHuman.TemporaryShopSlots <> nil then
+        for i := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
         begin
-          Slot := aShopStock.TemporaryShopSlots[i];
+          Slot := LocalHuman.TemporaryShopSlots[i];
           Item := Slot.Item;
           if Item <> nil then
           begin
@@ -2336,8 +2337,8 @@ begin
             Item := CreateDefaultItemByType(ItemType);
             if Item <> nil then
             begin
-              if (aShopStock.TemporaryShopSlots <> nil)
-                  and (aShopStock.TemporaryShopPlanet = Self) then
+              if (LocalHuman.TemporaryShopSlots <> nil)
+                  and (LocalHuman.TemporaryShopPlanet = Self) then
               begin
                 RestoreTemporaryShopStock;
                 EquipmentShop.Add(Item);

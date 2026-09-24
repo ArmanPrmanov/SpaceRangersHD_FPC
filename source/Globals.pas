@@ -1507,12 +1507,12 @@ begin
     GameplayUiScriptCache.Free;
     GameplayUiScriptCache := nil;
   end;
-  if TemporaryShopSlots <> nil then
+  if LocalHuman.TemporaryShopSlots <> nil then
   begin
-    Count := TemporaryShopSlots.Count;
+    Count := LocalHuman.TemporaryShopSlots.Count;
     for Index := 0 to Count - 1 do
     begin
-      Slot := TemporaryShopSlots[Index];
+      Slot := LocalHuman.TemporaryShopSlots[Index];
       if Slot.SlotImage <> nil then
       begin
         Slot.SlotImage.Free;

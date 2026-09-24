@@ -14,6 +14,8 @@ uses
   Classes,
   Globals,
   aGalaxy,
+  aPlanet,
+  aRuins,
   aShip;
 type
   THumanState = record
@@ -29,6 +31,10 @@ type
     // The message bubbles, guarded by PersistentPlayerMessageLock.
     FirstPersistentPlayerMessage: TMessagePlayer;
     LastPersistentPlayerMessage: TMessagePlayer;
+    // The shop the human has open: its stock (aShopStock) and where it came from.
+    TemporaryShopSlots: TList;
+    TemporaryShopPlanet: TPlanet;
+    TemporaryShopStation: TRuins;
   end;
 var
   LocalHuman: THumanState;

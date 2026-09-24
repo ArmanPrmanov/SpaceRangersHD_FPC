@@ -808,10 +808,10 @@ begin
     Stage := 5;
     StationPanel.OnOpen;
     Stage := 6;
-    if GetPlayer.DockedTo <> TemporaryShopStation then
+    if GetPlayer.DockedTo <> LocalHuman.TemporaryShopStation then
     begin
       SelectMusic;
-      if TemporaryShopSlots <> nil then
+      if LocalHuman.TemporaryShopSlots <> nil then
         RestoreTemporaryShopStock;
       RunGlobalScriptsForContext(GetPlayer.CurrentStar, 0);
       PruneExpiredPersistentPlayerMessages;
@@ -9738,10 +9738,10 @@ begin
         end;
       end;
   end;
-  if TemporaryShopSlots <> nil then
-    for I := 0 to TemporaryShopSlots.Count - 1 do
+  if LocalHuman.TemporaryShopSlots <> nil then
+    for I := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
     begin
-      Slot := TemporaryShopSlots[I];
+      Slot := LocalHuman.TemporaryShopSlots[I];
       if Slot <> nil then
       begin
         Item := TEquipment(Slot.Item);
@@ -10123,7 +10123,7 @@ var
   var
     Station: TRuins;
   begin
-    if TemporaryShopSlots <> nil then
+    if LocalHuman.TemporaryShopSlots <> nil then
     begin
       RestoreTemporaryShopStock;
       Station := TRuins(GetPlayer.DockedTo);

@@ -117,6 +117,7 @@ function ItemMatchesInfoSearch(Item: TItem; Search: WideString): Boolean;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   aCalc,
   aScript,
   Classes,
@@ -2797,11 +2798,11 @@ begin
             end
             else
               CheckInfoSearchResult(Ship);
-            if (GetPlayer.DockedTo = Ship) and (TemporaryShopSlots <> nil) then
+            if (GetPlayer.DockedTo = Ship) and (LocalHuman.TemporaryShopSlots <> nil) then
             begin
-              for ItemIndex := 0 to TemporaryShopSlots.Count - 1 do
+              for ItemIndex := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
               begin
-                Item := TShopSlot(TemporaryShopSlots[ItemIndex]).Item;
+                Item := TShopSlot(LocalHuman.TemporaryShopSlots[ItemIndex]).Item;
                 if Item <> nil then
                 begin
                   if SelectedSearchCategory = 0 then
@@ -2847,11 +2848,11 @@ begin
           begin
             if (GetPlayer.CurrentPlanet <> nil)
                 and (GetPlayer.CurrentPlanet = Planet)
-                and (TemporaryShopSlots <> nil) then
+                and (LocalHuman.TemporaryShopSlots <> nil) then
             begin
-              for ItemIndex := 0 to TemporaryShopSlots.Count - 1 do
+              for ItemIndex := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
               begin
-                Item := TShopSlot(TemporaryShopSlots[ItemIndex]).Item;
+                Item := TShopSlot(LocalHuman.TemporaryShopSlots[ItemIndex]).Item;
                 if Item <> nil then
                 begin
                   if SelectedSearchCategory = 0 then

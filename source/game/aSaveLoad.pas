@@ -224,9 +224,9 @@ end;
 // mod OnSave handlers.
 procedure PrepareGalaxyForSave;
 begin
-  if (TemporaryShopSlots <> nil)
-      and (GetPlayer.CurrentPlanet <> TemporaryShopPlanet)
-      and (GetPlayer.DockedTo <> TemporaryShopStation) then
+  if (LocalHuman.TemporaryShopSlots <> nil)
+      and (GetPlayer.CurrentPlanet <> LocalHuman.TemporaryShopPlanet)
+      and (GetPlayer.DockedTo <> LocalHuman.TemporaryShopStation) then
     RestoreTemporaryShopStock;
   Galaxy.RunConfigOnSaveHandlers;
 end;

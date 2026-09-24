@@ -98,6 +98,7 @@ procedure CheatInfos;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   aCalc,
   aKling,
   GI_MessageLoop,
@@ -1012,9 +1013,9 @@ begin
       and (GetPlayer.CurrentPlanet.OwnerId = Byte(oiPeleng))
       and (CurrentScreenId <> screenShip) then
   begin
-    for I := 0 to TemporaryShopSlots.Count - 1 do
+    for I := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
     begin
-      Item := TShopSlot(TemporaryShopSlots[I]).Item;
+      Item := TShopSlot(LocalHuman.TemporaryShopSlots[I]).Item;
       if (Item <> nil) and (Item is TWeapon) then
         (Item as TWeapon).Range := (Item as TWeapon).Range * 2;
     end;

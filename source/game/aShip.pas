@@ -11737,7 +11737,7 @@ begin
   OriginalMoney := Money;
   if CurrentPlanet <> nil then
   begin
-    if (TemporaryShopSlots <> nil) and (TemporaryShopPlanet = CurrentPlanet) then
+    if (LocalHuman.TemporaryShopSlots <> nil) and (LocalHuman.TemporaryShopPlanet = CurrentPlanet) then
     begin
       RestoreTemporaryShopStock;
       RestoreStock := True;
@@ -11754,7 +11754,7 @@ begin
   end
   else if (DockedTo <> nil) and (DockedTo is TRuins) then
   begin
-    if (TemporaryShopSlots <> nil) and (TemporaryShopStation = DockedTo) then
+    if (LocalHuman.TemporaryShopSlots <> nil) and (LocalHuman.TemporaryShopStation = DockedTo) then
     begin
       RestoreTemporaryShopStock;
       RestoreStock := True;
@@ -11771,7 +11771,7 @@ begin
   end
   else if (Self is TRuins) and Galaxy.IsStationShopUpdateEnabled then
   begin
-    if (TemporaryShopSlots <> nil) and (TemporaryShopStation = Self) then
+    if (LocalHuman.TemporaryShopSlots <> nil) and (LocalHuman.TemporaryShopStation = Self) then
     begin
       RestoreTemporaryShopStock;
       RestoreStock := True;

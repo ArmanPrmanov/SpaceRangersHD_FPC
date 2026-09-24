@@ -251,6 +251,7 @@ const
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   Classes,
   aWarrior,
   aPlayer,
@@ -664,10 +665,10 @@ begin
       Item.SaveToBlock(ShopBlock.AddBlockByPath(Text));
     end;
   end
-  else if (GetPlayer.DockedTo = Self) and (TemporaryShopSlots <> nil) then
-    for I := 0 to TemporaryShopSlots.Count - 1 do
+  else if (GetPlayer.DockedTo = Self) and (LocalHuman.TemporaryShopSlots <> nil) then
+    for I := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
     begin
-      Slot := TShopStockSlot(TemporaryShopSlots[I]);
+      Slot := TShopStockSlot(LocalHuman.TemporaryShopSlots[I]);
       Item := Slot.Item;
       if Item <> nil then
       begin
@@ -721,10 +722,10 @@ begin
       Item.LoadFromBlock(ShopBlock.GetBlockByPath(Text));
     end;
   end
-  else if (GetPlayer.DockedTo = Self) and (TemporaryShopSlots <> nil) then
-    for I := 0 to TemporaryShopSlots.Count - 1 do
+  else if (GetPlayer.DockedTo = Self) and (LocalHuman.TemporaryShopSlots <> nil) then
+    for I := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
     begin
-      Slot := TShopStockSlot(TemporaryShopSlots[I]);
+      Slot := TShopStockSlot(LocalHuman.TemporaryShopSlots[I]);
       Item := Slot.Item;
       if Item <> nil then
       begin
@@ -744,7 +745,7 @@ begin
           Item := CreateDefaultItemByType(TItemType(Kind));
           if Item <> nil then
           begin
-            if (TemporaryShopSlots <> nil) and (TemporaryShopStation = Self) then
+            if (LocalHuman.TemporaryShopSlots <> nil) and (LocalHuman.TemporaryShopStation = Self) then
             begin
               RestoreTemporaryShopStock;
               EquipmentShop.Add(Item);

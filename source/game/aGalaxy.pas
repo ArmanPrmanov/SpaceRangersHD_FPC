@@ -1289,12 +1289,12 @@ begin
     Buffer.AddDWord(KellerTargetStar.Id);
   Buffer.AddIntegerValue(KellerMissionState);
   Count := 0;
-  if TemporaryShopSlots <> nil then
-    Count := TemporaryShopSlots.Count;
+  if LocalHuman.TemporaryShopSlots <> nil then
+    Count := LocalHuman.TemporaryShopSlots.Count;
   Buffer.AddWideChar(WideChar(Count));
   for I := 0 to Count - 1 do
   begin
-    ShopSlot := TemporaryShopSlots[I];
+    ShopSlot := LocalHuman.TemporaryShopSlots[I];
     ShopSlot.SaveToBuffer(Buffer);
   end;
   SharedScriptVariables.SaveToBuffer(Buffer);
@@ -1756,11 +1756,11 @@ begin
     Count := Buffer.GetWord;
     if Count > 0 then
     begin
-      TemporaryShopSlots := TList.Create;
+      LocalHuman.TemporaryShopSlots := TList.Create;
       for I := 0 to Count - 1 do
       begin
         ShopSlot := ShopSlotClass.Create;
-        TemporaryShopSlots.Add(ShopSlot);
+        LocalHuman.TemporaryShopSlots.Add(ShopSlot);
         ShopSlot.LoadFromBuffer(Buffer, Self);
       end;
     end;
@@ -1862,12 +1862,12 @@ begin
       Star := TStar(Stars[I]);
       Star.ResolveLoadedReferences(Self);
     end;
-    if TemporaryShopSlots <> nil then
+    if LocalHuman.TemporaryShopSlots <> nil then
     begin
       if GetPlayer.CurrentPlanet <> nil then
-        TemporaryShopPlanet := GetPlayer.CurrentPlanet
+        LocalHuman.TemporaryShopPlanet := GetPlayer.CurrentPlanet
       else if (GetPlayer.DockedTo <> nil) and (GetPlayer.DockedTo is TRuins) then
-        TemporaryShopStation := TRuins(GetPlayer.DockedTo)
+        LocalHuman.TemporaryShopStation := TRuins(GetPlayer.DockedTo)
       else
         ClearTemporaryShopSlotGrid;
     end;
@@ -3542,12 +3542,12 @@ begin
       end;
     end;
   end;
-  if aShopStock.TemporaryShopSlots <> nil then
-    for i := 0 to aShopStock.TemporaryShopSlots.Count - 1 do
-      if TShopStockSlot(aShopStock.TemporaryShopSlots[i]).Item <> nil then
-        if Cardinal(TShopStockSlot(aShopStock.TemporaryShopSlots[i]).Item.Id) = Id then
+  if LocalHuman.TemporaryShopSlots <> nil then
+    for i := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
+      if TShopStockSlot(LocalHuman.TemporaryShopSlots[i]).Item <> nil then
+        if Cardinal(TShopStockSlot(LocalHuman.TemporaryShopSlots[i]).Item.Id) = Id then
         begin
-          Result := TShopStockSlot(aShopStock.TemporaryShopSlots[i]).Item;
+          Result := TShopStockSlot(LocalHuman.TemporaryShopSlots[i]).Item;
           Exit;
         end;
   for k := 0 to Self.StoredItems.Count - 1 do
