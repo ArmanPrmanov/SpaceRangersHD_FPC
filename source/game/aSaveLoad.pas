@@ -217,6 +217,18 @@ begin
   FilmBuffer := Films;
   Start;
 end;
+// CHANGE: BUGFIX - Moved out of TGalaxy.SaveToBuffer so that hashing the state changes
+// nothing. Returns shop stock left behind by a shop the player is no longer at, and runs
+// mod OnSave handlers.
+procedure PrepareGalaxyForSave;
+begin
+  if (TemporaryShopSlots <> nil)
+      and (GetPlayer.CurrentPlanet <> TemporaryShopPlanet)
+      and (GetPlayer.DockedTo <> TemporaryShopStation) then
+    RestoreTemporaryShopStock;
+  Galaxy.RunConfigOnSaveHandlers;
+end;
+
 function SaveGameToFile(FileName, Description: WideString): Boolean;
 var
   Header, Preview, SecondaryPreview, GameState, Films, FilmEntry: TBufEC;
@@ -295,6 +307,7 @@ begin
         GameState.AddAnsiChar(AnsiChar(Entry.GoodsIndex));
         GameState.AddDWord(Entry.ItemId);
       end;
+      PrepareGalaxyForSave;
       Galaxy.SaveToBuffer(GameState);
       Films := TBufEC.Create;
       FilmEntry := TBufEC.Create;
@@ -588,6 +601,7 @@ begin
     MemorySnapshotBuffer.AddDWord(Entry.ItemId);
   end;
   Dec(Galaxy.SaveCount);
+  PrepareGalaxyForSave;
   Galaxy.SaveToBuffer(MemorySnapshotBuffer);
   if Galaxy.ContainsShipReference(TalkShip) then
     MemorySnapshotBuffer.AddDWord(TalkShip.Id)

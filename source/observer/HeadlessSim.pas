@@ -11,6 +11,8 @@ type
     SavePath: AnsiString;
     Turns: Integer;
     Hash: Boolean;
+    // Hash only after the last turn, to show that hashing changes nothing.
+    HashLastOnly: Boolean;
     RoundTrip: Boolean;
     Seed: Cardinal;
     DumpDirectory: AnsiString;
@@ -281,12 +283,12 @@ begin
   ParkObserverPlayer;
   CurrentScreenId := screenPlanet;
   RequestedScreenId := screenNone;
-  if Options.Hash then
+  if Options.Hash and not Options.HashLastOnly then
     EmitHash(0, Options.DumpDirectory);
   for Turn := 1 to Options.Turns do
   begin
     SimulateParkedTurn;
-    if Options.Hash then
+    if Options.Hash and (not Options.HashLastOnly or (Turn = Options.Turns)) then
       EmitHash(Turn, Options.DumpDirectory);
   end;
   // A game that has run turns holds script references made during play, which

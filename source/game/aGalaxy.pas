@@ -1160,11 +1160,8 @@ var
   WeaponInfo: PWeaponInfo;
   Race: Byte;
 begin
-  if (TemporaryShopSlots <> nil)
-      and (GetPlayer.CurrentPlanet <> TemporaryShopPlanet)
-      and (GetPlayer.DockedTo <> TemporaryShopStation) then
-    RestoreTemporaryShopStock;
-  RunConfigOnSaveHandlers;
+  // CHANGE: BUGFIX - Stale shop stock and mod OnSave handlers are handled by the callers
+  // that save the game (PrepareGalaxyForSave); this writer only reads state.
   BeginObjectReferenceSave;
   Buffer.AddWideStringZ(SelectedMods);
   Buffer.AddIntegerValue(GenerationSeed);
@@ -4392,20 +4389,18 @@ begin
     Buffer.AddAnsiChar(AnsiChar(Item.ItemType));
     Item.SaveToBuffer(Buffer);
   end;
-  for I := MovingDropItems.Count - 1 downto 0 do
+  // CHANGE: BUGFIX - Skip emptied drops instead of deleting them: a writer must not change
+  // state, and scripts hold indices into this list.
+  Count := 0;
+  for I := 0 to MovingDropItems.Count - 1 do
+    if PointerToTMovingDropItemEntry(MovingDropItems[I]).Payload <> nil then
+      Inc(Count);
+  Buffer.AddWideChar(WideChar(Count));
+  for I := 0 to MovingDropItems.Count - 1 do
   begin
     Drop := MovingDropItems[I];
     if Drop.Payload = nil then
-    begin
-      MovingDropItems.Delete(I);
-      FreeEC(Drop);
-    end;
-  end;
-  Count := MovingDropItems.Count;
-  Buffer.AddWideChar(WideChar(Count));
-  for I := 0 to Count - 1 do
-  begin
-    Drop := MovingDropItems[I];
+      Continue;
     Buffer.AddSingle(Drop.Destination.X);
     Buffer.AddSingle(Drop.Destination.Y);
     Buffer.AddDWord(Drop.SourceShipId);

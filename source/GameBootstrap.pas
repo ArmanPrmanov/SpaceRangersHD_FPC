@@ -177,6 +177,11 @@ begin
       Simulation.DumpDirectory := ExpandFileName(Copy(Argument, 12, MaxInt))
     else if Argument = '--sim-hash' then
       Simulation.Hash := True
+    else if Argument = '--sim-hash-last' then
+    begin
+      Simulation.Hash := True;
+      Simulation.HashLastOnly := True
+    end
     else if Argument = '--sim-roundtrip' then
       Simulation.RoundTrip := True
     else if Pos('--game-dir=', Argument) = 1 then

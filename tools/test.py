@@ -104,6 +104,15 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
         return False, notes
     notes.append(f"deterministic over {args.turns} turns")
 
+    # Hashing saves the galaxy; saving must not change what later turns compute.
+    last_options = [f"--sim-turns={args.turns}", "--sim-hash-last", f"--sim-seed={args.seed}"]
+    code, output = simulate(binary, args.game_dir, save, last_options)
+    last = turn_lines(output)
+    if code != 0 or last != runs[0][-1:]:
+        notes.append("hashing changes the game: " + first_divergence(runs[0][-1:], last))
+        return False, notes
+    notes.append("hashing leaves the game unchanged")
+
     golden = GOLDEN / target_name() / f"{save_digest(save)}.txt"
     header = f"# {save.name}: {args.turns} turns, seed {args.seed}"
     if golden.is_file() and not args.update:

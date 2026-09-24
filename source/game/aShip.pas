@@ -1256,19 +1256,18 @@ begin
       Buffer.AddDWord(SourceId);
     end;
   end;
-  for I := CustomShipInfos.Count - 1 downto 0 do
-  begin
-    Info := CustomShipInfos[I];
-    if Info.DeleteQueued then
-    begin
-      CustomShipInfos.Delete(I);
-      Dispose(Info);
-    end;
-  end;
-  Buffer.AddIntegerValue(CustomShipInfos.Count);
+  // CHANGE: BUGFIX - Skip queued deletions instead of disposing them: a writer must not change
+  // state, and a running script action may still be walking this list.
+  Count := 0;
+  for I := 0 to CustomShipInfos.Count - 1 do
+    if not PCustomShipInfo(CustomShipInfos[I]).DeleteQueued then
+      Inc(Count);
+  Buffer.AddIntegerValue(Count);
   for I := 0 to CustomShipInfos.Count - 1 do
   begin
     Info := CustomShipInfos[I];
+    if Info.DeleteQueued then
+      Continue;
     Buffer.AddWideStringZ(Info.TypeName);
     Buffer.AddWideStringZ(Info.Description);
     Buffer.AddIntegerValue(Info.Data[1]);

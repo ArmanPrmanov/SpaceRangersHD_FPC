@@ -151,13 +151,15 @@ default save directory and is ignored by Git.
 The runner behind it is the game binary itself:
 
 ```sh
-Rangers --sim-save=save.sav --sim-turns=100 --sim-hash [--sim-roundtrip]
+Rangers --sim-save=save.sav --sim-turns=100 --sim-hash|--sim-hash-last [--sim-roundtrip]
         [--sim-seed=0] [--sim-dump=DIR]
 ```
 
 It runs without a window or audio, parks the player as the observer does, and
 prints `turn N day=D hash=H bytes=B unresolved=U` per turn. `--sim-roundtrip`
-checks the round trip before the turns and, with `--sim-turns`, again after them. The hash covers
+checks the round trip before the turns and, with `--sim-turns`, again after them.
+`--sim-hash-last` hashes only the last turn; the tests compare it with a run that
+hashes every turn, since hashing runs the save writer and must change nothing. The hash covers
 `TGalaxy.SaveToBuffer`, with script references to objects written by id instead
 of address; `unresolved` counts references it could not name. `--sim-dump`
 writes each hashed state so two runs can be diffed.

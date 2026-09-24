@@ -382,6 +382,8 @@ begin
 end;
 
 procedure TShopSlot.SaveToBuffer(Buffer: TBufEC);
+var
+  Target: TObject;
 begin
   Buffer.AddAnsiChar(AnsiChar(GridPoint.X));
   Buffer.AddAnsiChar(AnsiChar(GridPoint.Y));
@@ -391,9 +393,19 @@ begin
   begin
     Buffer.AddAnsiChar(#1);
     Buffer.AddAnsiChar(AnsiChar(Item.ItemType));
+    // CHANGE: BUGFIX - Write shop weapons without a target, but leave the weapon unchanged.
     if Item is TWeapon then
+    begin
+      Target := (Item as TWeapon).Target;
       (Item as TWeapon).Target := nil;
-    Item.SaveToBuffer(Buffer);
+      try
+        Item.SaveToBuffer(Buffer);
+      finally
+        (Item as TWeapon).Target := Target;
+      end;
+    end
+    else
+      Item.SaveToBuffer(Buffer);
   end;
 end;
 
