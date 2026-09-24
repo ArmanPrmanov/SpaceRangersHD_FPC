@@ -262,7 +262,6 @@ var
   SkipVideo: Boolean = False;
   SkipIntro: Boolean = False;
   NewGameGenerationThread: TThreadCreateNewGame;
-  ShownPlayerTips: Cardinal;
   StarMapWeaponPanelOpen: Boolean;
   PrimaryFilm: TEFilm;
   SecondaryFilm: TEFilm;
@@ -270,8 +269,6 @@ var
   SpaceProcess: TProcessSE;
   ActiveLoadBuffer: TBufEC;
   PersistentPlayerMessageLock: TCriticalSection;
-  FirstPersistentPlayerMessage: TMessagePlayer;
-  LastPersistentPlayerMessage: TMessagePlayer;
   ArcadeExplosionSounds: array of WideString;
   ArcadeItemSounds: array of WideString;
   ArcadeHitSounds: array of WideString;
@@ -552,6 +549,7 @@ function GetInnermostScreenLoop: TMessageLoopGI;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   aPacket,
   aSaveLoad,
   aScript,
@@ -1937,15 +1935,15 @@ var
 begin
   PersistentPlayerMessageLock.Enter;
   try
-    Next := FirstPersistentPlayerMessage;
+    Next := LocalHuman.FirstPersistentPlayerMessage;
     while Next <> nil do
     begin
       Entry := Next;
       Next := Next.Next;
       Entry.Free;
     end;
-    FirstPersistentPlayerMessage := nil;
-    LastPersistentPlayerMessage := nil;
+    LocalHuman.FirstPersistentPlayerMessage := nil;
+    LocalHuman.LastPersistentPlayerMessage := nil;
   finally
     PersistentPlayerMessageLock.Leave;
   end;
@@ -1958,7 +1956,7 @@ begin
   PersistentPlayerMessageLock.Enter;
   try
     Count := 0;
-    Entry := FirstPersistentPlayerMessage;
+    Entry := LocalHuman.FirstPersistentPlayerMessage;
     while Entry <> nil do
     begin
       Inc(Count);
@@ -1976,7 +1974,7 @@ begin
   if not SkipLock then
     PersistentPlayerMessageLock.Enter;
   try
-    Entry := FirstPersistentPlayerMessage;
+    Entry := LocalHuman.FirstPersistentPlayerMessage;
     while Entry <> nil do
     begin
       if Entry = MessageEntry then
@@ -2001,10 +1999,10 @@ begin
       MessageEntry.Prev.Next := MessageEntry.Next;
     if MessageEntry.Next <> nil then
       MessageEntry.Next.Prev := MessageEntry.Prev;
-    if LastPersistentPlayerMessage = MessageEntry then
-      LastPersistentPlayerMessage := MessageEntry.Prev;
-    if FirstPersistentPlayerMessage = MessageEntry then
-      FirstPersistentPlayerMessage := MessageEntry.Next;
+    if LocalHuman.LastPersistentPlayerMessage = MessageEntry then
+      LocalHuman.LastPersistentPlayerMessage := MessageEntry.Prev;
+    if LocalHuman.FirstPersistentPlayerMessage = MessageEntry then
+      LocalHuman.FirstPersistentPlayerMessage := MessageEntry.Next;
     MessageEntry.Free;
   finally
     if not SkipLock then
@@ -2044,7 +2042,7 @@ begin
   if not SkipLock then
     PersistentPlayerMessageLock.Enter;
   try
-    Entry := FirstPersistentPlayerMessage;
+    Entry := LocalHuman.FirstPersistentPlayerMessage;
     while Entry <> nil do
     begin
       if Entry.Text = Text then
@@ -2067,7 +2065,7 @@ begin
   if not SkipLock then
     PersistentPlayerMessageLock.Enter;
   try
-    Entry := FirstPersistentPlayerMessage;
+    Entry := LocalHuman.FirstPersistentPlayerMessage;
     while Entry <> nil do
     begin
       if Entry.Key = Key then
@@ -2088,7 +2086,7 @@ var
 begin
   PersistentPlayerMessageLock.Enter;
   try
-    Entry := FirstPersistentPlayerMessage;
+    Entry := LocalHuman.FirstPersistentPlayerMessage;
     while Entry <> nil do
     begin
       if Entry.Key = Key then
@@ -2097,10 +2095,10 @@ begin
           Entry.Prev.Next := Entry.Next;
         if Entry.Next <> nil then
           Entry.Next.Prev := Entry.Prev;
-        if LastPersistentPlayerMessage = Entry then
-          LastPersistentPlayerMessage := Entry.Prev;
-        if FirstPersistentPlayerMessage = Entry then
-          FirstPersistentPlayerMessage := Entry.Next;
+        if LocalHuman.LastPersistentPlayerMessage = Entry then
+          LocalHuman.LastPersistentPlayerMessage := Entry.Prev;
+        if LocalHuman.FirstPersistentPlayerMessage = Entry then
+          LocalHuman.FirstPersistentPlayerMessage := Entry.Next;
         Entry.Free;
         Exit;
       end;
@@ -2118,7 +2116,7 @@ var
 begin
   PersistentPlayerMessageLock.Enter;
   try
-    Entry := FirstPersistentPlayerMessage;
+    Entry := LocalHuman.FirstPersistentPlayerMessage;
     while Entry <> nil do
     begin
       Next := Entry.Next;
@@ -2134,10 +2132,10 @@ begin
             Entry.Prev.Next := Entry.Next;
           if Entry.Next <> nil then
             Entry.Next.Prev := Entry.Prev;
-          if LastPersistentPlayerMessage = Entry then
-            LastPersistentPlayerMessage := Entry.Prev;
-          if FirstPersistentPlayerMessage = Entry then
-            FirstPersistentPlayerMessage := Entry.Next;
+          if LocalHuman.LastPersistentPlayerMessage = Entry then
+            LocalHuman.LastPersistentPlayerMessage := Entry.Prev;
+          if LocalHuman.FirstPersistentPlayerMessage = Entry then
+            LocalHuman.FirstPersistentPlayerMessage := Entry.Next;
           Entry.Free;
         end;
       end;
@@ -2159,7 +2157,7 @@ begin
   if not SkipLock then
     PersistentPlayerMessageLock.Enter;
   try
-    MessageEntry := FirstPersistentPlayerMessage;
+    MessageEntry := LocalHuman.FirstPersistentPlayerMessage;
     while MessageEntry <> nil do
     begin
       if not (MessageEntry.Kind in ExcludedKinds)
@@ -2182,13 +2180,13 @@ begin
   PersistentPlayerMessageLock.Enter;
   try
     Entry := TMessagePlayer.Create;
-    if LastPersistentPlayerMessage <> nil then
-      LastPersistentPlayerMessage.Next := Entry;
-    Entry.Prev := LastPersistentPlayerMessage;
+    if LocalHuman.LastPersistentPlayerMessage <> nil then
+      LocalHuman.LastPersistentPlayerMessage.Next := Entry;
+    Entry.Prev := LocalHuman.LastPersistentPlayerMessage;
     Entry.Next := nil;
-    LastPersistentPlayerMessage := Entry;
-    if FirstPersistentPlayerMessage = nil then
-      FirstPersistentPlayerMessage := Entry;
+    LocalHuman.LastPersistentPlayerMessage := Entry;
+    if LocalHuman.FirstPersistentPlayerMessage = nil then
+      LocalHuman.FirstPersistentPlayerMessage := Entry;
   finally
     PersistentPlayerMessageLock.Leave;
   end;
@@ -2229,13 +2227,13 @@ begin
       Exit;
     end;
     Entry := TMessagePlayer.Create;
-    if LastPersistentPlayerMessage <> nil then
-      LastPersistentPlayerMessage.Next := Entry;
-    Entry.Prev := LastPersistentPlayerMessage;
+    if LocalHuman.LastPersistentPlayerMessage <> nil then
+      LocalHuman.LastPersistentPlayerMessage.Next := Entry;
+    Entry.Prev := LocalHuman.LastPersistentPlayerMessage;
     Entry.Next := nil;
-    LastPersistentPlayerMessage := Entry;
-    if FirstPersistentPlayerMessage = nil then
-      FirstPersistentPlayerMessage := Entry;
+    LocalHuman.LastPersistentPlayerMessage := Entry;
+    if LocalHuman.FirstPersistentPlayerMessage = nil then
+      LocalHuman.FirstPersistentPlayerMessage := Entry;
     Entry.Key := Key;
     Entry.Kind := Kind;
     Entry.Turn := Turn;
@@ -2253,7 +2251,7 @@ var
 begin
   PersistentPlayerMessageLock.Enter;
   try
-    Next := FirstPersistentPlayerMessage;
+    Next := LocalHuman.FirstPersistentPlayerMessage;
     while Next <> nil do
     begin
       Entry := Next;
@@ -2343,9 +2341,9 @@ end;
 function ShowPlayerTipOnce(Index: Integer): Boolean;
 begin
   Result := False;
-  if ShownPlayerTips shr Index and 1 = 0 then
+  if LocalHuman.ShownPlayerTips shr Index and 1 = 0 then
   begin
-    ShownPlayerTips := ShownPlayerTips or (1 shl Index);
+    LocalHuman.ShownPlayerTips := LocalHuman.ShownPlayerTips or (1 shl Index);
     if Index < 10 then
       AddOrUpdatePlayerBubble(
           6,
@@ -2365,7 +2363,7 @@ begin
 end;
 function HasShownPlayerTip(Index: Integer): Boolean;
 begin
-  Result := ShownPlayerTips shr Index and 1 <> 0;
+  Result := LocalHuman.ShownPlayerTips shr Index and 1 <> 0;
 end;
 function SelectSpaceImageTemplateFromSeed(Kind: Integer; Seed: Cardinal): Integer;
 var

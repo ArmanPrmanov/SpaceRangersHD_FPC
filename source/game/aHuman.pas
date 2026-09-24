@@ -12,6 +12,7 @@ unit aHuman;
 interface
 uses
   Classes,
+  Globals,
   aGalaxy,
   aShip;
 type
@@ -23,6 +24,11 @@ type
     PlayerAutomaticControl: Boolean;
     PlayerEquipmentBrokenThisTurn: Boolean;
     PlayerOldQuests: TList;
+    // Tips already shown, one bit each.
+    ShownPlayerTips: Cardinal;
+    // The message bubbles, guarded by PersistentPlayerMessageLock.
+    FirstPersistentPlayerMessage: TMessagePlayer;
+    LastPersistentPlayerMessage: TMessagePlayer;
   end;
 var
   LocalHuman: THumanState;

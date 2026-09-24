@@ -119,6 +119,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   Math,
   SearchBookmarks,
   GI_GI,
@@ -948,14 +949,14 @@ begin
     PersistentPlayerMessageLock.Enter;
   try
     Screen.GetByName('PM_Help').SetActive(False);
-    if FirstPersistentPlayerMessage = nil then
+    if LocalHuman.FirstPersistentPlayerMessage = nil then
       Exit;
     DisplayedShipId := 0;
     DisplayedPlanetId := 0;
     Panel := Screen.GetByName('PM_PanelMsg') as TPanelGI;
     Panel.SetActive(True);
     Screen.GetByName('PM_WinMsg').SetActive(False);
-    MessageEntry := LastPersistentPlayerMessage;
+    MessageEntry := LocalHuman.LastPersistentPlayerMessage;
     Count := 0;
     MaxCount := (Panel.ClientSize.X - 44) div 22;
     while (MessageEntry <> nil) and (Count < MaxCount) do
@@ -964,7 +965,7 @@ begin
       MessageEntry := MessageEntry.Prev;
     end;
     if MessageEntry = nil then
-      MessageEntry := FirstPersistentPlayerMessage;
+      MessageEntry := LocalHuman.FirstPersistentPlayerMessage;
     X := 0;
     while MessageEntry <> nil do
     begin
@@ -1037,7 +1038,7 @@ begin
   Panel.SetActive(False);
   Panel.FreeOwnedChildren;
   Screen.GetByName('PM_WinMsg').SetActive(False);
-  MessageEntry := LastPersistentPlayerMessage;
+  MessageEntry := LocalHuman.LastPersistentPlayerMessage;
   while MessageEntry <> nil do
   begin
     MessageEntry.Button := nil;
@@ -1467,7 +1468,7 @@ begin
   PlayedQuestCancel := False;
   PersistentPlayerMessageLock.Enter;
   try
-    MessageEntry := FirstPersistentPlayerMessage;
+    MessageEntry := LocalHuman.FirstPersistentPlayerMessage;
     while MessageEntry <> nil do
     begin
       if not MessageEntry.NotificationSoundPlayed then
@@ -1494,7 +1495,7 @@ begin
           end;
       MessageEntry := MessageEntry.Next;
     end;
-    MessageEntry := FirstPersistentPlayerMessage;
+    MessageEntry := LocalHuman.FirstPersistentPlayerMessage;
     while MessageEntry <> nil do
     begin
       MessageEntry.NotificationSoundPlayed := True;

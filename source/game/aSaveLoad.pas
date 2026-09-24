@@ -45,6 +45,7 @@ procedure LinkRecoveredTypes;
 implementation
 
 uses
+  aHuman,
   aCalc,
   RTLFileSystem,
   Math,
@@ -287,11 +288,11 @@ begin
       GameState.AddAnsiChar(#0);
       GameState.AddBoolean(False);
       GameState.AddBoolean(PlayerStarDayPrepared);
-      GameState.AddDWord(ShownPlayerTips);
+      GameState.AddDWord(LocalHuman.ShownPlayerTips);
       GameState.AddIntegerValue(0);
       Count := CountPersistentPlayerMessages;
       GameState.AddIntegerValue(Count);
-      Message := FirstPersistentPlayerMessage;
+      Message := LocalHuman.FirstPersistentPlayerMessage;
       while Message <> nil do
       begin
         Message.SaveToBuffer(GameState);
@@ -480,7 +481,7 @@ begin
       Buffer.GetByte;
       Buffer.GetBoolean;
       PlayerStarDayPrepared := Buffer.GetBoolean;
-      ShownPlayerTips := Buffer.GetUInt32;
+      LocalHuman.ShownPlayerTips := Buffer.GetUInt32;
       Buffer.GetInt32;
       Count := Buffer.GetInt32;
       for I := 0 to Count - 1 do
@@ -583,13 +584,13 @@ begin
     RestoreTemporaryShopStock;
   Count := CountPersistentPlayerMessages;
   MemorySnapshotBuffer.AddIntegerValue(Count);
-  Message := FirstPersistentPlayerMessage;
+  Message := LocalHuman.FirstPersistentPlayerMessage;
   while Message <> nil do
   begin
     Message.SaveToBuffer(MemorySnapshotBuffer);
     Message := Message.Next;
   end;
-  MemorySnapshotBuffer.AddDWord(ShownPlayerTips);
+  MemorySnapshotBuffer.AddDWord(LocalHuman.ShownPlayerTips);
   PlayerHoldShip := GetPlayer;
   RefreshPlayerHoldView(False);
   Count := PlayerHoldEntries.Count;
@@ -650,7 +651,7 @@ begin
     Message := CreatePersistentPlayerMessage;
     Message.LoadFromBuffer(MemorySnapshotBuffer);
   end;
-  ShownPlayerTips := MemorySnapshotBuffer.GetUInt32;
+  LocalHuman.ShownPlayerTips := MemorySnapshotBuffer.GetUInt32;
   InitializePlayerHoldView;
   Count := MemorySnapshotBuffer.GetWord;
   for I := 0 to Count - 1 do

@@ -952,7 +952,7 @@ begin
     Template.ActiveScriptIndex := -1;
   end;
   PreviousFilmActivity := 0;
-  ShownPlayerTips := 0;
+  LocalHuman.ShownPlayerTips := 0;
   EminentCareerShips[Ord(rcTrader)] := nil;
   EminentCareerShips[Ord(rcPirate)] := nil;
   EminentCareerShips[Ord(rcWarrior)] := nil;
