@@ -11,6 +11,9 @@ uses
   aCommands,
   TestSupport;
 
+const
+  ckTestMove = 1023;
+
 procedure RunCommandTests;
 var
   Command, Decoded: TPlayerCommand;
@@ -18,7 +21,8 @@ var
   Point: TPointF;
   NegativeZero: Single;
 begin
-  Command := NewCommand(ckOrderMove);
+  RegisterCommand(ckTestMove, 'TestMove', nil);
+  Command := NewCommand(ckTestMove);
   CheckInt(0, Command.Actor, 'NewCommand without a player has no actor');
   Command.Actor := 1234;
   SetLength(Command.Refs, 2);
@@ -39,14 +43,14 @@ begin
     EncodeCommand(Command, Buf);
     // Kind, actor, 2 references, 4 integers, the text and its terminator.
     CheckInt(2 + 4 + 1 + 2 * 5 + 2 + 4 * 4 + 18, Buf.DataSize, 'encoded command size');
-    CheckInt(Ord(ckOrderMove), Buf.GetByteAt(0) + Buf.GetByteAt(1) shl 8, 'command kind comes first');
+    CheckInt(ckTestMove, Buf.GetByteAt(0) + Buf.GetByteAt(1) shl 8, 'command kind comes first');
     Buf.SetPosition(0);
     Decoded := DecodeCommand(Buf);
     Check(Buf.IsAtEnd, 'decoding reads the whole command');
   finally
     Buf.Free
   end;
-  CheckInt(Ord(ckOrderMove), Ord(Decoded.Kind), 'decoded kind');
+  CheckInt(ckTestMove, Decoded.Kind, 'decoded kind');
   CheckInt(1234, Decoded.Actor, 'decoded actor');
   CheckInt(2, Length(Decoded.Refs), 'decoded reference count');
   CheckInt(Ord(crShip), Ord(Decoded.Refs[0].Kind), 'decoded reference kind');
@@ -67,7 +71,8 @@ begin
     on Exception do
       Check(True, 'reading a missing integer raises');
   end;
-  CheckText('OrderMove', WideString(CommandKindName(ckOrderMove)), 'command kind name');
+  CheckText('TestMove', WideString(CommandKindName(ckTestMove)), 'command kind name');
+  CheckText('Command1022', WideString(CommandKindName(1022)), 'unregistered kind name');
 end;
 
 end.

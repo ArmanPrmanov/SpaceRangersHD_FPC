@@ -11,48 +11,15 @@ uses
   EC_Buf,
   Types;
 type
-  // Values are part of the command log format; append new kinds, never renumber.
-  TCommandKind = (
-      ckNone = 0,
-      // Day flow.
-      ckBeginSpaceDay = 1,
-      ckPrepareSave = 2,
-      ckPruneMessages = 3,
-      ckParkPlayer = 4,
-      ckPreparePlayerPath = 5,
-      ckApplyPendingOrders = 6,
-      ckBuildPlayerPath = 7,
-      // Orders in space.
-      ckOrderMove = 10,
-      ckOrderStop = 11,
-      ckOrderFollow = 12,
-      ckOrderAutoBattle = 13,
-      ckOrderLand = 14,
-      ckOrderJumpHole = 15,
-      ckOrderJump = 16,
-      ckSetWeaponTarget = 17,
-      ckSetPickupTarget = 19,
-      ckTogglePickupTargets = 20,
-      ckSetAfterburner = 21,
-      ckSetInterceptorTarget = 22,
-      ckSetPendingFollow = 23,
-      ckEnterRuinsMode = 24,
-      ckExitRuinsMode = 25,
-      ckCancelInvalidTravelOrder = 26,
-      ckRefreshStepParameters = 27,
-      // Script hooks the UI runs: entering or leaving a screen, showing an object.
-      ckScriptItemsAct = 28,
-      ckRunScriptTurns = 29,
-      ckLandingWear = 30,
-      ckOrderNone = 31,
-      ckTakeoff = 32,
-      ckHyperspaceStep = 33,
-      ckCreateJumpHole = 34,
-      ckOrderTeleport = 35,
-      // The open shop's stock: back to the planet or station, or out into the slot grid.
-      ckReturnShopStock = 36,
-      ckOpenShopStock = 37
-  );
+  // A command's kind. Each actions unit declares its kinds as constants in a range of its
+  // own and registers them (RegisterCommand); values are part of the command log format,
+  // so never renumber one. Ranges: 0-99 aPlayerActions (travel, orders, the day), 100-199
+  // shops, 200-299 the ship and hold screen, 300-399 conversations, 400-499 planets and the
+  // government, 500-599 stations, 600-699 text quests, arcade battles, cheats and UI scripts.
+  TCommandKind = type Word;
+const
+  ckNone = 0;
+type
   TCommandRefKind = (
       crNone = 0,
       crStar = 1,
@@ -101,7 +68,7 @@ procedure EncodeCommand(const Command: TPlayerCommand; Buffer: TBufEC);
 function DecodeCommand(Buffer: TBufEC): TPlayerCommand;
 function CommandKindName(Kind: TCommandKind): AnsiString;
 
-procedure RegisterCommand(Kind: TCommandKind; Executor: TCommandExecutor);
+procedure RegisterCommand(Kind: TCommandKind; const Name: AnsiString; Executor: TCommandExecutor);
 // Runs the command and tells the hooks.
 procedure SubmitCommand(const Command: TPlayerCommand);
 // Runs the command only; the replay uses this.
@@ -118,8 +85,11 @@ uses
   aPlayer,
   SimulationThread;
 
+const
+  MaximumCommandKind = 1023;
 var
-  Executors: array[TCommandKind] of TCommandExecutor;
+  Executors: array[0..MaximumCommandKind] of TCommandExecutor;
+  KindNames: array[0..MaximumCommandKind] of AnsiString;
 
 function NewCommand(Kind: TCommandKind): TPlayerCommand;
 begin
@@ -303,55 +273,25 @@ end;
 
 function CommandKindName(Kind: TCommandKind): AnsiString;
 begin
-  case Kind of
-    ckNone: Result := 'None';
-    ckBeginSpaceDay: Result := 'BeginSpaceDay';
-    ckPrepareSave: Result := 'PrepareSave';
-    ckPruneMessages: Result := 'PruneMessages';
-    ckParkPlayer: Result := 'ParkPlayer';
-    ckPreparePlayerPath: Result := 'PreparePlayerPath';
-    ckApplyPendingOrders: Result := 'ApplyPendingOrders';
-    ckBuildPlayerPath: Result := 'BuildPlayerPath';
-    ckOrderMove: Result := 'OrderMove';
-    ckOrderStop: Result := 'OrderStop';
-    ckOrderFollow: Result := 'OrderFollow';
-    ckOrderAutoBattle: Result := 'OrderAutoBattle';
-    ckOrderLand: Result := 'OrderLand';
-    ckOrderJumpHole: Result := 'OrderJumpHole';
-    ckOrderJump: Result := 'OrderJump';
-    ckSetWeaponTarget: Result := 'SetWeaponTarget';
-    ckSetPickupTarget: Result := 'SetPickupTarget';
-    ckTogglePickupTargets: Result := 'TogglePickupTargets';
-    ckSetAfterburner: Result := 'SetAfterburner';
-    ckSetInterceptorTarget: Result := 'SetInterceptorTarget';
-    ckSetPendingFollow: Result := 'SetPendingFollow';
-    ckEnterRuinsMode: Result := 'EnterRuinsMode';
-    ckExitRuinsMode: Result := 'ExitRuinsMode';
-    ckCancelInvalidTravelOrder: Result := 'CancelInvalidTravelOrder';
-    ckRefreshStepParameters: Result := 'RefreshStepParameters';
-    ckScriptItemsAct: Result := 'ScriptItemsAct';
-    ckRunScriptTurns: Result := 'RunScriptTurns';
-    ckLandingWear: Result := 'LandingWear';
-    ckOrderNone: Result := 'OrderNone';
-    ckTakeoff: Result := 'Takeoff';
-    ckHyperspaceStep: Result := 'HyperspaceStep';
-    ckCreateJumpHole: Result := 'CreateJumpHole';
-    ckOrderTeleport: Result := 'OrderTeleport';
-    ckReturnShopStock: Result := 'ReturnShopStock';
-    ckOpenShopStock: Result := 'OpenShopStock';
+  if (Kind <= MaximumCommandKind) and (KindNames[Kind] <> '') then
+    Result := KindNames[Kind]
   else
-    Result := 'Command' + IntToStr(Ord(Kind));
-  end;
+    Result := 'Command' + IntToStr(Kind);
 end;
 
-procedure RegisterCommand(Kind: TCommandKind; Executor: TCommandExecutor);
+procedure RegisterCommand(Kind: TCommandKind; const Name: AnsiString; Executor: TCommandExecutor);
 begin
+  if Kind > MaximumCommandKind then
+    raise Exception.Create('Command kind out of range: ' + Name);
+  if KindNames[Kind] <> '' then
+    raise Exception.Create('Command kind registered twice: ' + Name);
   Executors[Kind] := Executor;
+  KindNames[Kind] := Name;
 end;
 
 procedure ExecuteCommand(const Command: TPlayerCommand);
 begin
-  if not Assigned(Executors[Command.Kind]) then
+  if (Command.Kind > MaximumCommandKind) or not Assigned(Executors[Command.Kind]) then
     raise Exception.Create('No executor for ' + CommandKindName(Command.Kind));
   if (GetPlayer = nil) or (Cardinal(GetPlayer.Id) <> Command.Actor) then
     raise Exception.Create(CommandKindName(Command.Kind) + ' names another actor');

@@ -8,7 +8,44 @@ unit aPlayerActions;
 interface
 uses
   Types,
+  aCommands,
   aShip;
+const
+  // Command kinds 0-99 (see TCommandKind).
+  ckBeginSpaceDay = 1;
+  ckPrepareSave = 2;
+  ckPruneMessages = 3;
+  ckParkPlayer = 4;
+  ckPreparePlayerPath = 5;
+  ckApplyPendingOrders = 6;
+  ckBuildPlayerPath = 7;
+  ckOrderMove = 10;
+  ckOrderStop = 11;
+  ckOrderFollow = 12;
+  ckOrderAutoBattle = 13;
+  ckOrderLand = 14;
+  ckOrderJumpHole = 15;
+  ckOrderJump = 16;
+  ckSetWeaponTarget = 17;
+  ckSetPickupTarget = 19;
+  ckTogglePickupTargets = 20;
+  ckSetAfterburner = 21;
+  ckSetInterceptorTarget = 22;
+  ckSetPendingFollow = 23;
+  ckEnterRuinsMode = 24;
+  ckExitRuinsMode = 25;
+  ckCancelInvalidTravelOrder = 26;
+  ckRefreshStepParameters = 27;
+  ckScriptItemsAct = 28;
+  ckRunScriptTurns = 29;
+  ckLandingWear = 30;
+  ckOrderNone = 31;
+  ckTakeoff = 32;
+  ckHyperspaceStep = 33;
+  ckCreateJumpHole = 34;
+  ckOrderTeleport = 35;
+  ckReturnShopStock = 36;
+  ckOpenShopStock = 37;
 type
   TSlotList = array of Integer;
 procedure AddWeaponSlot(var Slots: TSlotList; Slot: Integer);
@@ -112,7 +149,6 @@ uses
   Math,
   EC_Struct,
   aMyFunction,
-  aCommands,
   aGalaxy,
   aPlanet,
   aPlayer,
@@ -936,38 +972,38 @@ begin
 end;
 
 initialization
-  RegisterCommand(ckParkPlayer, @ExecuteParkPlayer);
-  RegisterCommand(ckPruneMessages, @ExecutePruneMessages);
-  RegisterCommand(ckOrderStop, @ExecuteOrderStop);
-  RegisterCommand(ckPreparePlayerPath, @ExecutePreparePlayerPath);
-  RegisterCommand(ckBuildPlayerPath, @ExecuteBuildPlayerPath);
-  RegisterCommand(ckOrderMove, @ExecuteOrderMove);
-  RegisterCommand(ckOrderLand, @ExecuteOrderLand);
-  RegisterCommand(ckOrderJumpHole, @ExecuteOrderJumpHole);
-  RegisterCommand(ckOrderFollow, @ExecuteOrderFollow);
-  RegisterCommand(ckOrderAutoBattle, @ExecuteOrderAutoBattle);
-  RegisterCommand(ckSetWeaponTarget, @ExecuteSetWeaponTargets);
-  RegisterCommand(ckSetInterceptorTarget, @ExecuteSetInterceptorTarget);
-  RegisterCommand(ckSetPickupTarget, @ExecuteSetPickupTarget);
-  RegisterCommand(ckTogglePickupTargets, @ExecuteTogglePickupTargets);
-  RegisterCommand(ckApplyPendingOrders, @ExecuteApplyPendingOrders);
-  RegisterCommand(ckBeginSpaceDay, @ExecuteBeginSpaceDay);
-  RegisterCommand(ckPrepareSave, @ExecutePrepareSave);
-  RegisterCommand(ckSetPendingFollow, @ExecuteSetPendingFollow);
-  RegisterCommand(ckSetAfterburner, @ExecuteSetAfterburner);
-  RegisterCommand(ckEnterRuinsMode, @ExecuteEnterRuinsMode);
-  RegisterCommand(ckExitRuinsMode, @ExecuteExitRuinsMode);
-  RegisterCommand(ckCancelInvalidTravelOrder, @ExecuteCancelInvalidTravelOrder);
-  RegisterCommand(ckRefreshStepParameters, @ExecuteRefreshStepParameters);
-  RegisterCommand(ckScriptItemsAct, @ExecuteScriptItemsAct);
-  RegisterCommand(ckRunScriptTurns, @ExecuteRunScriptTurns);
-  RegisterCommand(ckLandingWear, @ExecuteLandingWear);
-  RegisterCommand(ckOrderNone, @ExecuteOrderNone);
-  RegisterCommand(ckOrderJump, @ExecuteOrderJump);
-  RegisterCommand(ckOrderTeleport, @ExecuteOrderTeleport);
-  RegisterCommand(ckCreateJumpHole, @ExecuteCreateJumpHole);
-  RegisterCommand(ckTakeoff, @ExecuteTakeoff);
-  RegisterCommand(ckHyperspaceStep, @ExecuteHyperspaceStep);
-  RegisterCommand(ckReturnShopStock, @ExecuteReturnShopStock);
-  RegisterCommand(ckOpenShopStock, @ExecuteOpenShopStock);
+  RegisterCommand(ckParkPlayer, 'ParkPlayer', @ExecuteParkPlayer);
+  RegisterCommand(ckPruneMessages, 'PruneMessages', @ExecutePruneMessages);
+  RegisterCommand(ckOrderStop, 'OrderStop', @ExecuteOrderStop);
+  RegisterCommand(ckPreparePlayerPath, 'PreparePlayerPath', @ExecutePreparePlayerPath);
+  RegisterCommand(ckBuildPlayerPath, 'BuildPlayerPath', @ExecuteBuildPlayerPath);
+  RegisterCommand(ckOrderMove, 'OrderMove', @ExecuteOrderMove);
+  RegisterCommand(ckOrderLand, 'OrderLand', @ExecuteOrderLand);
+  RegisterCommand(ckOrderJumpHole, 'OrderJumpHole', @ExecuteOrderJumpHole);
+  RegisterCommand(ckOrderFollow, 'OrderFollow', @ExecuteOrderFollow);
+  RegisterCommand(ckOrderAutoBattle, 'OrderAutoBattle', @ExecuteOrderAutoBattle);
+  RegisterCommand(ckSetWeaponTarget, 'SetWeaponTarget', @ExecuteSetWeaponTargets);
+  RegisterCommand(ckSetInterceptorTarget, 'SetInterceptorTarget', @ExecuteSetInterceptorTarget);
+  RegisterCommand(ckSetPickupTarget, 'SetPickupTarget', @ExecuteSetPickupTarget);
+  RegisterCommand(ckTogglePickupTargets, 'TogglePickupTargets', @ExecuteTogglePickupTargets);
+  RegisterCommand(ckApplyPendingOrders, 'ApplyPendingOrders', @ExecuteApplyPendingOrders);
+  RegisterCommand(ckBeginSpaceDay, 'BeginSpaceDay', @ExecuteBeginSpaceDay);
+  RegisterCommand(ckPrepareSave, 'PrepareSave', @ExecutePrepareSave);
+  RegisterCommand(ckSetPendingFollow, 'SetPendingFollow', @ExecuteSetPendingFollow);
+  RegisterCommand(ckSetAfterburner, 'SetAfterburner', @ExecuteSetAfterburner);
+  RegisterCommand(ckEnterRuinsMode, 'EnterRuinsMode', @ExecuteEnterRuinsMode);
+  RegisterCommand(ckExitRuinsMode, 'ExitRuinsMode', @ExecuteExitRuinsMode);
+  RegisterCommand(ckCancelInvalidTravelOrder, 'CancelInvalidTravelOrder', @ExecuteCancelInvalidTravelOrder);
+  RegisterCommand(ckRefreshStepParameters, 'RefreshStepParameters', @ExecuteRefreshStepParameters);
+  RegisterCommand(ckScriptItemsAct, 'ScriptItemsAct', @ExecuteScriptItemsAct);
+  RegisterCommand(ckRunScriptTurns, 'RunScriptTurns', @ExecuteRunScriptTurns);
+  RegisterCommand(ckLandingWear, 'LandingWear', @ExecuteLandingWear);
+  RegisterCommand(ckOrderNone, 'OrderNone', @ExecuteOrderNone);
+  RegisterCommand(ckOrderJump, 'OrderJump', @ExecuteOrderJump);
+  RegisterCommand(ckOrderTeleport, 'OrderTeleport', @ExecuteOrderTeleport);
+  RegisterCommand(ckCreateJumpHole, 'CreateJumpHole', @ExecuteCreateJumpHole);
+  RegisterCommand(ckTakeoff, 'Takeoff', @ExecuteTakeoff);
+  RegisterCommand(ckHyperspaceStep, 'HyperspaceStep', @ExecuteHyperspaceStep);
+  RegisterCommand(ckReturnShopStock, 'ReturnShopStock', @ExecuteReturnShopStock);
+  RegisterCommand(ckOpenShopStock, 'OpenShopStock', @ExecuteOpenShopStock);
 end.
