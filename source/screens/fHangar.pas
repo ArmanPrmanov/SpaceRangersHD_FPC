@@ -86,6 +86,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aPlayerActions,
+  aShopActions,
   aSession,
   aHuman,
   fLoad,
@@ -489,7 +490,7 @@ begin
   end;
   RefreshDockedShips;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
   aCalc.WaitForTurnCalculationUI;
   RefreshServiceButtons;
   MainPanel.RebuildMessageButtons(False);
@@ -501,7 +502,7 @@ var
 begin
   aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
   ShipInfoWindow.SetActive(False);
   HoveredShip := nil;
   if ShipInfoHideTimer <> nil then
@@ -875,7 +876,7 @@ begin
   if GetPlayer.Money <= 0 then
   begin
     aCalc.WaitForTurnCalculationUI;
-    GetPlayer.SetMoney(0);
+    RepairHull;
     aCalc.WaitForTurnCalculationUI;
     ShowMessageBoxGI(
         Self,
@@ -890,29 +891,10 @@ begin
     MainPanel.FlashMoneyWarning;
     Exit;
   end;
-  if GetPlayer.GetHull.CalculateRepairCost > GetPlayer.Money then
-  begin
-    aCalc.WaitForTurnCalculationUI;
-    Inc(
-        GetPlayer.GetHull.HullPoints,
-        Round(
-            GetPlayer.Money
-                / GetPlayer.GetHull.CalculateRepairCost
-                * (GetPlayer.GetHull.Weight - GetPlayer.GetHull.HullPoints)
-        )
-    );
-    GetPlayer.SetMoney(0);
-    aCalc.WaitForTurnCalculationUI;
-    SoundManager.PlaySound('Sound.Repair');
-  end
-  else
-  begin
-    aCalc.WaitForTurnCalculationUI;
-    GetPlayer.SetMoney(GetPlayer.Money - GetPlayer.GetHull.CalculateRepairCost);
-    GetPlayer.GetHull.HullPoints := GetPlayer.GetHull.Weight;
-    aCalc.WaitForTurnCalculationUI;
-    SoundManager.PlaySound('Sound.Repair');
-  end;
+  aCalc.WaitForTurnCalculationUI;
+  RepairHull;
+  aCalc.WaitForTurnCalculationUI;
+  SoundManager.PlaySound('Sound.Repair');
   with GetByName('AnimRepair') as TgaiGI do
   begin
     SetActive(True);
@@ -945,9 +927,7 @@ begin
     Exit;
   end;
   aCalc.WaitForTurnCalculationUI;
-  GetPlayer.SetMoney(GetPlayer.Money - GetPlayer.GetFullRefuelCost);
-  GetPlayer.GetFuelTanks.Fuel := GetPlayer.GetFuelTanks.Capacity;
-  GetPlayer.RefreshDerivedStats(True);
+  Refuel;
   aCalc.WaitForTurnCalculationUI;
   SoundManager.PlaySound('Sound.Sell');
   with GetByName('AnimFuel') as TgaiGI do
@@ -1014,7 +994,7 @@ begin
     end;
   end;
   aCalc.WaitForTurnCalculationUI;
-  LocalHuman.PlayerAutomaticControl := False;
+  EndAutomaticControl;
   (GetByName('ButRepair') as TGraphButtonGI).SetDisabled(True);
   (GetByName('ButRefuel') as TGraphButtonGI).SetDisabled(True);
   (GetByName('ButTakeOff') as TGraphButtonGI).SetDisabled(True);
@@ -1545,7 +1525,7 @@ begin
         if IsVirtualKeyDown(VK_CONTROL) then
         begin
           aCalc.WaitForTurnCalculationUI;
-          (Ship as TTranclucator).ConvertToStoredArtefact;
+          StoreTranclucator(Ship);
           aCalc.WaitForTurnCalculationUI;
           RefreshDockedShips;
         end
@@ -1598,7 +1578,7 @@ begin
   if HoveredShip = Ship then
     Exit;
   ShipInfoWindow.SetActive(True);
-  Ship.ScriptItemsAct(satOnShowingShipInfo, nil, nil, 0);
+  RunScriptItemsAct(Ship, satOnShowingShipInfo, nil, nil, 0);
   if GetPlayer <> Ship then
   begin
     (GetByName('InfoShipName') as TLabelGI)

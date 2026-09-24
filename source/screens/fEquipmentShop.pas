@@ -100,6 +100,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aPlayerActions,
+  aShopActions,
   aHuman,
   GI_Main,
   ThreadCalc,
@@ -306,7 +307,6 @@ var
   Owner: Byte;
   Size: Integer;
   BackgroundPath: WideString;
-  SavedSlots: TList;
 begin
   if not MusicInPlanetEnabled then
     MusicManager.RequestFadeOut;
@@ -402,12 +402,7 @@ begin
   ClearGoodsControls;
   ReturnShopStock;
   if GetPlayer <> nil then
-  begin
-    SavedSlots := LocalHuman.TemporaryShopSlots;
-    LocalHuman.TemporaryShopSlots := nil;
-    GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
-    LocalHuman.TemporaryShopSlots := SavedSlots;
-  end;
+    EnterEquipmentShop;
   OpenShopStock;
   BuildGoodsControls;
   UpdateScrollButtons;
@@ -430,7 +425,7 @@ var
 begin
   aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
   if LocalHuman.TemporaryShopSlots <> nil then
   begin
     Count := LocalHuman.TemporaryShopSlots.Count;
@@ -1025,9 +1020,6 @@ procedure TfEquipmentShop.ItemMouseUp(Sender: TObjectGI; KeyState: Cardinal; Poi
 var
   Slot: TShopSlot;
   Y, X, Cost: Integer;
-  Event: TGalaxyEvent;
-  PurchasedItem: TItem;
-  Destination: PtrInt;
 begin
   Slot := TShopSlot(Sender.UserValue);
   if (Slot <> nil) and (Slot.Item <> nil) then
@@ -1124,111 +1116,16 @@ begin
       end;
       SoundManager.PlaySound('Sound.Buy');
       aCalc.WaitForTurnCalculationUI;
-      PurchasedItem := Slot.Item;
-      Event := AddGalaxyEvent('PlayerBuysEquipment');
-      Event.AddData(Ord(Slot.Item.ItemType));
-      Event.AddData(Slot.Item.GetConditionAdjustedCost);
-      Event.AddData(Slot.Item.Weight);
-      Event.AddData(Slot.Item.Id);
-      if GetPlayer.CurrentPlanet <> nil then
+      // The hull that goes to storage shows its message between the purchase and the rest.
+      if BuyEquipment(LocalHuman.TemporaryShopSlots.IndexOf(Slot), Slot.Item) = epHullStored then
       begin
-        Event.AddData(0);
-        Event.AddData(GetPlayer.CurrentPlanet.Id);
-      end
-      else if GetPlayer.DockedTo <> nil then
-      begin
-        Event.AddData(1);
-        Event.AddData(GetPlayer.DockedTo.Id);
-      end
-      else
-      begin
-        Event.AddData(2);
-        Event.AddData(0);
+        ShowMessageBoxGI(
+            Self,
+            LanguageDataConfig.GetParamByPathOrMarker('FormShop.AfterBuyHull'),
+            mbgOK
+        );
+        FinishStoredHullPurchase;
       end;
-      Event.AddTextData(Slot.Item.GetDisplayName);
-      Event.AddTextData(Slot.Item.GetCategoryConfigName);
-      if Slot.Item is THull then
-      begin
-        if Slot.Item.GetConditionAdjustedCost > GetPlayer.Money then
-        begin
-          Event := AddGalaxyEvent('PlayerSellsEquipment');
-          Event.AddData(Ord(GetPlayer.GetHull.ItemType));
-          Event.AddData(
-              GetPlayer.GetHull.CalculateResaleValue(GetPlayer.GetEffectiveSkillLevel(psTrading))
-          );
-          Event.AddData(GetPlayer.GetHull.Weight);
-          Event.AddData(GetPlayer.GetHull.Id);
-          if GetPlayer.CurrentPlanet <> nil then
-          begin
-            Event.AddData(0);
-            Event.AddData(GetPlayer.CurrentPlanet.Id);
-          end
-          else if GetPlayer.DockedTo <> nil then
-          begin
-            Event.AddData(1);
-            Event.AddData(GetPlayer.DockedTo.Id);
-          end
-          else
-          begin
-            Event.AddData(2);
-            Event.AddData(0);
-          end;
-          Event.AddTextData(GetPlayer.GetHull.GetDisplayName);
-          Event.AddTextData(GetPlayer.GetHull.GetCategoryConfigName);
-          GetPlayer.SetMoney(GetPlayer.Money - Galaxy.PendingEquipmentPurchasePrice);
-          GetPlayer.ScriptItemsAct(satOnPlayerChangeHull, Slot.Item, GetPlayer.GetHull, 0);
-          GetPlayer.Inventory.Delete(GetPlayer.Inventory.IndexOf(GetPlayer.GetHull));
-          GetPlayer.GetHull.Free;
-          GetPlayer.Inventory.Insert(0, Slot.Item);
-          GetPlayer.Hull := Slot.Item as THull;
-          GetPlayer.GetHull.OwnerShip := GetPlayer;
-          GetPlayer.GetHull.AssignedSlotData := 0;
-          if Slot.Item.ScriptItem <> nil then
-            TScriptItem(Slot.Item.ScriptItem)
-                .RunActionCode(satOnPlayerChangeHull, GetPlayer, Slot.Item, nil, 0);
-          Slot.Item := nil;
-          GetPlayer.RefreshAssignedItemSlots;
-          GetPlayer.RebuildEquipmentCache;
-          GetPlayer.RefreshDerivedStats(True);
-          if not GetPlayer.ScriptChameleon then
-          begin
-            ReleaseSpaceObject(GetPlayer.Graphic);
-            GetPlayer.RefreshGraphic;
-          end;
-          Destination := PtrInt(GetPlayer);
-        end
-        else
-        begin
-          GetPlayer.SetMoney(GetPlayer.Money - Slot.Item.GetConditionAdjustedCost);
-          if GetPlayer.IsOnPlanet then
-            GetPlayer.AddItemToPlayerStorage(Slot.Item, GetPlayer.CurrentPlanet, -1)
-          else
-            GetPlayer.AddItemToPlayerStorage(Slot.Item, GetPlayer.DockedTo, -1);
-          Slot.Item := nil;
-          ShowMessageBoxGI(
-              Self,
-              LanguageDataConfig.GetParamByPathOrMarker('FormShop.AfterBuyHull'),
-              mbgOK
-          );
-          if GetPlayer.CurrentPlanet <> nil then
-            Destination := PtrInt(GetPlayer.CurrentPlanet)
-          else
-            Destination := PtrInt(GetPlayer.DockedTo);
-        end;
-      end
-      else
-      begin
-        GetPlayer.SetMoney(GetPlayer.Money - Galaxy.PendingEquipmentPurchasePrice);
-        TEquipment(Slot.Item).EquippedFlag := 0;
-        if Slot.Item is TArtefact then
-          GetPlayer.Artefacts.Add(Slot.Item)
-        else
-          GetPlayer.Inventory.Add(Slot.Item);
-        Slot.Item := nil;
-        Destination := PtrInt(GetPlayer);
-      end;
-      GetPlayer.ScriptItemsAct(satOnPlayerBuyEq, PurchasedItem, nil, Destination);
-      GetPlayer.RefreshDerivedStats(True);
       aCalc.WaitForTurnCalculationUI;
       with Slot.SlotImage do
       begin
@@ -1402,24 +1299,7 @@ begin
     end;
     MainPanel.SlideMessagesOut;
     if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
-    begin
-      if GetPlayer.CurrentPlanet <> nil then
-      begin
-        if Item.ScriptItem <> nil then
-          TScriptItem(Item.ScriptItem)
-              .RunActionCode(satOnShowingItemInfo, nil, GetPlayer.CurrentPlanet, nil, 0);
-        if Item is TEquipmentWithActCode then
-          RunItemConfigActionCode(Item, satOnShowingItemInfo, nil, GetPlayer.CurrentPlanet, nil, 0);
-      end
-      else
-      begin
-        if Item.ScriptItem <> nil then
-          TScriptItem(Item.ScriptItem)
-              .RunActionCode(satOnShowingItemInfo, nil, GetPlayer.DockedTo, nil, 0);
-        if Item is TEquipmentWithActCode then
-          RunItemConfigActionCode(Item, satOnShowingItemInfo, nil, GetPlayer.DockedTo, nil, 0);
-      end;
-    end;
+      ShowShopItemInfo(Item);
     if Item.ItemType = t_Hull then
     begin
       RefreshHullInfo(

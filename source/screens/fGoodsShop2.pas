@@ -82,6 +82,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aPlayerActions,
+  aShopActions,
   aHuman,
   GI_GI,
   ThreadCalc,
@@ -605,7 +606,7 @@ begin
   FlagEC := False;
   AmbientSound.SetVolume(1);
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
   if not GetPlayer.InNormalSpace then
     aCalc.WaitForTurnCalculationUI;
 end;
@@ -616,7 +617,7 @@ begin
     if not GetPlayer.InNormalSpace then
       aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
   LoadPanel.OnClose;
   if MoneyWarningTimer <> nil then
   begin
@@ -652,33 +653,9 @@ var
 begin
   if GetPlayer.InNormalSpace then
   begin
-    for Good := 0 to 7 do
-    begin
-      LocalHuman.TradeRows[Good].Count := LocalHuman.TalkShip.CargoGoods[Good].Count;
-      LocalHuman.TradeRows[Good].MaximumPrice := GoodsMarket[Good].MaxPrice;
-      if LocalHuman.TalkShip.CargoGoods[Good].Count <= 0 then
-      begin
-        LocalHuman.TradeRows[Good].PurchasePrice := Round(Max(GoodsMarket[Good].AveragePrice * 1.1, 0));
-        LocalHuman.TradeRows[Good].BaseSalePrice := Round(Max(GoodsMarket[Good].MinPrice, 0));
-      end
-      else
-      begin
-        LocalHuman.TradeRows[Good].PurchasePrice :=
-            Round(
-                Max(
-                    GoodsMarket[Good].AveragePrice * 1.1,
-                    LocalHuman.TalkShip.CargoGoods[Good].TotalCost / LocalHuman.TalkShip.CargoGoods[Good].Count * 1.3
-                )
-            );
-        LocalHuman.TradeRows[Good].BaseSalePrice :=
-            Round(
-                Max(
-                    GoodsMarket[Good].MinPrice,
-                    LocalHuman.TalkShip.CargoGoods[Good].TotalCost / LocalHuman.TalkShip.CargoGoods[Good].Count * 0.7
-                )
-            );
-      end;
-    end;
+    // The prices are computed again from the partner's cargo, so a trade command can compute
+    // them too; the state hash leaves them out.
+    RefreshTradeRows(LocalHuman.TalkShip);
     PartnerCargoLimit := LocalHuman.TalkShip.GetCargoFreeSpace - LocalHuman.TalkShip.GetDesiredCargoFreeSpace;
     PartnerMoneyLimit := LocalHuman.TalkShip.Money;
   end;
@@ -1059,50 +1036,15 @@ begin
             end;
           if not GetPlayer.InNormalSpace then
             aCalc.WaitForTurnCalculationUI;
-          if GetPlayer.InNormalSpace then
-          begin
-            if DraggedGoodsIndex < 10 then
-            begin
-              LocalHuman.TalkShip.SetMoney(
-                  LocalHuman.TalkShip.Money
-                      + Count
-                          * GetPlayer
-                              .ShopGoodsPurchasePrice(ShopGoodsOrder[DraggedGoodsIndex mod 10], nil)
-              );
-              Dec(
-                  LocalHuman.TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex]].TotalCost,
-                  Count
-                      * GetPlayer
-                          .ShopGoodsPurchasePrice(ShopGoodsOrder[DraggedGoodsIndex mod 10], nil)
-              );
-              Dec(LocalHuman.TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex]].Count, Count);
-            end
-            else
-            begin
-              LocalHuman.TalkShip.SetMoney(
-                  LocalHuman.TalkShip.Money
-                      - Count
-                          * GetPlayer
-                              .ShopGoodsSellPrice(ShopGoodsOrder[DraggedGoodsIndex mod 10], nil)
-              );
-              Inc(
-                  LocalHuman.TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex mod 10]].TotalCost,
-                  Count
-                      * GetPlayer.ShopGoodsSellPrice(ShopGoodsOrder[DraggedGoodsIndex mod 10], nil)
-              );
-              Inc(LocalHuman.TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex mod 10]].Count, Count);
-            end;
-            LocalHuman.TalkShip.RefreshDerivedStats(True);
-          end;
           if DraggedGoodsIndex < 10 then
           begin
             SoundManager.PlaySound('Sound.Buy');
-            GetPlayer.BuyGoodsFromLocation(ShopGoodsOrder[DraggedGoodsIndex], Count);
+            TradeGoods(ShopGoodsOrder[DraggedGoodsIndex], Count, False);
           end
           else
           begin
             SoundManager.PlaySound('Sound.Sell');
-            GetPlayer.SellGoodsToLocation(ShopGoodsOrder[DraggedGoodsIndex - 10], Count);
+            TradeGoods(ShopGoodsOrder[DraggedGoodsIndex - 10], Count, True);
           end;
           if not GetPlayer.InNormalSpace then
             aCalc.WaitForTurnCalculationUI;
