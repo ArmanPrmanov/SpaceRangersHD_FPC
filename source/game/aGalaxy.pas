@@ -854,6 +854,7 @@ uses
   EC_Str,
   GlobalsV,
   GR_GraphBuf,
+  aObjectRefs,
   Math,
   SysUtils,
   Windows;
@@ -1164,6 +1165,7 @@ begin
       and (GetPlayer.DockedTo <> TemporaryShopStation) then
     RestoreTemporaryShopStock;
   RunConfigOnSaveHandlers;
+  BeginObjectReferenceSave;
   Buffer.AddWideStringZ(SelectedMods);
   Buffer.AddIntegerValue(GenerationSeed);
   Buffer.AddDWord(RandomState);
@@ -1521,6 +1523,8 @@ begin
   Buffer.AddBoolean(False);
   if CampaignFlag183 <> 0 then
     SaveEditableState;
+  // CHANGE: BUGFIX - Name saved script object addresses by id after the original layout.
+  EndObjectReferenceSave(Buffer);
 end;
 procedure TGalaxy.LoadFromBuffer(Buffer: TBufEC);
 var
@@ -1544,6 +1548,7 @@ var
   Series, Difficulty: Byte;
   LoadedPlanet: TPlanet;
   SavedRandomState: Cardinal;
+  SavedAverageRangerStrength, SavedBestRangerStrength: Single;
   Event: TGalaxyEvent;
   StateOverride: TInterfaceStateOverride;
   TextOverride: TInterfaceTextOverride;
@@ -1585,6 +1590,8 @@ begin
     MaxRangerWealth := Buffer.GetInt32;
     AverageRangerStrength := Buffer.GetSingle;
     BestRangerStrength := Buffer.GetSingle;
+    SavedAverageRangerStrength := AverageRangerStrength;
+    SavedBestRangerStrength := BestRangerStrength;
     // CHANGE: CLEANUP - Consume the legacy protection flags for save compatibility.
     Buffer.GetBoolean;
     Buffer.GetBoolean;
@@ -2423,6 +2430,8 @@ begin
     Event.AddData(Ord(ApplyEditableSaveOnLoad));
     Stage := 52;
     aGalaxy.Galaxy := Self;
+    // CHANGE: BUGFIX - Point script variables at the loaded objects, not stale addresses.
+    ResolveLoadedObjectReferences(Buffer);
     for I := 0 to LoadedShips.Count - 1 do
     begin
       Ship := TShip(LoadedShips[I]);
@@ -2431,6 +2440,10 @@ begin
       Ship.DerivedStateCompatibilityHook;
     end;
     RefreshRangerStrengthStats;
+    // CHANGE: BUGFIX - Keep the saved strength averages. The day refreshes them before
+    // the player's star runs, so recomputing here gave a loaded game other values.
+    AverageRangerStrength := SavedAverageRangerStrength;
+    BestRangerStrength := SavedBestRangerStrength;
     for I := 0 to LoadedShips.Count - 1 do
     begin
       Ship := TShip(LoadedShips[I]);

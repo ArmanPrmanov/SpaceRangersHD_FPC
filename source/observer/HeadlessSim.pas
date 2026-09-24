@@ -25,12 +25,8 @@ uses
   Globals,
   GlobalsV,
   aGalaxy,
-  aPlanet,
-  aItem,
-  aShip,
-  aScript,
-  aRuins,
   aGalaxyEvent,
+  aObjectRefs,
   aSaveLoad,
   ThreadCalc,
   ObserverSimulation;
@@ -48,186 +44,6 @@ begin
   end;
 end;
 
-type
-  TObjectIdentity = record
-    Address: PtrUInt;
-    Key: WideString;
-  end;
-var
-  Identities: array of TObjectIdentity;
-  IdentityCount, UnresolvedCount: Integer;
-
-procedure AddIdentity(Instance: TObject; const Key: WideString);
-begin
-  if IdentityCount = Length(Identities) then
-    SetLength(Identities, IdentityCount * 2 + 1024);
-  Identities[IdentityCount].Address := PtrUInt(Instance);
-  Identities[IdentityCount].Key := Key;
-  Inc(IdentityCount);
-end;
-
-procedure SortIdentities(Low, High: Integer);
-var
-  I, J: Integer;
-  Pivot: PtrUInt;
-  Swap: TObjectIdentity;
-begin
-  while Low < High do
-  begin
-    Pivot := Identities[(Low + High) div 2].Address;
-    I := Low;
-    J := High;
-    repeat
-      while Identities[I].Address < Pivot do
-        Inc(I);
-      while Identities[J].Address > Pivot do
-        Dec(J);
-      if I <= J then
-      begin
-        Swap := Identities[I];
-        Identities[I] := Identities[J];
-        Identities[J] := Swap;
-        Inc(I);
-        Dec(J);
-      end;
-    until I > J;
-    if J - Low < High - I then
-    begin
-      SortIdentities(Low, J);
-      Low := I
-    end
-    else
-    begin
-      SortIdentities(I, High);
-      High := J
-    end;
-  end;
-end;
-
-// Lists the game has not created yet are nil.
-function ListCount(List: TList): Integer;
-begin
-  if List = nil then
-    Result := 0
-  else
-    Result := List.Count;
-end;
-
-procedure AddListIdentities(List: TList; const Prefix: WideString);
-var
-  I: Integer;
-begin
-  for I := 0 to ListCount(List) - 1 do
-    AddIdentity(TObject(List[I]), Prefix + IntToStr(I));
-end;
-
-procedure AddItem(Instance: TObject);
-begin
-  if Instance is TItem then
-    AddIdentity(Instance, 'item:' + IntToStr(TItem(Instance).Id));
-end;
-
-procedure AddItemIdentities(List: TList);
-var
-  I: Integer;
-begin
-  for I := 0 to ListCount(List) - 1 do
-    AddItem(TObject(List[I]));
-end;
-
-procedure AddShipIdentity(Ship: TShip);
-begin
-  AddIdentity(Ship, 'ship:' + IntToStr(Ship.Id));
-  AddItemIdentities(Ship.Inventory);
-  AddItemIdentities(Ship.Artefacts);
-  AddItemIdentities(Ship.GuaranteedDeathDropItems);
-  if Ship is TRuins then
-    AddItemIdentities(TRuins(Ship).EquipmentShop);
-end;
-
-procedure CollectIdentities;
-var
-  I, J, K: Integer;
-  Star: TStar;
-  Planet: TPlanet;
-  Stored: TStoredItem;
-  Script: TScript;
-  Prefix: WideString;
-begin
-  IdentityCount := 0;
-  UnresolvedCount := 0;
-  for I := 0 to Galaxy.StoredItems.Count - 1 do
-  begin
-    Stored := TStoredItem(Galaxy.StoredItems[I]);
-    AddItem(Stored.Item);
-  end;
-  for I := 0 to Galaxy.ShipsInTransit.Count - 1 do
-    AddShipIdentity(TShip(Galaxy.ShipsInTransit[I]));
-  AddListIdentities(Galaxy.Holes, 'hole:');
-  AddListIdentities(Galaxy.Constellations, 'constellation:');
-  // Script-owned objects have no id; the position in their script names them.
-  for I := 0 to Galaxy.Scripts.Count - 1 do
-  begin
-    Script := TScript(Galaxy.Scripts[I]);
-    Prefix := 'script:' + IntToStr(I);
-    AddIdentity(Script, Prefix);
-    AddListIdentities(Script.Constellations, Prefix + ':constellation:');
-    AddListIdentities(Script.Stars, Prefix + ':star:');
-    AddListIdentities(Script.Places, Prefix + ':place:');
-    AddListIdentities(Script.Items, Prefix + ':item:');
-    AddListIdentities(Script.Groups, Prefix + ':group:');
-    AddListIdentities(Script.Ships, Prefix + ':ship:');
-    AddListIdentities(Script.States, Prefix + ':state:');
-    AddListIdentities(Script.Dialogs, Prefix + ':dialog:');
-  end;
-  for I := 0 to Galaxy.Stars.Count - 1 do
-  begin
-    Star := TStar(Galaxy.Stars[I]);
-    AddIdentity(Star, 'star:' + IntToStr(Star.Id));
-    for J := 0 to Star.Planets.Count - 1 do
-    begin
-      Planet := TPlanet(Star.Planets[J]);
-      AddIdentity(Planet, 'planet:' + IntToStr(Planet.Id));
-      AddItemIdentities(Planet.EquipmentShop);
-      for K := 0 to ListCount(Planet.SurfaceLootEntries) - 1 do
-        AddItem(PPlanetSurfaceLootEntry(Planet.SurfaceLootEntries[K]).Item);
-      for K := 0 to ListCount(Planet.Warriors) - 1 do
-        AddShipIdentity(TShip(Planet.Warriors[K]));
-    end;
-    for J := 0 to Star.Ships.Count - 1 do
-      AddShipIdentity(TShip(Star.Ships[J]));
-    AddItemIdentities(Star.Items);
-    for J := 0 to ListCount(Star.MovingDropItems) - 1 do
-      AddItem(PointerToTMovingDropItemEntry(Star.MovingDropItems[J]).Payload);
-  end;
-  SortIdentities(0, IdentityCount - 1);
-end;
-
-function ObjectIdentity(Value: PtrUInt): WideString;
-var
-  Low, High, Middle: Integer;
-begin
-  Low := 0;
-  High := IdentityCount - 1;
-  while Low <= High do
-  begin
-    Middle := (Low + High) div 2;
-    if Identities[Middle].Address = Value then
-      Exit(Identities[Middle].Key);
-    if Identities[Middle].Address < Value then
-      Low := Middle + 1
-    else
-      High := Middle - 1;
-  end;
-  // Script dwords are object handles; small values are plain numbers. A large
-  // one that names no known object may point to a container not collected
-  // above or to a freed object. Its address is meaningless, so count it.
-  if Value < $10000 then
-    Exit('');
-  Inc(UnresolvedCount);
-  Result := 'unresolved';
-end;
-
 // Script variables keep object references as addresses, which differ between
 // runs. The state buffer names those objects by id instead, so it can only be
 // hashed, never loaded. The save and load counters are bookkeeping; write the
@@ -235,7 +51,7 @@ end;
 function SerializeGalaxy: TBufEC;
 begin
   Result := TBufEC.Create;
-  CollectIdentities;
+  CollectObjectIdentities;
   SnapshotObjectIdentity := @ObjectIdentity;
   Dec(Galaxy.SaveCount);
   Dec(Galaxy.LoadCount);
@@ -278,7 +94,7 @@ begin
         Format(
             'turn %d day=%d hash=%s bytes=%d unresolved=%d',
             [Turn, Galaxy.CurrentTurn, IntToHex(HashBytes(State.Data, State.DataSize), 16),
-                State.DataSize, UnresolvedCount]
+                State.DataSize, UnresolvedObjectCount]
         )
     );
   finally
@@ -473,6 +289,10 @@ begin
     if Options.Hash then
       EmitHash(Turn, Options.DumpDirectory);
   end;
+  // A game that has run turns holds script references made during play, which
+  // a round trip from the save alone does not exercise.
+  if Options.RoundTrip and not CheckRoundTrip(Options.DumpDirectory, Options.Seed) then
+    Result := 1;
   Emit(Format('done turns=%d day=%d', [Options.Turns, Galaxy.CurrentTurn]));
 end;
 

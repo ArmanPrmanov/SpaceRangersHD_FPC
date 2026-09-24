@@ -141,7 +141,8 @@ The save tests need assets and saves, which cannot be redistributed:
 python tools/test.py --game-dir=/path/to/game path/to/saves-or-dir
 ```
 
-For each save it checks a save → load → save round trip, runs 100 turns twice
+For each save it checks a save → load → save round trip, both as loaded and after
+five turns of play, runs 100 turns twice
 and requires the same per-turn hashes, and compares them with
 `tests/golden/<target>/<save sha256>.txt`. A missing golden file is recorded;
 `--update` records it again after an intended change. `tests/saves/` is the
@@ -155,7 +156,8 @@ Rangers --sim-save=save.sav --sim-turns=100 --sim-hash [--sim-roundtrip]
 ```
 
 It runs without a window or audio, parks the player as the observer does, and
-prints `turn N day=D hash=H bytes=B unresolved=U` per turn. The hash covers
+prints `turn N day=D hash=H bytes=B unresolved=U` per turn. `--sim-roundtrip`
+checks the round trip before the turns and, with `--sim-turns`, again after them. The hash covers
 `TGalaxy.SaveToBuffer`, with script references to objects written by id instead
 of address; `unresolved` counts references it could not name. `--sim-dump`
 writes each hashed state so two runs can be diffed.

@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = ROOT / "tests" / "golden"
+ROUNDTRIP_TURNS = 5
 
 
 def target_name() -> str:
@@ -79,7 +80,10 @@ def first_divergence(expected: list[str], actual: list[str]) -> str:
 def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     notes = []
     passed = True
-    code, output = simulate(binary, args.game_dir, save, ["--sim-roundtrip"])
+    # Round trip the save as loaded, then again after a few turns of play.
+    code, output = simulate(
+        binary, args.game_dir, save, ["--sim-roundtrip", f"--sim-turns={ROUNDTRIP_TURNS}"]
+    )
     roundtrip = [line for line in output.splitlines() if line.startswith("roundtrip ")]
     if code != 0 or not roundtrip:
         passed = False
@@ -138,6 +142,8 @@ def main() -> None:
     parser.add_argument("--update", action="store_true", help="Record golden hashes again.")
     parser.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     args = parser.parse_args()
+    # Save names are often Cyrillic; do not fail on a console code page.
+    sys.stdout.reconfigure(errors="replace")
     binary = binary_path(args.release)
     if not binary.is_file():
         parser.error("Run ./tools/build.py first, with a matching --release option.")

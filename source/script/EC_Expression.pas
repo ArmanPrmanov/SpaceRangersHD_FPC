@@ -559,6 +559,8 @@ procedure InvokeNativeScriptFunction(Cell: TVarEC; av: array of TVarEC; Code: TC
 // Optional host snapshot encoding; nil preserves the ordinary save format.
 var
   SnapshotObjectIdentity: function(Value: PtrUInt): WideString;
+  // CHANGE: BUGFIX - Sees every saved dword so the save can name object addresses by id.
+  SavedObjectReference: procedure(Value: PtrUInt);
 implementation
 uses
   EC_Str,
@@ -2846,6 +2848,8 @@ procedure TVarEC.SaveToBuffer(Buffer: TBufEC);
 var
   ObjectKey: WideString;
 begin
+  if (Kind = vkDword) and Assigned(SavedObjectReference) then
+    SavedObjectReference(DwordValue);
   if (Kind = vkDword) and Assigned(SnapshotObjectIdentity) then
   begin
     ObjectKey := SnapshotObjectIdentity(DwordValue);
