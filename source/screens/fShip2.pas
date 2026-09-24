@@ -63,16 +63,6 @@ type
     RewardsBuffer: TGraphBufGI;
     RewardsWindow: TWindowGI;
     HoldFirstIndex: Integer;
-    SelectedHoldKind: TPlayerHoldKind;
-    SelectedGoodsIndex: Byte;
-    Gap351: array[0..2] of Byte;
-    SelectedGoodsQuantity: Integer;
-    SelectedGoodsCost: Integer;
-    SelectedHoldItem: TItem;
-    SelectedHoldOrigin: Integer;
-    SelectedHoldSlot: Integer;
-    SelectedHoldUsesDisplayOrder: Boolean;
-    Gap369: array[0..2] of Byte;
     RightPanelSlideTimer: PCallbackTimerGI;
     RightPanelSlideStep: PtrInt;
     PanelSlideWidth: Integer;
@@ -129,7 +119,6 @@ type
     RemoteHoldVisible: Boolean;
     Gap499: array[0..2] of Byte;
     ShipToInspect: TShip;
-    SavedShipExperience: Integer;
     RemoteHoldMode: Boolean;
     Gap4A5: array[0..2] of Byte;
     RemoteHoldImages: array[0..54] of TImageGI;
@@ -177,7 +166,6 @@ type
     procedure ArtefactSlotMouseDown(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
     procedure UseOnArtefactSlot(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
     procedure RemoteHoldItemMouseDown(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
-    procedure TakeHoldEntry(Entry: TPlayerHoldUnit; Slot: Integer; UsesDisplayOrder: Boolean);
     procedure HullMouseDown(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
     function ConfigureChameleon: Boolean;
     procedure HoldLeftPressed(Sender: TObjectGI);
@@ -304,6 +292,36 @@ type
     procedure RefreshLoadEquippedRocketsButton;
     procedure SellAllItems(Origin: Integer);
     procedure EnterBridgeClicked(Sender: TObjectGI);
+    function GetSelectedHoldKind: TPlayerHoldKind;
+    procedure SetSelectedHoldKind(Value: TPlayerHoldKind);
+    function GetSelectedGoodsIndex: Byte;
+    procedure SetSelectedGoodsIndex(Value: Byte);
+    function GetSelectedGoodsQuantity: Integer;
+    procedure SetSelectedGoodsQuantity(Value: Integer);
+    function GetSelectedGoodsCost: Integer;
+    procedure SetSelectedGoodsCost(Value: Integer);
+    function GetSelectedHoldItem: TItem;
+    procedure SetSelectedHoldItem(Value: TItem);
+    function GetSelectedHoldOrigin: Integer;
+    procedure SetSelectedHoldOrigin(Value: Integer);
+    function GetSelectedHoldSlot: Integer;
+    procedure SetSelectedHoldSlot(Value: Integer);
+    function GetSelectedHoldUsesDisplayOrder: Boolean;
+    procedure SetSelectedHoldUsesDisplayOrder(Value: Boolean);
+    // CHANGE: ENHANCEMENT - The held entry is the human's (LocalHuman), so the commands in
+    // aHoldActions can pick things up and put them down; these keep the names other units use.
+    property SelectedHoldKind: TPlayerHoldKind read GetSelectedHoldKind write SetSelectedHoldKind;
+    property SelectedGoodsIndex: Byte read GetSelectedGoodsIndex write SetSelectedGoodsIndex;
+    property SelectedGoodsQuantity: Integer
+        read GetSelectedGoodsQuantity
+        write SetSelectedGoodsQuantity;
+    property SelectedGoodsCost: Integer read GetSelectedGoodsCost write SetSelectedGoodsCost;
+    property SelectedHoldItem: TItem read GetSelectedHoldItem write SetSelectedHoldItem;
+    property SelectedHoldOrigin: Integer read GetSelectedHoldOrigin write SetSelectedHoldOrigin;
+    property SelectedHoldSlot: Integer read GetSelectedHoldSlot write SetSelectedHoldSlot;
+    property SelectedHoldUsesDisplayOrder: Boolean
+        read GetSelectedHoldUsesDisplayOrder
+        write SetSelectedHoldUsesDisplayOrder;
   end;
 var
   StorageImageCount: Integer = 21;
@@ -321,6 +339,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aPlayerActions,
+  aHoldActions,
   aSession,
   aHuman,
   GI_GI,
@@ -426,6 +445,86 @@ destructor TfShip2.Destroy;
 begin
   ShipLoopSound.Free;
   inherited Destroy;
+end;
+
+function TfShip2.GetSelectedHoldKind: TPlayerHoldKind;
+begin
+  Result := LocalHuman.SelectedHoldKind;
+end;
+
+procedure TfShip2.SetSelectedHoldKind(Value: TPlayerHoldKind);
+begin
+  LocalHuman.SelectedHoldKind := Value;
+end;
+
+function TfShip2.GetSelectedGoodsIndex: Byte;
+begin
+  Result := LocalHuman.SelectedGoodsIndex;
+end;
+
+procedure TfShip2.SetSelectedGoodsIndex(Value: Byte);
+begin
+  LocalHuman.SelectedGoodsIndex := Value;
+end;
+
+function TfShip2.GetSelectedGoodsQuantity: Integer;
+begin
+  Result := LocalHuman.SelectedGoodsQuantity;
+end;
+
+procedure TfShip2.SetSelectedGoodsQuantity(Value: Integer);
+begin
+  LocalHuman.SelectedGoodsQuantity := Value;
+end;
+
+function TfShip2.GetSelectedGoodsCost: Integer;
+begin
+  Result := LocalHuman.SelectedGoodsCost;
+end;
+
+procedure TfShip2.SetSelectedGoodsCost(Value: Integer);
+begin
+  LocalHuman.SelectedGoodsCost := Value;
+end;
+
+function TfShip2.GetSelectedHoldItem: TItem;
+begin
+  Result := LocalHuman.SelectedHoldItem;
+end;
+
+procedure TfShip2.SetSelectedHoldItem(Value: TItem);
+begin
+  LocalHuman.SelectedHoldItem := Value;
+end;
+
+function TfShip2.GetSelectedHoldOrigin: Integer;
+begin
+  Result := LocalHuman.SelectedHoldOrigin;
+end;
+
+procedure TfShip2.SetSelectedHoldOrigin(Value: Integer);
+begin
+  LocalHuman.SelectedHoldOrigin := Value;
+end;
+
+function TfShip2.GetSelectedHoldSlot: Integer;
+begin
+  Result := LocalHuman.SelectedHoldSlot;
+end;
+
+procedure TfShip2.SetSelectedHoldSlot(Value: Integer);
+begin
+  LocalHuman.SelectedHoldSlot := Value;
+end;
+
+function TfShip2.GetSelectedHoldUsesDisplayOrder: Boolean;
+begin
+  Result := LocalHuman.SelectedHoldUsesDisplayOrder;
+end;
+
+procedure TfShip2.SetSelectedHoldUsesDisplayOrder(Value: Boolean);
+begin
+  LocalHuman.SelectedHoldUsesDisplayOrder := Value;
 end;
 
 procedure TfShip2.InitializeLayout;
@@ -634,7 +733,6 @@ var
   Reserved08, SlotCount: Integer;
   PortraitPath, ReservedText: WideString;
   I, J: Integer;
-  Item: TItem;
   SavedFlag, ScriptChangedFlag: Boolean;
   Control: TObjectGI;
 begin
@@ -642,10 +740,6 @@ begin
   SetLength(ArtefactSlotZones, DefaultHullSlotCounts[8]);
   for I := 0 to DefaultHullSlotCounts[8] - 1 do
     ArtefactSlotZones[I] := GetByName('Art' + IntToStr(I) + 'z') as TZoneGI;
-  if ShipToInspect <> nil then
-    LocalHuman.PlayerHoldShip := ShipToInspect
-  else
-    LocalHuman.PlayerHoldShip := GetPlayer;
   (GetByName('PM_Ship') as TGraphButtonGI).SetHitTestDisabled(True);
   (GetByName('PM_Gal') as TGraphButtonGI).SetHitTestDisabled(True);
   (GetByName('PM_Quest') as TGraphButtonGI).SetHitTestDisabled(True);
@@ -657,18 +751,12 @@ begin
   SetCursorActive(True);
   SavedFlag := FlagD4;
   FlagD4 := False;
-  if SavedFlag then
-  begin
-    LocalHuman.PlayerHoldShip.ScriptItemsAct(satOnReEnteringForm, nil, nil, 0);
-    if GetPlayer <> LocalHuman.PlayerHoldShip then
-      GetPlayer.ScriptItemsAct(satOnReEnteringOtherShip, nil, nil, 0);
-  end
+  // The command also clears stale weapon targets, empty hold cells and duplicate storage
+  // slots, forgets a stale held entry and lends the player's experience, as this did below.
+  if ShipToInspect <> nil then
+    OpenShipScreen(ShipToInspect, SavedFlag)
   else
-  begin
-    LocalHuman.PlayerHoldShip.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
-    if GetPlayer <> LocalHuman.PlayerHoldShip then
-      GetPlayer.ScriptItemsAct(satOnEnteringOtherShip, nil, nil, 0);
-  end;
+    OpenShipScreen(GetPlayer, SavedFlag);
   ScriptChangedFlag := FlagD4;
   FlagD4 := SavedFlag;
   MainPanel.OnOpen;
@@ -676,27 +764,8 @@ begin
     MainPanel.Hide
   else
     MainPanel.Show;
-  for I := 0 to LocalHuman.PlayerHoldShip.Inventory.Count - 1 do
-  begin
-    Item := TItem(LocalHuman.PlayerHoldShip.Inventory[I]);
-    if (Item is TWeapon) and ((Item as TWeapon).Target <> nil) then
-      if (Item as TWeapon).EquippedFlag = 0 then
-        (Item as TWeapon).Target := nil
-      else if (not ((Item as TWeapon).Target is TShip)
-              or (Galaxy.IdToShip(((Item as TWeapon).Target as TShip).Id, False) = nil))
-          and (not ((Item as TWeapon).Target is TItem)
-              or (Galaxy.IdToItem(((Item as TWeapon).Target as TItem).Id, False) = nil))
-          and (not ((Item as TWeapon).Target is TAsteroid)
-              or (Galaxy.IdToAsteroid(((Item as TWeapon).Target as TAsteroid).Id) = nil))
-          and (not ((Item as TWeapon).Target is TMissile)
-              or (Galaxy.IdToMissile(((Item as TWeapon).Target as TMissile).Id) = nil)) then
-        (Item as TWeapon).Target := nil;
-  end;
-  if not FlagD4 then
-    RemoveEmptyPlayerHoldSlots;
   if not FlagD4 then
     StorageFirstSlot := 0;
-  GetPlayer.RepairDuplicateStorageSlots(GetLocalStorageOwner);
   RefreshEquipmentSlotControls;
   aCalc.WaitForTurnCalculationUI;
   if AuxRenderBuffer.GetPixels = nil then
@@ -706,8 +775,6 @@ begin
   Flag3BC := False;
   if not FlagD4 then
   begin
-    SelectedHoldKind := phkEmpty;
-    SelectedHoldItem := nil;
     HoldFirstIndex := 0;
     RemoteHoldFirstOrder := 0;
   end;
@@ -886,15 +953,12 @@ begin
     RestartPlayback;
   end;
   RefreshRewards(TNormalShip(LocalHuman.PlayerHoldShip));
-  SavedShipExperience := -1;
   with GetByName('TextPoints') as TLabelGI do
   begin
     if CanUsePlayerExperience then
     begin
       SetText(LocalizedColorText('FormShip.PlayerPoints'));
       SetTextColor(OtherSkillPointColor);
-      SavedShipExperience := LocalHuman.PlayerHoldShip.FreeExperience;
-      LocalHuman.PlayerHoldShip.FreeExperience := GetPlayer.FreeExperience;
     end
     else
     begin
@@ -1147,24 +1211,15 @@ begin
 end;
 
 procedure TfShip2.OnClose;
-var
-  I: Integer;
-  Binding: TScriptShip;
 begin
   aCalc.WaitForTurnCalculationUI;
   if not FlagD4 then
     aCalc.WaitForTurnCalculationUI;
   inherited OnClose;
   if ShipToInspect <> nil then
-    LocalHuman.PlayerHoldShip := ShipToInspect
+    LeaveShipScreen(ShipToInspect, FlagD4)
   else
-    LocalHuman.PlayerHoldShip := GetPlayer;
-  if not FlagD4 then
-  begin
-    LocalHuman.PlayerHoldShip.ScriptItemsAct($19, nil, nil, 0);
-    if GetPlayer <> LocalHuman.PlayerHoldShip then
-      GetPlayer.ScriptItemsAct($1C, nil, nil, 0);
-  end;
+    LeaveShipScreen(GetPlayer, FlagD4);
   BackgroundBuffer.GraphBuf.Clear;
   if HoldScrollTimer <> nil then
   begin
@@ -1234,44 +1289,11 @@ begin
     CancelCallbackTimer(RightPanelSlideTimer);
     RightPanelSlideTimer := nil;
   end;
-  Session.ScriptUseItem := nil;
   aCalc.WaitForTurnCalculationUI;
-  if (SavedShipExperience >= 0) and CanUsePlayerExperience then
-  begin
-    GetPlayer.FreeExperience := LocalHuman.PlayerHoldShip.FreeExperience;
-    LocalHuman.PlayerHoldShip.FreeExperience := SavedShipExperience;
-    SavedShipExperience := -1;
-  end;
-  LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
-  if LocalHuman.PlayerHoldShip.Order = soJump then
-    if LocalHuman.PlayerHoldShip.JumpRange
-        < System.Round(
-            PointDistance(
-                LocalHuman.PlayerHoldShip.CurrentStar.Position,
-                TStar(LocalHuman.PlayerHoldShip.OrderTarget).Position
-            )) then
-      LocalHuman.PlayerHoldShip.OrderNone(False);
-  if GetPlayer.ScriptShipBindings <> nil then
-  begin
-    I := GetPlayer.ScriptShipBindings.Count - 1;
-    while I >= 0 do
-    begin
-      if I >= GetPlayer.ScriptShipBindings.Count then
-        I := GetPlayer.ScriptShipBindings.Count - 1
-      else
-      begin
-        Binding := GetPlayer.ScriptShipBindings[I];
-        if Binding.Script <> nil then
-          Binding.Script.RunShipState(Binding);
-        Dec(I);
-      end;
-    end;
-  end;
-  GetPlayer.RefreshStorageBubbles;
+  CloseShipScreen(FlagD4);
   if not FlagD4 then
   begin
     ShipLoopSound.SetVolume(0.0);
-    LocalHuman.PlayerHoldShip := nil;
     ShipToInspect := nil;
   end;
   CustomCursorEnabled := not FlagD4;
@@ -1283,20 +1305,12 @@ end;
 
 function TfShip2.CanUseLocalStorage: Boolean;
 begin
-  Result :=
-      ((GetPlayer.IsOnPlanet and (GetPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
-              or (GetPlayer.IsDockedToShip and (GetPlayer.RuinsMode = 0)))
-          and (QueuedArcadeBattles.Count <= 0);
+  Result := aHoldActions.CanUseLocalStorage;
 end;
 
 function TfShip2.GetLocalStorageOwner: TObject;
 begin
-  if GetPlayer.IsOnPlanet then
-    Result := GetPlayer.CurrentPlanet
-  else if GetPlayer.IsDockedToShip then
-    Result := GetPlayer.DockedTo
-  else
-    Result := nil;
+  Result := aHoldActions.GetLocalStorageOwner;
 end;
 
 procedure TfShip2.RefreshRewards(Ship: TNormalShip);
@@ -1596,7 +1610,7 @@ begin
         = 1 then
     begin
       aCalc.WaitForTurnCalculationUI;
-      LocalHuman.PlayerHoldShip.Name := Name;
+      RenameShip(Name);
       (GetByName('ShipName') as TLabelGI).SetText(Name);
       aCalc.WaitForTurnCalculationUI;
     end;
@@ -1993,9 +2007,7 @@ var
 begin
   aCalc.WaitForTurnCalculationUI;
   RefreshEquipmentConfigurationButtons;
-  LocalHuman.PlayerHoldShip.RefreshAssignedItemSlots;
-  LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
-  RefreshPlayerHoldView(False);
+  RefreshHoldView;
   RefreshEquipmentSlotControls;
   with GetByName('LifeLeft') as TImageGI do
   begin
@@ -2901,26 +2913,23 @@ end;
 procedure TfShip2.TrainSkillClicked(Sender: TObjectGI);
 begin
   aCalc.WaitForTurnCalculationUI;
-  LocalHuman.PlayerHoldShip.TrainSkill(TPilotSkill(Sender.UserValue));
-  if CanUsePlayerExperience then
-    GetPlayer.FreeExperience := LocalHuman.PlayerHoldShip.FreeExperience;
+  TrainHoldSkill(Integer(Sender.UserValue));
   aCalc.WaitForTurnCalculationUI;
   RefreshShipView;
   ShowShipPropertyInfo(GetByName('Skill' + IntToStr(Cardinal(Sender.UserValue)) + 'z'));
   aCalc.WaitForTurnCalculationUI;
-  if GetPlayer = LocalHuman.PlayerHoldShip then
-    GetPlayer.AchievementStats.CheckAllSkillsAchievement;
-  LocalHuman.PlayerHoldShip.ScriptItemsAct(satOnPlayerSkillIncrease, nil, nil, 0);
+  FinishSkillTraining;
   aCalc.WaitForTurnCalculationUI;
 end;
 
 procedure TfShip2.EquipmentSlotMouseDown(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
 var
   ItemType: Byte;
-  Slot, Quantity: Integer;
+  Slot: Integer;
   Item: TEquipment;
   Text: WideString;
   ActionResult: Integer;
+  MissileWarning: Boolean;
 begin
   ItemType := SlotToTip(Sender.ControlName);
   Slot := ExtractDigitsToIntW(Sender.ControlName);
@@ -2973,18 +2982,7 @@ begin
         );
         Exit;
       end;
-      if Item.EquippedFlag <> 0 then
-        LocalHuman.PlayerHoldShip.UnequipItem(Item);
-      LocalHuman.PlayerHoldShip.Inventory.Delete(LocalHuman.PlayerHoldShip.Inventory.IndexOf(Item));
-      LocalHuman.PlayerHoldShip.RebuildEquipmentCache;
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
-      SelectedHoldKind := phkEquipment;
-      SelectedHoldOrigin := 0;
-      SelectedHoldSlot := -(Slot + 1);
-      SelectedHoldUsesDisplayOrder := False;
-      SelectedHoldItem := Item;
-      if Item is TWeapon then
-        (Item as TWeapon).Target := nil;
+      TakeEquipped(ItemType, Slot);
       UpdateActionCursor(True);
       aCalc.WaitForTurnCalculationUI;
       SoundManager.PlaySound('Sound.SlotGet');
@@ -3011,12 +3009,7 @@ begin
           );
       if ShowMessageBoxGI(Self, Text, mbgOK or mbgCancel or mbgQuestion) = mbgResultOK then
       begin
-        LocalHuman.PlayerHoldShip.ScriptItemsAct(satOnPlayerUseMM, Item, SelectedHoldItem, 0);
-        ApplyMicroModule((SelectedHoldItem as TMicroModule).MicroModuleIndex - 1, Item);
-        SelectedHoldItem.Free;
-        SelectedHoldKind := phkEmpty;
-        SelectedHoldItem := nil;
-        LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+        InstallHeldMicroModule(hsEquipmentSlot, ItemType, Slot);
         UpdateActionCursor(True);
         aCalc.WaitForTurnCalculationUI;
       end;
@@ -3029,18 +3022,10 @@ begin
         and ((LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(ItemType, Slot) as TFuelTanks).Fuel
             < (LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(ItemType, Slot) as TFuelTanks).Capacity) then
     begin
-      Item := LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(ItemType, Slot);
       Text := LocalizedColorText('Items.Cistern.ToFuelTanks');
       if ShowMessageBoxGI(Self, Text, mbgOK or mbgCancel or mbgQuestion) = mbgResultOK then
       begin
-        Quantity :=
-            Min(
-                (SelectedHoldItem as TCistern).Fuel,
-                (Item as TFuelTanks).Capacity - (Item as TFuelTanks).Fuel
-            );
-        Dec((SelectedHoldItem as TCistern).Fuel, Quantity);
-        Inc((Item as TFuelTanks).Fuel, Quantity);
-        LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+        TransferHeldFuel(hsEquipmentSlot, ItemType, Slot, hfCisternToFuelTanks);
         UpdateActionCursor(True);
         aCalc.WaitForTurnCalculationUI;
       end;
@@ -3048,71 +3033,21 @@ begin
     else if (SelectedHoldKind = phkEquipment)
         and IsCompatibleSlot(TItemType(ItemType), SelectedHoldItem.ItemType) then
     begin
-      Item := LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(ItemType, Slot);
-      if (Item <> nil) and (Item.EquippedFlag <> 0) then
-        LocalHuman.PlayerHoldShip.UnequipItem(Item);
-      LocalHuman.PlayerHoldShip.Inventory.Add(SelectedHoldItem);
-      (SelectedHoldItem as TEquipment).AssignedSlotData :=
-          ((SelectedHoldItem as TEquipment).AssignedSlotData and EquipmentSecondaryFireFlag)
-              or Slot;
-      (SelectedHoldItem as TEquipment).Equip;
-      if SelectedHoldItem is TWeapon then
-        (SelectedHoldItem as TWeapon).Target := nil;
+      MissileWarning := EquipHeld(ItemType, Slot);
       SoundManager.PlaySound('Sound.SlotPut');
-      if (LocalHuman.PlayerHoldShip is TTranclucator)
-          and (SelectedHoldItem is TWeapon)
-          and (Byte(TWeapon(SelectedHoldItem).GetWeaponInfo.ShotType)
-              in [Ord(wstTorpedo)..Ord(wstRocket)])
-          and (LocalHuman.PlayerHoldShip.GetRadar = nil) then
+      if MissileWarning then
         ShowMessageBoxGI(
             Self,
             LocalizedColorText('FormShip.TrancMissileWarning'),
             mbgOK or mbgWarning
         );
-      SelectedHoldKind := phkEmpty;
-      SelectedHoldItem := nil;
-      if Item <> nil then
-      begin
-        LocalHuman.PlayerHoldShip.Inventory.Delete(LocalHuman.PlayerHoldShip.Inventory.IndexOf(Item));
-        SelectedHoldKind := phkEquipment;
-        SelectedHoldOrigin := 0;
-        SelectedHoldSlot := -(Slot + 1);
-        SelectedHoldUsesDisplayOrder := False;
-        SelectedHoldItem := Item;
-      end;
       UpdateActionCursor(True);
       aCalc.WaitForTurnCalculationUI;
     end
     else if (SelectedHoldKind in [phkGoods])
         and (LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(ItemType, Slot) <> nil) then
     begin
-      Item := LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(ItemType, Slot);
-      ActionResult := 0;
-      if Item.ScriptItem <> nil then
-        ActionResult :=
-            TScriptItem(Item.ScriptItem)
-                .RunActionCode(
-                    satOnAnotherGoods,
-                    LocalHuman.PlayerHoldShip,
-                    TObject(SelectedGoodsIndex),
-                    TObject(SelectedGoodsQuantity),
-                    0);
-      if ActionResult <> 0 then
-      begin
-        Quantity := Abs(ActionResult);
-        if Quantity < SelectedGoodsQuantity then
-        begin
-          Dec(SelectedGoodsCost, Round(Quantity / SelectedGoodsQuantity * SelectedGoodsCost));
-          Dec(SelectedGoodsQuantity, Quantity);
-        end
-        else
-        begin
-          SelectedHoldKind := phkEmpty;
-          SelectedGoodsQuantity := 0;
-          SelectedGoodsCost := 0;
-        end;
-      end;
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+      ActionResult := UseHeldGoodsOn(hsEquipmentSlot, ItemType, Slot);
       UpdateActionCursor(True);
       aCalc.WaitForTurnCalculationUI;
       if ActionResult < 0 then
@@ -3121,48 +3056,7 @@ begin
     else if (SelectedHoldKind in [phkEquipment, phkArtefact])
         and (LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(ItemType, Slot) <> nil) then
     begin
-      Item := LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(ItemType, Slot);
-      ActionResult := 0;
-      if SelectedHoldItem.ScriptItem <> nil then
-        ActionResult :=
-            TScriptItem(SelectedHoldItem.ScriptItem)
-                .RunActionCode(satOnAnotherItem, LocalHuman.PlayerHoldShip, Item, nil, ActionResult);
-      if SelectedHoldItem is TEquipmentWithActCode then
-        ActionResult :=
-            RunItemConfigActionCode(
-                SelectedHoldItem,
-                satOnAnotherItem,
-                LocalHuman.PlayerHoldShip,
-                Item,
-                nil,
-                ActionResult
-            );
-      if Item.ScriptItem <> nil then
-        ActionResult :=
-            TScriptItem(Item.ScriptItem)
-                .RunActionCode(
-                    satOnAnotherItem2,
-                    LocalHuman.PlayerHoldShip,
-                    SelectedHoldItem,
-                    nil,
-                    ActionResult);
-      if Item is TEquipmentWithActCode then
-        ActionResult :=
-            RunItemConfigActionCode(
-                Item,
-                satOnAnotherItem2,
-                LocalHuman.PlayerHoldShip,
-                SelectedHoldItem,
-                nil,
-                ActionResult
-            );
-      if ActionResult in [1, 3] then
-      begin
-        SelectedHoldItem.Free;
-        SelectedHoldKind := phkEmpty;
-        SelectedHoldItem := nil;
-      end;
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+      ActionResult := UseHeldItemOn(hsEquipmentSlot, ItemType, Slot);
       UpdateActionCursor(True);
       aCalc.WaitForTurnCalculationUI;
       if ActionResult = 3 then
@@ -3184,7 +3078,6 @@ procedure TfShip2.ArtefactSlotMouseDown(Sender: TObjectGI; KeyState: Cardinal; P
 var
   Slot: Integer;
   Equipment: TEquipment;
-  Item: TArtefact;
 begin
   Slot := ExtractDigitsToIntW(Sender.ControlName);
   aCalc.WaitForTurnCalculationUI;
@@ -3193,15 +3086,7 @@ begin
     Equipment := LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(Ord(t_Artefact), Slot);
     if Equipment <> nil then
     begin
-      Item := Equipment as TArtefact;
-      Item.Unequip;
-      LocalHuman.PlayerHoldShip.Artefacts.Delete(LocalHuman.PlayerHoldShip.Artefacts.IndexOf(Item));
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
-      SelectedHoldKind := phkArtefact;
-      SelectedHoldOrigin := 0;
-      SelectedHoldSlot := -(Slot + 1);
-      SelectedHoldUsesDisplayOrder := False;
-      SelectedHoldItem := Item;
+      TakeArtefact(Slot);
       aCalc.WaitForTurnCalculationUI;
       UpdateActionCursor(True);
       SoundManager.PlaySound('Sound.SlotGet');
@@ -3209,25 +3094,8 @@ begin
   end
   else if SelectedHoldKind = phkArtefact then
   begin
-    Equipment := LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(Ord(t_Artefact), Slot);
-    if (Equipment <> nil) and (Equipment.EquippedFlag <> 0) then
-      Equipment.Unequip;
-    LocalHuman.PlayerHoldShip.Artefacts.Add(SelectedHoldItem);
-    (SelectedHoldItem as TEquipment).AssignedSlotData := Slot;
-    (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-    (SelectedHoldItem as TEquipment).Equip;
-    SelectedHoldKind := phkEmpty;
-    SelectedHoldItem := nil;
+    EquipHeldArtefact(Slot);
     SoundManager.PlaySound('Sound.SlotPut');
-    if Equipment <> nil then
-    begin
-      LocalHuman.PlayerHoldShip.Artefacts.Delete(LocalHuman.PlayerHoldShip.Artefacts.IndexOf(Equipment));
-      SelectedHoldKind := phkArtefact;
-      SelectedHoldOrigin := 0;
-      SelectedHoldSlot := -(Slot + 1);
-      SelectedHoldUsesDisplayOrder := False;
-      SelectedHoldItem := Equipment;
-    end;
     aCalc.WaitForTurnCalculationUI;
     UpdateActionCursor(True);
   end;
@@ -3247,7 +3115,7 @@ end;
 
 procedure TfShip2.UseOnArtefactSlot(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
 var
-  Slot, Quantity: Integer;
+  Slot: Integer;
   Item: TItem;
   ActionResult: Integer;
 begin
@@ -3258,41 +3126,7 @@ begin
     Exit;
   if SelectedHoldKind in [phkGoods] then
   begin
-    if Item.ScriptItem <> nil then
-      ActionResult :=
-          TScriptItem(Item.ScriptItem)
-              .RunActionCode(
-                  satOnAnotherGoods,
-                  LocalHuman.PlayerHoldShip,
-                  TObject(SelectedGoodsIndex),
-                  TObject(SelectedGoodsQuantity),
-                  0)
-    else
-      ActionResult :=
-          RunItemConfigActionCode(
-              Item,
-              satOnAnotherGoods,
-              LocalHuman.PlayerHoldShip,
-              TObject(SelectedGoodsIndex),
-              TObject(SelectedGoodsQuantity),
-              0
-          );
-    if ActionResult <> 0 then
-    begin
-      Quantity := Abs(ActionResult);
-      if Quantity < SelectedGoodsQuantity then
-      begin
-        Dec(SelectedGoodsCost, Round(Quantity / SelectedGoodsQuantity * SelectedGoodsCost));
-        Dec(SelectedGoodsQuantity, Quantity);
-      end
-      else
-      begin
-        SelectedHoldKind := phkEmpty;
-        SelectedGoodsQuantity := 0;
-        SelectedGoodsCost := 0;
-      end;
-    end;
-    LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+    ActionResult := UseHeldGoodsOn(hsArtefactSlot, Slot, 0);
     UpdateActionCursor(True);
     aCalc.WaitForTurnCalculationUI;
     if ActionResult < 0 then
@@ -3300,46 +3134,7 @@ begin
   end
   else if SelectedHoldKind in [phkEquipment, phkArtefact] then
   begin
-    ActionResult := 0;
-    if SelectedHoldItem.ScriptItem <> nil then
-      ActionResult :=
-          TScriptItem(SelectedHoldItem.ScriptItem)
-              .RunActionCode(satOnAnotherItem, LocalHuman.PlayerHoldShip, Item, nil, ActionResult);
-    if SelectedHoldItem is TEquipmentWithActCode then
-      ActionResult :=
-          RunItemConfigActionCode(
-              SelectedHoldItem,
-              satOnAnotherItem,
-              LocalHuman.PlayerHoldShip,
-              Item,
-              nil,
-              ActionResult
-          );
-    if Item.ScriptItem <> nil then
-      ActionResult :=
-          TScriptItem(Item.ScriptItem)
-              .RunActionCode(
-                  satOnAnotherItem2,
-                  LocalHuman.PlayerHoldShip,
-                  SelectedHoldItem,
-                  nil,
-                  ActionResult);
-    ActionResult :=
-        RunItemConfigActionCode(
-            Item,
-            satOnAnotherItem2,
-            LocalHuman.PlayerHoldShip,
-            SelectedHoldItem,
-            nil,
-            ActionResult
-        );
-    if ActionResult in [1, 3] then
-    begin
-      SelectedHoldItem.Free;
-      SelectedHoldKind := phkEmpty;
-      SelectedHoldItem := nil;
-    end;
-    LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+    ActionResult := UseHeldItemOn(hsArtefactSlot, Slot, 0);
     UpdateActionCursor(True);
     aCalc.WaitForTurnCalculationUI;
     if ActionResult = 3 then
@@ -3363,12 +3158,9 @@ end;
 
 procedure TfShip2.RemoteHoldItemMouseDown(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
 var
-  Index, J, Count, Missing, DialogCount, Available: Integer;
+  Index, J, Count, DialogCount, Available: Integer;
   Text: WideString;
-  Equipment: TEquipment;
-  Entry, Swap: TPlayerHoldUnit;
-  Stack: TCountableItem;
-  ReservedCisternFrom, ReservedCisternTo: TCistern;
+  Entry: TPlayerHoldUnit;
   FuelFrom, FuelTo: TFuelTanks;
   Expanded, NeedsRefresh: Boolean;
   ActionResult: Integer;
@@ -3421,9 +3213,8 @@ begin
   begin
     if Entry <> nil then
     begin
-      TakeHoldEntry(Entry, Index, Expanded);
+      TakeHoldEntryAt(Index, Expanded);
       NeedsRefresh := True;
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
       UpdateActionCursor(True);
       SoundManager.PlaySound('Sound.SlotGet');
     end;
@@ -3469,143 +3260,15 @@ begin
       aCalc.WaitForTurnCalculationUI;
       Exit;
     end;
-    if (Entry <> nil) and (Entry.Kind in [phkEquipment, phkArtefact]) then
+    if PutHeldGoods(Index, Expanded, Count) = poScript then
     begin
-      if Entry.Item.ScriptItem <> nil then
-        ActionResult :=
-            TScriptItem(Entry.Item.ScriptItem)
-                .RunActionCode(
-                    satOnAnotherGoods,
-                    LocalHuman.PlayerHoldShip,
-                    TObject(SelectedGoodsIndex),
-                    TObject(Count),
-                    0)
-      else
-        ActionResult :=
-            RunItemConfigActionCode(
-                Entry.Item,
-                satOnAnotherGoods,
-                LocalHuman.PlayerHoldShip,
-                TObject(SelectedGoodsIndex),
-                TObject(Count),
-                0
-            );
-      if ActionResult <> 0 then
-      begin
-        Count := Min(Count, Abs(ActionResult));
-        if Count < SelectedGoodsQuantity then
-        begin
-          Dec(SelectedGoodsCost, Round(Count / SelectedGoodsQuantity * SelectedGoodsCost));
-          Dec(SelectedGoodsQuantity, Count);
-        end
-        else
-        begin
-          SelectedHoldKind := phkEmpty;
-          SelectedGoodsQuantity := 0;
-          SelectedGoodsCost := 0;
-        end;
-        LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
-        UpdateActionCursor(True);
-        aCalc.WaitForTurnCalculationUI;
-        if ActionResult < 0 then
-          CloseClicked(nil);
-        Exit;
-      end;
+      UpdateActionCursor(True);
+      aCalc.WaitForTurnCalculationUI;
+      if HeldActionResult < 0 then
+        CloseClicked(nil);
+      Exit;
     end;
-    Inc(LocalHuman.PlayerHoldShip.CargoGoods[SelectedGoodsIndex].Count, Count);
-    Inc(
-        LocalHuman.PlayerHoldShip.CargoGoods[SelectedGoodsIndex].TotalCost,
-        Round(Count / SelectedGoodsQuantity * SelectedGoodsCost)
-    );
     SoundManager.PlaySound('Sound.SlotPut');
-    if not Expanded then
-    begin
-      if Entry = nil then
-      begin
-        Missing := Index - LocalHuman.PlayerHoldEntries.Count + 1;
-        for J := 0 to Missing - 1 do
-        begin
-          Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Add(Entry);
-          Entry.Kind := phkEmpty;
-        end;
-        Entry := TPlayerHoldUnit(LocalHuman.PlayerHoldEntries[LocalHuman.PlayerHoldEntries.Count - 1]);
-      end
-      else
-      begin
-        if Entry.Kind <> phkEmpty then
-        begin
-          Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Insert(Index, Entry);
-          Entry.Kind := phkEmpty;
-        end;
-      end;
-      Entry.DisplayOrder := FindFreePlayerHoldOrder;
-      Entry.Kind := phkGoods;
-      Entry.GoodsIndex := SelectedGoodsIndex;
-      Dec(SelectedGoodsCost, Round(Count / SelectedGoodsQuantity * SelectedGoodsCost));
-      Dec(SelectedGoodsQuantity, Count);
-      RemoveEmptyPlayerHoldSlot(LocalHuman.PlayerHoldEntries.IndexOf(Entry) + 1);
-      if SelectedGoodsQuantity <= 0 then
-        SelectedHoldKind := phkEmpty
-      else
-        ReturnSelectedHoldEntry;
-    end
-    else
-    begin
-      Swap := nil;
-      if Entry = nil then
-      begin
-        Entry := TPlayerHoldUnit.Create;
-        LocalHuman.PlayerHoldEntries.Add(Entry);
-      end
-      else
-      begin
-        if Entry.Kind <> phkEmpty then
-        begin
-          Swap := Entry;
-          Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Add(Entry);
-        end;
-      end;
-      Entry.DisplayOrder := Index;
-      Entry.Kind := phkGoods;
-      Entry.GoodsIndex := SelectedGoodsIndex;
-      Dec(SelectedGoodsCost, Round(Count / SelectedGoodsQuantity * SelectedGoodsCost));
-      Dec(SelectedGoodsQuantity, Count);
-      if Swap <> nil then
-      begin
-        if SelectedGoodsQuantity > 0 then
-          RaiseWideMessage('move goods');
-        TakeHoldEntry(Swap, Index, Expanded);
-      end
-      else if SelectedGoodsQuantity <= 0 then
-      begin
-        SelectedHoldKind := phkEmpty;
-        SelectedHoldItem := nil;
-      end
-      else
-        ReturnSelectedHoldEntry;
-      RestorePlayerHoldDisplayOrder;
-    end;
-    for J := LocalHuman.PlayerHoldEntries.Count - 1 downto 0 do
-    begin
-      Swap := TPlayerHoldUnit(LocalHuman.PlayerHoldEntries[J]);
-      if (Swap.Kind = phkGoods) and (SelectedGoodsIndex = Swap.GoodsIndex) and (Entry <> Swap) then
-      begin
-        if not Expanded then
-        begin
-          Swap.Item := nil;
-          Swap.Kind := phkEmpty;
-        end
-        else
-        begin
-          LocalHuman.PlayerHoldEntries.Delete(J);
-          Swap.Free;
-        end;
-      end;
-    end;
-    LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
     UpdateActionCursor(True);
     RefreshAfterTransfer;
     Exit;
@@ -3647,160 +3310,32 @@ begin
     if (TCountableItem(SelectedHoldItem).StackCount <> Count)
         or ((Entry <> nil) and TCountableItem(SelectedHoldItem).CanMerge(Entry.Item)) then
     begin
-      if not RemoteHoldVisible
-          and (SelectedHoldOrigin = 0)
-          and (Entry <> nil)
-          and (Entry.Item <> nil)
-          and (Entry.Kind in [phkEquipment, phkArtefact])
-          and not TCountableItem(SelectedHoldItem).CanMerge(Entry.Item) then
-      begin
-        ActionResult := 0;
-        if SelectedHoldItem.ScriptItem <> nil then
-          ActionResult :=
-              TScriptItem(SelectedHoldItem.ScriptItem)
-                  .RunActionCode(satOnAnotherItem, LocalHuman.PlayerHoldShip, Entry.Item, nil, ActionResult);
-        if Entry.Item.ScriptItem <> nil then
-          ActionResult :=
-              TScriptItem(Entry.Item.ScriptItem)
-                  .RunActionCode(
-                      satOnAnotherItem2,
-                      LocalHuman.PlayerHoldShip,
-                      SelectedHoldItem,
-                      nil,
-                      ActionResult);
-        if Entry.Item is TEquipmentWithActCode then
-          ActionResult :=
-              RunItemConfigActionCode(
-                  Entry.Item,
-                  satOnAnotherItem2,
-                  LocalHuman.PlayerHoldShip,
-                  SelectedHoldItem,
-                  nil,
-                  ActionResult
-              );
-        if ActionResult in [1, 3] then
+      case PutHeldStack(Index, Expanded, Count, not RemoteHoldVisible) of
+        poScript:
         begin
-          SelectedHoldItem.Free;
-          SelectedHoldKind := phkEmpty;
-          SelectedHoldItem := nil;
-        end;
-        if ActionResult in [1..3] then
-        begin
-          LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
           aCalc.WaitForTurnCalculationUI;
           UpdateActionCursor(True);
           RefreshShipView;
-          if ActionResult = 3 then
+          if HeldActionResult = 3 then
             CloseClicked(nil);
-          Exit;
         end;
-        Count := TCountableItem(SelectedHoldItem).StackCount;
-      end;
-      if (Count < 1) or (TCountableItem(SelectedHoldItem).StackCount < Count) then
-        Exit;
-      if Count < TCountableItem(SelectedHoldItem).StackCount then
-      begin
-        Stack := TCountableItem(SelectedHoldItem).Split(Count);
-        if (Entry <> nil) and (Entry.Item <> nil) and Stack.CanMerge(Entry.Item) then
-        begin
-          TCountableItem(Entry.Item).Merge(Stack);
-          Stack.Free;
-          ReturnSelectedHoldEntry;
-          Exit;
-        end;
-        LocalHuman.PlayerHoldShip.Inventory.Add(Stack);
-      end
-      else
-      begin
-        Stack := TCountableItem(SelectedHoldItem);
-        SelectedHoldKind := phkEmpty;
-        SelectedHoldItem := nil;
-        if (Entry <> nil) and (Entry.Item <> nil) and Stack.CanMerge(Entry.Item) then
-        begin
-          TCountableItem(Entry.Item).Merge(Stack);
-          Stack.Free;
-          SelectedHoldItem := nil;
-          SelectedHoldKind := phkEmpty;
-          Exit;
-        end;
-        LocalHuman.PlayerHoldShip.Inventory.Add(Stack);
-      end;
-      SoundManager.PlaySound('Sound.SlotPut');
-      if not Expanded then
-      begin
-        if Entry = nil then
-        begin
-          Missing := Index - LocalHuman.PlayerHoldEntries.Count + 1;
-          for J := 0 to Missing - 1 do
+        poMergedReturned:
+          if not ExitScreenLoop then
           begin
-            Entry := TPlayerHoldUnit.Create;
-            LocalHuman.PlayerHoldEntries.Add(Entry);
-            Entry.Kind := phkEmpty;
-          end;
-          Entry := TPlayerHoldUnit(LocalHuman.PlayerHoldEntries[LocalHuman.PlayerHoldEntries.Count - 1]);
-        end
-        else
+            if not IsCursorImageSelected('Main') then
+              SetCursorByName('Main');
+            aCalc.WaitForTurnCalculationUI;
+            RefreshShipView;
+          end
+          else
+            aCalc.WaitForTurnCalculationUI;
+        poPlaced:
         begin
-          if Entry.Kind <> phkEmpty then
-          begin
-            Entry := TPlayerHoldUnit.Create;
-            LocalHuman.PlayerHoldEntries.Insert(Index, Entry);
-            Entry.Kind := phkEmpty;
-          end;
-        end;
-        Entry.DisplayOrder := FindFreePlayerHoldOrder;
-        Entry.Kind := phkEquipment;
-        Entry.ItemId := Stack.Id;
-        Entry.Item := Stack;
-        RemoveEmptyPlayerHoldSlot(LocalHuman.PlayerHoldEntries.IndexOf(Entry) + 1);
-        if SelectedHoldItem <> nil then
-          ReturnSelectedHoldEntry;
-      end
-      else
-      begin
-        Swap := nil;
-        if Entry = nil then
-        begin
-          Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Add(Entry);
-        end
-        else
-        begin
-          if Entry.Kind <> phkEmpty then
-          begin
-            Swap := Entry;
-            Entry := TPlayerHoldUnit.Create;
-            LocalHuman.PlayerHoldEntries.Add(Entry);
-          end;
-        end;
-        Entry.DisplayOrder := Index;
-        Entry.Kind := phkEquipment;
-        Entry.ItemId := Stack.Id;
-        Entry.Item := Stack;
-        if Swap <> nil then
-        begin
-          if TCountableItem(SelectedHoldItem).StackCount > 0 then
-            RaiseWideMessage('move protoplasm');
-          TakeHoldEntry(Swap, Index, Expanded);
-        end
-        else if SelectedHoldItem <> nil then
-          ReturnSelectedHoldEntry;
-        RestorePlayerHoldDisplayOrder;
-      end;
-      for J := 0 to LocalHuman.PlayerHoldEntries.Count - 1 do
-      begin
-        Swap := TPlayerHoldUnit(LocalHuman.PlayerHoldEntries[J]);
-        if (Swap.Kind = phkEquipment) and (Entry.Item as TCountableItem).Merge(Swap.Item) then
-        begin
-          LocalHuman.PlayerHoldShip.Inventory.Delete(LocalHuman.PlayerHoldShip.Inventory.IndexOf(Swap.Item));
-          Swap.Item.Free;
-          Swap.Item := nil;
-          Swap.Kind := phkEmpty;
+          SoundManager.PlaySound('Sound.SlotPut');
+          UpdateActionCursor(True);
+          RefreshAfterTransfer;
         end;
       end;
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
-      UpdateActionCursor(True);
-      RefreshAfterTransfer;
       Exit;
     end;
   end;
@@ -3818,14 +3353,7 @@ begin
         Text := LocalizedColorText('Items.Cistern.Merge');
         if ShowMessageBoxGI(Self, Text, mbgOK or mbgCancel or mbgQuestion) = mbgResultOK then
         begin
-          Count :=
-              Min(
-                  (SelectedHoldItem as TCistern).Fuel,
-                  (Entry.Item as TCistern).Capacity - (Entry.Item as TCistern).Fuel
-              );
-          Dec((SelectedHoldItem as TCistern).Fuel, Count);
-          Inc((Entry.Item as TCistern).Fuel, Count);
-          LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+          TransferHeldFuel(hsHoldEquipment, Index, Ord(Expanded), hfCisternToCistern);
           aCalc.WaitForTurnCalculationUI;
           UpdateActionCursor(True);
           RefreshShipView;
@@ -3844,10 +3372,7 @@ begin
           Text := LocalizedColorText('Items.Cistern.Merge');
           if ShowMessageBoxGI(Self, Text, mbgOK or mbgCancel or mbgQuestion) = mbgResultOK then
           begin
-            Count := Min(FuelFrom.Fuel, FuelTo.Capacity - FuelTo.Fuel);
-            Dec(FuelFrom.Fuel, Count);
-            Inc(FuelTo.Fuel, Count);
-            LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+            TransferHeldFuel(hsHoldEquipment, Index, Ord(Expanded), hfFuelTanksToFuelTanks);
             aCalc.WaitForTurnCalculationUI;
             UpdateActionCursor(True);
             RefreshShipView;
@@ -3865,14 +3390,7 @@ begin
         Text := LocalizedColorText('Items.Cistern.ToFuelTanks');
         if ShowMessageBoxGI(Self, Text, mbgOK or mbgCancel or mbgQuestion) = mbgResultOK then
         begin
-          Count :=
-              Min(
-                  (SelectedHoldItem as TCistern).Fuel,
-                  (Entry.Item as TFuelTanks).Capacity - (Entry.Item as TFuelTanks).Fuel
-              );
-          Dec((SelectedHoldItem as TCistern).Fuel, Count);
-          Inc((Entry.Item as TFuelTanks).Fuel, Count);
-          LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+          TransferHeldFuel(hsHoldEquipment, Index, Ord(Expanded), hfCisternToFuelTanks);
           aCalc.WaitForTurnCalculationUI;
           UpdateActionCursor(True);
           RefreshShipView;
@@ -3889,14 +3407,7 @@ begin
         Text := LocalizedColorText('Items.Cistern.FromFuelTanks');
         if ShowMessageBoxGI(Self, Text, mbgOK or mbgCancel or mbgQuestion) = mbgResultOK then
         begin
-          Count :=
-              Min(
-                  (SelectedHoldItem as TFuelTanks).Fuel,
-                  (Entry.Item as TCistern).Capacity - (Entry.Item as TCistern).Fuel
-              );
-          Dec((SelectedHoldItem as TFuelTanks).Fuel, Count);
-          Inc((Entry.Item as TCistern).Fuel, Count);
-          LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+          TransferHeldFuel(hsHoldEquipment, Index, Ord(Expanded), hfFuelTanksToCistern);
           aCalc.WaitForTurnCalculationUI;
           UpdateActionCursor(True);
           RefreshShipView;
@@ -3922,13 +3433,7 @@ begin
             );
         if ShowMessageBoxGI(Self, Text, mbgOK or mbgCancel or mbgQuestion) = mbgResultOK then
         begin
-          Equipment := TEquipment(Entry.Item);
-          LocalHuman.PlayerHoldShip.ScriptItemsAct(satOnPlayerUseMM, Equipment, SelectedHoldItem, 0);
-          ApplyMicroModule((SelectedHoldItem as TMicroModule).MicroModuleIndex - 1, Equipment);
-          SelectedHoldItem.Free;
-          SelectedHoldKind := phkEmpty;
-          SelectedHoldItem := nil;
-          LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+          InstallHeldMicroModule(hsHoldEquipment, Index, Ord(Expanded));
           aCalc.WaitForTurnCalculationUI;
           UpdateActionCursor(True);
           RefreshShipView;
@@ -3941,49 +3446,9 @@ begin
           and not LocalHuman.PlayerHoldShip.InHyperspace
           and (QueuedArcadeBattles.Count <= 0) then
       begin
-        ActionResult := 0;
-        if SelectedHoldItem.ScriptItem <> nil then
-          ActionResult :=
-              TScriptItem(SelectedHoldItem.ScriptItem)
-                  .RunActionCode(satOnAnotherItem, LocalHuman.PlayerHoldShip, Entry.Item, nil, ActionResult);
-        if SelectedHoldItem is TEquipmentWithActCode then
-          ActionResult :=
-              RunItemConfigActionCode(
-                  SelectedHoldItem,
-                  satOnAnotherItem,
-                  LocalHuman.PlayerHoldShip,
-                  Entry.Item,
-                  nil,
-                  ActionResult
-              );
-        if Entry.Item.ScriptItem <> nil then
-          ActionResult :=
-              TScriptItem(Entry.Item.ScriptItem)
-                  .RunActionCode(
-                      satOnAnotherItem2,
-                      LocalHuman.PlayerHoldShip,
-                      SelectedHoldItem,
-                      nil,
-                      ActionResult);
-        if Entry.Item is TEquipmentWithActCode then
-          ActionResult :=
-              RunItemConfigActionCode(
-                  Entry.Item,
-                  satOnAnotherItem2,
-                  LocalHuman.PlayerHoldShip,
-                  SelectedHoldItem,
-                  nil,
-                  ActionResult
-              );
-        if ActionResult in [1, 3] then
-        begin
-          SelectedHoldItem.Free;
-          SelectedHoldKind := phkEmpty;
-          SelectedHoldItem := nil;
-        end;
+        ActionResult := UseHeldItemOn(hsHoldEquipment, Index, Ord(Expanded));
         if ActionResult in [1..3] then
         begin
-          LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
           aCalc.WaitForTurnCalculationUI;
           UpdateActionCursor(True);
           RefreshShipView;
@@ -3993,74 +3458,8 @@ begin
         end;
       end;
     end;
-    if SelectedHoldItem is TWeapon then
-      (SelectedHoldItem as TWeapon).Target := nil;
-    LocalHuman.PlayerHoldShip.Inventory.Add(SelectedHoldItem);
-    (SelectedHoldItem as TEquipment).EquippedFlag := 0;
+    PutHeldEquipment(Index, Expanded);
     SoundManager.PlaySound('Sound.SlotPut');
-    if not Expanded then
-    begin
-      if Entry = nil then
-      begin
-        Count := Index - LocalHuman.PlayerHoldEntries.Count + 1;
-        for J := 0 to Count - 1 do
-        begin
-          Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Add(Entry);
-          Entry.Kind := phkEmpty;
-        end;
-        Entry := TPlayerHoldUnit(LocalHuman.PlayerHoldEntries[LocalHuman.PlayerHoldEntries.Count - 1]);
-      end
-      else
-      begin
-        if Entry.Kind <> phkEmpty then
-        begin
-          Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Insert(Index, Entry);
-          Entry.Kind := phkEmpty;
-        end;
-      end;
-      Entry.DisplayOrder := FindFreePlayerHoldOrder;
-      Entry.Kind := phkEquipment;
-      Entry.ItemId := SelectedHoldItem.Id;
-      Entry.Item := SelectedHoldItem;
-      RemoveEmptyPlayerHoldSlot(LocalHuman.PlayerHoldEntries.IndexOf(Entry) + 1);
-      SelectedHoldKind := phkEmpty;
-      SelectedHoldItem := nil;
-    end
-    else
-    begin
-      if (Entry <> nil) and (Entry.Item <> nil) and (Entry.Item.NoDropFlag > 0) then
-        Entry := nil;
-      Swap := nil;
-      if Entry = nil then
-      begin
-        Entry := TPlayerHoldUnit.Create;
-        LocalHuman.PlayerHoldEntries.Add(Entry);
-      end
-      else
-      begin
-        if Entry.Kind <> phkEmpty then
-        begin
-          Swap := Entry;
-          Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Add(Entry);
-        end;
-      end;
-      Entry.DisplayOrder := Index;
-      Entry.Kind := phkEquipment;
-      Entry.ItemId := SelectedHoldItem.Id;
-      Entry.Item := SelectedHoldItem;
-      if Swap <> nil then
-        TakeHoldEntry(Swap, Index, Expanded)
-      else
-      begin
-        SelectedHoldKind := phkEmpty;
-        SelectedHoldItem := nil;
-      end;
-      RestorePlayerHoldDisplayOrder;
-    end;
-    LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
     UpdateActionCursor(True);
     RefreshAfterTransfer;
     Exit;
@@ -4074,48 +3473,9 @@ begin
         and not LocalHuman.PlayerHoldShip.InHyperspace
         and (QueuedArcadeBattles.Count <= 0) then
     begin
-      ActionResult := 0;
-      if SelectedHoldItem.ScriptItem <> nil then
-        ActionResult :=
-            TScriptItem(SelectedHoldItem.ScriptItem)
-                .RunActionCode(satOnAnotherItem, LocalHuman.PlayerHoldShip, Entry.Item, nil, ActionResult);
-      ActionResult :=
-          RunItemConfigActionCode(
-              SelectedHoldItem,
-              satOnAnotherItem,
-              LocalHuman.PlayerHoldShip,
-              Entry.Item,
-              nil,
-              ActionResult
-          );
-      if Entry.Item.ScriptItem <> nil then
-        ActionResult :=
-            TScriptItem(Entry.Item.ScriptItem)
-                .RunActionCode(
-                    satOnAnotherItem2,
-                    LocalHuman.PlayerHoldShip,
-                    SelectedHoldItem,
-                    nil,
-                    ActionResult);
-      if Entry.Item is TEquipmentWithActCode then
-        ActionResult :=
-            RunItemConfigActionCode(
-                Entry.Item,
-                satOnAnotherItem2,
-                LocalHuman.PlayerHoldShip,
-                SelectedHoldItem,
-                nil,
-                ActionResult
-            );
-      if ActionResult in [1, 3] then
-      begin
-        SelectedHoldItem.Free;
-        SelectedHoldKind := phkEmpty;
-        SelectedHoldItem := nil;
-      end;
+      ActionResult := UseHeldItemOn(hsHoldArtefact, Index, Ord(Expanded));
       if ActionResult in [1..3] then
       begin
-        LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
         aCalc.WaitForTurnCalculationUI;
         UpdateActionCursor(True);
         RefreshShipView;
@@ -4124,74 +3484,8 @@ begin
         Exit;
       end;
     end;
-    LocalHuman.PlayerHoldShip.Artefacts.Add(SelectedHoldItem);
-    (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-    if SelectedHoldItem is TArtefactTranclucator then
-      (TObject((SelectedHoldItem as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip :=
-          GetPlayer;
+    PutHeldArtefact(Index, Expanded);
     SoundManager.PlaySound('Sound.SlotPut');
-    if not Expanded then
-    begin
-      if Entry = nil then
-      begin
-        Count := Index - LocalHuman.PlayerHoldEntries.Count + 1;
-        for J := 0 to Count - 1 do
-        begin
-          Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Add(Entry);
-          Entry.Kind := phkEmpty;
-        end;
-        Entry := TPlayerHoldUnit(LocalHuman.PlayerHoldEntries[LocalHuman.PlayerHoldEntries.Count - 1]);
-      end
-      else
-      begin
-        if Entry.Kind <> phkEmpty then
-        begin
-          Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Insert(Index, Entry);
-          Entry.Kind := phkEmpty;
-        end;
-      end;
-      Entry.Kind := phkArtefact;
-      Entry.ItemId := SelectedHoldItem.Id;
-      Entry.Item := SelectedHoldItem;
-      RemoveEmptyPlayerHoldSlot(LocalHuman.PlayerHoldEntries.IndexOf(Entry) + 1);
-      SelectedHoldKind := phkEmpty;
-      SelectedHoldItem := nil;
-    end
-    else
-    begin
-      if (Entry <> nil) and (Entry.Item <> nil) and (Entry.Item.NoDropFlag > 0) then
-        Entry := nil;
-      Swap := nil;
-      if Entry = nil then
-      begin
-        Entry := TPlayerHoldUnit.Create;
-        LocalHuman.PlayerHoldEntries.Add(Entry);
-      end
-      else
-      begin
-        if Entry.Kind <> phkEmpty then
-        begin
-          Swap := Entry;
-          Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Add(Entry);
-        end;
-      end;
-      Entry.DisplayOrder := Index;
-      Entry.Kind := phkArtefact;
-      Entry.ItemId := SelectedHoldItem.Id;
-      Entry.Item := SelectedHoldItem;
-      if Swap <> nil then
-        TakeHoldEntry(Swap, Index, Expanded)
-      else
-      begin
-        SelectedHoldKind := phkEmpty;
-        SelectedHoldItem := nil;
-      end;
-      RestorePlayerHoldDisplayOrder;
-    end;
-    LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
     UpdateActionCursor(True);
     RefreshAfterTransfer;
     Exit;
@@ -4199,54 +3493,10 @@ begin
   RefreshAfterTransfer;
 end;
 
-procedure TfShip2.TakeHoldEntry(Entry: TPlayerHoldUnit; Slot: Integer; UsesDisplayOrder: Boolean);
-begin
-  if Entry.Kind = phkEquipment then
-  begin
-    SelectedHoldKind := phkEquipment;
-    SelectedHoldOrigin := 0;
-    SelectedHoldSlot := Slot;
-    SelectedHoldUsesDisplayOrder := UsesDisplayOrder;
-    SelectedHoldItem := Entry.Item;
-    LocalHuman.PlayerHoldShip.Inventory.Delete(LocalHuman.PlayerHoldShip.Inventory.IndexOf(Entry.Item));
-    Entry.Kind := phkEmpty;
-    Entry.Item := nil;
-  end
-  else if Entry.Kind = phkGoods then
-  begin
-    SelectedHoldKind := phkGoods;
-    SelectedHoldOrigin := 0;
-    SelectedHoldSlot := Slot;
-    SelectedHoldUsesDisplayOrder := UsesDisplayOrder;
-    SelectedGoodsIndex := Entry.GoodsIndex;
-    SelectedGoodsQuantity := LocalHuman.PlayerHoldShip.CargoGoods[SelectedGoodsIndex].Count;
-    SelectedGoodsCost := LocalHuman.PlayerHoldShip.CargoGoods[SelectedGoodsIndex].TotalCost;
-    LocalHuman.PlayerHoldShip.CargoGoods[SelectedGoodsIndex].Count := 0;
-    LocalHuman.PlayerHoldShip.CargoGoods[SelectedGoodsIndex].TotalCost := 0;
-    Entry.Kind := phkEmpty;
-    Entry.Item := nil;
-  end
-  else if Entry.Kind = phkArtefact then
-  begin
-    SelectedHoldKind := phkArtefact;
-    SelectedHoldOrigin := 0;
-    SelectedHoldSlot := Slot;
-    SelectedHoldUsesDisplayOrder := UsesDisplayOrder;
-    SelectedHoldItem := Entry.Item;
-    LocalHuman.PlayerHoldShip.Artefacts.Delete(LocalHuman.PlayerHoldShip.Artefacts.IndexOf(Entry.Item));
-    Entry.Kind := phkEmpty;
-    Entry.Item := nil;
-  end
-  else
-    SelectedHoldKind := phkEmpty;
-  aCalc.WaitForTurnCalculationUI;
-end;
-
 procedure TfShip2.HullMouseDown(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
 var
   Text: WideString;
-  OldHull: THull;
-  ActionResult, Quantity: Integer;
+  ActionResult: Integer;
 begin
   if (SelectedHoldKind in [phkEquipment, phkArtefact])
       and (SelectedHoldItem <> nil)
@@ -4270,15 +3520,7 @@ begin
         );
     if ShowMessageBoxGI(Self, Text, mbgOK or mbgCancel or mbgQuestion) = mbgResultOK then
     begin
-      LocalHuman.PlayerHoldShip.ScriptItemsAct(satOnPlayerUseMM, LocalHuman.PlayerHoldShip.GetHull, SelectedHoldItem, 0);
-      ApplyMicroModule(
-          (SelectedHoldItem as TMicroModule).MicroModuleIndex - 1,
-          LocalHuman.PlayerHoldShip.GetHull
-      );
-      SelectedHoldItem.Free;
-      SelectedHoldKind := phkEmpty;
-      SelectedHoldItem := nil;
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+      InstallHeldMicroModule(hsHull, 0, 0);
       aCalc.WaitForTurnCalculationUI;
       UpdateActionCursor(True);
       RefreshShipView;
@@ -4287,32 +3529,7 @@ begin
   end
   else if SelectedHoldKind in [phkGoods] then
   begin
-    ActionResult := 0;
-    if LocalHuman.PlayerHoldShip.GetHull.ScriptItem <> nil then
-      ActionResult :=
-          TScriptItem(LocalHuman.PlayerHoldShip.GetHull.ScriptItem)
-              .RunActionCode(
-                  satOnAnotherGoods,
-                  LocalHuman.PlayerHoldShip,
-                  TObject(SelectedGoodsIndex),
-                  TObject(SelectedGoodsQuantity),
-                  0);
-    if ActionResult <> 0 then
-    begin
-      Quantity := Abs(ActionResult);
-      if Quantity < SelectedGoodsQuantity then
-      begin
-        Dec(SelectedGoodsCost, Round(Quantity / SelectedGoodsQuantity * SelectedGoodsCost));
-        Dec(SelectedGoodsQuantity, Quantity);
-      end
-      else
-      begin
-        SelectedHoldKind := phkEmpty;
-        SelectedGoodsQuantity := 0;
-        SelectedGoodsCost := 0;
-      end;
-    end;
-    LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+    ActionResult := UseHeldGoodsOn(hsHull, 0, 0);
     aCalc.WaitForTurnCalculationUI;
     UpdateActionCursor(True);
     RefreshShipView;
@@ -4322,44 +3539,9 @@ begin
   end
   else if (SelectedHoldKind in [phkEquipment, phkArtefact]) and (SelectedHoldItem <> nil) then
   begin
-    ActionResult := 0;
-    if SelectedHoldItem.ScriptItem <> nil then
-      ActionResult :=
-          TScriptItem(SelectedHoldItem.ScriptItem)
-              .RunActionCode(
-                  satOnAnotherItem,
-                  LocalHuman.PlayerHoldShip,
-                  LocalHuman.PlayerHoldShip.GetHull,
-                  nil,
-                  ActionResult);
-    if SelectedHoldItem is TEquipmentWithActCode then
-      ActionResult :=
-          RunItemConfigActionCode(
-              SelectedHoldItem,
-              satOnAnotherItem,
-              LocalHuman.PlayerHoldShip,
-              LocalHuman.PlayerHoldShip.GetHull,
-              nil,
-              ActionResult
-          );
-    if LocalHuman.PlayerHoldShip.GetHull.ScriptItem <> nil then
-      ActionResult :=
-          TScriptItem(LocalHuman.PlayerHoldShip.GetHull.ScriptItem)
-              .RunActionCode(
-                  satOnAnotherItem2,
-                  LocalHuman.PlayerHoldShip,
-                  SelectedHoldItem,
-                  nil,
-                  ActionResult);
-    if ActionResult in [1, 3] then
-    begin
-      SelectedHoldItem.Free;
-      SelectedHoldKind := phkEmpty;
-      SelectedHoldItem := nil;
-    end;
+    ActionResult := UseHeldItemOn(hsHull, 0, 0);
     if ActionResult in [1..3] then
     begin
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
       aCalc.WaitForTurnCalculationUI;
       UpdateActionCursor(True);
       RefreshShipView;
@@ -4372,12 +3554,7 @@ begin
   begin
     if IsHoldNormalShip and (TItem(LocalHuman.PlayerHoldShip.Inventory[0]).NoDropFlag <= 0) then
     begin
-      SelectedHoldKind := phkEquipment;
-      SelectedHoldOrigin := 0;
-      SelectedHoldSlot := 0;
-      SelectedHoldUsesDisplayOrder := False;
-      SelectedHoldItem := TItem(LocalHuman.PlayerHoldShip.Inventory[0]);
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+      TakeHull;
       aCalc.WaitForTurnCalculationUI;
       UpdateActionCursor(True);
       RefreshShipView;
@@ -4394,34 +3571,7 @@ begin
       and (SelectedHoldOrigin = 1)
       and IsHoldNormalShip then
   begin
-    LocalHuman.PlayerHoldShip
-        .ScriptItemsAct(satOnPlayerChangeHull, SelectedHoldItem, LocalHuman.PlayerHoldShip.GetHull, 0);
-    OldHull := LocalHuman.PlayerHoldShip.GetHull;
-    LocalHuman.PlayerHoldShip.Inventory.Insert(0, SelectedHoldItem);
-    LocalHuman.PlayerHoldShip.Hull := SelectedHoldItem as THull;
-    LocalHuman.PlayerHoldShip.GetHull.OwnerShip := LocalHuman.PlayerHoldShip;
-    LocalHuman.PlayerHoldShip.GetHull.AssignedSlotData := 0;
-    LocalHuman.PlayerHoldShip.GetHull.EquippedFlag := 1;
-    SelectedHoldKind := phkEmpty;
-    SelectedHoldItem := nil;
-    if OldHull <> nil then
-    begin
-      OldHull.OwnerShip := nil;
-      LocalHuman.PlayerHoldShip.Inventory.Delete(LocalHuman.PlayerHoldShip.Inventory.IndexOf(OldHull));
-      GetPlayer.AddItemToPlayerStorage(OldHull, GetLocalStorageOwner, -1);
-      aCalc.WaitForTurnCalculationUI;
-    end;
-    if LocalHuman.PlayerHoldShip.GetHull.ScriptItem <> nil then
-      TScriptItem(LocalHuman.PlayerHoldShip.GetHull.ScriptItem)
-          .RunActionCode(satOnPlayerChangeHull, LocalHuman.PlayerHoldShip, LocalHuman.PlayerHoldShip.GetHull, OldHull, 0);
-    LocalHuman.PlayerHoldShip.RefreshAssignedItemSlots;
-    LocalHuman.PlayerHoldShip.RebuildEquipmentCache;
-    LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
-    if not LocalHuman.PlayerHoldShip.ScriptChameleon then
-    begin
-      ReleaseSpaceObject(LocalHuman.PlayerHoldShip.Graphic);
-      LocalHuman.PlayerHoldShip.RefreshGraphic;
-    end;
+    ChangeHull;
     aCalc.WaitForTurnCalculationUI;
     UpdateActionCursor(True);
     RefreshShipView;
@@ -4434,21 +3584,8 @@ end;
 
 function TfShip2.ConfigureChameleon: Boolean;
 var
-  Choice, ExpectedCharges, I: Integer;
-  Series: TDominatorSeries;
+  Choice: Integer;
   VisualType: Byte;
-  Ship: TShip;
-  function ChameleonDialogChoiceToSeries(
-      Choice: Integer
-  ): TDominatorSeries; // @addr $700FFC @ida "unsigned __int8 __usercall $name@<al>(int Choice@<eax>, void *ParentFrame@<^0>);" @stackpop 0 @calls "0x7011A4" Nested helper; does not access its parent frame.
-  begin
-    Result := dsBlazer;
-    case Choice of
-      2: Result := dsBlazer;
-      3: Result := dsKeller;
-      4: Result := dsTerron;
-    end;
-  end;
 begin
   Result := False;
   if not LocalHuman.PlayerHoldShip.InHyperspace
@@ -4469,30 +3606,7 @@ begin
             Choice)
         = 1 then
     begin
-      if Choice = 1 then
-      begin
-        LocalHuman.PlayerHoldShip.ChameleonActive := False;
-        for I := 0 to LocalHuman.PlayerHoldShip.CurrentStar.Ships.Count - 1 do
-        begin
-          Ship := TShip(LocalHuman.PlayerHoldShip.CurrentStar.Ships[I]);
-          if (Ship <> LocalHuman.PlayerHoldShip)
-              and Ship.InNormalSpace
-              and not Ship.HasScriptControl
-              and (Ship is TNormalShip)
-              and (Ship.TypeId <> stPirate) then
-            Ship.AssignWeaponTargetsInStar;
-        end;
-      end
-      else
-      begin
-        Series := ChameleonDialogChoiceToSeries(Choice);
-        ExpectedCharges := Max(0, LocalHuman.PlayerHoldShip.ChameleonCharges[Ord(Series)] - 1);
-        LocalHuman.PlayerHoldShip.ChameleonCharges[Ord(Series)] := ExpectedCharges;
-        LocalHuman.PlayerHoldShip.ChameleonSeries := Series;
-        LocalHuman.PlayerHoldShip.ChameleonActive := True;
-      end;
-      ReleaseSpaceObject(LocalHuman.PlayerHoldShip.Graphic);
-      LocalHuman.PlayerHoldShip.RefreshGraphic;
+      ApplyChameleonChoice(Choice);
       Result := True;
     end;
     aCalc.WaitForTurnCalculationUI;
@@ -4569,145 +3683,12 @@ begin
 end;
 
 procedure TfShip2.ReturnSelectedHoldEntry;
-var
-  I, Count: Integer;
-  Entry: TPlayerHoldUnit;
 begin
   if SelectedHoldKind <> phkEmpty then
   begin
-    if SelectedHoldOrigin = 0 then
-    begin
-      if SelectedHoldKind = phkGoods then
-      begin
-        LocalHuman.PlayerHoldShip.CargoGoods[SelectedGoodsIndex].Count := SelectedGoodsQuantity;
-        LocalHuman.PlayerHoldShip.CargoGoods[SelectedGoodsIndex].TotalCost := SelectedGoodsCost;
-      end
-      else if SelectedHoldKind = phkEquipment then
-      begin
-        if not (SelectedHoldItem is THull) then
-        begin
-          if SelectedHoldItem is TWeapon then
-            (SelectedHoldItem as TWeapon).Target := nil;
-          LocalHuman.PlayerHoldShip.Inventory.Add(SelectedHoldItem);
-          (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-        end;
-      end
-      else if SelectedHoldKind = phkArtefact then
-      begin
-        LocalHuman.PlayerHoldShip.Artefacts.Add(SelectedHoldItem);
-        (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-      end;
-      if (SelectedHoldKind = phkGoods)
-          or (SelectedHoldKind = phkEquipment)
-          or (SelectedHoldKind = phkArtefact) then
-      begin
-        if SelectedHoldUsesDisplayOrder then
-        begin
-          if FindPlayerHoldIndexByOrder(SelectedHoldSlot) < 0 then
-          begin
-            Entry := TPlayerHoldUnit.Create;
-            LocalHuman.PlayerHoldEntries.Add(Entry);
-            Entry.DisplayOrder := SelectedHoldSlot;
-          end
-          else
-          begin
-            Entry := TPlayerHoldUnit.Create;
-            Entry.DisplayOrder := FindFreePlayerHoldOrder;
-            LocalHuman.PlayerHoldEntries.Add(Entry);
-          end;
-          Entry.Kind := SelectedHoldKind;
-          if SelectedHoldKind = phkGoods then
-            Entry.GoodsIndex := SelectedGoodsIndex
-          else
-          begin
-            Entry.ItemId := SelectedHoldItem.Id;
-            Entry.Item := SelectedHoldItem;
-          end;
-          RestorePlayerHoldDisplayOrder;
-        end
-        else if SelectedHoldSlot >= 0 then
-        begin
-          if IsPlayerHoldSlotEmpty(SelectedHoldSlot) then
-          begin
-            if LocalHuman.PlayerHoldEntries.Count > SelectedHoldSlot then
-              Entry := LocalHuman.PlayerHoldEntries[SelectedHoldSlot]
-            else
-            begin
-              Count := SelectedHoldSlot - LocalHuman.PlayerHoldEntries.Count + 1;
-              for I := 0 to Count - 1 do
-              begin
-                Entry := TPlayerHoldUnit.Create;
-                LocalHuman.PlayerHoldEntries.Add(Entry);
-                Entry.Kind := phkEmpty;
-              end;
-              Entry := LocalHuman.PlayerHoldEntries[LocalHuman.PlayerHoldEntries.Count - 1];
-            end;
-          end
-          else
-          begin
-            Entry := TPlayerHoldUnit.Create;
-            LocalHuman.PlayerHoldEntries.Add(Entry);
-          end;
-          Entry.DisplayOrder := FindFreePlayerHoldOrder;
-          Entry.Kind := SelectedHoldKind;
-          if SelectedHoldKind = phkGoods then
-            Entry.GoodsIndex := SelectedGoodsIndex
-          else
-          begin
-            Entry.ItemId := SelectedHoldItem.Id;
-            Entry.Item := SelectedHoldItem;
-          end;
-        end
-        else
-        begin
-          if ((SelectedHoldKind = phkEquipment) or (SelectedHoldKind = phkArtefact))
-              and (LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(
-                      Byte(SelectedHoldItem.ItemType),
-                      -SelectedHoldSlot - 1)
-                  = nil) then
-          begin
-            (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-            (SelectedHoldItem as TEquipment).Equip;
-          end;
-        end
-      end;
-    end
-    else
-    begin
-      if SelectedHoldKind = phkGoods then
-      begin
-        if GetPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, SelectedHoldSlot)
-            < 0 then
-          GetPlayer.AddGoodsToPlayerStorage(
-              SelectedGoodsIndex,
-              SelectedGoodsQuantity,
-              SelectedGoodsCost,
-              GetLocalStorageOwner,
-              SelectedHoldSlot
-          )
-        else
-          GetPlayer.AddGoodsToPlayerStorage(
-              SelectedGoodsIndex,
-              SelectedGoodsQuantity,
-              SelectedGoodsCost,
-              GetLocalStorageOwner,
-              -1
-          );
-      end
-      else if (SelectedHoldKind = phkEquipment) or (SelectedHoldKind = phkArtefact) then
-      begin
-        if GetPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, SelectedHoldSlot)
-            < 0 then
-          GetPlayer.AddItemToPlayerStorage(SelectedHoldItem, GetLocalStorageOwner, SelectedHoldSlot)
-        else
-          GetPlayer.AddItemToPlayerStorage(SelectedHoldItem, GetLocalStorageOwner, -1);
-      end;
-    end;
-    SelectedHoldKind := phkEmpty;
-    SelectedHoldItem := nil;
+    ReturnHeldEntry;
     if not ExitScreenLoop then
     begin
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
       if not IsCursorImageSelected('Main') then
         SetCursorByName('Main');
       aCalc.WaitForTurnCalculationUI;
@@ -4757,17 +3738,14 @@ begin
         and (GetPlayer.SelectedEquipmentConfiguration <> Index) then
     begin
       aCalc.WaitForTurnCalculationUI;
-      GetPlayer.SaveEquipmentConfiguration(GetPlayer.SelectedEquipmentConfiguration);
-      GetPlayer.SelectedEquipmentConfiguration := Index;
-      if GetPlayer.HasEquipmentConfiguration(Index) and not IsVirtualKeyDown(VK_CONTROL) then
+      if ChooseEquipmentConfiguration(Index, not IsVirtualKeyDown(VK_CONTROL)) then
       begin
-        GetPlayer.ApplyEquipmentConfiguration(Index);
         if GetInnermostScreenLoop = Self then
           RefreshShipView;
       end
       else
         RefreshEquipmentConfigurationButtons;
-      GetPlayer.ScriptItemsAct(satOnNonStandartEqChange, nil, nil, 0);
+      RunScriptItemsAct(GetPlayer, satOnNonStandartEqChange, nil, nil, 0);
       aCalc.WaitForTurnCalculationUI;
     end;
   end;
@@ -4807,7 +3785,7 @@ begin
     Index := Key - Ord('1');
     if IsVirtualKeyDown(VK_CONTROL) then
     begin
-      GetPlayer.SaveEquipmentConfiguration(Index);
+      SaveEquipmentConfiguration(Index);
       RefreshEquipmentConfigurationButtons;
       SoundManager.PlaySound('Sound.UserMsgAdd');
       ShowMessageBoxGI(
@@ -4862,7 +3840,7 @@ begin
       begin
         if SelectedHoldKind <> phkEmpty then
           ReturnSelectedHoldEntry;
-        GetPlayer.EnterRuinsMode(0);
+        EnterBridge(0);
       end;
     end
     else if Key = Ord('F') then
@@ -4874,15 +3852,13 @@ begin
       if {$B+} (CanAfterburn and not LocalHuman.PlayerHoldShip.AfterburnerActive) {$B-} then
       begin
         SoundManager.PlaySound('Sound.ForsageOn');
-        LocalHuman.PlayerHoldShip.AfterburnerActive := True;
-        LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+        SetHoldAfterburner(True);
         RefreshShipView;
       end
       else if LocalHuman.PlayerHoldShip.AfterburnerActive then
       begin
         SoundManager.PlaySound('Sound.ForsageOff');
-        LocalHuman.PlayerHoldShip.AfterburnerActive := False;
-        LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+        SetHoldAfterburner(False);
         RefreshShipView;
       end;
     end
@@ -5384,7 +4360,7 @@ begin
               EquipSelected;
               StorageItemMouseUp(StorageImages[I], KeyState, Point);
             end;
-            GetPlayer.CloseVacantStorageSlot(GetLocalStorageOwner, I);
+            CloseVacantStorageSlot(I);
             Changed := True;
           end;
           RemoteHoldVisible := False;
@@ -5591,14 +4567,8 @@ end;
 
 procedure TfShip2.DropSelectedOutside(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
 var
-  Item: TItem;
-  Goods: TGoods;
-  Angle: Double;
-  Effect: TWeaponSE;
-  Entry: PEFilmEndEntry;
-  Quantity, I, Index: Integer;
+  Quantity: Integer;
   Text: WideString;
-  ActionResult: Integer;
 begin
   if (SelectedHoldKind = phkEquipment) and (SelectedHoldItem is THull) then
     Exit;
@@ -5642,48 +4612,9 @@ begin
         Exit;
     if (Quantity < 1) or (TCountableItem(SelectedHoldItem).StackCount < Quantity) then
       Exit;
-    Item := TCountableItem(SelectedHoldItem).Split(Quantity);
-    if (not LocalHuman.PlayerHoldShip.IsOnPlanet and not LocalHuman.PlayerHoldShip.IsDockedToShip)
-        or ((GetPlayer.RuinsMode > 0)
-            and (GetPlayer.RuinsSavedDockedTo = nil)
-            and (GetPlayer.RuinsSavedPlanet = nil)) then
+    DropHeld(Quantity);
+    if SelectedHoldKind = phkEmpty then
     begin
-      with LocalHuman.PlayerHoldShip.CurrentStar do
-      begin
-        Items.Add(Item);
-        Angle :=
-            SeededRandomIntRange(
-                    0,
-                    360,
-                    LocalHuman.PlayerHoldShip.CurrentStar.GenerationSeed * Galaxy.CurrentTurn * Item.Id)
-                * Pi
-                / 180;
-        Item.Position.X := Sin(Angle) * 100 + LocalHuman.PlayerHoldShip.Position.X;
-        Item.Position.Y := LocalHuman.PlayerHoldShip.Position.Y - Cos(Angle) * 100;
-        Item.GetGraphObject.SetPosition(Item.Position);
-        if DamageRadius * DamageRadius > Sqr(Item.Position.X) + Sqr(Item.Position.Y) then
-        begin
-          Effect := TWeaponSE.Create('Weapon.NoGraph', Classes.Point(0, 0), 0, -1);
-          Effect.SetEndpoints(nil, Item.GetGraphObject);
-          Effect.SetHit(0, 0, True, True);
-          if TrailingFilmEffects = nil then
-            TrailingFilmEffects := TEFilmEnd.Create;
-          Entry := TrailingFilmEffects.AppendEntry;
-          RetainSpaceObject(Entry.SceneObject, Effect);
-          RetainSpaceObject(Entry.RelatedObject1, Item.GetGraphObject);
-          ReleaseSpaceObject(Item.GraphObject);
-          Items.Delete(Items.IndexOf(Item));
-          Item.Free;
-        end;
-      end;
-    end
-    else
-      Item.Free;
-    if TCountableItem(SelectedHoldItem).StackCount < 1 then
-    begin
-      SelectedHoldItem.Free;
-      SelectedHoldItem := nil;
-      SelectedHoldKind := phkEmpty;
       SetCursorByName('Main');
       RefreshShipView;
     end;
@@ -5691,11 +4622,9 @@ begin
   end
   else if (SelectedHoldKind = phkEquipment) or (SelectedHoldKind = phkArtefact) then
   begin
-    if SelectedHoldItem is TArtefactTranclucator then
-      (TObject((SelectedHoldItem as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip := nil;
-    if LocalHuman.PlayerHoldShip is TRuins then
-    begin
-      if LocalHuman.PlayerHoldShip.NeedsEquipmentType(SelectedHoldItem.ItemType) then
+    // The command forgets a tranclucator's owner first, then says why the item stays.
+    case DropHeld(0) of
+      dbRuins:
       begin
         ShowMessageBoxGI(
             Self,
@@ -5709,11 +4638,7 @@ begin
         );
         Exit;
       end;
-    end
-    else if LocalHuman.PlayerHoldShip is TTranclucator then
-    begin
-      if ((SelectedHoldItem.ItemType = t_FuelTanks) or (SelectedHoldItem.ItemType = t_Engine))
-          and LocalHuman.PlayerHoldShip.NeedsEquipmentType(SelectedHoldItem.ItemType) then
+      dbTranclucator:
       begin
         ShowMessageBoxGI(
             Self,
@@ -5728,10 +4653,7 @@ begin
         aCalc.WaitForTurnCalculationUI;
         Exit;
       end;
-    end
-    else if SelectedHoldItem.ItemType = t_FuelTanks then
-    begin
-      if LocalHuman.PlayerHoldShip.GetFuelTanks = nil then
+      dbFuelTanks:
       begin
         if LocalHuman.PlayerHoldShip is TRuins then
           Text :=
@@ -5747,10 +4669,7 @@ begin
         aCalc.WaitForTurnCalculationUI;
         Exit;
       end;
-    end
-    else if SelectedHoldItem.ItemType = t_Engine then
-    begin
-      if LocalHuman.PlayerHoldShip.GetEngine = nil then
+      dbEngine:
       begin
         if LocalHuman.PlayerHoldShip is TRuins then
           Text :=
@@ -5766,85 +4685,13 @@ begin
         aCalc.WaitForTurnCalculationUI;
         Exit;
       end;
-    end
-    else if SelectedHoldItem.NoDropFlag > 0 then
-    begin
-      aCalc.WaitForTurnCalculationUI;
-      Exit;
-    end;
-    if SelectedHoldItem is TWeapon then
-      (SelectedHoldItem as TWeapon).Target := nil;
-    SoundManager.PlaySound('Sound.Drop');
-    if LocalHuman.PlayerHoldShip.IsOnPlanet
-        or (LocalHuman.PlayerHoldShip.IsDockedToShip and (GetPlayer.RuinsMode = 0))
-        or ((GetPlayer.RuinsMode > 0)
-            and ((GetPlayer.RuinsSavedDockedTo <> nil) or (GetPlayer.RuinsSavedPlanet <> nil))) then
-    begin
-      SelectedHoldItem.Free;
-      SelectedHoldItem := nil;
-    end
-    else
-      with LocalHuman.PlayerHoldShip.CurrentStar do
+      dbNoDrop:
       begin
-        Items.Add(SelectedHoldItem);
-        Angle :=
-            SeededRandomIntRange(
-                    0,
-                    360,
-                    LocalHuman.PlayerHoldShip.CurrentStar.GenerationSeed
-                        * Galaxy.CurrentTurn
-                        * SelectedHoldItem.Id)
-                * Pi
-                / 180;
-        SelectedHoldItem.Position.X := Sin(Angle) * 100 + LocalHuman.PlayerHoldShip.Position.X;
-        SelectedHoldItem.Position.Y := LocalHuman.PlayerHoldShip.Position.Y - Cos(Angle) * 100;
-        ActionResult := LocalHuman.PlayerHoldShip.ScriptItemsAct(satOnDropItemFixed, SelectedHoldItem, nil, 0);
-        if SelectedHoldItem is TEquipmentWithActCode then
-          ActionResult :=
-              RunItemConfigActionCode(
-                  SelectedHoldItem,
-                  satOnDropItemFixed,
-                  LocalHuman.PlayerHoldShip,
-                  SelectedHoldItem,
-                  nil,
-                  ActionResult
-              );
-        if SelectedHoldItem.ScriptItem <> nil then
-          ActionResult :=
-              TScriptItem(SelectedHoldItem.ScriptItem)
-                  .RunActionCode(
-                      satOnDropItemFixed,
-                      LocalHuman.PlayerHoldShip,
-                      SelectedHoldItem,
-                      nil,
-                      ActionResult);
-        if ActionResult = 0 then
-        begin
-          SelectedHoldItem.GetGraphObject.SetPosition(SelectedHoldItem.Position);
-          if DamageRadius * DamageRadius
-              > Sqr(SelectedHoldItem.Position.X) + Sqr(SelectedHoldItem.Position.Y) then
-          begin
-            Effect := TWeaponSE.Create('Weapon.NoGraph', Classes.Point(0, 0), 0, -1);
-            Effect.SetEndpoints(nil, SelectedHoldItem.GetGraphObject);
-            Effect.SetHit(0, 0, True, True);
-            if TrailingFilmEffects = nil then
-              TrailingFilmEffects := TEFilmEnd.Create;
-            Entry := TrailingFilmEffects.AppendEntry;
-            RetainSpaceObject(Entry.SceneObject, Effect);
-            RetainSpaceObject(Entry.RelatedObject1, SelectedHoldItem.GetGraphObject);
-            Items.Delete(Items.IndexOf(SelectedHoldItem));
-            SelectedHoldItem.Free;
-          end;
-        end
-        else
-        begin
-          Items.Delete(Items.IndexOf(SelectedHoldItem));
-          if ActionResult < 0 then
-            SelectedHoldItem.Free;
-        end;
+        aCalc.WaitForTurnCalculationUI;
+        Exit;
       end;
-    SelectedHoldKind := phkEmpty;
-    SelectedHoldItem := nil;
+    end;
+    SoundManager.PlaySound('Sound.Drop');
     SetCursorByName('Main');
     RefreshShipView;
   end
@@ -5876,53 +4723,15 @@ begin
         Exit;
     end;
     SoundManager.PlaySound('Sound.Drop');
-    if (not LocalHuman.PlayerHoldShip.IsOnPlanet and not LocalHuman.PlayerHoldShip.IsDockedToShip)
-        or ((GetPlayer.RuinsMode > 0)
-            and (GetPlayer.RuinsSavedDockedTo = nil)
-            and (GetPlayer.RuinsSavedPlanet = nil)) then
-      with LocalHuman.PlayerHoldShip.CurrentStar do
-      begin
-        Goods := TGoods.Create;
-        Goods.Init(TItemType(SelectedGoodsIndex), Quantity);
-        Goods.Cost := Round(Quantity / SelectedGoodsQuantity * SelectedGoodsCost);
-        for I := 0 to 20 do
-        begin
-          Angle :=
-              SeededRandomIntRange(
-                      0,
-                      360,
-                      LocalHuman.PlayerHoldShip.CurrentStar.GenerationSeed
-                          * Galaxy.CurrentTurn
-                          * (SelectedGoodsIndex + I))
-                  * Pi
-                  / 180;
-          Goods.Position.X := Sin(Angle) * 100 + LocalHuman.PlayerHoldShip.Position.X;
-          Goods.Position.Y := LocalHuman.PlayerHoldShip.Position.Y - Cos(Angle) * 100;
-          Index := 0;
-          while Items.Count > Index do
-          begin
-            Item := Items[Index];
-            if PointDistanceSquared(Item.Position, Goods.Position) < 100 then
-              Break;
-            Inc(Index);
-          end;
-          if Items.Count <= Index then
-            Break;
-        end;
-        Items.Add(Goods);
-        Goods.GetGraphObject.SetPosition(Goods.Position);
-      end;
-    Dec(SelectedGoodsCost, Round(Quantity / SelectedGoodsQuantity * SelectedGoodsCost));
-    Dec(SelectedGoodsQuantity, Quantity);
-    if SelectedGoodsQuantity < 1 then
+    DropHeld(Quantity);
+    if SelectedHoldKind = phkEmpty then
     begin
-      SelectedHoldKind := phkEmpty;
       SetCursorByName('Main');
       RefreshShipView;
     end;
   end;
   aCalc.WaitForTurnCalculationUI;
-  RemoveEmptyPlayerHoldSlots;
+  RemoveEmptyHoldSlots;
   if not RemoteHoldVisible then
   begin
     FlagD4 := True;
@@ -6049,8 +4858,8 @@ begin
       Goods.Cost := Round(Quantity / SelectedGoodsQuantity * SelectedGoodsCost);
       ab_Item_Drop(PlayerArcadeShip, Goods, 100, 150);
     end;
-    Dec(SelectedGoodsCost, Round(Quantity / SelectedGoodsQuantity * SelectedGoodsCost));
-    Dec(SelectedGoodsQuantity, Quantity);
+    Dec(LocalHuman.SelectedGoodsCost, Round(Quantity / SelectedGoodsQuantity * SelectedGoodsCost));
+    Dec(LocalHuman.SelectedGoodsQuantity, Quantity);
     if SelectedGoodsQuantity < 1 then
     begin
       SelectedHoldKind := phkEmpty;
@@ -6063,7 +4872,7 @@ end;
 
 procedure TfShip2.SpecialSlot1Clicked(Sender: TObjectGI);
 var
-  I, Nodes: Integer;
+  Nodes: Integer;
   Text: WideString;
 begin
   if GetPlayer.IsOnPlanet
@@ -6120,6 +4929,7 @@ begin
         StartMoneyWarning;
         Exit;
       end;
+      Nodes := 0;
       if (SelectedHoldItem is TWeapon)
           and (TWeapon(SelectedHoldItem).GetWeaponInfo.Availability = waNotSoldAndNodeRepair) then
       begin
@@ -6152,62 +4962,10 @@ begin
                 mbgOK or mbgCancel)
             <> mbgResultOK then
           Exit;
-        GetPlayer.ConsumeAvailableNodes(Nodes, LocalHuman.PlayerHoldShip);
       end;
-      GetPlayer.SetMoney(GetPlayer.Money - (SelectedHoldItem as TEquipment).CalculateRepairCost);
-      (SelectedHoldItem as TEquipment).Repair;
+      RepairHeld(Nodes);
       Flag3BC := True;
       SoundManager.PlaySound('Sound.Repair');
-      if SelectedHoldKind = phkEquipment then
-      begin
-        I := 0;
-        while I < LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(SelectedHoldItem.ItemType)) do
-        begin
-          if LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(Byte(SelectedHoldItem.ItemType), I) = nil then
-            Break;
-          Inc(I);
-        end;
-        if I < LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(SelectedHoldItem.ItemType)) then
-        begin
-          if SelectedHoldItem is TWeapon then
-            (SelectedHoldItem as TWeapon).Target := nil;
-          LocalHuman.PlayerHoldShip.Inventory.Add(SelectedHoldItem);
-          (SelectedHoldItem as TEquipment).AssignedSlotData :=
-              ((SelectedHoldItem as TEquipment).AssignedSlotData and EquipmentSecondaryFireFlag)
-                  or I;
-          (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-          (SelectedHoldItem as TEquipment).Equip;
-          SelectedHoldKind := phkEmpty;
-          SelectedHoldItem := nil;
-        end;
-      end
-      else if (SelectedHoldKind = phkArtefact)
-          and (not LocalHuman.PlayerHoldShip.HasEquippedArtefactOfSameUseGroup(SelectedHoldItem)
-              or Galaxy.AreDuplicateArtefactsEnabled) then
-      begin
-        I := 0;
-        while I < LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(SelectedHoldItem.ItemType)) do
-        begin
-          if LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(Byte(SelectedHoldItem.ItemType), I) = nil then
-            Break;
-          Inc(I);
-        end;
-        if I < LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(SelectedHoldItem.ItemType)) then
-        begin
-          LocalHuman.PlayerHoldShip.Artefacts.Add(SelectedHoldItem);
-          if (LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(SelectedHoldItem.ItemType))
-                  <= Integer((SelectedHoldItem as TEquipment).AssignedSlotData))
-              or (LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(
-                      Byte(SelectedHoldItem.ItemType),
-                      Integer((SelectedHoldItem as TEquipment).AssignedSlotData))
-                  <> nil) then
-            (SelectedHoldItem as TEquipment).AssignedSlotData := I;
-          (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-          (SelectedHoldItem as TEquipment).Equip;
-          SelectedHoldKind := phkEmpty;
-          SelectedHoldItem := nil;
-        end;
-      end;
       aCalc.WaitForTurnCalculationUI;
       RefreshShipView;
     end
@@ -6241,7 +4999,7 @@ begin
       RefreshShipView;
     end;
   end;
-  RemoveEmptyPlayerHoldSlots;
+  RemoveEmptyHoldSlots;
   FlagD4 := True;
   PlayTransitionSounds := False;
   CloseClicked(nil);
@@ -6250,8 +5008,6 @@ end;
 procedure TfShip2.SpecialSlot2Clicked(Sender: TObjectGI);
 var
   Count, Price: Integer;
-  Item: TItem;
-  Event: TGalaxyEvent;
 begin
   if (SelectedHoldKind in [phkEquipment, phkArtefact])
       and (SelectedHoldItem <> nil)
@@ -6339,6 +5095,7 @@ begin
                 mbgOK or mbgCancel or mbgQuestion)
             = 2) then
       Exit;
+    Count := 0;
     if (SelectedHoldItem is TCountableItem)
         and ((SelectedHoldItem as TCountableItem).StackCount > 1) then
     begin
@@ -6368,85 +5125,13 @@ begin
           or (Count < 1)
           or (Count > (SelectedHoldItem as TCountableItem).StackCount) then
         Exit;
-      Item := (SelectedHoldItem as TCountableItem).Split(Count);
-      Price := Item.CalculateResaleValue(GetPlayer.GetEffectiveSkillLevel(psTrading));
-      GetPlayer.SetMoney(GetPlayer.Money + Price);
-      Item.Free;
-    end
-    else
-    begin
-      Price := SelectedHoldItem.CalculateResaleValue(GetPlayer.GetEffectiveSkillLevel(psTrading));
-      GetPlayer.SetMoney(GetPlayer.Money + Price);
-      if SelectedHoldItem is TCountableItem then
-        (SelectedHoldItem as TCountableItem).StackCount := 0;
     end;
+    Price := SellHeld(Count);
     if Price <> 0 then
       SoundManager.PlaySound('Sound.Sell');
-    if not (SelectedHoldItem is TCountableItem) then
-    begin
-      Event := AddGalaxyEvent('PlayerSellsEquipment');
-      Event.AddData(Ord(SelectedHoldItem.ItemType));
-      Event.AddData(
-          SelectedHoldItem.CalculateResaleValue(GetPlayer.GetEffectiveSkillLevel(psTrading))
-      );
-      Event.AddData(SelectedHoldItem.Weight);
-      Event.AddData(SelectedHoldItem.Id);
-      if GetPlayer.CurrentPlanet <> nil then
-      begin
-        Event.AddData(0);
-        Event.AddData(GetPlayer.CurrentPlanet.Id);
-      end
-      else if GetPlayer.DockedTo <> nil then
-      begin
-        Event.AddData(1);
-        Event.AddData(GetPlayer.DockedTo.Id);
-      end
-      else
-      begin
-        Event.AddData(2);
-        Event.AddData(0);
-      end;
-      Event.AddTextData(SelectedHoldItem.GetDisplayName);
-      Event.AddTextData(SelectedHoldItem.GetCategoryConfigName);
-    end;
     Flag3BC := True;
-    if SelectedHoldItem is TWeapon then
-      (SelectedHoldItem as TWeapon).Target := nil;
-    if (SelectedHoldKind = phkEquipment)
-        and (SelectedHoldItem.ItemType = t_Hull)
-        and ((SelectedHoldItem as THull).HullType = htSpecial) then
-    begin
-      SelectedHoldItem.Free;
-      SelectedHoldItem := nil;
-    end
-    else if (SelectedHoldItem.OwnerId in [Ord(oiMaloc)..Ord(oiGaal), Ord(oiPirate)])
-        and (SelectedHoldKind = phkEquipment)
-        and (SelectedHoldItem.ItemType in [t_Hull..t_CustomWeapon])
-        and (not (SelectedHoldItem is TWeapon)
-            or (TWeapon(SelectedHoldItem).GetWeaponInfo.Availability
-                <> waNotSoldAndNodeRepair)) then
-    begin
-      ReturnShopStock;
-      if GetPlayer.CurrentPlanet <> nil then
-        GetPlayer.CurrentPlanet.EquipmentShop.Add(SelectedHoldItem)
-      else
-        (GetPlayer.DockedTo as TRuins).EquipmentShop.Add(SelectedHoldItem);
-      OpenShopStock;
-    end
-    else if not (SelectedHoldItem is TCountableItem)
-        or ((SelectedHoldItem as TCountableItem).StackCount = 0) then
-    begin
-      SelectedHoldItem.Free;
-      SelectedHoldItem := nil;
-    end;
-    if (SelectedHoldItem = nil)
-        or not (SelectedHoldItem is TCountableItem)
-        or ((SelectedHoldItem as TCountableItem).StackCount = 0) then
-    begin
-      SelectedHoldItem := nil;
-      SelectedHoldKind := phkEmpty;
+    if SelectedHoldKind = phkEmpty then
       SetCursorByName('Main');
-    end;
     aCalc.WaitForTurnCalculationUI;
     RefreshShipView;
   end
@@ -6483,15 +5168,12 @@ begin
         Exit;
     Flag3BC := True;
     SoundManager.PlaySound('Sound.Sell');
-    Inc(GetPlayer.CargoGoods[SelectedGoodsIndex].Count, SelectedGoodsQuantity);
-    Inc(GetPlayer.CargoGoods[SelectedGoodsIndex].TotalCost, SelectedGoodsCost);
-    GetPlayer.SellGoodsToLocation(SelectedGoodsIndex, Count);
-    SelectedHoldKind := phkEmpty;
+    SellHeld(Count);
     aCalc.WaitForTurnCalculationUI;
     SetCursorByName('Main');
     RefreshShipView;
   end;
-  RemoveEmptyPlayerHoldSlots;
+  RemoveEmptyHoldSlots;
   FlagD4 := True;
   PlayTransitionSounds := False;
   CloseClicked(nil);
@@ -6551,7 +5233,7 @@ begin
     aCalc.WaitForTurnCalculationUI;
     aCalc.WaitForTurnCalculationUI;
     ReturnSelectedHoldEntry;
-    ActionResult := RunItemUseCode(Item, LocalHuman.PlayerHoldShip);
+    ActionResult := UseItem(Item);
     if not HasPendingScriptRequests and (ExitCode = 0) then
     begin
       aCalc.WaitForTurnCalculationUI;
@@ -6579,7 +5261,7 @@ begin
     aCalc.WaitForTurnCalculationUI;
     aCalc.WaitForTurnCalculationUI;
     ReturnSelectedHoldEntry;
-    ActionResult := RunItemUseCode(Item, LocalHuman.PlayerHoldShip);
+    ActionResult := UseItem(Item);
     if not HasPendingScriptRequests and (ExitCode = 0) then
     begin
       aCalc.WaitForTurnCalculationUI;
@@ -6608,12 +5290,7 @@ begin
       else
         Text := (SelectedHoldItem as TTreasureMap).PreviewTablePage2;
       aCalc.WaitForTurnCalculationUI;
-      AddOrUpdatePlayerBubble(
-          7,
-          Galaxy.CurrentTurn,
-          Text,
-          (SelectedHoldItem as TTreasureMap).GetTargetPlanetName
-      );
+      ShowTreasureMap(Text);
       MainPanel.RebuildMessageButtons(False);
       ReturnSelectedHoldEntry;
       FlagD4 := True;
@@ -6629,7 +5306,7 @@ begin
       aCalc.WaitForTurnCalculationUI;
       aCalc.WaitForTurnCalculationUI;
       ReturnSelectedHoldEntry;
-      ActionResult := RunItemUseCode(Item, LocalHuman.PlayerHoldShip);
+      ActionResult := UseItem(Item);
       if not HasPendingScriptRequests and (ExitCode = 0) then
       begin
         aCalc.WaitForTurnCalculationUI;
@@ -6650,7 +5327,7 @@ begin
     end
     else if SelectedHoldKind = phkArtefact then
     begin
-      RemoveEmptyPlayerHoldSlots;
+      RemoveEmptyHoldSlots;
       FlagD4 := True;
       PlayTransitionSounds := False;
       CloseClicked(nil);
@@ -6720,12 +5397,11 @@ begin
       StartMoneyWarning;
       Exit;
     end;
-    GetPlayer.SetMoney(GetPlayer.Money - Cost);
-    Inc(Cistern.Fuel, Amount);
+    RefuelHeld(Amount);
     aCalc.WaitForTurnCalculationUI;
     SoundManager.PlaySound('Sound.Buy');
     RefreshShipView;
-    RemoveEmptyPlayerHoldSlots;
+    RemoveEmptyHoldSlots;
     FlagD4 := True;
     PlayTransitionSounds := False;
     CloseClicked(nil);
@@ -6782,12 +5458,11 @@ begin
       StartMoneyWarning;
       Exit;
     end;
-    GetPlayer.SetMoney(GetPlayer.Money - Cost);
-    Inc(FuelTanks.Fuel, Amount);
+    RefuelHeld(Amount);
     aCalc.WaitForTurnCalculationUI;
     SoundManager.PlaySound('Sound.Buy');
     RefreshShipView;
-    RemoveEmptyPlayerHoldSlots;
+    RemoveEmptyHoldSlots;
     FlagD4 := True;
     PlayTransitionSounds := False;
     CloseClicked(nil);
@@ -6869,32 +5544,11 @@ begin
         StartMoneyWarning;
         Exit;
       end;
-      GetPlayer.SetMoney(GetPlayer.Money - Cost);
-      Inc(Weapon.Ammo, Amount);
+      ReloadHeld(Amount);
       SoundManager.PlaySound('Sound.Buy');
-      Cost := 0;
-      while Cost < LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(SelectedHoldItem.ItemType)) do
-      begin
-        if LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(Byte(SelectedHoldItem.ItemType), Cost) = nil then
-          Break;
-        Inc(Cost);
-      end;
-      if Cost < LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(SelectedHoldItem.ItemType)) then
-      begin
-        if SelectedHoldItem is TWeapon then
-          (SelectedHoldItem as TWeapon).Target := nil;
-        LocalHuman.PlayerHoldShip.Inventory.Add(SelectedHoldItem);
-        (SelectedHoldItem as TEquipment).AssignedSlotData :=
-            ((SelectedHoldItem as TEquipment).AssignedSlotData and EquipmentSecondaryFireFlag)
-                or Cost;
-        (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-        (SelectedHoldItem as TEquipment).Equip;
-        SelectedHoldKind := phkEmpty;
-        SelectedHoldItem := nil;
-      end;
       aCalc.WaitForTurnCalculationUI;
       RefreshShipView;
-      RemoveEmptyPlayerHoldSlots;
+      RemoveEmptyHoldSlots;
       FlagD4 := True;
       PlayTransitionSounds := False;
       CloseClicked(nil);
@@ -6993,89 +5647,41 @@ begin
                 IntToStr(Nodes)
             ),
             mbgOK or mbgCancel)
-        = mbgResultOK then
-      GetPlayer.ConsumeAvailableNodes(Nodes, LocalHuman.PlayerHoldShip)
-    else
+        <> mbgResultOK then
       Nodes := 0;
   end;
-  if Nodes <> 0 then
-    Inc(Cost, NodeCost);
-  if Cost > 0 then
+  if RepairAll(Nodes) then
   begin
-    GetPlayer.SetMoney(GetPlayer.Money - Cost);
-    for I := 0 to LocalHuman.PlayerHoldShip.Inventory.Count - 1 do
+    for I := 0 to High(RepairedItems) do
     begin
-      Item := LocalHuman.PlayerHoldShip.Inventory[I];
-      if LocalHuman.PlayerHoldShip.CanRepairEquipmentTech(Item)
-          and (not (Item is TWeapon)
-              or (TWeapon(Item).GetWeaponInfo.Availability <> waNotSoldAndNodeRepair)
-              or (Nodes <> 0))
-          and (Item <> SelectedHoldItem)
-          and ((Item.EquippedFlag <> 0) or (Item is THull))
-          and Item.NeedsRepair then
-      begin
-        Item.Repair;
-        if Item is THull then
-          Control := GetByName('HullRepair')
-        else if Item is TWeapon then
-          Control :=
-              GetByName(
-                  'S_Weapon_'
-                      + IntToStr(Integer(Item.AssignedSlotData) and EquipmentSlotIndexMask)
-                      + 'Repair'
-              )
-        else
-          Control :=
-              GetByName(
-                  'S_'
-                      + ItemTypeNames[Ord(Item.ItemType)]
-                      + '_'
-                      + IntToStr(Integer(Item.AssignedSlotData) and EquipmentSlotIndexMask)
-                      + 'Repair'
-              );
-        if Control <> nil then
-          with Control as TgaiGI do
-            SetActive(True);
-      end;
+      Item := RepairedItems[I];
+      if Item is THull then
+        Control := GetByName('HullRepair')
+      else if Item is TWeapon then
+        Control :=
+            GetByName(
+                'S_Weapon_'
+                    + IntToStr(Integer(Item.AssignedSlotData) and EquipmentSlotIndexMask)
+                    + 'Repair'
+            )
+      else
+        Control :=
+            GetByName(
+                'S_'
+                    + ItemTypeNames[Ord(Item.ItemType)]
+                    + '_'
+                    + IntToStr(Integer(Item.AssignedSlotData) and EquipmentSlotIndexMask)
+                    + 'Repair'
+            );
+      if Control <> nil then
+        with Control as TgaiGI do
+          SetActive(True);
     end;
     Flag3BC := True;
     SoundManager.PlaySound('Sound.Repair');
-    if SelectedHoldKind = phkEquipment then
-    begin
-      I := 0;
-      while I < LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(SelectedHoldItem.ItemType)) do
-      begin
-        if LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(Byte(SelectedHoldItem.ItemType), I) = nil then
-          Break;
-        Inc(I);
-      end;
-      if I < LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(SelectedHoldItem.ItemType)) then
-      begin
-        if SelectedHoldItem is TWeapon then
-          (SelectedHoldItem as TWeapon).Target := nil;
-        LocalHuman.PlayerHoldShip.Inventory.Add(SelectedHoldItem);
-        (SelectedHoldItem as TEquipment).AssignedSlotData :=
-            ((SelectedHoldItem as TEquipment).AssignedSlotData and EquipmentSecondaryFireFlag) or I;
-        (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-        (SelectedHoldItem as TEquipment).Equip;
-        SelectedHoldKind := phkEmpty;
-        SelectedHoldItem := nil;
-      end;
-    end
-    else if (SelectedHoldKind = phkArtefact)
-        and (not LocalHuman.PlayerHoldShip.HasEquippedArtefactOfSameUseGroup(SelectedHoldItem)
-            or Galaxy.AreDuplicateArtefactsEnabled) then
-    begin
-      LocalHuman.PlayerHoldShip.Artefacts.Add(SelectedHoldItem);
-      (SelectedHoldItem as TEquipment).AssignedSlotData := 0;
-      (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-      (SelectedHoldItem as TEquipment).Equip;
-      SelectedHoldKind := phkEmpty;
-      SelectedHoldItem := nil;
-    end;
     aCalc.WaitForTurnCalculationUI;
     RefreshShipView;
-    RemoveEmptyPlayerHoldSlots;
+    RemoveEmptyHoldSlots;
     PlayServiceAnimations := True;
     FlagD4 := True;
     PlayTransitionSounds := False;
@@ -7098,10 +5704,9 @@ end;
 
 procedure TfShip2.LoadRockets(Equipped: Boolean);
 var
-  I, Cost, Quantity: Integer;
+  I, Cost: Integer;
   Item: TEquipment;
   Suffix: WideString;
-  Event: TGalaxyEvent;
 begin
   if not CanUseLocalStorage then
     Exit;
@@ -7196,61 +5801,12 @@ begin
     Exit;
   end;
   aCalc.WaitForTurnCalculationUI;
-  GetPlayer.SetMoney(GetPlayer.Money - Cost);
-  Quantity := 0;
-  for I := 0 to LocalHuman.PlayerHoldShip.Inventory.Count - 1 do
-  begin
-    Item := LocalHuman.PlayerHoldShip.Inventory[I];
-    if (Equipped = Boolean(Item.EquippedFlag))
-        and (Item <> SelectedHoldItem)
-        and (Item is TWeapon)
-        and (Item as TWeapon).NeedsAmmo then
-    begin
-      Quantity := Quantity + (Item as TWeapon).AmmoCapacity - (Item as TWeapon).Ammo;
-      (Item as TWeapon).Ammo := (Item as TWeapon).AmmoCapacity;
-    end;
-  end;
-  Event := AddGalaxyEvent('PlayerBuysMissiles');
-  Event.AddData(Cost);
-  Event.AddData(Quantity);
+  BuyRockets(Equipped);
   Flag3BC := True;
   SoundManager.PlaySound('Sound.Buy');
-  if SelectedHoldKind = phkEquipment then
-  begin
-    I := 0;
-    while I < LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(SelectedHoldItem.ItemType)) do
-    begin
-      if LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(Byte(SelectedHoldItem.ItemType), I) = nil then
-        Break;
-      Inc(I);
-    end;
-    if I < LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(SelectedHoldItem.ItemType)) then
-    begin
-      if SelectedHoldItem is TWeapon then
-        (SelectedHoldItem as TWeapon).Target := nil;
-      LocalHuman.PlayerHoldShip.Inventory.Add(SelectedHoldItem);
-      (SelectedHoldItem as TEquipment).AssignedSlotData :=
-          ((SelectedHoldItem as TEquipment).AssignedSlotData and EquipmentSecondaryFireFlag) or I;
-      (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-      (SelectedHoldItem as TEquipment).Equip;
-      SelectedHoldKind := phkEmpty;
-      SelectedHoldItem := nil;
-    end;
-  end
-  else if (SelectedHoldKind = phkArtefact)
-      and (not LocalHuman.PlayerHoldShip.HasEquippedArtefactOfSameUseGroup(SelectedHoldItem)
-          or Galaxy.AreDuplicateArtefactsEnabled) then
-  begin
-    LocalHuman.PlayerHoldShip.Artefacts.Add(SelectedHoldItem);
-    (SelectedHoldItem as TEquipment).AssignedSlotData := 0;
-    (SelectedHoldItem as TEquipment).EquippedFlag := 0;
-    (SelectedHoldItem as TEquipment).Equip;
-    SelectedHoldKind := phkEmpty;
-    SelectedHoldItem := nil;
-  end;
   aCalc.WaitForTurnCalculationUI;
   RefreshShipView;
-  RemoveEmptyPlayerHoldSlots;
+  RemoveEmptyHoldSlots;
   PlayServiceAnimations := True;
   FlagD4 := True;
   PlayTransitionSounds := False;
@@ -7260,8 +5816,7 @@ end;
 procedure TfShip2.ToggleAfterburner(Sender: TObjectGI);
 begin
   aCalc.WaitForTurnCalculationUI;
-  LocalHuman.PlayerHoldShip.AfterburnerActive := not LocalHuman.PlayerHoldShip.AfterburnerActive;
-  LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
+  SetHoldAfterburner(not LocalHuman.PlayerHoldShip.AfterburnerActive);
   aCalc.WaitForTurnCalculationUI;
   RefreshShipView;
   ShowShipPropertyInfo(GetByName('ForsageBut'));
@@ -7795,13 +6350,7 @@ begin
     UpdateInfoHint(0, 0);
     SoundManager.PlaySound('Sound.ShipItemInfo');
     if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
-    begin
-      if Item.ScriptItem <> nil then
-        TScriptItem(Item.ScriptItem)
-            .RunActionCode(satOnShowingItemInfo, LocalHuman.PlayerHoldShip, nil, nil, 0);
-      if Item is TEquipmentWithActCode then
-        RunItemConfigActionCode(Item, satOnShowingItemInfo, LocalHuman.PlayerHoldShip, nil, nil, 0);
-    end;
+      RunItemInfoScripts(Item);
     if (GetPlayer = LocalHuman.PlayerHoldShip)
         and (SelectedHoldKind in [phkEquipment, phkArtefact])
         and not PreserveSpaceMusic
@@ -8791,7 +7340,6 @@ procedure TfShip2.StorageItemMouseUp(Sender: TObjectGI; KeyState: Cardinal; Poin
 var
   Entry: PStorageEntry;
   Count, Slot, Index: Integer;
-  Item: TItem;
 begin
   if not StorageUpButton.Active then
     StorageUpButton.SetActive(True);
@@ -8812,7 +7360,7 @@ begin
     Exit;
   aCalc.WaitForTurnCalculationUI;
   if (SelectedHoldKind <> phkEmpty) and (SelectedHoldOrigin = 0) then
-    RemoveEmptyPlayerHoldSlots;
+    RemoveEmptyHoldSlots;
   if (SelectedHoldKind = phkEquipment)
       and (SelectedHoldItem is TCountableItem)
       and (TCountableItem(SelectedHoldItem).StackCount >= 1) then
@@ -8845,13 +7393,9 @@ begin
       aCalc.WaitForTurnCalculationUI;
       Exit;
     end;
-    Item := (SelectedHoldItem as TCountableItem).Split(Count);
-    GetPlayer.MergeItemIntoPlayerStorage(Item, GetLocalStorageOwner, Slot);
-    if TCountableItem(SelectedHoldItem).StackCount < 1 then
+    StoreHeld(Slot, Count);
+    if SelectedHoldKind = phkEmpty then
     begin
-      SelectedHoldItem.Free;
-      SelectedHoldItem := nil;
-      SelectedHoldKind := phkEmpty;
       aCalc.WaitForTurnCalculationUI;
       RefreshShipView;
       UpdateActionCursor(True);
@@ -8906,25 +7450,14 @@ begin
           aCalc.WaitForTurnCalculationUI;
           Exit;
         end;
-        GetPlayer.StorageEntries.Delete(Index);
-        SelectedHoldKind := phkEquipment;
-        SelectedHoldOrigin := 1;
-        SelectedHoldSlot := Slot;
-        SelectedHoldUsesDisplayOrder := False;
-        SelectedHoldItem := Entry.Item;
-        Entry.LocationOwner := nil;
-        Entry.Item := nil;
-        Dispose(Entry);
+        TakeStoredHull(Slot);
         HullMouseDown(nil, 0, Classes.Point(0, 0));
       end;
       aCalc.WaitForTurnCalculationUI;
       Exit;
     end;
-    if SelectedHoldItem is TArtefactTranclucator then
-      (TObject((SelectedHoldItem as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip := nil;
     SoundManager.PlaySound('Sound.SlotPut');
-    SelectedHoldKind := phkEmpty;
-    GetPlayer.AddItemToPlayerStorage(SelectedHoldItem, GetLocalStorageOwner, Slot);
+    StoreHeld(Slot, 0);
     aCalc.WaitForTurnCalculationUI;
     RefreshShipView;
     UpdateActionCursor(True);
@@ -8960,18 +7493,9 @@ begin
       Exit;
     end;
     SoundManager.PlaySound('Sound.SlotPut');
-    GetPlayer.AddGoodsToPlayerStorage(
-        SelectedGoodsIndex,
-        Count,
-        Round(Count / SelectedGoodsQuantity * SelectedGoodsCost),
-        GetLocalStorageOwner,
-        Slot
-    );
-    Dec(SelectedGoodsCost, Round(Count / SelectedGoodsQuantity * SelectedGoodsCost));
-    Dec(SelectedGoodsQuantity, Count);
-    if SelectedGoodsQuantity < 1 then
+    StoreHeld(Slot, Count);
+    if SelectedHoldKind = phkEmpty then
     begin
-      SelectedHoldKind := phkEmpty;
       aCalc.WaitForTurnCalculationUI;
       RefreshShipView;
       UpdateActionCursor(True);
@@ -8980,41 +7504,9 @@ begin
   end
   else if (Index >= 0) and (SelectedHoldKind = phkEmpty) then
   begin
-    Entry := GetPlayer.StorageEntries[Index];
-    GetPlayer.StorageEntries.Delete(Index);
-    if Entry.Item is TGoods then
-    begin
-      SelectedHoldKind := phkGoods;
-      SelectedHoldOrigin := 1;
-      SelectedHoldSlot := Slot;
-      SelectedHoldUsesDisplayOrder := False;
-      SelectedGoodsIndex := Byte(Entry.Item.ItemType);
-      SelectedGoodsQuantity := (Entry.Item as TGoods).Quantity;
-      SelectedGoodsCost := (Entry.Item as TGoods).Cost;
-      Entry.Item.Free;
-    end
-    else if Entry.Item is TArtefact then
-    begin
-      SelectedHoldKind := phkArtefact;
-      SelectedHoldOrigin := 1;
-      SelectedHoldSlot := Slot;
-      SelectedHoldUsesDisplayOrder := False;
-      SelectedHoldItem := Entry.Item;
-    end
-    else
-    begin
-      SelectedHoldKind := phkEquipment;
-      SelectedHoldOrigin := 1;
-      SelectedHoldSlot := Slot;
-      SelectedHoldUsesDisplayOrder := False;
-      SelectedHoldItem := Entry.Item;
-    end;
-    Entry.LocationOwner := nil;
-    Entry.Item := nil;
-    Dispose(Entry);
+    TakeStored(Slot);
     aCalc.WaitForTurnCalculationUI;
     UpdateActionCursor(True);
-    LocalHuman.PlayerHoldShip.ScriptItemsAct(satOnReEnteringForm, nil, nil, 0);
     RefreshShipView;
     SoundManager.PlaySound('Sound.SlotGet');
     Exit;
@@ -9024,7 +7516,7 @@ begin
     aCalc.WaitForTurnCalculationUI;
     Exit;
   end;
-  GetPlayer.CloseVacantStorageSlot(GetLocalStorageOwner, Slot + 1);
+  CloseVacantStorageSlot(Slot + 1);
   aCalc.WaitForTurnCalculationUI;
   if not RemoteHoldVisible then
   begin
@@ -9451,11 +7943,7 @@ end;
 
 function TfShip2.CanUsePlayerExperience: Boolean;
 begin
-  Result := True;
-  if not ((LocalHuman.PlayerHoldShip is TRuins) and (LocalHuman.PlayerHoldShip as TRuins).ModernizationSponsor)
-      and not ((LocalHuman.PlayerHoldShip is TTranclucator)
-          and ((LocalHuman.PlayerHoldShip as TTranclucator).OwnerShip = GetPlayer)) then
-    Result := False;
+  Result := aHoldActions.CanUsePlayerExperience;
 end;
 
 procedure TfShip2.ToggleRemoteHoldClicked(Sender: TObjectGI);
@@ -9570,7 +8058,7 @@ end;
 
 procedure TfShip2.SortRemoteHoldClicked(Sender: TObjectGI);
 begin
-  SortPlayerHoldEntries(TPlayerHoldSort(Sender.UserValue));
+  SortHold(TPlayerHoldSort(Sender.UserValue));
   RefreshShipView;
 end;
 
@@ -9605,7 +8093,7 @@ begin
       and (GetPlayer.RuinsMode <= 0) then
   begin
     aCalc.WaitForTurnCalculationUI;
-    if LocalHuman.PlayerHoldShip.RetrieveStoredItems(GetLocalStorageOwner) then
+    if TakeAllFromStorage then
     begin
       aCalc.WaitForTurnCalculationUI;
       Flag3BC := True;
@@ -9675,7 +8163,7 @@ begin
       and (QueuedArcadeBattles.Count <= 0) then
   begin
     aCalc.WaitForTurnCalculationUI;
-    if LocalHuman.PlayerHoldShip.StoreLooseInventoryAt(GetLocalStorageOwner) then
+    if PutAllIntoStorage then
     begin
       aCalc.WaitForTurnCalculationUI;
       Flag3BC := True;
@@ -9772,174 +8260,14 @@ begin
 end;
 
 function CompareStoredItems(Left, Right: PStorageEntry; Sort: TPlayerHoldSort): Integer;
-var
-  LeftValue, RightValue: Integer;
-  LeftType, RightType: Byte;
-  LeftClass, RightClass: Integer;
-  LeftName, RightName: WideString;
-  NameComparison: Integer;
-  function Classify(
-      ItemType: Byte
-  ): Integer; // @addr $7129B4 @ida "int __usercall $name@<eax>(unsigned __int8 ItemType@<al>, void *ParentFrame@<^0>);" @stackpop 0 @calls "0x712A81,0x712A8E" Nested helper; does not read the parent frame.
-  begin
-    Result := 0;
-    if ItemType in [Ord(t_Food)..Ord(t_Narcotics)] then
-      Result := 1
-    else if ItemType in [Ord(t_Artefact)..Ord(t_ArtFastRacks)] then
-      Result := 3
-    else if ItemType in [Ord(t_Hull)..Ord(t_CustomWeapon)] then
-      Result := 2
-    else if ItemType in [Ord(t_Protoplasm)..Ord(t_UselessCountableItem)] then
-      Result := 4;
-  end;
 begin
-  Result := 0;
-  if Left.Item = nil then
-  begin
-    Result := -1;
-    Exit
-  end;
-  if Right.Item = nil then
-  begin
-    Result := 1;
-    Exit
-  end;
-  LeftType := Byte(Left.Item.ItemType);
-  RightType := Byte(Right.Item.ItemType);
-  LeftClass := Classify(LeftType);
-  RightClass := Classify(RightType);
-  if Sort = phsType then
-  begin
-    if LeftClass < RightClass then
-    begin
-      Result := -1;
-      Exit
-    end;
-    if LeftClass > RightClass then
-    begin
-      Result := 1;
-      Exit
-    end;
-    if Integer(LeftType) < Integer(RightType) then
-    begin
-      Result := -1;
-      Exit
-    end;
-    if Integer(LeftType) > Integer(RightType) then
-    begin
-      Result := 1;
-      Exit
-    end;
-    if (LeftClass = 4)
-        and (RightClass = 4)
-        and (Left.Item.ItemType = t_MicroModule)
-        and (Right.Item.ItemType = t_MicroModule) then
-    begin
-      LeftValue :=
-          GetMicroModulePriorityColorTier((Left.Item as TMicroModule).MicroModuleIndex - 1);
-      RightValue :=
-          GetMicroModulePriorityColorTier((Right.Item as TMicroModule).MicroModuleIndex - 1);
-      if LeftValue < RightValue then
-      begin
-        Result := -1;
-        Exit
-      end;
-      if LeftValue > RightValue then
-      begin
-        Result := 1;
-        Exit
-      end;
-    end;
-    LeftName := Left.Item.GetDisplayName;
-    RightName := Right.Item.GetDisplayName;
-    NameComparison := CompareWideChars(PWideChar(LeftName), PWideChar(RightName));
-    if NameComparison <> 0 then
-    begin
-      Result := NameComparison;
-      Exit
-    end;
-  end;
-  if Integer(Sort) <= Integer(phsSize) then
-  begin
-    if LeftClass = 1 then
-      LeftValue := TGoods(Left.Item).Quantity
-    else
-      LeftValue := Left.Item.Weight;
-    if RightClass = 1 then
-      RightValue := TGoods(Right.Item).Quantity
-    else
-      RightValue := Right.Item.Weight;
-    if LeftValue < RightValue then
-    begin
-      Result := -1;
-      Exit
-    end;
-    if LeftValue > RightValue then
-    begin
-      Result := 1;
-      Exit
-    end;
-  end;
-  LeftValue := Left.Item.Cost;
-  RightValue := Right.Item.Cost;
-  if LeftValue < RightValue then
-  begin
-    Result := -1;
-    Exit
-  end;
-  if LeftValue > RightValue then
-  begin
-    Result := 1;
-    Exit
-  end;
+  Result := aHoldActions.CompareStoredItems(Left, Right, Sort);
 end;
 
 procedure TfShip2.SortStorage(Sort: TPlayerHoldSort);
-var
-  I, J, Count: Integer;
-  Entry: PStorageEntry;
-  LeftIndex, RightIndex: Integer;
 begin
   aCalc.WaitForTurnCalculationUI;
-  Count := GetPlayer.StorageEntries.Count;
-  I := 0;
-  J := 0;
-  while I < Count do
-  begin
-    Entry := GetPlayer.StorageEntries[I];
-    if GetLocalStorageOwner = Entry.LocationOwner then
-    begin
-      if Entry.Item = nil then
-      begin
-        GetPlayer.StorageEntries.Delete(I);
-        Dispose(Entry);
-        Dec(Count);
-        Continue;
-      end;
-      Entry.SlotIndex := J;
-      Inc(J);
-    end;
-    Inc(I);
-  end;
-  Count := GetPlayer.GetStorageSlotExtent(GetLocalStorageOwner);
-  for I := 0 to Count - 2 do
-    for J := I + 1 to Count - 1 do
-    begin
-      LeftIndex := GetPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, I);
-      RightIndex := GetPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, J);
-      if (LeftIndex >= 0) and (RightIndex >= 0) then
-        if CompareStoredItems(
-                GetPlayer.StorageEntries[LeftIndex],
-                GetPlayer.StorageEntries[RightIndex],
-                Sort)
-            > 0 then
-        begin
-          Entry := GetPlayer.StorageEntries[LeftIndex];
-          Entry.SlotIndex := J;
-          Entry := GetPlayer.StorageEntries[RightIndex];
-          Entry.SlotIndex := I;
-        end;
-    end;
+  SortStorageEntries(Sort);
   aCalc.WaitForTurnCalculationUI;
 end;
 
@@ -9968,83 +8296,11 @@ end;
 procedure TfShip2.SellAllItems(Origin: Integer);
 var
   PlaySaleSound, Changed: Boolean;
-  I, StorageIndex, SavedCount, SavedCost: Integer;
+  I, StorageIndex: Integer;
   Item: TItem;
   AllowIllegal, DeclineIllegal: Boolean;
   Good: Byte;
   Entry: PStorageEntry;
-  function SellItem(
-      Item: TItem;
-      IgnoreRequiredEquipment: Boolean
-  ): Boolean; // @addr $712F80 @ida "bool __usercall $name@<al>(TItem *Item@<eax>, bool IgnoreRequiredEquipment@<dl>, void *ParentFrame@<^0>);" @stackpop 0 @calls "0x713540,0x713661,0x7139EB" Nested helper captures sale/change flags.
-  var
-    Count, Cost, Price: Integer;
-    Event: TGalaxyEvent;
-  begin
-    Result := False;
-    if Item = nil then
-      Exit;
-    if not IgnoreRequiredEquipment then
-    begin
-      if LocalHuman.PlayerHoldShip is TRuins then
-      begin
-        if LocalHuman.PlayerHoldShip.NeedsEquipmentType(Item.ItemType) then
-          Exit;
-      end
-      else if ((Item.ItemType = t_FuelTanks) or (Item.ItemType = t_Engine))
-          and LocalHuman.PlayerHoldShip.NeedsEquipmentType(Item.ItemType) then
-        Exit;
-    end;
-    if Item.ItemType in [t_Food..t_Narcotics] then
-    begin
-      Count := GetPlayer.CargoGoods[Ord(Item.ItemType)].Count;
-      Cost := GetPlayer.CargoGoods[Ord(Item.ItemType)].TotalCost;
-      GetPlayer.CargoGoods[Ord(Item.ItemType)].Count := (Item as TGoods).Quantity;
-      GetPlayer.CargoGoods[Ord(Item.ItemType)].TotalCost := (Item as TGoods).Cost;
-      GetPlayer.SellGoodsToLocation(Byte(Item.ItemType), (Item as TGoods).Quantity);
-      PlaySaleSound := True;
-      GetPlayer.CargoGoods[Ord(Item.ItemType)].Count := Count;
-      GetPlayer.CargoGoods[Ord(Item.ItemType)].TotalCost := Cost;
-      Item.Free;
-    end
-    else
-    begin
-      if not (Item is TCountableItem) then
-      begin
-        Event := AddGalaxyEvent('PlayerSellsEquipment');
-        Event.AddData(Ord(Item.ItemType));
-        Event.AddData(Item.CalculateResaleValue(GetPlayer.GetEffectiveSkillLevel(psTrading)));
-        Event.AddData(Item.Weight);
-        Event.AddData(Item.Id);
-        Event.AddTextData(Item.GetDisplayName);
-        Event.AddTextData(Item.GetCategoryConfigName);
-      end;
-      Price := Item.CalculateResaleValue(GetPlayer.GetEffectiveSkillLevel(psTrading));
-      GetPlayer.SetMoney(GetPlayer.Money + Price);
-      if Price <> 0 then
-        PlaySaleSound := True;
-      if Item is TWeapon then
-        (Item as TWeapon).Target := nil;
-      if (Item.ItemType = t_Hull) and ((Item as THull).HullType = htSpecial) then
-        Item.Free
-      else if (Item.OwnerId in [Ord(oiMaloc)..Ord(oiGaal), Ord(oiPirate)])
-          and (Item.ItemType in [t_Hull..t_CustomWeapon])
-          and (not (Item is TWeapon)
-              or (TWeapon(Item).GetWeaponInfo.Availability <> waNotSoldAndNodeRepair)) then
-      begin
-        ReturnShopStock;
-        if GetPlayer.CurrentPlanet <> nil then
-          GetPlayer.CurrentPlanet.EquipmentShop.Add(Item)
-        else
-          (GetPlayer.DockedTo as TRuins).EquipmentShop.Add(Item);
-        OpenShopStock;
-      end
-      else
-        Item.Free;
-    end;
-    Result := True;
-    Changed := True;
-  end;
 begin
   if GetPlayer.InNormalSpace
       or GetPlayer.InHyperspace
@@ -10083,25 +8339,14 @@ begin
     Exit;
   end;
   aCalc.WaitForTurnCalculationUI;
-  Changed := False;
-  PlaySaleSound := False;
+  // Each sale is a command; the questions stay here, between them, where they were.
+  SaleChanged := False;
+  SalePlaySound := False;
   AllowIllegal := False;
   DeclineIllegal := False;
   if Origin = 0 then
   begin
-    I := LocalHuman.PlayerHoldShip.Inventory.Count - 1;
-    while I >= 0 do
-    begin
-      Item := LocalHuman.PlayerHoldShip.Inventory[I];
-      if (Item.NoDropFlag = 0)
-          and (Item.ItemType <> t_Hull)
-          and (TEquipment(Item).EquippedFlag = 0)
-          and ((Item.ScriptItem = nil) or TScriptItem(Item.ScriptItem).CanSell)
-          and GetPlayer.CanAccessStoredItem(Item) then
-        if SellItem(Item, False) then
-          LocalHuman.PlayerHoldShip.Inventory.Delete(I);
-      Dec(I);
-    end;
+    SellHoldInventory;
     I := LocalHuman.PlayerHoldShip.Artefacts.Count - 1;
     while I >= 0 do
     begin
@@ -10126,8 +8371,7 @@ begin
             Dec(I);
             Continue;
           end;
-        LocalHuman.PlayerHoldShip.Artefacts.Delete(I);
-        SellItem(Item, True);
+        SellHoldArtefact(I);
       end;
       Dec(I);
     end;
@@ -10147,24 +8391,7 @@ begin
             else
               AllowIllegal := True;
           if not (GetPlayer.IsCargoGoodIllegalOnCurrentPlanet(Good) and DeclineIllegal) then
-          begin
-            Changed := True;
-            PlaySaleSound := True;
-            if GetPlayer = LocalHuman.PlayerHoldShip then
-              GetPlayer.SellGoodsToLocation(Good, GetPlayer.CargoGoods[Good].Count)
-            else
-            begin
-              SavedCount := GetPlayer.CargoGoods[Good].Count;
-              SavedCost := GetPlayer.CargoGoods[Good].TotalCost;
-              GetPlayer.CargoGoods[Good].Count := LocalHuman.PlayerHoldShip.CargoGoods[Good].Count;
-              GetPlayer.CargoGoods[Good].TotalCost := LocalHuman.PlayerHoldShip.CargoGoods[Good].TotalCost;
-              LocalHuman.PlayerHoldShip.CargoGoods[Good].Count := 0;
-              LocalHuman.PlayerHoldShip.CargoGoods[Good].TotalCost := 0;
-              GetPlayer.SellGoodsToLocation(Good, GetPlayer.CargoGoods[Good].Count);
-              GetPlayer.CargoGoods[Good].Count := SavedCount;
-              GetPlayer.CargoGoods[Good].TotalCost := SavedCost;
-            end;
-          end;
+            SellHoldGoods(Good);
         end;
   end
   else
@@ -10217,14 +8444,13 @@ begin
           Dec(I);
           Continue;
         end;
-        Entry.Item := nil;
-        GetPlayer.StorageEntries.Delete(StorageIndex);
-        Dispose(Entry);
-        SellItem(Item, True);
+        SellStoredItem(StorageIndex);
       end;
       Dec(I);
     end;
   end;
+  Changed := SaleChanged;
+  PlaySaleSound := SalePlaySound;
   if Changed then
   begin
     Flag3BC := True;
@@ -10243,7 +8469,7 @@ begin
   aCalc.WaitForTurnCalculationUI;
   if SelectedHoldKind <> phkEmpty then
     ReturnSelectedHoldEntry;
-  GetPlayer.EnterRuinsMode(0);
+  EnterBridge(0);
   aCalc.WaitForTurnCalculationUI;
 end;
 

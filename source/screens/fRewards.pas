@@ -62,6 +62,7 @@ uses
   Globals,
   GlobalsV,
   aPlayer,
+  aHoldActions,
   aNormalShip,
   aConst,
   aPlanet,
@@ -95,8 +96,7 @@ procedure TfRewards.OnOpen;
 begin
   inherited OnOpen;
   Ship := AwardSubject as TShip;
-  if Ship.AwardVisibleCount = 0 then
-    Ship.AwardVisibleCount := Ship.AwardIds.Count;
+  ShowAwards(Ship);
   CaptureScreenBackground(False, 0);
   (GetByName('BGBuf') as TGraphBufGI).BindExternalGraphBuf(AuxRenderBuffer);
   with GetByName('PTable') as TPanelScrollBarGI do
@@ -231,7 +231,7 @@ begin
   end
   else
   begin
-    Ship.AwardIds.Exchange(Sender.UserData, DraggedAward.UserData);
+    ExchangeAwards(Ship, Sender.UserData, DraggedAward.UserData);
     Temp := Sender.UserIndex;
     Sender.UserIndex := DraggedAward.UserIndex;
     DraggedAward.UserIndex := Temp;
@@ -257,15 +257,13 @@ end;
 
 procedure TfRewards.IncreaseVisibleCount(Sender: TObjectGI);
 begin
-  if Ship.AwardVisibleCount < Ship.AwardIds.Count then
-    Inc(Ship.AwardVisibleCount);
+  ChangeAwardVisibleCount(Ship, 1);
   RefreshVisibleCount;
 end;
 
 procedure TfRewards.DecreaseVisibleCount(Sender: TObjectGI);
 begin
-  if Ship.AwardVisibleCount > 0 then
-    Dec(Ship.AwardVisibleCount);
+  ChangeAwardVisibleCount(Ship, -1);
   RefreshVisibleCount;
 end;
 

@@ -14,6 +14,8 @@ uses
   Classes,
   Globals,
   aGalaxy,
+  aHold,
+  aItem,
   aPlanet,
   aRuins,
   aShip;
@@ -47,6 +49,20 @@ type
     // The ship screen's hold order (aHold) and the ship it lists.
     PlayerHoldEntries: TList;
     PlayerHoldShip: TShip;
+    // What the human holds on the ship screen's cursor (aHoldActions): taken out of the
+    // hold, a slot or the storage, and in no galaxy list until it is put down. Origin 0 is
+    // the ship, 1 the storage; Slot is where it goes back.
+    SelectedHoldKind: TPlayerHoldKind;
+    SelectedGoodsIndex: Byte;
+    SelectedGoodsQuantity: Integer;
+    SelectedGoodsCost: Integer;
+    SelectedHoldItem: TItem;
+    SelectedHoldOrigin: Integer;
+    SelectedHoldSlot: Integer;
+    SelectedHoldUsesDisplayOrder: Boolean;
+    // The edited ship's own free experience while the screen shows the player's instead;
+    // -1 when it does not.
+    SavedShipExperience: Integer;
     // Prices while trading with a ship in space.
     TradeRows: array[0..7] of TGoodsShopTradeRow;
     // Whether the star map shows its weapon panel.
