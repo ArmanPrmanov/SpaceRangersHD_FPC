@@ -580,8 +580,7 @@ begin
   Buffer.AddIntegerValue(ExperienceByNormals);
   Buffer.AddIntegerValue(ExperienceByTraderCareer);
   Buffer.AddAnsiChar(AnsiChar(RuinsMode));
-  if RuinsProxy = nil then
-    CreateRuinsProxy;
+  // CHANGE: BUGFIX - The proxy exists from player creation or load; a writer must not change state.
   (RuinsProxy as TRuins).SaveToBuffer(Buffer);
   if RuinsMode > 0 then
   begin
@@ -1726,6 +1725,10 @@ begin
   HomePlanet.ChangeRelationToRanger(Self, 100);
   for I := 1 to 24 do
     StatusEffectSourceNames[I] := '';
+  // CHANGE: BUGFIX - Create the ruins proxy with the player; SaveToBuffer used to create it
+  // lazily, drawing from Galaxy.RandomState, so saving changed the game.
+  if RuinsProxy = nil then
+    CreateRuinsProxy;
 end;
 
 // CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.

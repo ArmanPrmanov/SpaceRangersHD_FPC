@@ -2202,6 +2202,11 @@ begin
     end;
     Stage := 48;
     GetPlayer.CurrentStar.RefreshMovementStepParameters;
+    // CHANGE: BUGFIX - Saves before version 51 hold no ruins proxy. Create it here, before the
+    // random state is restored, instead of lazily in TPlayer.SaveToBuffer.
+    for I := 0 to Rangers.Count - 1 do
+      if (TObject(Rangers[I]) is TPlayer) and (TPlayer(Rangers[I]).RuinsProxy = nil) then
+        TPlayer(Rangers[I]).CreateRuinsProxy;
     RandomState := SavedRandomState;
     Stage := 49;
     if LoadedSaveVersion >= 61 then
