@@ -11,15 +11,15 @@ has got.
 
 ## Status
 
-- Phase: 0 done; second-human spike done (branch `spike/second-human`,
-  not for merging). CI written, not yet run (needs a push).
-- Next: the two single-player-safe fixes from the spike (`GetPlayer`→`Self`
-  in `TPlayer`, eager ruins proxy), then Phase 1 including the script
-  raw-address fix.
-- Open issues: script object references saved as raw addresses; after one
-  turn a round trip no longer matches, even in single player. CI format job
-  fails on files formatted before Phase 0.
-- Latest entry: [2026-09-24-spike-second-human.md](2026-09-24-spike-second-human.md)
+- Phase: 0 and 1 done (item 7, cross-target drift, skipped); second-human
+  spike done (branch `spike/second-human`, not for merging). CI written, not
+  yet run (needs a push).
+- Next: push so CI runs; Phase 2, scoped by the spike.
+- Open issues: chaotic mode is seeded from the clock, not the save (a
+  deliberate deviation, see the latest entry); a save with the object
+  reference table is untested in the original game; CI format job fails on
+  files formatted before Phase 0.
+- Latest entry: [2026-09-24-phase1.md](2026-09-24-phase1.md)
 
 ## Session entry format
 
