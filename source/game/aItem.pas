@@ -688,6 +688,7 @@ function MigrateSavedItemType(ItemType: Byte): TItemType;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
   GlobalsV,
   aPlanet,
   aTranclucator,
@@ -704,8 +705,7 @@ uses
   EC_Str,
   aAsteroid,
   aMissile,
-  Globals,
-  fShip2;
+  Globals;
 // @unit-initialization $8779AC
 // @unit-finalization $80CF50
 // Preserve the native evaluation order: select the percentage before clamping
@@ -7939,7 +7939,7 @@ begin
   else if GetInnermostScreenLoop = ScannerScreen then
     Ship := ScannerScreen.ShipToInspect
   else if GetInnermostScreenLoop = ShipScreen then
-    Ship := PlayerHoldShip;
+    Ship := LocalHuman.PlayerHoldShip;
   if Ship = nil then
     Exit;
   if Ship.CanBoostArtefact(Ord(GetEffectiveType), nil, True) then

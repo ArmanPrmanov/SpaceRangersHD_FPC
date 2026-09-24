@@ -661,6 +661,7 @@ procedure InitializeScriptBuiltinsAndConstants(Scope: TVarArrayEC);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHold,
   aHuman,
   StrUtils,
   DateUtils,
@@ -15855,7 +15856,7 @@ begin
   else if GetInnermostScreenLoop = ScannerScreen then
     av[0].SetDword(PtrUInt(ScannerScreen.ShipToInspect))
   else if GetInnermostScreenLoop = ShipScreen then
-    av[0].SetDword(PtrUInt(PlayerHoldShip))
+    av[0].SetDword(PtrUInt(LocalHuman.PlayerHoldShip))
   else
     av[0].SetDword(0);
 end;
@@ -16482,7 +16483,7 @@ begin
         ShipScreen.SelectedHoldItem.Free;
       ShipScreen.SelectedHoldItem := nil;
       ShipScreen.SelectedHoldKind := phkEmpty;
-      PlayerHoldShip.RefreshDerivedStats(True);
+      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
       if not ShipScreen.IsCursorImageSelected('Main') then
         ShipScreen.SetCursorByName('Main');
       ShipScreen.RefreshShipView;
@@ -16493,7 +16494,7 @@ begin
       av[0].SetDword(PtrUInt(ShipScreen.SelectedHoldItem));
       ShipScreen.SelectedHoldItem := nil;
       ShipScreen.SelectedHoldKind := phkEmpty;
-      PlayerHoldShip.RefreshDerivedStats(True);
+      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
       if not ShipScreen.IsCursorImageSelected('Main') then
         ShipScreen.SetCursorByName('Main');
       ShipScreen.RefreshShipView;
@@ -16512,7 +16513,7 @@ begin
         ShipScreen.SelectedHoldKind := phkArtefact
       else
         ShipScreen.SelectedHoldKind := phkEquipment;
-      PlayerHoldShip.RefreshDerivedStats(True);
+      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
       ShipScreen.UpdateActionCursor(True);
       ShipScreen.RefreshShipView;
     end;

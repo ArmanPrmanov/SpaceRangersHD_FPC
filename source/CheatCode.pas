@@ -1261,7 +1261,7 @@ begin
     else if GetInnermostScreenLoop = ScannerScreen then
       Ship := ScannerScreen.ShipToInspect
     else if GetInnermostScreenLoop = ShipScreen then
-      Ship := PlayerHoldShip;
+      Ship := LocalHuman.PlayerHoldShip;
     if Ship = nil then
       Ship := GetPlayer;
     ReportCheat(10, 'SKILL');

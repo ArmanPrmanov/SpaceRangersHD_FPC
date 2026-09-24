@@ -37,6 +37,9 @@ type
     TemporaryShopStation: TRuins;
     // Ships shown in the hangar's nine slots, by id.
     HangarShipIds: array[0..8] of Integer;
+    // The ship screen's hold order (aHold) and the ship it lists.
+    PlayerHoldEntries: TList;
+    PlayerHoldShip: TShip;
   end;
 var
   LocalHuman: THumanState;

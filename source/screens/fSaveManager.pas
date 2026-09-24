@@ -81,6 +81,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHold,
   GI_MessageBox,
   GR_DX,
   aGalaxyStruct,

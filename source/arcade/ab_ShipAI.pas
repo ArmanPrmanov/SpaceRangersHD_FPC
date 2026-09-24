@@ -90,6 +90,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHold,
   aCalc,
   Math,
   aMyFunction,

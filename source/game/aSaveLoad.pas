@@ -45,6 +45,7 @@ procedure LinkRecoveredTypes;
 implementation
 
 uses
+  aHold,
   aHuman,
   aCalc,
   RTLFileSystem,
@@ -298,13 +299,13 @@ begin
         Message.SaveToBuffer(GameState);
         Message := Message.Next;
       end;
-      PlayerHoldShip := GetPlayer;
+      LocalHuman.PlayerHoldShip := GetPlayer;
       RefreshPlayerHoldView(False);
-      Count := PlayerHoldEntries.Count;
+      Count := LocalHuman.PlayerHoldEntries.Count;
       GameState.AddWideChar(WideChar(Count));
       for I := 0 to Count - 1 do
       begin
-        Entry := PlayerHoldEntries[I];
+        Entry := LocalHuman.PlayerHoldEntries[I];
         GameState.AddAnsiChar(AnsiChar(Entry.Kind));
         GameState.AddAnsiChar(AnsiChar(Entry.GoodsIndex));
         GameState.AddDWord(Entry.ItemId);
@@ -383,7 +384,7 @@ begin
   for I := 0 to Count - 1 do
   begin
     Entry := TPlayerHoldUnit.Create;
-    PlayerHoldEntries.Add(Entry);
+    LocalHuman.PlayerHoldEntries.Add(Entry);
     Entry.Kind := TPlayerHoldKind(Buffer.GetByte);
     Entry.GoodsIndex := Buffer.GetByte;
     Entry.ItemId := Buffer.GetUInt32;
@@ -591,13 +592,13 @@ begin
     Message := Message.Next;
   end;
   MemorySnapshotBuffer.AddDWord(LocalHuman.ShownPlayerTips);
-  PlayerHoldShip := GetPlayer;
+  LocalHuman.PlayerHoldShip := GetPlayer;
   RefreshPlayerHoldView(False);
-  Count := PlayerHoldEntries.Count;
+  Count := LocalHuman.PlayerHoldEntries.Count;
   MemorySnapshotBuffer.AddWideChar(WideChar(Count));
   for I := 0 to Count - 1 do
   begin
-    Entry := PlayerHoldEntries[I];
+    Entry := LocalHuman.PlayerHoldEntries[I];
     MemorySnapshotBuffer.AddAnsiChar(AnsiChar(Entry.Kind));
     MemorySnapshotBuffer.AddAnsiChar(AnsiChar(Entry.GoodsIndex));
     MemorySnapshotBuffer.AddDWord(Entry.ItemId);
@@ -657,7 +658,7 @@ begin
   for I := 0 to Count - 1 do
   begin
     Entry := TPlayerHoldUnit.Create;
-    PlayerHoldEntries.Add(Entry);
+    LocalHuman.PlayerHoldEntries.Add(Entry);
     Entry.Kind := TPlayerHoldKind(MemorySnapshotBuffer.GetByte);
     Entry.GoodsIndex := MemorySnapshotBuffer.GetByte;
     Entry.ItemId := MemorySnapshotBuffer.GetUInt32;

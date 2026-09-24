@@ -5,7 +5,6 @@ aGalaxy -> GI_GraphButton
 aGalaxy -> GI_Label
 aGalaxy -> GI_MessageLoop
 aGalaxy -> GI_Panel
-aItem -> fShip2
 aSaveLoad -> fChameleon
 aSaveLoad -> fCount2
 aSaveLoad -> fEquipmentShop
@@ -61,6 +60,5 @@ aScriptFun -> GI_Label
 aScriptFun -> GI_MessageBox
 aScriptFun -> GI_MessageLoop
 aShip -> fGoodsShop2
-aShip -> fShip2
 Robot -> fPanelLoad
 Robot -> GI_MessageLoop

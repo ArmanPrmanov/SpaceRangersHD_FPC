@@ -2823,7 +2823,7 @@ begin
       SetCursorActive(True);
       ShipScreen.ShipToInspect := ShipToInspect;
       if ShipToInspect = nil then
-        PlayerHoldShip := GetPlayer;
+        LocalHuman.PlayerHoldShip := GetPlayer;
       ShipScreen.PlayTransitionSounds := True;
       ShipReturnScreenId := FormToId(Self);
       RequestedScreenId := screenShip;

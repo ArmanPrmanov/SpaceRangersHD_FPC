@@ -853,13 +853,13 @@ function CalculateRoundedFuelCost(Amount: Integer; OwnerId: Byte): Integer;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHold,
   aHuman,
   SimulationThread,
   ObserverHooks,
   SE_Process,
   aCalc,
   aGroup,
-  fShip2,
   aGalaxyEvent,
   aShopStock,
   fGoodsShop2,
@@ -15177,7 +15177,7 @@ begin
   begin
     RepairDuplicateSatelliteTrajectoryIndices;
     RefreshAssignedItemSlots;
-    PlayerHoldShip := Self;
+    LocalHuman.PlayerHoldShip := Self;
     RefreshPlayerHoldView(True);
     SetLength(Indices, Inventory.Count);
     Count := 0;
@@ -15191,9 +15191,9 @@ begin
       end;
     end;
     Next := 0;
-    for I := 0 to PlayerHoldEntries.Count - 1 do
+    for I := 0 to LocalHuman.PlayerHoldEntries.Count - 1 do
     begin
-      Entry := PlayerHoldEntries[I];
+      Entry := LocalHuman.PlayerHoldEntries[I];
       if Entry = nil then
         Continue;
       if Entry.Kind <> phkEquipment then
@@ -15227,14 +15227,14 @@ begin
   begin
     RepairDuplicateSatelliteTrajectoryIndices;
     RefreshAssignedItemSlots;
-    PlayerHoldShip := Self;
+    LocalHuman.PlayerHoldShip := Self;
     RefreshPlayerHoldView(True);
     SetLength(Indices, Inventory.Count);
     SetLength(Entries, Inventory.Count);
     Count := 0;
-    for I := 0 to PlayerHoldEntries.Count - 1 do
+    for I := 0 to LocalHuman.PlayerHoldEntries.Count - 1 do
     begin
-      Entry := PlayerHoldEntries[I];
+      Entry := LocalHuman.PlayerHoldEntries[I];
       if (Entry <> nil)
           and (Entry.Kind = phkEquipment)
           and (Inventory.IndexOf(Entry.Item) >= 0) then
@@ -15261,7 +15261,7 @@ begin
       begin
         if Next >= Count then
           RaiseWideMessage('Satellite renom 3');
-        Entry := PlayerHoldEntries[Indices[Next]];
+        Entry := LocalHuman.PlayerHoldEntries[Indices[Next]];
         Entry.Kind := Entries[Next].Kind;
         Entry.GoodsIndex := Entries[Next].GoodsIndex;
         Entry.ItemId := Item.Id;

@@ -49,6 +49,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHold,
   Math,
   aGalaxy,
   aSaveLoad,

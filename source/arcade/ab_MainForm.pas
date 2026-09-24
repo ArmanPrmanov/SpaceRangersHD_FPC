@@ -222,6 +222,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHold,
   aHuman,
   GI_GI,
   aKling,
