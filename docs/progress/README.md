@@ -13,19 +13,20 @@ has got.
 
 - Phase: 0 and 1 done (item 7, cross-target drift, skipped); second-human
   spike done (branch `spike/second-human`, not for merging). Phase 2 in
-  progress: layer check in place (65 violations left), `SimEvents` for
-  calls out of the turn, `LocalHuman` for the first per-human globals.
-  CI is not used: the workflow exists but the repository is not connected
-  to a runner, so tests run locally (`tools/test.py`, `tools/unit_tests.py`,
-  `tools/check_layers.py`).
-- Next: Phase 2 item 2 (the rest of the per-human state, then grouping
-  `Globals`), and the remaining UI edges listed in the latest entry.
+  progress: `source/game` and `source/core` are separated from the UI
+  (one documented exception). The 66 violations left are the script
+  builtins in `aScript`/`aScriptFun`. CI is not used: the workflow exists
+  but the repository is not connected to a runner, so tests run locally
+  (`tools/test.py`, `tools/unit_tests.py`, `tools/check_layers.py`).
+- Next: split the UI script builtins out of `aScriptFun`. Decide whether
+  the `Session`/`Settings`/`UiState` records happen (about 11,200 sites; see
+  the latest entry).
 - Open issues: chaotic mode is seeded from the clock, not the save (a
   deliberate deviation, see the Phase 1 entry); a save with the object
   reference table is untested in the original game; `format.py --check`
-  fails on files formatted before Phase 0; the player-death and shop-refresh
-  handlers are untested in the game.
-- Latest entry: [2026-09-24-phase2.md](2026-09-24-phase2.md)
+  fails on files formatted before Phase 0; untested in the game: the
+  player-death and shop-refresh handlers and the interface overrides.
+- Latest entry: [2026-09-24-phase2-game-layer.md](2026-09-24-phase2-game-layer.md)
 
 ## Session entry format
 
