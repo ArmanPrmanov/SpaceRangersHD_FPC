@@ -853,6 +853,7 @@ function CalculateRoundedFuelCost(Amount: Integer; OwnerId: Byte): Integer;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHold,
   aHuman,
   SimulationThread,
@@ -1452,7 +1453,7 @@ begin
   if Cardinal(Id) >= Cardinal(Galaxy.NextShipId) then
     Galaxy.NextShipId := Id + 1;
   Name := Buffer.ReadWideString;
-  if LoadedSaveVersion >= 97 then
+  if Session.LoadedSaveVersion >= 97 then
     TypeNameOverrideKey := Buffer.ReadWideString
   else
     TypeNameOverrideKey := '';
@@ -1478,7 +1479,7 @@ begin
     ShowMessage('TShip.Create; - FRnd<0');
   CreationTurn := Buffer.GetUInt32;
   PortraitFaceId := Buffer.GetInt32;
-  if LoadedSaveVersion >= 125 then
+  if Session.LoadedSaveVersion >= 125 then
     PilotRace := Buffer.GetByte
   else if OwnerId = Byte(oiPirate) then
     PilotRace := Buffer.GetByte
@@ -1486,7 +1487,7 @@ begin
     PilotRace := OwnerToRace(OwnerId)
   else
     PilotRace := Byte(oiMaloc);
-  if LoadedSaveVersion < 102 then
+  if Session.LoadedSaveVersion < 102 then
   begin
     if TypeId = Byte(rstMedicalBase) then
     begin
@@ -1530,7 +1531,7 @@ begin
     GuaranteedDeathDropItems.Add(Item);
     Item.LoadFromBuffer(Buffer, Galaxy);
   end;
-  if LoadedSaveVersion >= 68 then
+  if Session.LoadedSaveVersion >= 68 then
   begin
     Count := Buffer.GetWord;
     if (Count < 0) or (Count > 10000) then
@@ -1547,7 +1548,7 @@ begin
       end;
     end;
   end;
-  if LoadedSaveVersion >= 77 then
+  if Session.LoadedSaveVersion >= 77 then
   begin
     Count := Buffer.GetWord;
     if (Count < 0) or (Count > 10000) then
@@ -1565,7 +1566,7 @@ begin
       end;
     end;
   end;
-  if LoadedSaveVersion >= 104 then
+  if Session.LoadedSaveVersion >= 104 then
   begin
     Count := Buffer.GetInt32;
     for I := 0 to Count - 1 do
@@ -1611,7 +1612,7 @@ begin
     for I := 0 to Count - 1 do
       PickupTargets.Add(Pointer(Buffer.GetUInt32));
   end;
-  if LoadedSaveVersion >= 81 then
+  if Session.LoadedSaveVersion >= 81 then
   begin
     Count := Buffer.GetWord;
     if (Count < 0) or (Count > 10000) then
@@ -1639,9 +1640,9 @@ begin
   OrderDestination.X := Buffer.GetSingle;
   OrderDestination.Y := Buffer.GetSingle;
   OrderAbsolute := Buffer.GetBoolean;
-  if LoadedSaveVersion >= 107 then
+  if Session.LoadedSaveVersion >= 107 then
     AbductedByPirateClan := Buffer.GetBoolean;
-  if LoadedSaveVersion >= 48 then
+  if Session.LoadedSaveVersion >= 48 then
     ConsecutiveDockedDays := Buffer.GetInt32
   else
     ConsecutiveDockedDays := 0;
@@ -1652,7 +1653,7 @@ begin
     RetainSpaceObject(Graphic, CreateSpaceObjectByName('Ruins', GraphName, Classes.Point(0, 0)))
   else
   begin
-    if LoadedSaveVersion <= 66 then
+    if Session.LoadedSaveVersion <= 66 then
     begin
       GraphName := ReplaceAllWideString(GraphName, 'Adon', 'Akrin');
       GraphName := ReplaceAllWideString(GraphName, 'Custom.1', 'AkrinFemale.J');
@@ -1699,7 +1700,7 @@ begin
     CaptainHealth[I].Progress := Buffer.GetSingle;
     CaptainHealth[I].AppliedTurn := Buffer.GetInt32;
     CaptainHealth[I].ExpireTurn := Buffer.GetInt32;
-    if LoadedSaveVersion >= 54 then
+    if Session.LoadedSaveVersion >= 54 then
       CaptainHealth[I].ApplicationCount := Buffer.GetInt32
     else
       CaptainHealth[I].ApplicationCount := 0;
@@ -1720,18 +1721,18 @@ begin
     RadiationHealth[I].Progress := Buffer.GetSingle;
     RadiationHealth[I].AppliedTurn := Buffer.GetInt32;
     RadiationHealth[I].ExpireTurn := Buffer.GetInt32;
-    if LoadedSaveVersion >= 54 then
+    if Session.LoadedSaveVersion >= 54 then
       RadiationHealth[I].ApplicationCount := Buffer.GetInt32
     else
       RadiationHealth[I].ApplicationCount := 0;
   end;
-  if LoadedSaveVersion >= 146 then
+  if Session.LoadedSaveVersion >= 146 then
     TechKnowledge := Buffer.GetByte
   else
     TechKnowledge := 3;
   TradeLossBalance := Buffer.GetInt32;
   TradeExperience := Buffer.GetInt32;
-  if LoadedSaveVersion >= 58 then
+  if Session.LoadedSaveVersion >= 58 then
     ContrabandProfit := Buffer.GetInt32
   else
     ContrabandProfit := 0;
@@ -1742,11 +1743,11 @@ begin
   NoScan := Buffer.GetBoolean;
   ScriptChameleon := Buffer.GetBoolean;
   PlayerExtortionPactActive := Buffer.GetBoolean;
-  if LoadedSaveVersion >= 99 then
+  if Session.LoadedSaveVersion >= 99 then
     PlayerScratchHitsReceived := Buffer.GetWord
   else
     PlayerScratchHitsReceived := 0;
-  if LoadedSaveVersion >= 51 then
+  if Session.LoadedSaveVersion >= 51 then
   begin
     InterceptorPassesRemaining := Buffer.GetInt32;
     InterceptorSourceShip := TShip(Buffer.GetUInt32);
@@ -1775,7 +1776,7 @@ begin
     InterceptorSourceShip := nil;
     InterceptorGraphic := nil;
   end;
-  if LoadedSaveVersion >= 85 then
+  if Session.LoadedSaveVersion >= 85 then
   begin
     CurrentStanding := Buffer.GetByte;
     SmoothedSpeed := Buffer.GetInt32;
@@ -1787,13 +1788,13 @@ begin
     SmoothedSpeed := Speed;
     SmoothedEnemySpeed := Speed;
   end;
-  if LoadedSaveVersion >= 90 then
+  if Session.LoadedSaveVersion >= 90 then
   begin
     SmoothedEquipmentEffectiveness := Buffer.GetSingle;
     SmoothedWealth := Buffer.GetInt32;
     SmoothedMoneyFraction := Buffer.GetSingle;
     SmoothedFreeCapacityFraction := Buffer.GetSingle;
-    if LoadedSaveVersion >= 138 then
+    if Session.LoadedSaveVersion >= 138 then
       EquipmentPriceSensitivity := Buffer.GetSingle
     else
       EquipmentPriceSensitivity := 1.0;
@@ -2141,7 +2142,7 @@ begin
   else
     DockedTo := TObject(Galaxy.IdToShip(Cardinal(DockedTo), True)) as TShip;
   HomePlanet := TObject(Galaxy.IdToPlanet(Cardinal(HomePlanet))) as TPlanet;
-  if (LoadedSaveVersion < 146) and (HomePlanet <> nil) then
+  if (Session.LoadedSaveVersion < 146) and (HomePlanet <> nil) then
     TechKnowledge := Max(TechKnowledge, HomePlanet.InventionLevels[7]);
   if PickupTargets <> nil then
   begin
@@ -2187,9 +2188,9 @@ begin
     Item := GuaranteedDeathDropItems[I];
     Item.ResolveLoadedReferences(Galaxy);
   end;
-  if (LoadedSaveVersion < 85) and (TypeId <> stTranclucator) then
+  if (Session.LoadedSaveVersion < 85) and (TypeId <> stTranclucator) then
     RefreshCurrentStanding;
-  if (LoadedSaveVersion in [92, 93]) and (Self is TNormalShip) and not (Self is TPlayer) then
+  if (Session.LoadedSaveVersion in [92, 93]) and (Self is TNormalShip) and not (Self is TPlayer) then
   begin
     // Preserve the native legacy portrait exception, including its repeated type test.
     if (PilotRace = Byte(oiHuman))
@@ -2918,7 +2919,7 @@ begin
   if (GetPlayer <> nil) and (GetPlayer.CurrentStar = CurrentStar) then
   begin
     Result := LookupTalkText(Path);
-    ReplaceTextToken(Result, '<TalkShip>', OtherShip.GetName, '<color=255,240,100>');
+    ReplaceTextToken(Result, '<LocalHuman.TalkShip>', OtherShip.GetName, '<color=255,240,100>');
   end
   else
     Result := '';
@@ -6890,7 +6891,7 @@ begin
     Result := @TRuins(DockedTo).ShopGoods[Good]
   else if Self is TRuins then
     Result := @TRuins(Self).ShopGoods[Good]
-  else if TalkShip <> nil then
+  else if LocalHuman.TalkShip <> nil then
     Result := PGoodsTradePriceEntry(@LocalHuman.TradeRows[Good])
   else
   begin
@@ -9981,7 +9982,7 @@ begin
   CopyItem := TEquipment(CreateItemByType(Item.ItemType));
   Item.SaveToBuffer(Buffer);
   Buffer.SetPosition(0);
-  LoadedSaveVersion := CurrentSaveVersion;
+  Session.LoadedSaveVersion := CurrentSaveVersion;
   CopyItem.LoadFromBuffer(Buffer, Galaxy);
   ApplyMicroModule(ModuleIndex, CopyItem);
   WithModule := EvaluateItem(CopyItem, 1);
@@ -15811,8 +15812,8 @@ begin
   begin
     if GetPlayer <> Self then
       Key := ReplaceAllWideString(Path, 'Talk.', GetTalkContextPrefix(Self))
-    else if TalkShip <> nil then
-      Key := ReplaceAllWideString(Path, 'Talk.', GetTalkContextPrefix(TalkShip))
+    else if LocalHuman.TalkShip <> nil then
+      Key := ReplaceAllWideString(Path, 'Talk.', GetTalkContextPrefix(LocalHuman.TalkShip))
     else
       Key := Path;
   end
@@ -15847,8 +15848,8 @@ begin
   Result := ReplaceColoredToken(Result, '<FullShip>', GetFullName(' '), '<color=255,240,100>');
   Result := ReplaceAllWideString(Result, '<clr>', '<color=255,240,100>');
   Result := ReplaceAllWideString(Result, '<clrEnd>', '</color>');
-  if (GetPlayer = Self) and (TalkShip <> nil) then
-    Result := ReplaceColoredToken(Result, '<TalkShip>', TalkShip.GetName, '<color=255,240,100>');
+  if (GetPlayer = Self) and (LocalHuman.TalkShip <> nil) then
+    Result := ReplaceColoredToken(Result, '<LocalHuman.TalkShip>', LocalHuman.TalkShip.GetName, '<color=255,240,100>');
 end;
 
 function TShip.OpenPlayerConversation(RespectChameleon: Boolean): Boolean;
@@ -15874,17 +15875,17 @@ begin
     Result := False;
     Exit;
   end;
-  TalkShip := Self;
-  TalkPlanet := nil;
-  TalkScripted := RespectChameleon;
-  ResetEvent(TalkCompletedEvent);
-  Handles[0] := TalkCompletedEvent;
-  Handles[1] := ScriptUiAbortEvent;
+  LocalHuman.TalkShip := Self;
+  LocalHuman.TalkPlanet := nil;
+  LocalHuman.TalkScripted := RespectChameleon;
+  ResetEvent(Session.TalkCompletedEvent);
+  Handles[0] := Session.TalkCompletedEvent;
+  Handles[1] := Session.ScriptUiAbortEvent;
   // CHANGE: ENHANCEMENT - The UI runs the conversation while the turn thread waits.
   InterlockedIncrement(TurnYieldedToUi);
   try
-    SetEvent(TalkRequestEvent);
-    SetEvent(ScriptUiRequestEvent);
+    SetEvent(Session.TalkRequestEvent);
+    SetEvent(Session.ScriptUiRequestEvent);
     WaitResult := WaitForMultipleObjects(Length(Handles), @Handles[0], False, INFINITE);
   finally
     InterlockedDecrement(TurnYieldedToUi);
@@ -15892,13 +15893,13 @@ begin
   if WaitResult <> WAIT_OBJECT_0 then
   begin
     Result := False;
-    TalkScripted := False;
-    ResetEvent(TalkRequestEvent);
+    LocalHuman.TalkScripted := False;
+    ResetEvent(Session.TalkRequestEvent);
   end
   else
   begin
-    ResetEvent(ScriptUiRequestEvent);
-    TalkScripted := False;
+    ResetEvent(Session.ScriptUiRequestEvent);
+    LocalHuman.TalkScripted := False;
     SysUtils.Sleep(10);
     Result := True;
   end;
@@ -15906,14 +15907,14 @@ end;
 
 function TShip.ShowPlayerDialogue(Kind: Byte; const Text: WideString; Amount: Integer): Byte;
 begin
-  TalkType := Kind;
+  LocalHuman.TalkType := Kind;
   if Amount > 0 then
-    TalkAmount := Amount;
-  TalkResponse := 0;
-  TalkText := Text;
+    LocalHuman.TalkAmount := Amount;
+  LocalHuman.TalkResponse := 0;
+  LocalHuman.TalkText := Text;
   Result := 0;
   if OpenPlayerConversation(True) then
-    Result := TalkResponse;
+    Result := LocalHuman.TalkResponse;
 end;
 
 procedure TShip.NotifyMoneyDemand(OtherShip: TShip; Response: WideString; Amount: Integer);
@@ -18184,7 +18185,7 @@ begin
       end;
     end;
     Stage := 11;
-    if ScriptActionTypeStack.Count <= 0 then
+    if Session.ScriptActionTypeStack.Count <= 0 then
       for I := CustomShipInfos.Count - 1 downto 0 do
       begin
         Info := CustomShipInfos[I];
@@ -18324,19 +18325,19 @@ begin
       if Stage = 4 then
         AppendLogLineThreadSafe(Info.TypeName);
       AppendLogLineThreadSafe(
-          SysUtils.IntToStr(ScriptActionTypeStack.Count)
+          SysUtils.IntToStr(Session.ScriptActionTypeStack.Count)
               + ','
-              + SysUtils.IntToStr(ScriptActionObject1Stack.Count)
+              + SysUtils.IntToStr(Session.ScriptActionObject1Stack.Count)
               + ','
-              + SysUtils.IntToStr(ScriptActionObject2Stack.Count)
+              + SysUtils.IntToStr(Session.ScriptActionObject2Stack.Count)
               + ','
-              + SysUtils.IntToStr(ScriptActionParamStack.Count)
+              + SysUtils.IntToStr(Session.ScriptActionParamStack.Count)
               + ','
-              + SysUtils.IntToStr(ScriptActionShipStack.Count)
+              + SysUtils.IntToStr(Session.ScriptActionShipStack.Count)
               + ','
-              + SysUtils.IntToStr(ScriptItemInfoContextStack.Count)
+              + SysUtils.IntToStr(Session.ScriptItemInfoContextStack.Count)
               + ','
-              + SysUtils.IntToStr(ScriptItemContextStack.Count)
+              + SysUtils.IntToStr(Session.ScriptItemContextStack.Count)
       );
       if ScriptShip <> nil then
       begin

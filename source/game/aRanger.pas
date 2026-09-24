@@ -238,6 +238,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   SimEvents,
   aHuman,
   TextQuest,
@@ -645,7 +646,7 @@ var
   ProgramIndex: Byte;
 begin
   inherited LoadFromBuffer(Buffer, Galaxy);
-  if (LoadedSaveVersion < 139) and (CreationTurn < 666) then
+  if (Session.LoadedSaveVersion < 139) and (CreationTurn < 666) then
     CreationTurn := 667;
   CareerStatus[Ord(rcTrader)] := Buffer.GetByte;
   CareerStatus[Ord(rcPirate)] := Buffer.GetByte;
@@ -675,19 +676,19 @@ begin
     Quest.Description := Buffer.ReadWideString;
     Quest.CompletionText := Buffer.ReadWideString;
     Quest.SpecialCompletionText := Buffer.ReadWideString;
-    if LoadedSaveVersion <= 141 then
+    if Session.LoadedSaveVersion <= 141 then
       Buffer.GetUInt32;
   end;
   PendingCareerActivity[0] := Buffer.GetByte;
   PendingCareerActivity[1] := Buffer.GetByte;
   PendingCareerActivity[2] := Buffer.GetByte;
-  if LoadedSaveVersion >= 60 then
+  if Session.LoadedSaveVersion >= 60 then
     PrisonTermRemaining := Buffer.GetUInt32
   else
     PrisonTermRemaining := Buffer.GetByte;
   LastDockedNonPlanetLocation := TShip(Buffer.GetUInt32);
   BaseNodes := Buffer.GetInt32;
-  if LoadedSaveVersion < 49 then
+  if Session.LoadedSaveVersion < 49 then
   begin
     ProgramCounts[prgKellerCall] := 0;
     for ProgramIndex := prgLogicalNegation to High(ProgramCounts) do
@@ -696,7 +697,7 @@ begin
   else
     for ProgramIndex := Low(ProgramCounts) to High(ProgramCounts) do
       ProgramCounts[ProgramIndex] := Buffer.GetInt32;
-  if LoadedSaveVersion >= 110 then
+  if Session.LoadedSaveVersion >= 110 then
     ExcludedFromRating := Buffer.GetBoolean;
 end;
 procedure TRanger.ResolveLoadedReferences(Galaxy: TGalaxy);
@@ -5616,9 +5617,9 @@ begin
   end;
   Interval := 10;
   if not ((FractionalQuotient(CurrentPlanet.GenerationSeed, Galaxy.CurrentTurn + 100) >= 1.5)
-      and (ForcedPlanetQuestId < 0)) then
+      and (Session.ForcedPlanetQuestId < 0)) then
   begin
-    if not HasQuestOfType(qtSendLetter) and (ForcedPlanetQuestId < 0) then
+    if not HasQuestOfType(qtSendLetter) and (Session.ForcedPlanetQuestId < 0) then
       if FractionalQuotient(CurrentPlanet.GenerationSeed, (Galaxy.CurrentTurn + 111) div Interval)
           < PlanetGovernmentMarket[Ord(CurrentPlanet.Government)].QuestOfferProbabilities[0] then
       begin
@@ -5762,7 +5763,7 @@ begin
       end;
     if not HasQuestOfType(qtKillShip)
         and (Galaxy.CurrentTurn > 665)
-        and (ForcedPlanetQuestId < 0) then
+        and (Session.ForcedPlanetQuestId < 0) then
       if FractionalQuotient(CurrentPlanet.GenerationSeed, (Galaxy.CurrentTurn + 222) div Interval)
           < PlanetGovernmentMarket[Ord(CurrentPlanet.Government)].QuestOfferProbabilities[1] then
         for I := Min(20, Galaxy.Stars.Count - 1) downto 1 do
@@ -5981,10 +5982,10 @@ begin
             end;
         end;
     FirstStar := 10;
-    if ForcedPlanetQuestId >= 0 then
+    if Session.ForcedPlanetQuestId >= 0 then
       FirstStar := 0;
     if not HasQuestOfType(qtPlanetQuest) then
-      if (ForcedPlanetQuestId >= 0)
+      if (Session.ForcedPlanetQuestId >= 0)
           or (FractionalQuotient(
                   CurrentPlanet.GenerationSeed,
                   (Galaxy.CurrentTurn + 333) div Interval)
@@ -6010,8 +6011,8 @@ begin
                               .GetBlockByPath('PlanetQuest.PlanetQuest')
                               .CountParams(IntToStr(Planet.TextQuestId))
                           > 0)
-                      and ((ForcedPlanetQuestId < 0)
-                          or (Planet.TextQuestId = ForcedPlanetQuestId)) then
+                      and ((Session.ForcedPlanetQuestId < 0)
+                          or (Planet.TextQuestId = Session.ForcedPlanetQuestId)) then
                   begin
                     TextQuest := TTextQuest.Create;
 
@@ -6032,7 +6033,7 @@ begin
 
                     // Native $73996E jumps directly to $739BD2; a combined Boolean
                     // expression introduces temporaries in this DCC32 build.
-                    if ForcedPlanetQuestId >= 0 then
+                    if Session.ForcedPlanetQuestId >= 0 then
                       goto OfferPlanetQuest;
                     if ((((CurrentPlanet.RaceId = Byte(oiMaloc))
                                 and ((TextQuest.IssuerRaceMask and 1) <> 0))
@@ -6143,7 +6144,7 @@ begin
             end;
         end;
     if not HasQuestOfType(qtDefendSystem)
-        and (ForcedPlanetQuestId < 0)
+        and (Session.ForcedPlanetQuestId < 0)
         and (CurrentStar.ShipTypeCounts[stKling] = 0) then
       if FractionalQuotient(CurrentPlanet.GenerationSeed, (Galaxy.CurrentTurn + 444) div Interval)
           < PlanetGovernmentMarket[Ord(CurrentPlanet.Government)].QuestOfferProbabilities[3] then
@@ -6257,7 +6258,7 @@ begin
             end;
           end;
         end;
-    if not HasQuestOfType(qtDefendShip) and (ForcedPlanetQuestId < 0) then
+    if not HasQuestOfType(qtDefendShip) and (Session.ForcedPlanetQuestId < 0) then
       if FractionalQuotient(CurrentPlanet.GenerationSeed, (Galaxy.CurrentTurn + 555) div Interval)
           < PlanetGovernmentMarket[Ord(CurrentPlanet.Government)].QuestOfferProbabilities[4] then
         for I := 0 to Min(20, Galaxy.Stars.Count - 1) do

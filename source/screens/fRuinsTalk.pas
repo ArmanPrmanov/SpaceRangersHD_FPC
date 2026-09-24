@@ -347,6 +347,7 @@ function ApplyRecentDominionOrderSurcharge(Cost: Single): Integer;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   Achievements,
   aKling,
@@ -635,7 +636,7 @@ begin
           TextPanel.VerticalScrollBar.ClientSize.Y + TextExtra
       )
   );
-  TextLabel := TextPanel.FindByNameRecursive('TalkText');
+  TextLabel := TextPanel.FindByNameRecursive('LocalHuman.TalkText');
   TextLabel.SetSize(Classes.Point(TextLabel.ClientSize.X, TextLabel.ClientSize.Y + TextExtra));
   ChoicePanel := TalkPanel.FindByNameRecursive('TalkPA') as TPanelScrollBarGI;
   ChoicePanel.SetPosition(
@@ -943,7 +944,7 @@ begin
                 and (GetPlayer.PendingDockDialogue = 2))
     );
     Stage := 23;
-    TextLabel := GetByName('TalkText') as TLabelGI;
+    TextLabel := GetByName('LocalHuman.TalkText') as TLabelGI;
     if FontDialog = 0 then
       TextLabel.SetFontName(NormalFontName)
     else if FontDialog = 1 then
@@ -985,7 +986,7 @@ begin
   LoadPanel.OnClose;
   HideStationTransientControl;
   StationBridgeMode := 0;
-  ScriptDialogIndex := -1;
+  Session.ScriptDialogIndex := -1;
   ClearChoices;
   MainPanel.OnClose;
   StationPanel.OnClose;
@@ -1473,7 +1474,7 @@ begin
   begin
     Choices := GetByName('TalkPA') as TPanelScrollBarGI;
     Choices.SetActive(True);
-    Choices.VerticalScrollBar.SetSmallChange((GetByName('TalkText') as TLabelGI).GetLineHeight);
+    Choices.VerticalScrollBar.SetSmallChange((GetByName('LocalHuman.TalkText') as TLabelGI).GetLineHeight);
     Choices.VerticalScrollBar.SetLargeChange(Choices.ClientSize.Y);
     Choices.VerticalScrollBar.SetPageSize(Choices.ClientSize.Y);
     Choices.SetScrollOffset(Point(0, 0));
@@ -1498,16 +1499,16 @@ begin
     DialogText := ReplaceAllWideString(DialogText, #13#10, #13#10 + LocalizedTextLinePrefix);
     PresentedTextLength := Length(DialogText);
     DialogText := ReplaceAllWideString(DialogText, '<color=255,240,100>', '<color=0,50,200>');
-    (GetByName('TalkText') as TLabelGI).SetText(DialogText);
+    (GetByName('LocalHuman.TalkText') as TLabelGI).SetText(DialogText);
     TextPanel := GetByName('TextScroll') as TPanelScrollBarGI;
     TextPanel.SetScrollOffset(Point(0, 0));
     TextPanel.UpdateScrollRanges;
     TextPanel.VerticalScrollBar.SetActive(
-        (TextPanel.FindByNameRecursive('TalkText') as TLabelGI).ClientSize.Y
+        (TextPanel.FindByNameRecursive('LocalHuman.TalkText') as TLabelGI).ClientSize.Y
             > TextPanel.ClientSize.Y
     );
     TextPanel.VerticalScrollBar.SetSmallChange(
-        (TextPanel.FindByNameRecursive('TalkText') as TLabelGI).GetLineHeight
+        (TextPanel.FindByNameRecursive('LocalHuman.TalkText') as TLabelGI).GetLineHeight
     );
     TextPanel.VerticalScrollBar.SetLargeChange(TextPanel.ClientSize.Y);
     TextPanel.VerticalScrollBar.SetPageSize(TextPanel.ClientSize.Y);
@@ -1659,7 +1660,7 @@ procedure TfRuinsTalk.AddMessageClicked(Sender: TObjectGI);
 var
   Text: WideString;
 begin
-  Text := (GetByName('TalkText') as TLabelGI).GetText;
+  Text := (GetByName('LocalHuman.TalkText') as TLabelGI).GetText;
   Text := ReplaceAllWideString(Text, '<color=0,50,200>', '<color=255,240,100>');
   (Sender as TGraphButtonGI).SetDisabled(True);
   SoundManager.PlaySound('Sound.UserMsgAdd');
@@ -1996,7 +1997,7 @@ begin
     ClearScriptDialogRules;
     Stage := 1;
     ClearChoices;
-    ScriptDialogIndex := -1;
+    Session.ScriptDialogIndex := -1;
     Script := nil;
     Stage := 2;
     if (GetPlayer.DockedTo.TypeId = Byte(rstRangerCenter)) and ShowDominatorVictoryDialog then
@@ -2467,7 +2468,7 @@ begin
                     'FormRuins.' + GetPlayer.DockedTo.GetTypeNameKey + '.SpecialShip.Before');
     end;
     Stage := 17;
-    if ScriptDialogIndex < 0 then
+    if Session.ScriptDialogIndex < 0 then
     begin
       Stage := 18;
       for I := 0 to Galaxy.Scripts.Count - 1 do
@@ -2498,7 +2499,7 @@ begin
         begin
           Script.PublishCurrentShip(GetPlayer.DockedTo);
           Script.CallDialogByVariable(Text);
-          if ScriptDialogIndex < 0 then
+          if Session.ScriptDialogIndex < 0 then
             AppendLogLineThreadSafe(
                 Script.ScriptFileName
                     + ' has overriden dialog with '
@@ -2506,7 +2507,7 @@ begin
                     + ' but it failed to start'
             );
         end;
-        if ScriptDialogIndex < 0 then
+        if Session.ScriptDialogIndex < 0 then
         begin
           Stage := 21;
           M_Main(True);
@@ -3605,17 +3606,17 @@ procedure TfRuinsTalk.SelectScriptDialog(ScriptValue: PtrInt);
 begin
   ClearChoices;
   CurrentScript := TScript(ScriptValue);
-  CurrentScript.CallDialogMessage(ScriptDialogIndex);
+  CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
 end;
 
 procedure TfRuinsTalk.RunScriptAnswer(Answer: PtrInt);
 begin
   ClearChoices;
-  ScriptDialogIndex := -1;
+  Session.ScriptDialogIndex := -1;
   CurrentScript.ExecuteDialogAnswer(Answer);
-  if ScriptDialogIndex < 0 then
+  if Session.ScriptDialogIndex < 0 then
     RaiseWideMessage('I_Script');
-  CurrentScript.CallDialogMessage(ScriptDialogIndex);
+  CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
 end;
 
 procedure TfRuinsTalk.RunScriptAnswerKeepingScroll(Answer: PtrInt);
@@ -3662,7 +3663,7 @@ end;
 procedure TfRuinsTalk.RunScriptGameEnd(Answer: PtrInt);
 begin
   CurrentScript.ExecuteDialogAnswer(Answer);
-  GameEndReason := 0;
+  Session.GameEndReason := 0;
   RequestedScreenId := screenGameEnd;
   RequestClose(1);
 end;
@@ -4388,7 +4389,7 @@ begin
     if GetPlayer.OwnerId <> Byte(oiPirate) then
       GetPlayer.OwnerId := RaceToOwner(SelectFaceScreen.PlayerRace);
     GetPlayer.Name := SelectFaceScreen.PlayerName;
-    LastLoadedPlayerName := GetPlayer.Name;
+    Session.LastLoadedPlayerName := GetPlayer.Name;
     PayNationalityMoney;
     GetPlayer.AddPirateCareerActivity(8);
     Inc(GetPlayer.NationalityChangeCount);
@@ -9553,12 +9554,12 @@ begin
   ClearChoices;
   Injection.Script.PublishCurrentShip(GetPlayer.DockedTo);
   CurrentScript.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Injection.AnswerData);
-  ScriptDialogIndex := -1;
+  Session.ScriptDialogIndex := -1;
   CurrentScript.CallDialogByVariable(Injection.DialogName);
-  if ScriptDialogIndex < 0 then
+  if Session.ScriptDialogIndex < 0 then
     M_Main(True)
   else
-    CurrentScript.CallDialogMessage(ScriptDialogIndex);
+    CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
 end;
 
 procedure TfRuinsTalk.RunInjectedDialogKeepingScroll(Action: PtrInt);

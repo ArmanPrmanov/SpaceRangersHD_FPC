@@ -308,6 +308,7 @@ procedure LinkRecoveredTypes;
 implementation
 
 uses
+  aSession,
   StarScene,
   aHuman,
   EC_Cache,
@@ -526,9 +527,9 @@ var
 begin
   Offset := Classes.Point(0, 0);
   ShowObjectInfo(nil);
-  if TalkShip <> nil then
+  if LocalHuman.TalkShip <> nil then
     SetMapCenter(SubtractPoints(TruncatePointF(Position), Offset))
-  else if (TalkPlanet <> nil) and (TalkPlanet.CurrentStar = GetPlayer.CurrentStar) then
+  else if (LocalHuman.TalkPlanet <> nil) and (LocalHuman.TalkPlanet.CurrentStar = GetPlayer.CurrentStar) then
     SetMapCenter(SubtractPoints(TruncatePointF(Position), Offset));
 end;
 procedure TfStarMap.InitializeLayout;
@@ -795,7 +796,7 @@ begin
     if TerronShip <> nil then
       TerronName := TerronShip.GetFullName(' ');
     if IsTurnCalculationRunning
-        and (WaitForSingleObject(ScriptUiRequestEvent, 0) <> WAIT_OBJECT_0) then
+        and (WaitForSingleObject(Session.ScriptUiRequestEvent, 0) <> WAIT_OBJECT_0) then
       WaitForTurnCalculation;
     if not MemorySnapshotActive then
       SaveGameToMemorySnapshot;
@@ -1387,17 +1388,17 @@ begin
       BreakOnNextFilm := IsVirtualKeyDown(VK_SHIFT);
       LocalHuman.PlayerAutomaticControl := False;
       FilmCameraFollow := ViewFollowShip;
-      if not PlayerStarDayPrepared then
+      if not Session.PlayerStarDayPrepared then
         AppendLogLineThreadSafe('Not calc NextDay header');
       GetPlayer.NextDay;
       QueuePlayerStarTurnCalculation;
-      Events[0] := TurnCalculationThread.IdleEvent;
-      Events[1] := TalkRequestEvent;
+      Events[0] := Session.TurnCalculationThread.IdleEvent;
+      Events[1] := Session.TalkRequestEvent;
       EventList := @Events;
       WaitResult := WaitForMultipleObjects(Length(Events), EventList, False, INFINITE);
       if not ExitScreenLoop then
       begin
-        if (TurnCalculationThread.IdleEvent = 0) or (WaitResult = WAIT_OBJECT_0) then
+        if (Session.TurnCalculationThread.IdleEvent = 0) or (WaitResult = WAIT_OBJECT_0) then
         begin
           RebuildPartnerButtons;
           if (GetPlayer <> nil) and not GetPlayer.InHyperspace then
@@ -1408,7 +1409,7 @@ begin
           raise Exception.Create('Error GetLastError()=' + IntToStr(Int64(GetLastError)))
         else if WaitResult = WAIT_OBJECT_0 + 1 then
         begin
-          ScriptDialogIndex := -1;
+          Session.ScriptDialogIndex := -1;
           RunTalkDialogs;
           WaitForTurnOrTalk;
         end;
@@ -2284,9 +2285,9 @@ begin
       if (GetPlayer.CurrentStar = Ship.CurrentStar) and Ship.InNormalSpace then
         if PointDistance(GetPlayer.Position, Ship.Position) <= GetPlayer.GetRadarRange then
         begin
-          TalkShip := Ship;
-          TalkScripted := False;
-          ScriptDialogIndex := -1;
+          LocalHuman.TalkShip := Ship;
+          LocalHuman.TalkScripted := False;
+          Session.ScriptDialogIndex := -1;
           aCalc.WaitForTurnCalculationUI;
           RunTalkDialogs;
           aCalc.WaitForTurnCalculationUI;
@@ -2710,7 +2711,7 @@ begin
   PrepareTalkDisplay;
   TalkReturnScreenId := FormToId(Self);
   RequestedScreenId := screenTalk;
-  if GetPlayer <> TalkShip then
+  if GetPlayer <> LocalHuman.TalkShip then
     SoundManager.PlaySound('Sound.Talk');
   ScannerSelectionActive := False;
   TalkSelectionActive := False;
@@ -2779,7 +2780,7 @@ begin
   end;
   RestorePendingSceneObjects;
   ResumeMode := smrNormal;
-  if GameEndReason = 4 then
+  if Session.GameEndReason = 4 then
   begin
     RequestedScreenId := screenGameEnd;
     ReleaseAllTextureSurfaces;
@@ -2936,7 +2937,7 @@ begin
   end;
   (GetByName('PM_EndTurn') as TGraphButtonGI).SetHovered(False);
   PostMouseMoveMessage;
-  if GameEndReason = 4 then
+  if Session.GameEndReason = 4 then
   begin
     RequestedScreenId := screenGameEnd;
     ReleaseAllTextureSurfaces;
@@ -3504,9 +3505,9 @@ begin
         HideLargeHelp;
         TalkUnresolved := False;
         CurrentScript := nil;
-        ScriptDialogIndex := -1;
-        TalkShip := CursorObject as TShip;
-        TalkScripted := False;
+        Session.ScriptDialogIndex := -1;
+        LocalHuman.TalkShip := CursorObject as TShip;
+        LocalHuman.TalkScripted := False;
         aCalc.WaitForTurnCalculationUI;
         RunTalkDialogs;
         ClearPathOverlay(True);
@@ -3666,9 +3667,9 @@ begin
     begin
       if PointDistance(GetPlayer.Position, TerronShip.Position) <= GetPlayer.GetRadarRange then
       begin
-        TalkShip := TerronShip;
-        TalkScripted := False;
-        ScriptDialogIndex := -1;
+        LocalHuman.TalkShip := TerronShip;
+        LocalHuman.TalkScripted := False;
+        Session.ScriptDialogIndex := -1;
         aCalc.WaitForTurnCalculationUI;
         RunTalkDialogs;
         aCalc.WaitForTurnCalculationUI;
@@ -4060,9 +4061,9 @@ begin
             else
             begin
               HideLargeHelp;
-              TalkShip := Ship;
-              TalkScripted := False;
-              ScriptDialogIndex := -1;
+              LocalHuman.TalkShip := Ship;
+              LocalHuman.TalkScripted := False;
+              Session.ScriptDialogIndex := -1;
               aCalc.WaitForTurnCalculationUI;
               RunTalkDialogs;
               ClearPathOverlay(True);
@@ -5971,8 +5972,8 @@ procedure TfStarMap.CenterShipMouseEnter(Sender: TObjectGI);
 begin
   // The native guard tests job 5 as well as the declared preparation job 3.
   if IsTurnCalculationRunning
-      and ((TurnCalculationThread.Job = tcjPreparePlayerStar)
-          or (Integer(TurnCalculationThread.Job) = 5)) then
+      and ((Session.TurnCalculationThread.Job = tcjPreparePlayerStar)
+          or (Integer(Session.TurnCalculationThread.Job) = 5)) then
     Exit;
   if GetPlayer <> nil then
     ShowObjectInfo(GetPlayer);
@@ -7175,7 +7176,7 @@ begin
       begin
         Stage := 10;
         StopTurnFilm(True);
-        GameEndReason := 0;
+        Session.GameEndReason := 0;
         RequestedScreenId := screenGameEnd;
         ReleaseAllTextureSurfaces;
         RequestClose(1);
@@ -7315,8 +7316,8 @@ begin
           Stage := 22;
           if IsTurnCalculationRunningUI then
           begin
-            Events[0] := TurnCalculationThread.IdleEvent;
-            Events[1] := TalkRequestEvent;
+            Events[0] := Session.TurnCalculationThread.IdleEvent;
+            Events[1] := Session.TalkRequestEvent;
             EventList := @Events;
             WaitResult := WaitForMultipleObjects(Length(Events), EventList, False, INFINITE);
           end
@@ -7361,11 +7362,11 @@ begin
           QueuePlayerStarPreparation;
           Stage := 28;
           StartScriptRequestThread;
-          Events[0] := TurnCalculationThread.IdleEvent;
-          Events[1] := TalkRequestEvent;
+          Events[0] := Session.TurnCalculationThread.IdleEvent;
+          Events[1] := Session.TalkRequestEvent;
           EventList := @Events;
           WaitResult := WaitForMultipleObjects(Length(Events), EventList, False, INFINITE);
-          if (TurnCalculationThread.IdleEvent = 0) or (WaitResult = WAIT_OBJECT_0) then
+          if (Session.TurnCalculationThread.IdleEvent = 0) or (WaitResult = WAIT_OBJECT_0) then
           begin
             AnimateSpacePanelOnResume := True;
             StartOrderMode;
@@ -7610,8 +7611,8 @@ end;
 procedure TfStarMap.CenterFilmShipMouseEnter(Sender: TObjectGI);
 begin
   if IsTurnCalculationRunning
-      and ((TurnCalculationThread.Job = tcjPreparePlayerStar)
-          or (Integer(TurnCalculationThread.Job) = 5)) then
+      and ((Session.TurnCalculationThread.Job = tcjPreparePlayerStar)
+          or (Integer(Session.TurnCalculationThread.Job) = 5)) then
     Exit;
   if GetPlayer <> nil then
     ShowFilmObjectInfo(GetPlayer.Graphic, GetPlayer.Id);
@@ -9255,9 +9256,9 @@ begin
   FilmCameraMoving := True;
   MainPanel.Show;
   ShowObjectInfo(nil);
-  if TalkShip <> nil then
-    CenterMapForTalk(TalkShip.Position)
-  else if (TalkPlanet <> nil) and (TalkPlanet.CurrentStar = GetPlayer.CurrentStar) then
+  if LocalHuman.TalkShip <> nil then
+    CenterMapForTalk(LocalHuman.TalkShip.Position)
+  else if (LocalHuman.TalkPlanet <> nil) and (LocalHuman.TalkPlanet.CurrentStar = GetPlayer.CurrentStar) then
     CenterMapForTalk(GetPlayer.Position);
   SpaceProcess.Space.DrawMinimap;
   SetCursorActive(False);
@@ -9273,14 +9274,14 @@ var
 begin
   MainPanel.Hide;
   ResumeMode := smrNormal;
-  SetEvent(TalkCompletedEvent);
-  Events[0] := TurnCalculationThread.IdleEvent;
-  Events[1] := TalkRequestEvent;
+  SetEvent(Session.TalkCompletedEvent);
+  Events[0] := Session.TurnCalculationThread.IdleEvent;
+  Events[1] := Session.TalkRequestEvent;
   EventList := @Events;
   WaitResult := WaitForMultipleObjects(Length(Events), EventList, False, INFINITE);
-  if (TurnCalculationThread.IdleEvent = 0) or (WaitResult = WAIT_OBJECT_0) then
+  if (Session.TurnCalculationThread.IdleEvent = 0) or (WaitResult = WAIT_OBJECT_0) then
   begin
-    if PlayerStarDayPrepared then
+    if Session.PlayerStarDayPrepared then
     begin
       AnimateSpacePanelOnResume := True;
       StartOrderMode;
@@ -9457,7 +9458,7 @@ begin
     Exit;
   if ExitScreenLoop then
     Exit;
-  if WaitForSingleObject(ScriptUiRequestEvent, 0) = WAIT_OBJECT_0 then
+  if WaitForSingleObject(Session.ScriptUiRequestEvent, 0) = WAIT_OBJECT_0 then
     Exit;
   if not (TurnCalculationPhase
       in [tcpIdle, tcpGalaxyFinished, tcpPlayerStarFinished, tcpPlayerStarPrepared]) then

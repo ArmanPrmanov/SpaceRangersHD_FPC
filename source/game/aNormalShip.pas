@@ -82,6 +82,7 @@ procedure ProcessSystemLiberationRewards(SourceShip: TNormalShip; Star: TStar);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   EC_Str,
   aGalaxyEvent,
@@ -166,7 +167,7 @@ end;
 procedure TNormalShip.LoadFromBuffer(Buffer: TBufEC; Galaxy: TGalaxy);
 begin
   inherited LoadFromBuffer(Buffer, Galaxy);
-  if LoadedSaveVersion >= 57 then
+  if Session.LoadedSaveVersion >= 57 then
   begin
     TotalShipKillCount := Buffer.GetInt32;
     PirateKillCount := Buffer.GetInt32;
@@ -189,10 +190,10 @@ begin
   CurrentSystemKills.Dominator := Buffer.GetWord;
   CurrentSystemKills.Pirate := Buffer.GetWord;
   CurrentSystemKills.Normal := Buffer.GetWord;
-  if LoadedSaveVersion >= 153 then
+  if Session.LoadedSaveVersion >= 153 then
     CurrentSystemKills.Custom := Buffer.GetWord;
   PendingLiberationCeremonyPlanet := TPlanet(Buffer.GetUInt32);
-  if LoadedSaveVersion >= 80 then
+  if Session.LoadedSaveVersion >= 80 then
     PendingLiberationContribution := Buffer.GetInt32
   else
     PendingLiberationContribution := 0;
@@ -200,7 +201,7 @@ begin
   RankPoints := Buffer.GetWord;
   PirateRank := Buffer.GetByte;
   PirateRankPoints := Buffer.GetUInt32;
-  if (LoadedSaveVersion < 126) and (Buffer.GetByte <> 0) then
+  if (Session.LoadedSaveVersion < 126) and (Buffer.GetByte <> 0) then
     OwnerId := Byte(oiPirate);
   LastDockedPlanet := TPlanet(Buffer.GetUInt32);
   LastPlayerExtortionTurn := Buffer.GetInt32;
@@ -263,7 +264,7 @@ begin
     if (GetPlayer <> nil)
         and (GetPlayer.CurrentStar = CurrentStar)
         and (Order <> soNone)
-        and PlayerStarDayPrepared
+        and Session.PlayerStarDayPrepared
         and (TurnsSinceLastShipMessage > 5)
         and (((Integer(Seed) * Galaxy.CurrentTurn) mod 7) = 0)
         and InNormalSpace

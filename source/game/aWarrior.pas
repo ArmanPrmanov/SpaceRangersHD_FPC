@@ -117,6 +117,8 @@ const
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
+  aSession,
   aEFilmEnd,
   aPlayer,
   aKling,
@@ -381,7 +383,7 @@ end;
 procedure TWarrior.LoadFromBuffer(Buffer: TBufEC; Galaxy: TGalaxy);
 begin
   inherited;
-  if LoadedSaveVersion >= 130 then
+  if Session.LoadedSaveVersion >= 130 then
     WarriorType := Buffer.GetByte
   else
     WarriorType := wtRegular;

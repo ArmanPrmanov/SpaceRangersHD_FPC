@@ -17,6 +17,7 @@ procedure ParkObserverPlayer;
 procedure SimulateParkedTurn;
 implementation
 uses
+  aSession,
   aHuman,
   SysUtils,
   Math,
@@ -57,7 +58,7 @@ begin
     P.Weapons[I].Target := nil;
   LocalHuman.PlayerAutomaticControl := False;
   LocalHuman.PendingPlayerFollowTarget := nil;
-  PlayerStarDayPrepared := False;
+  Session.PlayerStarDayPrepared := False;
   TurnSaveStep := 0;
 end;
 

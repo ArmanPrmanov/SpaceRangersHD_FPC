@@ -335,14 +335,14 @@ begin
   end
   else if GetPlayer.InNormalSpace then
   begin
-    if TalkShip is TRanger then
+    if LocalHuman.TalkShip is TRanger then
     begin
-      (GetByName('NameFace') as TLabelGI).SetText(TalkShip.GetFullName(#13#10));
-      (GetByName('CharFace') as TLabelGI).SetText((TalkShip as TRanger).GetCharacterName);
+      (GetByName('NameFace') as TLabelGI).SetText(LocalHuman.TalkShip.GetFullName(#13#10));
+      (GetByName('CharFace') as TLabelGI).SetText((LocalHuman.TalkShip as TRanger).GetCharacterName);
     end
     else
     begin
-      (GetByName('NameFace') as TLabelGI).SetText(TalkShip.GetFullName(#13#10));
+      (GetByName('NameFace') as TLabelGI).SetText(LocalHuman.TalkShip.GetFullName(#13#10));
       (GetByName('CharFace') as TLabelGI).SetText('');
       GetByName('CloseLine').SetActive(True);
       (GetByName('NameFace') as TLabelGI)
@@ -355,14 +355,14 @@ begin
     begin
       SetActive(True);
       SourceHasPerPixelAlpha := True;
-      if TalkShip.Graphic is TRuinsSE then
+      if LocalHuman.TalkShip.Graphic is TRuinsSE then
         LoadGiByPathIntoGraphBuf(
-            ExtractDelimitedPartW((TalkShip.Graphic as TRuinsSE).StaticImagePath, 1, ','),
+            ExtractDelimitedPartW((LocalHuman.TalkShip.Graphic as TRuinsSE).StaticImagePath, 1, ','),
             GraphBuf
         )
       else
         LoadGiByPathIntoGraphBuf(
-            ExtractDelimitedPartW(TalkShip.GetShipPortraitImagePath, 1, ','),
+            ExtractDelimitedPartW(LocalHuman.TalkShip.GetShipPortraitImagePath, 1, ','),
             GraphBuf
         );
       if Cardinal(GraphBuf.Width) >= Cardinal(GraphBuf.Height) then
@@ -447,7 +447,7 @@ begin
     begin
       with GetByName('FaceI') as TImageGI do
       begin
-        SetImagePath('GI,' + TalkShip.GetCaptainPortraitResourceBase + 'i');
+        SetImagePath('GI,' + LocalHuman.TalkShip.GetCaptainPortraitResourceBase + 'i');
         SetHardwareMirrorHorizontal(HardwareRenderingEnabled);
         SetImageKindX(ikxCenter);
         SetImageKindY(ikyCenter);
@@ -456,7 +456,7 @@ begin
       with GetByName('FaceA') as TgaiGI do
       begin
         FirstFrameOnly := not AnimCaptain;
-        SetImagePath(TalkShip.GetCaptainPortraitResourceBase + 'a');
+        SetImagePath(LocalHuman.TalkShip.GetCaptainPortraitResourceBase + 'a');
         SetHardwareMirrorHorizontal(HardwareRenderingEnabled);
         SequenceIndex := 0;
         UpdateAutoGeometry;
@@ -653,9 +653,9 @@ begin
   begin
     for Good := 0 to 7 do
     begin
-      LocalHuman.TradeRows[Good].Count := TalkShip.CargoGoods[Good].Count;
+      LocalHuman.TradeRows[Good].Count := LocalHuman.TalkShip.CargoGoods[Good].Count;
       LocalHuman.TradeRows[Good].MaximumPrice := GoodsMarket[Good].MaxPrice;
-      if TalkShip.CargoGoods[Good].Count <= 0 then
+      if LocalHuman.TalkShip.CargoGoods[Good].Count <= 0 then
       begin
         LocalHuman.TradeRows[Good].PurchasePrice := Round(Max(GoodsMarket[Good].AveragePrice * 1.1, 0));
         LocalHuman.TradeRows[Good].BaseSalePrice := Round(Max(GoodsMarket[Good].MinPrice, 0));
@@ -666,20 +666,20 @@ begin
             Round(
                 Max(
                     GoodsMarket[Good].AveragePrice * 1.1,
-                    TalkShip.CargoGoods[Good].TotalCost / TalkShip.CargoGoods[Good].Count * 1.3
+                    LocalHuman.TalkShip.CargoGoods[Good].TotalCost / LocalHuman.TalkShip.CargoGoods[Good].Count * 1.3
                 )
             );
         LocalHuman.TradeRows[Good].BaseSalePrice :=
             Round(
                 Max(
                     GoodsMarket[Good].MinPrice,
-                    TalkShip.CargoGoods[Good].TotalCost / TalkShip.CargoGoods[Good].Count * 0.7
+                    LocalHuman.TalkShip.CargoGoods[Good].TotalCost / LocalHuman.TalkShip.CargoGoods[Good].Count * 0.7
                 )
             );
       end;
     end;
-    PartnerCargoLimit := TalkShip.GetCargoFreeSpace - TalkShip.GetDesiredCargoFreeSpace;
-    PartnerMoneyLimit := TalkShip.Money;
+    PartnerCargoLimit := LocalHuman.TalkShip.GetCargoFreeSpace - LocalHuman.TalkShip.GetDesiredCargoFreeSpace;
+    PartnerMoneyLimit := LocalHuman.TalkShip.Money;
   end;
   with GetByName('DownLeft') do
     SetActive((DraggedGoodsIndex >= 10) and (DraggedGoodsIndex < 20));
@@ -837,7 +837,7 @@ begin
   else if GetPlayer.IsDockedToShip then
     Location := GetPlayer.DockedTo
   else if GetPlayer.InNormalSpace then
-    Location := TalkShip
+    Location := LocalHuman.TalkShip
   else
     Location := nil;
   with GetByName('UserMsgAdd') as TGraphButtonGI do
@@ -929,13 +929,13 @@ begin
           if PartnerCargoLimit <= 0 then
             ShowMessageBoxGI(
                 Self,
-                TalkShip.LookupTalkText('Talk.Trade.NoSpace'),
+                LocalHuman.TalkShip.LookupTalkText('Talk.Trade.NoSpace'),
                 mbgCancel or mbgError
             )
           else
             ShowMessageBoxGI(
                 Self,
-                TalkShip.LookupTalkText('Talk.Trade.NoMoney'),
+                LocalHuman.TalkShip.LookupTalkText('Talk.Trade.NoMoney'),
                 mbgOK or mbgError
             );
         end
@@ -1027,13 +1027,13 @@ begin
           if Count > PartnerCargoLimit then
             ShowMessageBoxGI(
                 Self,
-                TalkShip.LookupTalkText('Talk.Trade.NoSpace'),
+                LocalHuman.TalkShip.LookupTalkText('Talk.Trade.NoSpace'),
                 mbgCancel or mbgError
             )
           else
             ShowMessageBoxGI(
                 Self,
-                TalkShip.LookupTalkText('Talk.Trade.NoMoney'),
+                LocalHuman.TalkShip.LookupTalkText('Talk.Trade.NoMoney'),
                 mbgOK or mbgError
             );
         end
@@ -1062,36 +1062,36 @@ begin
           begin
             if DraggedGoodsIndex < 10 then
             begin
-              TalkShip.SetMoney(
-                  TalkShip.Money
+              LocalHuman.TalkShip.SetMoney(
+                  LocalHuman.TalkShip.Money
                       + Count
                           * GetPlayer
                               .ShopGoodsPurchasePrice(ShopGoodsOrder[DraggedGoodsIndex mod 10], nil)
               );
               Dec(
-                  TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex]].TotalCost,
+                  LocalHuman.TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex]].TotalCost,
                   Count
                       * GetPlayer
                           .ShopGoodsPurchasePrice(ShopGoodsOrder[DraggedGoodsIndex mod 10], nil)
               );
-              Dec(TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex]].Count, Count);
+              Dec(LocalHuman.TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex]].Count, Count);
             end
             else
             begin
-              TalkShip.SetMoney(
-                  TalkShip.Money
+              LocalHuman.TalkShip.SetMoney(
+                  LocalHuman.TalkShip.Money
                       - Count
                           * GetPlayer
                               .ShopGoodsSellPrice(ShopGoodsOrder[DraggedGoodsIndex mod 10], nil)
               );
               Inc(
-                  TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex mod 10]].TotalCost,
+                  LocalHuman.TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex mod 10]].TotalCost,
                   Count
                       * GetPlayer.ShopGoodsSellPrice(ShopGoodsOrder[DraggedGoodsIndex mod 10], nil)
               );
-              Inc(TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex mod 10]].Count, Count);
+              Inc(LocalHuman.TalkShip.CargoGoods[ShopGoodsOrder[DraggedGoodsIndex mod 10]].Count, Count);
             end;
-            TalkShip.RefreshDerivedStats(True);
+            LocalHuman.TalkShip.RefreshDerivedStats(True);
           end;
           if DraggedGoodsIndex < 10 then
           begin
@@ -1310,10 +1310,10 @@ begin
     begin
       if PartnerCargoLimit < Result then
         Result := PartnerCargoLimit;
-      if Result * TalkShip.ShopGoodsSellPrice(ShopGoodsOrder[Index - 10], nil)
+      if Result * LocalHuman.TalkShip.ShopGoodsSellPrice(ShopGoodsOrder[Index - 10], nil)
           > PartnerMoneyLimit then
         Result :=
-            PartnerMoneyLimit div TalkShip.ShopGoodsSellPrice(ShopGoodsOrder[Index - 10], nil);
+            PartnerMoneyLimit div LocalHuman.TalkShip.ShopGoodsSellPrice(ShopGoodsOrder[Index - 10], nil);
     end;
   end;
 end;
@@ -1351,7 +1351,7 @@ begin
   else if Location is TRuins then
     Title := WrapTextInColor((Location as TRuins).GetColoredFullName('<color=255,240,100>'), '')
   else if GetPlayer.InNormalSpace then
-    Title := WrapTextInColor(TalkShip.GetFullName(' '), '<color=255,240,100>');
+    Title := WrapTextInColor(LocalHuman.TalkShip.GetFullName(' '), '<color=255,240,100>');
   Text := '<td=' + IntToStr(GiScalePixels(0)) + '>' + '<align=left>' + Title + '</align>';
   Text :=
       Text
@@ -1523,7 +1523,7 @@ begin
   else if GetPlayer.IsDockedToShip then
     Location := GetPlayer.DockedTo
   else if GetPlayer.InNormalSpace then
-    Location := TalkShip
+    Location := LocalHuman.TalkShip
   else
     Location := nil;
   AddOrUpdatePlayerBubble(

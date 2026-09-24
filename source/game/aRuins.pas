@@ -251,6 +251,7 @@ const
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   Classes,
   aWarrior,
@@ -595,7 +596,7 @@ var
   Good: Byte;
 begin
   inherited LoadFromBuffer(Buffer, Galaxy);
-  if LoadedSaveVersion < 102 then
+  if Session.LoadedSaveVersion < 102 then
     Buffer.GetByte;
   Count := Buffer.GetWord;
   if (Count < 0) or (Count > 10000) then
@@ -613,7 +614,7 @@ begin
     ShopGoods[Good].PurchasePrice := Buffer.GetInt32;
     ShopGoods[Good].BaseSalePrice := Buffer.GetInt32;
   end;
-  if LoadedSaveVersion >= 107 then
+  if Session.LoadedSaveVersion >= 107 then
     RelocationAge := Buffer.GetInt32;
   FlyToStar := TStar(Buffer.GetUInt32);
   FlyDate := Buffer.GetInt32;
@@ -628,7 +629,7 @@ begin
   ModernizationSponsor := Buffer.GetBoolean;
   SpecialServiceActive := Buffer.GetBoolean;
   NoLanding := Buffer.GetBoolean;
-  if LoadedSaveVersion >= 83 then
+  if Session.LoadedSaveVersion >= 83 then
     ShopUpdateMode := TShopUpdateMode(Buffer.GetByte)
   else
     ShopUpdateMode := sumNormal;

@@ -45,6 +45,7 @@ procedure LinkRecoveredTypes;
 implementation
 
 uses
+  aSession,
   aHold,
   aHuman,
   aCalc,
@@ -288,7 +289,7 @@ begin
       GameState.AddAnsiChar(#0);
       GameState.AddAnsiChar(#0);
       GameState.AddBoolean(False);
-      GameState.AddBoolean(PlayerStarDayPrepared);
+      GameState.AddBoolean(Session.PlayerStarDayPrepared);
       GameState.AddDWord(LocalHuman.ShownPlayerTips);
       GameState.AddIntegerValue(0);
       Count := CountPersistentPlayerMessages;
@@ -340,10 +341,10 @@ begin
         if (UserSettingsConfig.CountParams('UnicodeDump') > 0)
             and ParseEnabledNameGI(
                 TrimWideString(UserSettingsConfig.GetParamByPathOrMarker('UnicodeDump'))) then
-          EditableSaveBlock.SaveTextFile(PWideChar(EditableSaveFileName), False, False)
+          Session.EditableSaveBlock.SaveTextFile(PWideChar(EditableSaveFileName), False, False)
         else
-          EditableSaveBlock.SaveTextFile(PWideChar(EditableSaveFileName), True, False);
-        EditableSaveBlock.Clear;
+          Session.EditableSaveBlock.SaveTextFile(PWideChar(EditableSaveFileName), True, False);
+        Session.EditableSaveBlock.Clear;
         Galaxy.CampaignFlag183 := 0;
       end;
       Result := True;
@@ -392,10 +393,10 @@ begin
   LoadingGalaxy := Galaxy;
   Galaxy := nil;
   LoadingGalaxy.LoadFromBuffer(Buffer);
-  if ApplyEditableSaveOnLoad then
+  if Session.ApplyEditableSaveOnLoad then
   begin
     Galaxy.ApplyEditableState;
-    ApplyEditableSaveOnLoad := False;
+    Session.ApplyEditableSaveOnLoad := False;
     aCalc.WaitForTurnCalculationUI;
   end;
   Galaxy.RunConfigOnLoadHandlers;
@@ -411,7 +412,7 @@ var
 begin
   Result := False;
   LastSaveLoadError := '';
-  LoadedSaveModSet := SelectedMods;
+  Session.LoadedSaveModSet := SelectedMods;
 
   SaveLoadLock.Enter;
 
@@ -433,7 +434,7 @@ begin
         raise EAbort.Create('Cannot open file ' + FileName);
       if F.ReadWideString <> 'RSG' then
         raise EAbort.Create('Bad pre-signature of file' + FileName);
-      LoadedSaveVersion := ExtractDigitsToIntW(F.ReadWideString);
+      Session.LoadedSaveVersion := ExtractDigitsToIntW(F.ReadWideString);
       F.ReadWideString;
       StrToInt(F.ReadWideString);
       StrToInt(F.ReadWideString);
@@ -481,7 +482,7 @@ begin
       Buffer.GetByte;
       Buffer.GetByte;
       Buffer.GetBoolean;
-      PlayerStarDayPrepared := Buffer.GetBoolean;
+      Session.PlayerStarDayPrepared := Buffer.GetBoolean;
       LocalHuman.ShownPlayerTips := Buffer.GetUInt32;
       Buffer.GetInt32;
       Count := Buffer.GetInt32;
@@ -547,8 +548,8 @@ begin
             Galaxy := nil;
           end;
         end;
-        if EditableSaveBlock <> nil then
-          EditableSaveBlock.Clear;
+        if Session.EditableSaveBlock <> nil then
+          Session.EditableSaveBlock.Clear;
       end;
     end;
     LoadingFilmCount := -1;
@@ -606,12 +607,12 @@ begin
   Dec(Galaxy.SaveCount);
   PrepareGalaxyForSave;
   Galaxy.SaveToBuffer(MemorySnapshotBuffer);
-  if Galaxy.ContainsShipReference(TalkShip) then
-    MemorySnapshotBuffer.AddDWord(TalkShip.Id)
+  if Galaxy.ContainsShipReference(LocalHuman.TalkShip) then
+    MemorySnapshotBuffer.AddDWord(LocalHuman.TalkShip.Id)
   else
     MemorySnapshotBuffer.AddDWord(0);
-  if Galaxy.ContainsPlanetReference(TalkPlanet) then
-    MemorySnapshotBuffer.AddDWord(TalkPlanet.Id)
+  if Galaxy.ContainsPlanetReference(LocalHuman.TalkPlanet) then
+    MemorySnapshotBuffer.AddDWord(LocalHuman.TalkPlanet.Id)
   else
     MemorySnapshotBuffer.AddDWord(0);
   if Galaxy.ContainsShipReference(ShipScreen.ShipToInspect) then
@@ -645,7 +646,7 @@ begin
   MemorySnapshotBuffer.SetPosition(0);
   MemorySnapshotActive := True;
   Galaxy := TGalaxy.Create;
-  LoadedSaveVersion := CurrentSaveVersion;
+  Session.LoadedSaveVersion := CurrentSaveVersion;
   Count := MemorySnapshotBuffer.GetInt32;
   for I := 0 to Count - 1 do
   begin
@@ -665,8 +666,8 @@ begin
   end;
   Galaxy.LoadFromBuffer(MemorySnapshotBuffer);
   Dec(Galaxy.LoadCount);
-  TalkShip := Galaxy.IdToShip(MemorySnapshotBuffer.GetUInt32, True);
-  TalkPlanet := Galaxy.IdToPlanet(MemorySnapshotBuffer.GetUInt32);
+  LocalHuman.TalkShip := Galaxy.IdToShip(MemorySnapshotBuffer.GetUInt32, True);
+  LocalHuman.TalkPlanet := Galaxy.IdToPlanet(MemorySnapshotBuffer.GetUInt32);
   ShipScreen.ShipToInspect := Galaxy.IdToShip(MemorySnapshotBuffer.GetUInt32, True);
   for I := MessageLoopStack.Count - 1 downto 0 do
   begin
@@ -720,7 +721,7 @@ begin
     else if Loop is TfTalk then
     begin
       RequestedScreenId := TalkReturnScreenId;
-      if TalkScripted then
+      if LocalHuman.TalkScripted then
         RaiseWideMessage('gtalk AI');
       Loop.RequestClose(1);
     end

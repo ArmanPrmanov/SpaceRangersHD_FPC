@@ -26,6 +26,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   Classes,
   Windows,
@@ -109,7 +110,7 @@ begin
     // CHANGE: BUGFIX - Generation keeps the legacy stream seeded from GenerationSeed.
     LegacyGenerationRandom := True;
 
-    PlayerStarDayPrepared := True;
+    Session.PlayerStarDayPrepared := True;
     Galaxy := TGalaxy.Create;
     for Skill := 0 to 7 do
       Galaxy.DifficultyLevels[Skill] := DifficultyLevels[Skill];
@@ -544,7 +545,7 @@ begin
     GetPlayer.HomePlanet.ChangeRelationToRanger(GetPlayer, 100);
     GetPlayer.Name := PlayerName;
     LocalHuman.PlayerOldQuests := aMyFunction.TObjectList.Create;
-    LastLoadedPlayerName := PlayerName;
+    Session.LastLoadedPlayerName := PlayerName;
     Stage := 8;
 
     Galaxy.RefreshRangerWealthStats;

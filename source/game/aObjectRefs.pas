@@ -22,6 +22,8 @@ var
   UnresolvedObjectCount: Integer;
 implementation
 uses
+  aHuman,
+  aSession,
   SysUtils,
   Classes,
   contnrs,
@@ -414,7 +416,7 @@ begin
     CollectObjectIdentities;
     for I := 0 to IdentityCount - 1 do
       Resolver.Objects.Add(AnsiString(Identities[I].Key), Pointer(Identities[I].Address));
-    Resolver.ResolveArray(SharedScriptVariables);
+    Resolver.ResolveArray(Session.SharedScriptVariables);
     for I := 0 to Galaxy.Scripts.Count - 1 do
     begin
       Script := TScript(Galaxy.Scripts[I]);

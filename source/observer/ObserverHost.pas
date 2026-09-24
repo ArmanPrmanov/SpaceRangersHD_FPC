@@ -6,6 +6,7 @@ interface
 procedure RunObserver(const SavePath: AnsiString);
 implementation
 uses
+  aSession,
   aHuman,
   SysUtils,
   Classes,
@@ -1502,8 +1503,8 @@ procedure TObserverScreen.OnClose;
 begin
   if Worker <> nil then
   begin
-    SetEvent(ScriptUiAbortEvent);
-    SetEvent(TalkCompletedEvent);
+    SetEvent(Session.ScriptUiAbortEvent);
+    SetEvent(Session.TalkCompletedEvent);
     Worker.WaitFor;
     Worker.Recording.Free;
     FreeAndNil(Worker)

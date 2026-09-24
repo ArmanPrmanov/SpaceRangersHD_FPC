@@ -179,6 +179,8 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
+  aSession,
   GR_Main,
   SE_Hole,
   SysUtils,
@@ -873,7 +875,7 @@ begin
   DominatorSeries := TDominatorSeries(Buffer.GetByte);
   ActiveProgramAppliedTurn := Buffer.GetInt32;
   ActiveProgramId := Buffer.GetByte;
-  if LoadedSaveVersion <= 147 then
+  if Session.LoadedSaveVersion <= 147 then
     ClearRecentlyDroppedItems;
 end;
 

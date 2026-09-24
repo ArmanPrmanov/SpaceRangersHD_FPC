@@ -1,43 +1,10 @@
 # Root globals (Globals, GlobalsV, GR_Main) that simulation units use, by kind.
-# session: game state; film: the turn's recording; scene: scene objects and templates that
+# film: the turn's recording; scene: scene objects and templates that
 # simulation objects own (Ship.Graphic and the like; separating them is beyond Phase 2);
 # app: the application is quitting; data: game data loaded at start; settings: user
 # options; ui: screens and presentation. tools/check_layers.py fails when a simulation unit
 # uses a root global that is not listed here, or a ui global that is not in the allowlist.
-session  ApplyEditableSaveOnLoad
-session  EditableSaveBlock
-session  ForcedPlanetQuestId
-session  GameEndReason
-session  GlobalScriptVariables
-session  LastLoadedPlayerName
-session  LoadedSaveModSet
-session  LoadedSaveVersion
-session  PlayerStarDayPrepared
-session  ScriptActionObject1Stack
-session  ScriptActionObject2Stack
-session  ScriptActionParamStack
-session  ScriptActionShipStack
-session  ScriptActionTypeStack
-session  ScriptDialogIndex
-session  ScriptItemContextStack
-session  ScriptItemInfoContextStack
-session  ScriptTemplates
-session  ScriptTemplateStartRequested
-session  ScriptUiAbortEvent
-session  ScriptUiRequestEvent
-session  ScriptUseItem
-session  SharedScriptVariables
-session  TalkAmount
-session  TalkCompletedEvent
-session  TalkPlanet
-session  TalkRequestEvent
-session  TalkResponse
-session  TalkScripted
-session  TalkShip
-session  TalkText
-session  TalkType
-session  TurnCalculationThread
-session  UselessItemRemainsCount
+# The session globals moved to aSession (Session) and aHuman (LocalHuman).
 film     FilmHistory
 film     PreviousFilmActivity
 film     PrimaryFilm

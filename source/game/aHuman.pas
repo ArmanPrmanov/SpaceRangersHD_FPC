@@ -51,6 +51,15 @@ type
     TradeRows: array[0..7] of TGoodsShopTradeRow;
     // Whether the star map shows its weapon panel.
     StarMapWeaponPanelOpen: Boolean;
+    // The conversation the human is in: with a ship or a planet, and what the turn thread
+    // and the conversation screen pass each other.
+    TalkShip: TShip;
+    TalkPlanet: TPlanet;
+    TalkScripted: Boolean;
+    TalkType: Byte;
+    TalkResponse: Byte;
+    TalkText: WideString;
+    TalkAmount: Integer;
   end;
 var
   LocalHuman: THumanState;

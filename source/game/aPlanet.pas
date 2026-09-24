@@ -206,6 +206,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   SimulationThread,
   Windows,
@@ -2004,13 +2005,13 @@ begin
     HillTiles := Buffer.GetInt32;
     HillExplored := Buffer.GetInt32;
     ProbeOrbitCount := Buffer.GetByte;
-    if GlobalsV.LoadedSaveVersion >= 99 then
+    if Session.LoadedSaveVersion >= 99 then
       HasPlayerLanded := Buffer.GetBoolean
     else
       HasPlayerLanded := False;
     Stage := 1;
     for Track := 0 to 19 do
-      if GlobalsV.LoadedSaveVersion <= 90 then
+      if Session.LoadedSaveVersion <= 90 then
       begin
         Buffer.GetByte;
         InventionLevels[Track] := Buffer.GetByte;
@@ -2019,7 +2020,7 @@ begin
       end
       else
         InventionLevels[Track] := Buffer.GetByte;
-    if GlobalsV.LoadedSaveVersion <= 90 then
+    if Session.LoadedSaveVersion <= 90 then
       CurrentInvention := Buffer.GetByte shr 1
     else
       CurrentInvention := Buffer.GetByte;
@@ -2032,7 +2033,7 @@ begin
     OwnerId := Buffer.GetByte;
     RaceId := Buffer.GetByte;
     Government := TPlanetGovernment(Buffer.GetByte);
-    if GlobalsV.LoadedSaveVersion < 96 then
+    if Session.LoadedSaveVersion < 96 then
       Buffer.GetByte;
     Stage := 2;
     for Good := 0 to 7 do
@@ -2076,7 +2077,7 @@ begin
     HomeRangerCount := Buffer.GetWord;
     HomeTransportCount := Buffer.GetWord;
     Buffer.GetWord;
-    if GlobalsV.LoadedSaveVersion < 144 then
+    if Session.LoadedSaveVersion < 144 then
       Buffer.GetWord;
     Buffer.GetWord;
     Buffer.GetWord;
@@ -2121,7 +2122,7 @@ begin
     end;
     Stage := 12;
     NoLanding := Buffer.GetBoolean;
-    if GlobalsV.LoadedSaveVersion >= 83 then
+    if Session.LoadedSaveVersion >= 83 then
       ShopUpdateMode := Buffer.GetByte
     else
       ShopUpdateMode := 0;
@@ -2131,7 +2132,7 @@ begin
     IsMainPiratePlanet := Buffer.GetBoolean;
     if IsMainPiratePlanet then
       MainPiratePlanet := Self;
-    if GlobalsV.LoadedSaveVersion >= 166 then
+    if Session.LoadedSaveVersion >= 166 then
       CustomFaction := Buffer.ReadWideString;
   except
     on E: SysUtils.Exception do
@@ -2502,7 +2503,7 @@ begin
     Item := EquipmentShop[i];
     Item.ResolveLoadedReferences(Galaxy);
   end;
-  if (GlobalsV.LoadedSaveVersion < 106) and IsMainPiratePlanet then
+  if (Session.LoadedSaveVersion < 106) and IsMainPiratePlanet then
     for i := Count - 1 downto 0 do
     begin
       Item := EquipmentShop[i];
@@ -3584,22 +3585,22 @@ begin
     Result := False;
     Exit;
   end;
-  TalkShip := nil;
-  TalkPlanet := Self;
-  TalkScripted := True;
-  ResetEvent(TalkCompletedEvent);
+  LocalHuman.TalkShip := nil;
+  LocalHuman.TalkPlanet := Self;
+  LocalHuman.TalkScripted := True;
+  ResetEvent(Session.TalkCompletedEvent);
   // CHANGE: ENHANCEMENT - The UI runs the dialogue while the turn thread waits.
   InterlockedIncrement(TurnYieldedToUi);
   try
-    SetEvent(TalkRequestEvent);
-    WaitResult := WaitForSingleObject(TalkCompletedEvent, INFINITE);
+    SetEvent(Session.TalkRequestEvent);
+    WaitResult := WaitForSingleObject(Session.TalkCompletedEvent, INFINITE);
   finally
     InterlockedDecrement(TurnYieldedToUi);
   end;
   if WaitResult <> WAIT_OBJECT_0 then
   begin
     Result := False;
-    ResetEvent(TalkRequestEvent);
+    ResetEvent(Session.TalkRequestEvent);
   end
   else
   begin

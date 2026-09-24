@@ -123,6 +123,8 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
+  aSession,
   SE_Process,
   Classes,
   GR_Main,
@@ -419,11 +421,11 @@ begin
   Id := Buffer.GetUInt32;
   if Id >= World.NextMissileId then
     World.NextMissileId := Id + 1;
-  if LoadedSaveVersion >= 159 then
+  if Session.LoadedSaveVersion >= 159 then
     WeaponId := Buffer.GetUInt32;
   ItemType := Byte(MigrateSavedItemType(Buffer.GetByte));
   TechLevel := Buffer.GetByte;
-  if LoadedSaveVersion >= 100 then
+  if Session.LoadedSaveVersion >= 100 then
   begin
     MinDamage := Buffer.GetInt32;
     MaxDamage := Buffer.GetInt32;
@@ -433,16 +435,16 @@ begin
     MinDamage := Buffer.GetByte;
     MaxDamage := Buffer.GetByte;
   end;
-  if LoadedSaveVersion >= 157 then
+  if Session.LoadedSaveVersion >= 157 then
   begin
     MicroModuleIndex := ReadSavedMicroModuleIndex(Buffer);
     SpecialModuleIndex := ReadSavedMicroModuleIndex(Buffer);
   end
-  else if LoadedSaveVersion >= 82 then
+  else if Session.LoadedSaveVersion >= 82 then
   begin
     MicroModuleIndex := Buffer.GetInt32;
     SpecialModuleIndex := Buffer.GetInt32;
-    if LoadedSaveVersion >= 98 then
+    if Session.LoadedSaveVersion >= 98 then
     begin
       if MicroModuleIndex > 0 then
       begin
@@ -465,7 +467,7 @@ begin
     MicroModuleIndex := 0;
     SpecialModuleIndex := 0;
   end;
-  if LoadedSaveVersion < 98 then
+  if Session.LoadedSaveVersion < 98 then
   begin
     if MicroModuleIndex <> 0 then
     begin
@@ -501,7 +503,7 @@ begin
   FlightTicks := Buffer.GetInt32;
   SourceHeading := Buffer.GetSingle;
   Speed := Buffer.GetSingle;
-  if LoadedSaveVersion >= 95 then
+  if Session.LoadedSaveVersion >= 95 then
     MaximumSpeed := Buffer.GetSingle
   else
     MaximumSpeed :=

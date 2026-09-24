@@ -164,6 +164,7 @@ procedure FreeAchievementData(Data: PAchievementData);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   aRanger,
   aShip,
@@ -237,7 +238,7 @@ end;
 
 procedure TAchievementStats.LoadFromBuffer(Buffer: TBufEC);
 begin
-  if LoadedSaveVersion >= 99 then
+  if Session.LoadedSaveVersion >= 99 then
   begin
     AsteroidsDestroyed := Buffer.GetUInt32;
     EnemiesDestroyedByStarHeat := Buffer.GetUInt32;

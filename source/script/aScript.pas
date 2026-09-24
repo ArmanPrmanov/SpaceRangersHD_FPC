@@ -587,6 +587,8 @@ function GetScriptContextDescription: WideString;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
+  aSession,
   aCalc,
   Math,
   GI_MessageLoop,
@@ -961,8 +963,8 @@ end;
 function DispatchPendingScriptRequests: Boolean;
 begin
   Result := True;
-  if (TurnCalculationThread <> nil) and TurnCalculationThread.IsRunning then
-    TurnCalculationThread.WaitForIdle(INFINITE);
+  if (Session.TurnCalculationThread <> nil) and Session.TurnCalculationThread.IsRunning then
+    Session.TurnCalculationThread.WaitForIdle(INFINITE);
   if TryDispatchResumingScriptRequest then
     Exit;
   if TryShowQueuedArcadeBattle then
@@ -993,8 +995,8 @@ end;
 
 procedure TScriptThread.Execute;
 begin
-  if (TurnCalculationThread <> nil) and TurnCalculationThread.IsRunning then
-    TurnCalculationThread.WaitForIdle(INFINITE);
+  if (Session.TurnCalculationThread <> nil) and Session.TurnCalculationThread.IsRunning then
+    Session.TurnCalculationThread.WaitForIdle(INFINITE);
   if HasPendingScriptRequests then
   begin
     if CurrentScreenId = screenShip then
@@ -1140,14 +1142,14 @@ var
   Candidates: TList;
   I: Integer;
 begin
-  SharedScriptVariables.GetVar('GRunFrom').SetInt(RunFrom);
-  SharedScriptVariables.GetVar('GRunStar').SetDword(PtrUInt(Star));
+  Session.SharedScriptVariables.GetVar('GRunFrom').SetInt(RunFrom);
+  Session.SharedScriptVariables.GetVar('GRunStar').SetDword(PtrUInt(Star));
   Candidates := TList.Create;
   CollectInactiveScriptTemplates(Candidates);
   for I := 0 to Candidates.Count - 1 do
   begin
     Template := TScriptTemplUnit(Candidates[I]);
-    ScriptTemplateStartRequested := False;
+    Session.ScriptTemplateStartRequested := False;
     try
       Template.ConditionCode.Run(ScriptProcess);
     except
@@ -1161,8 +1163,8 @@ begin
         raise Exception.Create(AnsiString('Error in global code of script ' + Template.FileName));
       end;
     end;
-    if ScriptTemplateStartRequested then
-      TryStartScriptInstanceFromTemplate(Star, nil, ScriptTemplates.IndexOf(Template));
+    if Session.ScriptTemplateStartRequested then
+      TryStartScriptInstanceFromTemplate(Star, nil, Session.ScriptTemplates.IndexOf(Template));
   end;
   Candidates.Free;
 end;
@@ -1188,7 +1190,7 @@ var
   Script: TScript;
   Index: Integer;
 begin
-  Template := TScriptTemplUnit(ScriptTemplates[TemplateIndex]);
+  Template := TScriptTemplUnit(Session.ScriptTemplates[TemplateIndex]);
   Script := TScript.Create;
   Galaxy.Scripts.Add(Script);
   Template.ActiveScriptIndex := Galaxy.Scripts.Count - 1;
@@ -1225,7 +1227,7 @@ begin
   Index := FindScriptTemplateIndex(Script.ScriptFileName);
   if Index < 0 then
     Exit;
-  Template := TScriptTemplUnit(ScriptTemplates[Index]);
+  Template := TScriptTemplUnit(Session.ScriptTemplates[Index]);
   I := Galaxy.Scripts.IndexOf(Script);
   NewScript := TScript.Create;
   Galaxy.Scripts[I] := NewScript;
@@ -1263,7 +1265,7 @@ var
   ErrorText: WideString;
   Version: Cardinal;
 begin
-  Template := TScriptTemplUnit(ScriptTemplates[TemplateIndex]);
+  Template := TScriptTemplUnit(Session.ScriptTemplates[TemplateIndex]);
   Control := nil;
   try
     Control := TCBufControlEC.Create;
@@ -1278,7 +1280,7 @@ begin
       Exit;
     end;
     Buffer.GetUInt32;
-    GlobalScriptVariables.AppendFromBuffer(Buffer);
+    Session.GlobalScriptVariables.AppendFromBuffer(Buffer);
     Analyzer := TCodeAnalyzerEC.Create;
     Analyzer.Tokenize(Buffer.ReadWideString);
     Analyzer.RemoveComments;
@@ -2443,7 +2445,7 @@ begin
   CurrentScript := Self;
   CurrentDialog := Index;
   SkipGreeting := False;
-  ScriptDialogIndex := -1;
+  Session.ScriptDialogIndex := -1;
   try
     TScriptDialog(Dialogs[Index]).Code.Run(ScriptProcess);
   except
@@ -3066,7 +3068,7 @@ var
       State.StepTypeMask := [0..11];
     end;
     State.ActionCode.LinkAll(ScriptFunctionScope, False);
-    State.ActionCode.LinkAll(SharedScriptVariables, False);
+    State.ActionCode.LinkAll(Session.SharedScriptVariables, False);
     State.ActionCode.LinkAll(InitCode.LocalVar, False);
     State.ActionCode.ScriptFunLinked := True;
   end;
@@ -3482,7 +3484,7 @@ begin
   InitCode.LocalVar.Add('GVideoStatus', vkInt).SetInt(0);
   InitCode.LocalVar.Add('GAnswerData', vkDword).SetInt(0);
   InitCode.LinkAll(ScriptFunctionScope, False);
-  InitCode.LinkAll(SharedScriptVariables, False);
+  InitCode.LinkAll(Session.SharedScriptVariables, False);
   InitCode.LinkAll(InitCode.LocalVar, False);
   InitCode.ScriptFunLinked := True;
   if CreateObjects then
@@ -3510,7 +3512,7 @@ begin
   if ErrorText <> '' then
     RaiseWideMessage('CodeTurn.Compiler. Error=' + ErrorText);
   TurnCode.LinkAll(ScriptFunctionScope, False);
-  TurnCode.LinkAll(SharedScriptVariables, False);
+  TurnCode.LinkAll(Session.SharedScriptVariables, False);
   TurnCode.LinkAll(InitCode.LocalVar, False);
   TurnCode.ScriptFunLinked := True;
   if Version > 5 then
@@ -3526,7 +3528,7 @@ begin
     if ErrorText <> '' then
       RaiseWideMessage('CodeTurn.Compiler. Error=' + ErrorText);
     AuxiliaryCode.LinkAll(ScriptFunctionScope, False);
-    AuxiliaryCode.LinkAll(SharedScriptVariables, False);
+    AuxiliaryCode.LinkAll(Session.SharedScriptVariables, False);
     AuxiliaryCode.LinkAll(InitCode.LocalVar, False);
     AuxiliaryCode.ScriptFunLinked := True;
   end;
@@ -3566,7 +3568,7 @@ begin
       if ErrorText <> '' then
         RaiseWideMessage('StateCodeText.Compiler. Error=' + ErrorText + ' State=' + State.Name);
       State.AuxiliaryCode.LinkAll(ScriptFunctionScope, False);
-      State.AuxiliaryCode.LinkAll(SharedScriptVariables, False);
+      State.AuxiliaryCode.LinkAll(Session.SharedScriptVariables, False);
       State.AuxiliaryCode.LinkAll(InitCode.LocalVar, False);
       State.AuxiliaryCode.ScriptFunLinked := True;
     end;
@@ -3592,7 +3594,7 @@ begin
       if ErrorText <> '' then
         RaiseWideMessage('StateCodeEther.Compiler. Error=' + ErrorText + ' State=' + State.Name);
       State.EntryCode.LinkAll(ScriptFunctionScope, False);
-      State.EntryCode.LinkAll(SharedScriptVariables, False);
+      State.EntryCode.LinkAll(Session.SharedScriptVariables, False);
       State.EntryCode.LinkAll(InitCode.LocalVar, False);
       State.EntryCode.ScriptFunLinked := True;
     end;
@@ -3607,7 +3609,7 @@ begin
     if ErrorText <> '' then
       RaiseWideMessage('StateTurn.Compiler. Error=' + ErrorText + ' State=' + State.Name);
     State.StateCode.LinkAll(ScriptFunctionScope, False);
-    State.StateCode.LinkAll(SharedScriptVariables, False);
+    State.StateCode.LinkAll(Session.SharedScriptVariables, False);
     State.StateCode.LinkAll(InitCode.LocalVar, False);
     State.StateCode.ScriptFunLinked := True;
   end;
@@ -3628,7 +3630,7 @@ begin
     if ErrorText <> '' then
       RaiseWideMessage('Dialog.Code.Compiler. Error=' + ErrorText + ' State=' + Dialog.Name);
     Dialog.Code.LinkAll(ScriptFunctionScope, False);
-    Dialog.Code.LinkAll(SharedScriptVariables, False);
+    Dialog.Code.LinkAll(Session.SharedScriptVariables, False);
     Dialog.Code.LinkAll(InitCode.LocalVar, False);
     Dialog.Code.ScriptFunLinked := True;
     InitCode.LocalVar.GetVar(Dialog.Name).SetInt(I);
@@ -3652,7 +3654,7 @@ begin
           'DialogMsg.Code.Compiler. Error=' + ErrorText + ' State=' + DialogMessage.Name
       );
     DialogMessage.Code.LinkAll(ScriptFunctionScope, False);
-    DialogMessage.Code.LinkAll(SharedScriptVariables, False);
+    DialogMessage.Code.LinkAll(Session.SharedScriptVariables, False);
     DialogMessage.Code.LinkAll(InitCode.LocalVar, False);
     DialogMessage.Code.ScriptFunLinked := True;
   end;
@@ -3675,7 +3677,7 @@ begin
           'DialogAnswer.CodeAnswer.Compiler. Error=' + ErrorText + ' State=' + DialogAnswer.Name
       );
     DialogAnswer.AnswerCode.LinkAll(ScriptFunctionScope, False);
-    DialogAnswer.AnswerCode.LinkAll(SharedScriptVariables, False);
+    DialogAnswer.AnswerCode.LinkAll(Session.SharedScriptVariables, False);
     DialogAnswer.AnswerCode.LinkAll(InitCode.LocalVar, False);
     DialogAnswer.AnswerCode.ScriptFunLinked := True;
     Analyzer := TCodeAnalyzerEC.Create;
@@ -3691,7 +3693,7 @@ begin
           'DialogAnswer.Code.Compiler. Error=' + ErrorText + ' State=' + DialogAnswer.Name
       );
     DialogAnswer.ActionCode.LinkAll(ScriptFunctionScope, False);
-    DialogAnswer.ActionCode.LinkAll(SharedScriptVariables, False);
+    DialogAnswer.ActionCode.LinkAll(Session.SharedScriptVariables, False);
     DialogAnswer.ActionCode.LinkAll(InitCode.LocalVar, False);
     DialogAnswer.ActionCode.ScriptFunLinked := True;
   end;
@@ -4368,9 +4370,9 @@ begin
     end
     else
       ScriptItem := GetItem(Name);
-    if LoadedSaveVersion >= 162 then
+    if Session.LoadedSaveVersion >= 162 then
       ScriptItem.CanSell := Buffer.GetBoolean;
-    if LoadedSaveVersion >= 123 then
+    if Session.LoadedSaveVersion >= 123 then
     begin
       ScriptItem.Data[1] := Buffer.GetInt32;
       ScriptItem.Data[2] := Buffer.GetInt32;
@@ -4379,11 +4381,11 @@ begin
       ScriptItem.TextData2 := Buffer.ReadWideString;
       ScriptItem.TextData3 := Buffer.ReadWideString;
     end;
-    if LoadedSaveVersion >= 69 then
+    if Session.LoadedSaveVersion >= 69 then
       ScriptItem.OnUseText := Buffer.ReadWideString
     else
       ScriptItem.OnUseText := '';
-    if LoadedSaveVersion >= 87 then
+    if Session.LoadedSaveVersion >= 87 then
       ScriptItem.OnActionText := Buffer.ReadWideString
     else
       ScriptItem.OnActionText := '';
@@ -4421,10 +4423,10 @@ begin
       Binding.State := TScriptState(States[StateIndex])
     else
       Binding.State := nil;
-    if LoadedSaveVersion >= 149 then
+    if Session.LoadedSaveVersion >= 149 then
     begin
       Binding.StateText := Buffer.ReadWideString;
-      if LoadedSaveVersion < 151 then
+      if Session.LoadedSaveVersion < 151 then
         Buffer.GetByte;
     end
     else
@@ -4728,7 +4730,7 @@ begin
   SavedScript := CurrentScript;
   if Scope = nil then
     CurrentScript := nil;
-  Code.LinkAll(SharedScriptVariables, False);
+  Code.LinkAll(Session.SharedScriptVariables, False);
   Code.LinkAll(ScriptFunctionScope, False);
   Code.ScriptFunLinked := True;
   if Scope <> nil then
@@ -4787,7 +4789,7 @@ end;
 
 procedure RunScriptCode(ContextName: WideString; Code, ParentCode: TCodeEC);
 begin
-  Code.LinkAll(SharedScriptVariables, False);
+  Code.LinkAll(Session.SharedScriptVariables, False);
   if not Code.ScriptFunLinked then
   begin
     Code.LinkAll(ScriptFunctionScope, False);
@@ -5140,7 +5142,7 @@ begin
   if Entry = nil then
     Exit;
   Code := Entry.Code;
-  Code.LinkAll(SharedScriptVariables, False);
+  Code.LinkAll(Session.SharedScriptVariables, False);
   Code.LinkAll(ScriptFunctionScope, False);
   Code.ScriptFunLinked := True;
   SavedScript := CurrentScript;
@@ -5223,7 +5225,7 @@ begin
     ActionTypes := ExtractDelimitedPartW(ActionTypes, 0, '|');
     ActionCode := CompileScriptText(SourceText);
     ActionCode.LinkAll(ScriptFunctionScope, False);
-    ActionCode.LinkAll(SharedScriptVariables, False);
+    ActionCode.LinkAll(Session.SharedScriptVariables, False);
     if Script <> nil then
       ActionCode.LinkAll(Script.InitCode.LocalVar, False);
     ActionCode.ScriptFunLinked := True;
@@ -5291,23 +5293,23 @@ begin
       begin
         ScriptSnap(Snapshot);
         Script.PublishCurrentShip(Ship);
-        ScriptItemContextStack.Add(Item);
-        ScriptItemInfoContextStack.Add(nil);
-        ScriptActionTypeStack.Add(Pointer(ActionType));
-        ScriptActionObject1Stack.Add(Object1);
-        ScriptActionObject2Stack.Add(Object2);
-        ScriptActionParamStack.Add(Pointer(Param));
-        ScriptActionShipStack.Add(Ship);
+        Session.ScriptItemContextStack.Add(Item);
+        Session.ScriptItemInfoContextStack.Add(nil);
+        Session.ScriptActionTypeStack.Add(Pointer(ActionType));
+        Session.ScriptActionObject1Stack.Add(Object1);
+        Session.ScriptActionObject2Stack.Add(Object2);
+        Session.ScriptActionParamStack.Add(Pointer(Param));
+        Session.ScriptActionShipStack.Add(Ship);
         RunScriptCode(OnActionText, ActionCode, Script.InitCode);
         ScriptUnSnap(Snapshot);
-        Result := PtrInt(ScriptActionParamStack[ScriptActionParamStack.Count - 1]);
-        ScriptActionTypeStack.Delete(ScriptActionTypeStack.Count - 1);
-        ScriptActionObject1Stack.Delete(ScriptActionObject1Stack.Count - 1);
-        ScriptActionObject2Stack.Delete(ScriptActionObject2Stack.Count - 1);
-        ScriptActionParamStack.Delete(ScriptActionParamStack.Count - 1);
-        ScriptActionShipStack.Delete(ScriptActionShipStack.Count - 1);
-        ScriptItemInfoContextStack.Delete(ScriptItemInfoContextStack.Count - 1);
-        ScriptItemContextStack.Delete(ScriptItemContextStack.Count - 1);
+        Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
+        Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
+        Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
+        Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
+        Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
+        Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
+        Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
+        Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
         Exit;
       end;
     except
@@ -5338,23 +5340,23 @@ begin
         try
           ScriptSnap(Snapshot);
           Script.PublishCurrentShip(Ship);
-          ScriptItemContextStack.Add(nil);
-          ScriptItemInfoContextStack.Add(nil);
-          ScriptActionTypeStack.Add(Pointer(ActionType));
-          ScriptActionObject1Stack.Add(Object1);
-          ScriptActionObject2Stack.Add(Object2);
-          ScriptActionParamStack.Add(Pointer(Param));
-          ScriptActionShipStack.Add(Ship);
+          Session.ScriptItemContextStack.Add(nil);
+          Session.ScriptItemInfoContextStack.Add(nil);
+          Session.ScriptActionTypeStack.Add(Pointer(ActionType));
+          Session.ScriptActionObject1Stack.Add(Object1);
+          Session.ScriptActionObject2Stack.Add(Object2);
+          Session.ScriptActionParamStack.Add(Pointer(Param));
+          Session.ScriptActionShipStack.Add(Ship);
           RunScriptCode(State.OnActionText, State.ActionCode, Script.InitCode);
           ScriptUnSnap(Snapshot);
-          Result := PtrInt(ScriptActionParamStack[ScriptActionParamStack.Count - 1]);
-          ScriptActionTypeStack.Delete(ScriptActionTypeStack.Count - 1);
-          ScriptActionObject1Stack.Delete(ScriptActionObject1Stack.Count - 1);
-          ScriptActionObject2Stack.Delete(ScriptActionObject2Stack.Count - 1);
-          ScriptActionParamStack.Delete(ScriptActionParamStack.Count - 1);
-          ScriptActionShipStack.Delete(ScriptActionShipStack.Count - 1);
-          ScriptItemInfoContextStack.Delete(ScriptItemInfoContextStack.Count - 1);
-          ScriptItemContextStack.Delete(ScriptItemContextStack.Count - 1);
+          Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
+          Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
+          Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
+          Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
+          Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
+          Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
+          Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
+          Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
         except
           on E: Exception do
           begin
@@ -5377,7 +5379,7 @@ begin
   Result := 0;
   if Item = nil then
     Exit;
-  ScriptUseItem := Item;
+  Session.ScriptUseItem := Item;
   Binding := Item.ScriptItem as TScriptItem;
   SavedScript := CurrentScript;
   CurrentScript := nil;
@@ -5401,18 +5403,18 @@ begin
   end;
   if Text <> '' then
   begin
-    ScriptActionParamStack.Add(nil);
-    ScriptActionShipStack.Add(Ship);
+    Session.ScriptActionParamStack.Add(nil);
+    Session.ScriptActionShipStack.Add(Ship);
     if ParentCode <> nil then
       ExecuteScriptText(Text, ParentCode.LocalVar)
     else
       ExecuteScriptText(Text, nil);
-    Result := PtrInt(ScriptActionParamStack[ScriptActionParamStack.Count - 1]);
-    ScriptActionParamStack.Delete(ScriptActionParamStack.Count - 1);
-    ScriptActionShipStack.Delete(ScriptActionShipStack.Count - 1);
+    Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
+    Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
+    Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
   end;
   CurrentScript := SavedScript;
-  ScriptUseItem := nil;
+  Session.ScriptUseItem := nil;
 end;
 
 function RunItemConfigActionCode(
@@ -5441,13 +5443,13 @@ begin
         Binding := TScriptItem(Item.ScriptItem);
         ParentCode := nil;
         try
-          ScriptItemContextStack.Add(Item);
-          ScriptItemInfoContextStack.Add(nil);
-          ScriptActionTypeStack.Add(Pointer(ActionType));
-          ScriptActionObject1Stack.Add(Object1);
-          ScriptActionObject2Stack.Add(Object2);
-          ScriptActionParamStack.Add(Pointer(Param));
-          ScriptActionShipStack.Add(Ship);
+          Session.ScriptItemContextStack.Add(Item);
+          Session.ScriptItemInfoContextStack.Add(nil);
+          Session.ScriptActionTypeStack.Add(Pointer(ActionType));
+          Session.ScriptActionObject1Stack.Add(Object1);
+          Session.ScriptActionObject2Stack.Add(Object2);
+          Session.ScriptActionParamStack.Add(Pointer(Param));
+          Session.ScriptActionShipStack.Add(Ship);
           ScriptSnap(Snapshot);
           if (Binding <> nil) and (Binding.Script <> nil) then
           begin
@@ -5456,14 +5458,14 @@ begin
           end;
           RunScriptCode(Entry.SourceText, Entry.Code, ParentCode);
           ScriptUnSnap(Snapshot);
-          Result := PtrInt(ScriptActionParamStack[ScriptActionParamStack.Count - 1]);
-          ScriptActionTypeStack.Delete(ScriptActionTypeStack.Count - 1);
-          ScriptActionObject1Stack.Delete(ScriptActionObject1Stack.Count - 1);
-          ScriptActionObject2Stack.Delete(ScriptActionObject2Stack.Count - 1);
-          ScriptActionParamStack.Delete(ScriptActionParamStack.Count - 1);
-          ScriptActionShipStack.Delete(ScriptActionShipStack.Count - 1);
-          ScriptItemInfoContextStack.Delete(ScriptItemInfoContextStack.Count - 1);
-          ScriptItemContextStack.Delete(ScriptItemContextStack.Count - 1);
+          Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
+          Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
+          Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
+          Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
+          Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
+          Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
+          Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
+          Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
         except
           on E: Exception do
           begin
@@ -5522,13 +5524,13 @@ begin
     if ActionType in Entry.ActionTypeMask then
       if (ActionType <> satOnStep) or (Param in Entry.StepTypeMask) then
       begin
-        ScriptItemContextStack.Add(nil);
-        ScriptItemInfoContextStack.Add(Info);
-        ScriptActionTypeStack.Add(Pointer(ActionType));
-        ScriptActionObject1Stack.Add(Object1);
-        ScriptActionObject2Stack.Add(Object2);
-        ScriptActionParamStack.Add(Pointer(Param));
-        ScriptActionShipStack.Add(Ship);
+        Session.ScriptItemContextStack.Add(nil);
+        Session.ScriptItemInfoContextStack.Add(Info);
+        Session.ScriptActionTypeStack.Add(Pointer(ActionType));
+        Session.ScriptActionObject1Stack.Add(Object1);
+        Session.ScriptActionObject2Stack.Add(Object2);
+        Session.ScriptActionParamStack.Add(Pointer(Param));
+        Session.ScriptActionShipStack.Add(Ship);
         try
           ScriptSnap(Snapshot);
           RunScriptCode(Entry.SourceText, Entry.Code, nil);
@@ -5543,14 +5545,14 @@ begin
             raise;
           end;
         end;
-        Result := PtrInt(ScriptActionParamStack[ScriptActionParamStack.Count - 1]);
-        ScriptActionTypeStack.Delete(ScriptActionTypeStack.Count - 1);
-        ScriptActionObject1Stack.Delete(ScriptActionObject1Stack.Count - 1);
-        ScriptActionObject2Stack.Delete(ScriptActionObject2Stack.Count - 1);
-        ScriptActionParamStack.Delete(ScriptActionParamStack.Count - 1);
-        ScriptActionShipStack.Delete(ScriptActionShipStack.Count - 1);
-        ScriptItemInfoContextStack.Delete(ScriptItemInfoContextStack.Count - 1);
-        ScriptItemContextStack.Delete(ScriptItemContextStack.Count - 1);
+        Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
+        Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
+        Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
+        Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
+        Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
+        Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
+        Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
+        Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
       end;
 end;
 
@@ -5571,15 +5573,15 @@ var
   Item: TItem;
   Binding: TScriptItem;
 begin
-  if ScriptItemContextStack.Count > 0 then
+  if Session.ScriptItemContextStack.Count > 0 then
   begin
-    Info := PCustomShipInfo(ScriptItemInfoContextStack[ScriptItemInfoContextStack.Count - 1]);
+    Info := PCustomShipInfo(Session.ScriptItemInfoContextStack[Session.ScriptItemInfoContextStack.Count - 1]);
     if Info <> nil then
     begin
       Result := Info.TypeName;
       Exit;
     end;
-    Item := TItem(ScriptItemContextStack[ScriptItemInfoContextStack.Count - 1]);
+    Item := TItem(Session.ScriptItemContextStack[Session.ScriptItemInfoContextStack.Count - 1]);
     if Item <> nil then
     begin
       Binding := TScriptItem(Item.ScriptItem);
@@ -5604,24 +5606,24 @@ begin
     else
       Result := CurrentScript.ScriptFileName;
   end
-  else if ScriptUseItem <> nil then
+  else if Session.ScriptUseItem <> nil then
   begin
-    Binding := TScriptItem(ScriptUseItem.ScriptItem);
+    Binding := TScriptItem(Session.ScriptUseItem.ScriptItem);
     if Binding <> nil then
     begin
       if Binding.Script <> nil then
         Result :=
-            ScriptUseItem.GetDisplayName
+            Session.ScriptUseItem.GetDisplayName
                 + ' ('
                 + Binding.Name
                 + ', '
                 + Binding.Script.ScriptFileName
                 + ')'
       else
-        Result := ScriptUseItem.GetDisplayName + ' (' + Binding.Name + ', unknown script)';
+        Result := Session.ScriptUseItem.GetDisplayName + ' (' + Binding.Name + ', unknown script)';
     end
     else
-      Result := ScriptUseItem.GetDisplayName;
+      Result := Session.ScriptUseItem.GetDisplayName;
   end
   else
     Result := 'unknown source';

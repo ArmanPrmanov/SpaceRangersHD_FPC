@@ -688,6 +688,7 @@ function MigrateSavedItemType(ItemType: Byte): TItemType;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   SimEvents,
   aHuman,
   GlobalsV,
@@ -1199,26 +1200,26 @@ var
   end;
 begin
   inherited LoadFromBuffer(Buffer, Galaxy);
-  if LoadedSaveVersion >= 152 then
+  if Session.LoadedSaveVersion >= 152 then
     if Buffer.GetBoolean then
       CustomFaction := Buffer.ReadWideString;
-  if LoadedSaveVersion >= 86 then
+  if Session.LoadedSaveVersion >= 86 then
     if Buffer.GetBoolean then
       ConfigBlockName := Buffer.ReadWideString;
   EquippedFlag := Byte(Buffer.GetBoolean);
   ConditionPercent := Buffer.GetSingle;
   BrokenFlag := Byte(Buffer.GetBoolean);
   AssignedSlotData := Buffer.GetByte;
-  if LoadedSaveVersion >= 157 then
+  if Session.LoadedSaveVersion >= 157 then
   begin
     MicroModuleIndex := ReadSavedMicroModuleIndex(Buffer);
     SpecialModuleIndex := ReadSavedMicroModuleIndex(Buffer);
   end
-  else if LoadedSaveVersion >= 67 then
+  else if Session.LoadedSaveVersion >= 67 then
   begin
     MicroModuleIndex := Buffer.GetInt32;
     SpecialModuleIndex := Buffer.GetInt32;
-    if LoadedSaveVersion >= 98 then
+    if Session.LoadedSaveVersion >= 98 then
     begin
       if MicroModuleIndex > 0 then
       begin
@@ -1241,7 +1242,7 @@ begin
     MicroModuleIndex := Buffer.GetByte;
     SpecialModuleIndex := Buffer.GetByte;
   end;
-  if LoadedSaveVersion < 98 then
+  if Session.LoadedSaveVersion < 98 then
   begin
     if MicroModuleIndex <> 0 then
     begin
@@ -1262,7 +1263,7 @@ begin
         Inc(SpecialModuleIndex);
     end;
   end;
-  if LoadedSaveVersion >= 116 then
+  if Session.LoadedSaveVersion >= 116 then
   begin
     Count := Buffer.GetInt32;
     if Count > 0 then
@@ -1270,7 +1271,7 @@ begin
       ExtraSpecials := TList.Create;
       for Index := 0 to Count - 1 do
       begin
-        if LoadedSaveVersion >= 157 then
+        if Session.LoadedSaveVersion >= 157 then
           ModuleIndex := ReadSavedMicroModuleIndex(Buffer)
         else
         begin
@@ -1282,7 +1283,7 @@ begin
         end;
         if ModuleIndex = 0 then
           ModuleIndex := 1;
-        if LoadedSaveVersion >= 140 then
+        if Session.LoadedSaveVersion >= 140 then
         begin
           New(Entry);
           Entry.ModuleIndexPlusOne := ModuleIndex;
@@ -1323,7 +1324,7 @@ begin
   Buffer := TBufEC.Create;
   SaveToBuffer(Buffer);
   Buffer.SetPosition(0);
-  LoadedSaveVersion := CurrentSaveVersion;
+  Session.LoadedSaveVersion := CurrentSaveVersion;
   Result.LoadFromBuffer(Buffer, Galaxy);
   Result.ResolveLoadedReferences(Galaxy);
   Result.Id := NewId;
@@ -2275,16 +2276,16 @@ var
   end;
 begin
   inherited LoadFromBuffer(Buffer, Galaxy);
-  if LoadedSaveVersion >= 51 then
+  if Session.LoadedSaveVersion >= 51 then
     HullPoints := Buffer.GetInt32
   else
     HullPoints := Buffer.GetWord;
   TechLevel := Buffer.GetByte;
   Armor := ShortInt(Buffer.GetByte);
   SavedHullType := Buffer.GetByte;
-  if LoadedSaveVersion >= 88 then
+  if Session.LoadedSaveVersion >= 88 then
     HullType := SavedHullType
-  else if LoadedSaveVersion >= 67 then
+  else if Session.LoadedSaveVersion >= 67 then
   begin
     if (SavedHullType > 6) and (SavedHullType < 24) then
       SavedHullType := 6;
@@ -2304,7 +2305,7 @@ begin
   end;
   if (HullType = htSpecial) and (SpecialModuleIndex = 0) then
     HullType := htRanger;
-  if LoadedSaveVersion >= 163 then
+  if Session.LoadedSaveVersion >= 163 then
     HullSeries := ReadSavedHullSeriesIndex(Buffer)
   else
   begin
@@ -2312,11 +2313,11 @@ begin
     if (HullSeries = 255) or (High(HullSeriesDefinitions) < HullSeries) then
       HullSeries := -1;
   end;
-  if LoadedSaveVersion >= 50 then
+  if Session.LoadedSaveVersion >= 50 then
     PirateBuilt := Buffer.GetBoolean
   else
     PirateBuilt := False;
-  if LoadedSaveVersion >= 51 then
+  if Session.LoadedSaveVersion >= 51 then
   begin
     CapitalShip := Buffer.GetByte;
     ImpulseShieldsEnabled := Buffer.GetBoolean;
@@ -2332,7 +2333,7 @@ begin
     Energy := 0;
     EnergyMax := 0;
   end;
-  if LoadedSaveVersion >= 52 then
+  if Session.LoadedSaveVersion >= 52 then
     if InterceptorsEnabled then
     begin
       InterceptorTarget := Pointer(Buffer.GetUInt32);
@@ -2345,7 +2346,7 @@ begin
       InterceptorTargetingStrategy := itsManual;
       InterceptorPassCountOverride := 0;
     end
-  else if LoadedSaveVersion = 51 then
+  else if Session.LoadedSaveVersion = 51 then
   begin
     InterceptorTarget := Pointer(Buffer.GetUInt32);
     InterceptorTargetingStrategy := itsManual;
@@ -3121,7 +3122,7 @@ procedure TEngine.LoadFromBuffer(Buffer: TBufEC; Galaxy: TGalaxy);
 begin
   inherited LoadFromBuffer(Buffer, Galaxy);
   TechLevel := Buffer.GetByte;
-  if LoadedSaveVersion >= 161 then
+  if Session.LoadedSaveVersion >= 161 then
     Speed := Buffer.GetInt32
   else
     Speed := Buffer.GetWord;
@@ -3606,7 +3607,7 @@ begin
   inherited LoadFromBuffer(Buffer, Galaxy);
   TechLevel := Buffer.GetByte;
   ScanPower := ShortInt(Buffer.GetByte);
-  if (LoadedSaveVersion < 118)
+  if (Session.LoadedSaveVersion < 118)
       and (MicroModuleIndex <> 0)
       and (MicroModuleTemplates[MicroModuleIndex - 1].ConfigNumber = 122) then
     Inc(ScanPower);
@@ -3782,7 +3783,7 @@ begin
   inherited LoadFromBuffer(Buffer, Galaxy);
   TechLevel := Buffer.GetByte;
   RepairPoints := Buffer.GetByte;
-  if LoadedSaveVersion < 118 then
+  if Session.LoadedSaveVersion < 118 then
   begin
     if TechLevel < 5 then
       Inc(RepairPoints, 5);
@@ -4587,7 +4588,7 @@ begin
   inherited LoadFromBuffer(Buffer, Galaxy);
   TechLevel := Buffer.GetByte;
   Range := Buffer.GetWord;
-  if LoadedSaveVersion >= 115 then
+  if Session.LoadedSaveVersion >= 115 then
   begin
     MinDamage := Buffer.GetInt32;
     MaxDamage := Buffer.GetInt32;
@@ -4606,7 +4607,7 @@ begin
   begin
     Ammo := Buffer.GetUInt32;
     AmmoCapacity := Buffer.GetUInt32;
-    if (LoadedSaveVersion < 118)
+    if (Session.LoadedSaveVersion < 118)
         and (MicroModuleIndex <> 0)
         and (MicroModuleTemplates[MicroModuleIndex - 1].StatBonuses[Ord(bonWMissile)] <> 0) then
       case MicroModuleTemplates[MicroModuleIndex - 1].ConfigNumber of
@@ -5640,7 +5641,7 @@ begin
   begin
     repeat
       ConfigBlockName :=
-          'Remains_' + IntToStr(SeededRandomIntRange(0, UselessItemRemainsCount - 1, Seed));
+          'Remains_' + IntToStr(SeededRandomIntRange(0, Session.UselessItemRemainsCount - 1, Seed));
       if Pos(
               DominatorSeriesNames[Ord(Series)],
               LookupLocalizedTextByKey('UselessItems.' + ConfigBlockName + '.Owner'))
@@ -5707,9 +5708,9 @@ end;
 procedure TUselessItem.LoadFromBuffer(Buffer: TBufEC; Galaxy: TGalaxy);
 begin
   inherited LoadFromBuffer(Buffer, Galaxy);
-  if LoadedSaveVersion < 86 then
+  if Session.LoadedSaveVersion < 86 then
     ConfigBlockName := Buffer.ReadWideString;
-  if LoadedSaveVersion >= 76 then
+  if Session.LoadedSaveVersion >= 76 then
   begin
     CustomText := Buffer.ReadWideString;
     Data[0] := Buffer.GetInt32;
@@ -6364,7 +6365,7 @@ end;
 procedure TMicroModule.LoadFromBuffer(Buffer: TBufEC; Galaxy: TGalaxy);
 begin
   inherited LoadFromBuffer(Buffer, Galaxy);
-  if LoadedSaveVersion < 113 then
+  if Session.LoadedSaveVersion < 113 then
     Buffer.GetInt32;
   if MicroModuleIndex = 0 then
     MicroModuleIndex := 1;
@@ -7871,7 +7872,7 @@ begin
   Data[1] := Buffer.GetInt32;
   Data[2] := Buffer.GetInt32;
   Data[3] := Buffer.GetInt32;
-  if LoadedSaveVersion >= 96 then
+  if Session.LoadedSaveVersion >= 96 then
   begin
     if Buffer.GetBoolean then
       TextData1 := Buffer.ReadWideString;
@@ -8112,15 +8113,15 @@ end;
 
 function MigrateSavedItemType(ItemType: Byte): TItemType;
 begin
-  if (LoadedSaveVersion < 164) and (TItemType(ItemType) > t_Artefact) then
+  if (Session.LoadedSaveVersion < 164) and (TItemType(ItemType) > t_Artefact) then
     Inc(ItemType);
-  if (LoadedSaveVersion < 78) and (TItemType(ItemType) > t_ArtBio) then
+  if (Session.LoadedSaveVersion < 78) and (TItemType(ItemType) > t_ArtBio) then
     Inc(ItemType);
-  if (LoadedSaveVersion < 131) and (TItemType(ItemType) > t_ArtPDTurret) then
+  if (Session.LoadedSaveVersion < 131) and (TItemType(ItemType) > t_ArtPDTurret) then
     Inc(ItemType);
-  if (LoadedSaveVersion < 78) and (TItemType(ItemType) > t_Weapon15) then
+  if (Session.LoadedSaveVersion < 78) and (TItemType(ItemType) > t_Weapon15) then
     Inc(ItemType, 3);
-  if (LoadedSaveVersion < 127) and (TItemType(ItemType) > t_Weapon18) then
+  if (Session.LoadedSaveVersion < 127) and (TItemType(ItemType) > t_Weapon18) then
     Inc(ItemType);
   Result := TItemType(ItemType);
 end;

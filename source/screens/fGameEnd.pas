@@ -30,6 +30,8 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
+  aSession,
   Math,
   aConst,
   aSaveLoad,
@@ -215,7 +217,7 @@ begin
   CustomPicture := '';
   CustomWin := False;
   CustomLoss := False;
-  if GameEndReason = 0 then
+  if Session.GameEndReason = 0 then
     for I := Galaxy.GalaxyEvents.Count - 1 downto 0 do
     begin
       Event := Galaxy.GalaxyEvents[I];
@@ -234,7 +236,7 @@ begin
         Break;
       end;
     end;
-  if (GameEndReason > 4) or CustomWin then
+  if (Session.GameEndReason > 4) or CustomWin then
   begin
     (GetByName('ImageFon1') as TImageGI).SetImagePath('GI,Bm.FormIntro2.2bg');
     (GetByName('ImageFon2') as TImageGI).SetImagePath('GI,Bm.FormIntro2.2bg');
@@ -255,55 +257,55 @@ begin
   ScrollBackground(nil, 0);
   SelectMusic;
   if GetPlayer <> nil then
-    ScoreScreen.RecordPlayerResult((GetPlayer <> nil) and (GameEndReason <> 2) and not CustomLoss);
+    ScoreScreen.RecordPlayerResult((GetPlayer <> nil) and (Session.GameEndReason <> 2) and not CustomLoss);
   Score := ScoreScreen.Entries[ScoreScreen.SelectedIndex];
-  DefaultLoss := (GameEndReason <= 4) and not CustomWin and (CustomPicture = '');
+  DefaultLoss := (Session.GameEndReason <= 4) and not CustomWin and (CustomPicture = '');
   GetByName('Maloc').SetActive((Score.PilotRace = Byte(oiMaloc)) and DefaultLoss);
   GetByName('Peleng').SetActive((Score.PilotRace = Byte(oiPeleng)) and DefaultLoss);
   GetByName('Fei').SetActive((Score.PilotRace = Byte(oiFeyan)) and DefaultLoss);
   GetByName('Gaal').SetActive((Score.PilotRace = Byte(oiGaal)) and DefaultLoss);
   GetByName('PirateWin1Maloc')
-      .SetActive((GameEndReason in [5, 9, 11]) and (Score.PilotRace = Byte(oiMaloc)));
+      .SetActive((Session.GameEndReason in [5, 9, 11]) and (Score.PilotRace = Byte(oiMaloc)));
   GetByName('PirateWin1Peleng')
-      .SetActive((GameEndReason in [5, 9, 11]) and (Score.PilotRace = Byte(oiPeleng)));
+      .SetActive((Session.GameEndReason in [5, 9, 11]) and (Score.PilotRace = Byte(oiPeleng)));
   GetByName('PirateWin1People')
-      .SetActive((GameEndReason in [5, 9, 11]) and (Score.PilotRace = Byte(oiHuman)));
+      .SetActive((Session.GameEndReason in [5, 9, 11]) and (Score.PilotRace = Byte(oiHuman)));
   GetByName('PirateWin1Fei')
-      .SetActive((GameEndReason in [5, 9, 11]) and (Score.PilotRace = Byte(oiFeyan)));
+      .SetActive((Session.GameEndReason in [5, 9, 11]) and (Score.PilotRace = Byte(oiFeyan)));
   GetByName('PirateWin1Gaal')
-      .SetActive((GameEndReason in [5, 9, 11]) and (Score.PilotRace = Byte(oiGaal)));
-  GetByName('PirateWin2').SetActive(GameEndReason in [6, 10]);
+      .SetActive((Session.GameEndReason in [5, 9, 11]) and (Score.PilotRace = Byte(oiGaal)));
+  GetByName('PirateWin2').SetActive(Session.GameEndReason in [6, 10]);
   GetByName('PirateWin3Maloc')
-      .SetActive((GameEndReason in [7, 18]) and (Score.PilotRace = Byte(oiMaloc)));
+      .SetActive((Session.GameEndReason in [7, 18]) and (Score.PilotRace = Byte(oiMaloc)));
   GetByName('PirateWin3Peleng')
-      .SetActive((GameEndReason in [7, 18]) and (Score.PilotRace = Byte(oiPeleng)));
+      .SetActive((Session.GameEndReason in [7, 18]) and (Score.PilotRace = Byte(oiPeleng)));
   GetByName('PirateWin3People')
-      .SetActive((GameEndReason in [7, 18]) and (Score.PilotRace = Byte(oiHuman)));
+      .SetActive((Session.GameEndReason in [7, 18]) and (Score.PilotRace = Byte(oiHuman)));
   GetByName('PirateWin3Fei')
-      .SetActive((GameEndReason in [7, 18]) and (Score.PilotRace = Byte(oiFeyan)));
+      .SetActive((Session.GameEndReason in [7, 18]) and (Score.PilotRace = Byte(oiFeyan)));
   GetByName('PirateWin3Gaal')
-      .SetActive((GameEndReason in [7, 18]) and (Score.PilotRace = Byte(oiGaal)));
-  GetByName('PirateWin4Maloc').SetActive((GameEndReason = 8) and (Score.PilotRace = Byte(oiMaloc)));
+      .SetActive((Session.GameEndReason in [7, 18]) and (Score.PilotRace = Byte(oiGaal)));
+  GetByName('PirateWin4Maloc').SetActive((Session.GameEndReason = 8) and (Score.PilotRace = Byte(oiMaloc)));
   GetByName('PirateWin4Peleng')
-      .SetActive((GameEndReason = 8) and (Score.PilotRace = Byte(oiPeleng)));
+      .SetActive((Session.GameEndReason = 8) and (Score.PilotRace = Byte(oiPeleng)));
   GetByName('PirateWin4People')
-      .SetActive((GameEndReason = 8) and (Score.PilotRace = Byte(oiHuman)));
-  GetByName('PirateWin4Fei').SetActive((GameEndReason = 8) and (Score.PilotRace = Byte(oiFeyan)));
-  GetByName('PirateWin4Gaal').SetActive((GameEndReason = 8) and (Score.PilotRace = Byte(oiGaal)));
+      .SetActive((Session.GameEndReason = 8) and (Score.PilotRace = Byte(oiHuman)));
+  GetByName('PirateWin4Fei').SetActive((Session.GameEndReason = 8) and (Score.PilotRace = Byte(oiFeyan)));
+  GetByName('PirateWin4Gaal').SetActive((Session.GameEndReason = 8) and (Score.PilotRace = Byte(oiGaal)));
   GetByName('PirateWin5Maloc')
-      .SetActive((GameEndReason in [12..14]) and (Score.PilotRace = Byte(oiMaloc)));
+      .SetActive((Session.GameEndReason in [12..14]) and (Score.PilotRace = Byte(oiMaloc)));
   GetByName('PirateWin5Peleng')
-      .SetActive((GameEndReason in [12..14]) and (Score.PilotRace = Byte(oiPeleng)));
+      .SetActive((Session.GameEndReason in [12..14]) and (Score.PilotRace = Byte(oiPeleng)));
   GetByName('PirateWin5People')
-      .SetActive((GameEndReason in [12..14]) and (Score.PilotRace = Byte(oiHuman)));
+      .SetActive((Session.GameEndReason in [12..14]) and (Score.PilotRace = Byte(oiHuman)));
   GetByName('PirateWin5Fei')
-      .SetActive((GameEndReason in [12..14]) and (Score.PilotRace = Byte(oiFeyan)));
+      .SetActive((Session.GameEndReason in [12..14]) and (Score.PilotRace = Byte(oiFeyan)));
   GetByName('PirateWin5Gaal')
-      .SetActive((GameEndReason in [12..14]) and (Score.PilotRace = Byte(oiGaal)));
-  GetByName('PirateWin6').SetActive(GameEndReason = 15);
-  GetByName('PirateWin7').SetActive(GameEndReason = 16);
-  GetByName('PirateWin8').SetActive(GameEndReason = 17);
-  GetByName('PirateWin').SetActive((GameEndReason > 18) or (CustomWin and (CustomPicture = '')));
+      .SetActive((Session.GameEndReason in [12..14]) and (Score.PilotRace = Byte(oiGaal)));
+  GetByName('PirateWin6').SetActive(Session.GameEndReason = 15);
+  GetByName('PirateWin7').SetActive(Session.GameEndReason = 16);
+  GetByName('PirateWin8').SetActive(Session.GameEndReason = 17);
+  GetByName('PirateWin').SetActive((Session.GameEndReason > 18) or (CustomWin and (CustomPicture = '')));
   with GetByName('MainPanel') do
   begin
     Control := FirstChild;
@@ -314,8 +316,8 @@ begin
       Control := Control.NextSibling;
     end;
   end;
-  (GetByName('Load') as TGraphButtonGI).SetDisabled(GameEndReason > 4);
-  if GameEndReason > 4 then
+  (GetByName('Load') as TGraphButtonGI).SetDisabled(Session.GameEndReason > 4);
+  if Session.GameEndReason > 4 then
   begin
     with GetByName('Load') do
     begin
@@ -337,9 +339,9 @@ begin
     TextPanelTop := LocalPosition.Y;
     TextPanelHeight := ClientSize.Y;
   end;
-  if GameEndReason > 4 then
-    Text := LookupLocalizedTextByKey(AnsiString('FormGameEnd.WinPirate') + IntToStr(GameEndReason))
-  else if GameEndReason = 4 then
+  if Session.GameEndReason > 4 then
+    Text := LookupLocalizedTextByKey(AnsiString('FormGameEnd.WinPirate') + IntToStr(Session.GameEndReason))
+  else if Session.GameEndReason = 4 then
   begin
     if Galaxy.CoalitionDefeatedTurn <> 0 then
       Text := LocalizedColorText('FormGameEnd.LossConvertToTerron3')
@@ -415,9 +417,9 @@ begin
         Text := PickLocalizedTextVariant('FormGameEnd.LossKilledBySunDamage', Random(100000));
     end;
   end;
-  if LastLoadedPlayerName = '' then
-    LastLoadedPlayerName := 'GPlayerName='#39;
-  ReplaceTextToken(Text, '<Player>', LastLoadedPlayerName, '<color=255,240,100>');
+  if Session.LastLoadedPlayerName = '' then
+    Session.LastLoadedPlayerName := 'GPlayerName='#39;
+  ReplaceTextToken(Text, '<Player>', Session.LastLoadedPlayerName, '<color=255,240,100>');
   ReplaceTextToken(Text, '<Date>', FormatGameTurnDate(Galaxy.CurrentTurn), '<color=255,240,100>');
   if FindTextOffsetW(Text, '<Money>') >= 0 then
     if LastMedicalPolicyTicks = 0 then
@@ -524,7 +526,7 @@ begin
   if (Galaxy <> nil) and not Galaxy.Destroying then
     Galaxy.Free;
   Galaxy := nil;
-  if GameEndReason <= 4 then
+  if Session.GameEndReason <= 4 then
     RequestedScreenId := screenScores
   else
   begin
@@ -576,17 +578,17 @@ var
   I: Integer;
   Event: TGalaxyEvent;
 begin
-  if GameEndReason > 4 then
+  if Session.GameEndReason > 4 then
   begin
     MusicManager.PlayCategory('Win');
     Exit;
   end;
-  if (GameEndReason <> 0) or (Galaxy = nil) then
+  if (Session.GameEndReason <> 0) or (Galaxy = nil) then
   begin
     MusicManager.PlayCategory('Loss');
     Exit;
   end;
-  if GameEndReason = 0 then
+  if Session.GameEndReason = 0 then
     for I := Galaxy.GalaxyEvents.Count - 1 downto 0 do
     begin
       Event := Galaxy.GalaxyEvents[I];

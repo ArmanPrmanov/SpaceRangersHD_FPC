@@ -81,6 +81,8 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
+  aSession,
   aHold,
   GI_MessageBox,
   GR_DX,
@@ -578,10 +580,10 @@ begin
                 mbgOK or mbgCancel or mbgQuestion)
             = mbgResultOK then
         begin
-          EditableSaveBlock.Clear;
-          EditableSaveBlock
+          Session.EditableSaveBlock.Clear;
+          Session.EditableSaveBlock
               .LoadFromTextFileWithEncodingProbe(PWideChar(EditableSaveFileName), True);
-          ApplyEditableSaveOnLoad := True;
+          Session.ApplyEditableSaveOnLoad := True;
         end;
       ShipScreen.SelectedHoldKind := phkEmpty;
       ShipScreen.SelectedHoldItem := nil;

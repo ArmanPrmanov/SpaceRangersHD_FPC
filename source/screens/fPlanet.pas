@@ -33,6 +33,7 @@ type
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   Math,
   aCalc,
@@ -150,7 +151,7 @@ begin
   begin
     Event := AddGalaxyEvent('PlayerDeath');
     Event.AddTextData('PlanetCaptured');
-    GameEndReason := 2;
+    Session.GameEndReason := 2;
     RequestedScreenId := screenGameEnd;
     RequestClose(1);
     Exit;

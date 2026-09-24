@@ -661,6 +661,7 @@ procedure InitializeScriptBuiltinsAndConstants(Scope: TVarArrayEC);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHold,
   aHuman,
   StrUtils,
@@ -747,7 +748,7 @@ uses
   GI_GraphBuf;
 procedure SF_GRun(av: array of TVarEC; code: TCodeEC);
 begin
-  ScriptTemplateStartRequested := True;
+  Session.ScriptTemplateStartRequested := True;
 end;
 procedure SF_GCntRun(av: array of TVarEC; code: TCodeEC);
 var
@@ -758,7 +759,7 @@ begin
   Index := FindScriptTemplateIndex(av[1].GetString);
   if Index < 0 then
     raise Exception.Create('Error.Script.NotFound SF_GCntRun');
-  av[0].SetInt(TScriptTemplUnit(ScriptTemplates[Index]).UseCount);
+  av[0].SetInt(TScriptTemplUnit(Session.ScriptTemplates[Index]).UseCount);
 end;
 procedure SF_GLastTurnRun(av: array of TVarEC; code: TCodeEC);
 var
@@ -769,10 +770,10 @@ begin
   Index := FindScriptTemplateIndex(av[1].GetString);
   if Index < 0 then
     raise Exception.Create('Error.Script.NotFound SF_GLastTurnRun');
-  if (High(av) >= 2) and (TScriptTemplUnit(ScriptTemplates[Index]).UseCount < 1) then
+  if (High(av) >= 2) and (TScriptTemplUnit(Session.ScriptTemplates[Index]).UseCount < 1) then
     av[0].SetInt(av[2].GetInt)
   else
-    av[0].SetInt(TScriptTemplUnit(ScriptTemplates[Index]).LastTurn);
+    av[0].SetInt(TScriptTemplUnit(Session.ScriptTemplates[Index]).LastTurn);
 end;
 procedure SF_GAllCntRun(av: array of TVarEC; code: TCodeEC);
 var
@@ -799,7 +800,7 @@ begin
   av[0].SetInt(0);
   Index := FindScriptTemplateIndex(av[1].GetString);
   if Index >= 0 then
-    av[0].SetInt(Ord(TScriptTemplUnit(ScriptTemplates[Index]).ActiveScriptIndex >= 0));
+    av[0].SetInt(Ord(TScriptTemplUnit(Session.ScriptTemplates[Index]).ActiveScriptIndex >= 0));
 end;
 procedure SF_GetValueFromScript(av: array of TVarEC; code: TCodeEC);
 var
@@ -822,7 +823,7 @@ begin
     Index := FindScriptTemplateIndex(av[1].GetString);
     if Index < 0 then
       Exit;
-    Index := TScriptTemplUnit(ScriptTemplates[Index]).ActiveScriptIndex;
+    Index := TScriptTemplUnit(Session.ScriptTemplates[Index]).ActiveScriptIndex;
     if Index < 0 then
       Exit;
     Script := TScript(Galaxy.Scripts[Index]);
@@ -874,7 +875,7 @@ begin
   Index := FindScriptTemplateIndex(av[1].GetString);
   if Index < 0 then
     Exit;
-  Index := TScriptTemplUnit(ScriptTemplates[Index]).ActiveScriptIndex;
+  Index := TScriptTemplUnit(Session.ScriptTemplates[Index]).ActiveScriptIndex;
   if Index < 0 then
     Exit;
   Script := TScript(Galaxy.Scripts[Index]);
@@ -3179,9 +3180,9 @@ begin
   begin
     if Immediate then
     begin
-      TalkShip := TShip(av[1].GetDword);
-      TalkScripted := False;
-      ScriptDialogIndex := -1;
+      LocalHuman.TalkShip := TShip(av[1].GetDword);
+      LocalHuman.TalkScripted := False;
+      Session.ScriptDialogIndex := -1;
       StarMapScreen.RunTalkDialogs;
       av[0].SetInt(1);
     end
@@ -3203,14 +3204,14 @@ begin
         Binding := TScriptShip(CurrentScript.Ships[J]);
         if (Binding.GroupIndex = Integer(Obj)) and (GetPlayer <> Binding.Ship) then
         begin
-          ScriptDialogIndex := -1;
+          Session.ScriptDialogIndex := -1;
           CurrentScript.CallDialog(av[1].GetInt);
-          if ScriptDialogIndex >= 0 then
+          if Session.ScriptDialogIndex >= 0 then
           begin
             if Immediate then
             begin
-              TalkShip := Binding.Ship;
-              TalkScripted := False;
+              LocalHuman.TalkShip := Binding.Ship;
+              LocalHuman.TalkScripted := False;
               StarMapScreen.RunTalkDialogs;
               av[0].SetInt(1);
             end
@@ -3224,14 +3225,14 @@ begin
     end
     else if Obj is TShip then
     begin
-      ScriptDialogIndex := -1;
+      Session.ScriptDialogIndex := -1;
       CurrentScript.CallDialog(av[1].GetInt);
-      if ScriptDialogIndex >= 0 then
+      if Session.ScriptDialogIndex >= 0 then
       begin
         if Immediate then
         begin
-          TalkShip := TShip(Obj);
-          TalkScripted := False;
+          LocalHuman.TalkShip := TShip(Obj);
+          LocalHuman.TalkScripted := False;
           StarMapScreen.RunTalkDialogs;
           av[0].SetInt(1);
         end
@@ -3243,9 +3244,9 @@ begin
     end
     else if Obj is TPlanet then
     begin
-      ScriptDialogIndex := -1;
+      Session.ScriptDialogIndex := -1;
       CurrentScript.CallDialog(av[1].GetInt);
-      if (ScriptDialogIndex >= 0) and TPlanet(Obj).RequestDialog then
+      if (Session.ScriptDialogIndex >= 0) and TPlanet(Obj).RequestDialog then
       begin
         av[0].SetInt(1);
         ScriptUnSnap(Snapshot);
@@ -3451,12 +3452,12 @@ begin
     end
     else if LowerCase(AnsiString(av[1].GetString)) = 'main' then
     begin
-      ScriptDialogIndex := -1;
+      Session.ScriptDialogIndex := -1;
       TalkScreen.CodeMsgOut(True);
     end
     else if ExtractDelimitedPartW(LowerCase(AnsiString(av[1].GetString)), 0, '~') = 'exit_end' then
     begin
-      GameEndReason := 4;
+      Session.GameEndReason := 4;
       Count := CountDelimitedPartsW(av[1].GetString, '~');
       if Count > 1 then
         TalkScreen.AddScriptExitChoice(ExtractDelimitedRangeW(av[1].GetString, 1, Count - 1, '~'))
@@ -3621,7 +3622,7 @@ procedure SF_DChange(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) <> 1 then
     raise Exception.Create('Error.Script DChange');
-  ScriptDialogIndex := av[1].GetInt;
+  Session.ScriptDialogIndex := av[1].GetInt;
 end;
 procedure SF_Player(av: array of TVarEC; code: TCodeEC);
 begin
@@ -7569,7 +7570,7 @@ begin
     Index := FindScriptTemplateIndex(ExtractDelimitedPartW(DialogName, 0, ':'));
     if Index < 0 then
       Exit;
-    Index := TScriptTemplUnit(ScriptTemplates[Index]).ActiveScriptIndex;
+    Index := TScriptTemplUnit(Session.ScriptTemplates[Index]).ActiveScriptIndex;
     if Index < 0 then
       Exit;
     New(Entry);
@@ -7605,7 +7606,7 @@ begin
     Index := FindScriptTemplateIndex(ExtractDelimitedPartW(DialogName, 0, ':'));
     if Index < 0 then
       Exit;
-    Index := TScriptTemplUnit(ScriptTemplates[Index]).ActiveScriptIndex;
+    Index := TScriptTemplUnit(Session.ScriptTemplates[Index]).ActiveScriptIndex;
     if Index < 0 then
       Exit;
     New(Entry);
@@ -7657,7 +7658,7 @@ begin
     Index := FindScriptTemplateIndex(ExtractDelimitedPartW(Text, 0, ':'));
     if Index < 0 then
       Exit;
-    Index := TScriptTemplUnit(ScriptTemplates[Index]).ActiveScriptIndex;
+    Index := TScriptTemplUnit(Session.ScriptTemplates[Index]).ActiveScriptIndex;
     if Index < 0 then
       Exit;
     New(Entry);
@@ -7793,18 +7794,18 @@ begin
 end;
 procedure SF_GetTalkShip(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetDword(PtrUInt(TalkShip));
+  av[0].SetDword(PtrUInt(LocalHuman.TalkShip));
 end;
 procedure SF_TalkByAI(av: array of TVarEC; code: TCodeEC);
 begin
-  if TalkScripted then
+  if LocalHuman.TalkScripted then
     av[0].SetInt(1)
   else
     av[0].SetInt(0);
 end;
 procedure SF_GetTalkType(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(TalkType);
+  av[0].SetInt(LocalHuman.TalkType);
 end;
 procedure SF_ScriptRun(av: array of TVarEC; code: TCodeEC);
 var
@@ -11901,7 +11902,7 @@ procedure SF_EndGame(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) > 0 then
   begin
-    GameEndReason := av[1].GetInt;
+    Session.GameEndReason := av[1].GetInt;
     RequestedScreenId := screenGameEnd;
     TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
   end
@@ -11925,7 +11926,7 @@ begin
     Event.AddTextData(av[2].GetString)
   else
     Event.AddTextData('');
-  GameEndReason := 0;
+  Session.GameEndReason := 0;
   RequestedScreenId := screenGameEnd;
   TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
 end;
@@ -11941,7 +11942,7 @@ begin
     Event.AddTextData(av[2].GetString)
   else
     Event.AddTextData('');
-  GameEndReason := 0;
+  Session.GameEndReason := 0;
   RequestedScreenId := screenGameEnd;
   TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
 end;
@@ -15027,7 +15028,7 @@ begin
   begin
     SavedScript := CurrentScript;
     RunCode := CompileScriptText(SourceText);
-    RunCode.LinkAll(SharedScriptVariables, False);
+    RunCode.LinkAll(Session.SharedScriptVariables, False);
     RunCode.LinkAll(ScriptFunctionScope, False);
     RunCode.ScriptFunLinked := True;
     if code <> nil then
@@ -15245,79 +15246,79 @@ begin
 end;
 procedure SF_CurItem(av: array of TVarEC; code: TCodeEC);
 begin
-  if ScriptItemContextStack.Count < 1 then
-    av[0].SetDword(PtrUInt(ScriptUseItem))
+  if Session.ScriptItemContextStack.Count < 1 then
+    av[0].SetDword(PtrUInt(Session.ScriptUseItem))
   else
-    av[0].SetDword(PtrUInt(ScriptItemContextStack[ScriptItemContextStack.Count - 1]));
+    av[0].SetDword(PtrUInt(Session.ScriptItemContextStack[Session.ScriptItemContextStack.Count - 1]));
 end;
 procedure SF_CurInfo(av: array of TVarEC; code: TCodeEC);
 begin
-  if ScriptItemInfoContextStack.Count < 1 then
+  if Session.ScriptItemInfoContextStack.Count < 1 then
     av[0].SetDword(0)
   else
-    av[0].SetDword(PtrUInt(ScriptItemInfoContextStack[ScriptItemInfoContextStack.Count - 1]));
+    av[0].SetDword(PtrUInt(Session.ScriptItemInfoContextStack[Session.ScriptItemInfoContextStack.Count - 1]));
 end;
 procedure SF_ScriptItemActShip(av: array of TVarEC; code: TCodeEC);
 begin
-  if ScriptActionShipStack.Count < 1 then
+  if Session.ScriptActionShipStack.Count < 1 then
     av[0].SetDword(0)
   else
-    av[0].SetDword(PtrUInt(ScriptActionShipStack[ScriptActionShipStack.Count - 1]));
+    av[0].SetDword(PtrUInt(Session.ScriptActionShipStack[Session.ScriptActionShipStack.Count - 1]));
 end;
 procedure SF_ScriptItemActObject1(av: array of TVarEC; code: TCodeEC);
 begin
-  if ScriptActionObject1Stack.Count < 1 then
+  if Session.ScriptActionObject1Stack.Count < 1 then
     av[0].SetDword(0)
   else
-    av[0].SetDword(PtrUInt(ScriptActionObject1Stack[ScriptActionObject1Stack.Count - 1]));
+    av[0].SetDword(PtrUInt(Session.ScriptActionObject1Stack[Session.ScriptActionObject1Stack.Count - 1]));
 end;
 procedure SF_ScriptItemActObject2(av: array of TVarEC; code: TCodeEC);
 begin
-  if ScriptActionObject2Stack.Count < 1 then
+  if Session.ScriptActionObject2Stack.Count < 1 then
     av[0].SetDword(0)
   else
-    av[0].SetDword(PtrUInt(ScriptActionObject2Stack[ScriptActionObject2Stack.Count - 1]));
+    av[0].SetDword(PtrUInt(Session.ScriptActionObject2Stack[Session.ScriptActionObject2Stack.Count - 1]));
 end;
 procedure SF_ScriptItemActionType(av: array of TVarEC; code: TCodeEC);
 var
   Matches: Boolean;
 begin
-  if ScriptActionTypeStack.Count < 1 then
+  if Session.ScriptActionTypeStack.Count < 1 then
     av[0].SetDword(0)
   else if High(av) <= 0 then
-    av[0].SetDword(PtrUInt(ScriptActionTypeStack[ScriptActionTypeStack.Count - 1]))
+    av[0].SetDword(PtrUInt(Session.ScriptActionTypeStack[Session.ScriptActionTypeStack.Count - 1]))
   else
   begin
-    Matches := Integer(ScriptActionTypeStack[ScriptActionTypeStack.Count - 1]) = av[1].GetInt;
+    Matches := Integer(Session.ScriptActionTypeStack[Session.ScriptActionTypeStack.Count - 1]) = av[1].GetInt;
     if Matches and (High(av) > 1) then
       if av[1].GetInt = 43 then
         Matches :=
-            PtrUInt(ScriptActionParamStack[ScriptActionParamStack.Count - 1]) = av[2].GetDword
+            PtrUInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]) = av[2].GetDword
       else
-        Matches := Integer(ScriptActionParamStack[ScriptActionParamStack.Count - 1]) = av[2].GetInt;
+        Matches := Integer(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]) = av[2].GetInt;
     av[0].SetDword(Ord(Matches));
   end;
 end;
 procedure SF_ScriptItemActParam(av: array of TVarEC; code: TCodeEC);
 begin
-  if ScriptActionParamStack.Count < 1 then
+  if Session.ScriptActionParamStack.Count < 1 then
     av[0]
         .SetInt(0)
         // Purchase action 43 carries the destination object in the parameter slot.
         // Keep numeric actions signed 32-bit, but expose this object as a native-width
         // script DWORD, like ActObject1/ActObject2, rather than truncating its address.
-  else if (ScriptActionTypeStack.Count > 0)
-      and (PtrUInt(ScriptActionTypeStack[ScriptActionTypeStack.Count - 1]) = 43) then
+  else if (Session.ScriptActionTypeStack.Count > 0)
+      and (PtrUInt(Session.ScriptActionTypeStack[Session.ScriptActionTypeStack.Count - 1]) = 43) then
   begin
-    av[0].SetDword(PtrUInt(ScriptActionParamStack[ScriptActionParamStack.Count - 1]));
+    av[0].SetDword(PtrUInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]));
     if High(av) > 0 then
-      ScriptActionParamStack[ScriptActionParamStack.Count - 1] := Pointer(av[1].GetDword);
+      Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1] := Pointer(av[1].GetDword);
   end
   else
   begin
-    av[0].SetInt(Integer(ScriptActionParamStack[ScriptActionParamStack.Count - 1]));
+    av[0].SetInt(Integer(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]));
     if High(av) > 0 then
-      ScriptActionParamStack[ScriptActionParamStack.Count - 1] := Pointer(av[1].GetInt);
+      Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1] := Pointer(av[1].GetInt);
   end;
 end;
 procedure SF_OnUseCodeTranclucator(av: array of TVarEC; code: TCodeEC);
@@ -15330,8 +15331,8 @@ var
   Star: TStar;
   Other: TObject;
 begin
-  if (ScriptUseItem <> nil) and (ScriptUseItem is TArtefactTranclucator) then
-    Item := TArtefactTranclucator(ScriptUseItem)
+  if (Session.ScriptUseItem <> nil) and (Session.ScriptUseItem is TArtefactTranclucator) then
+    Item := TArtefactTranclucator(Session.ScriptUseItem)
   else
   begin
     if High(av) < 1 then
@@ -15371,8 +15372,8 @@ begin
       if Index >= 0 then
         GetPlayer.Inventory.Delete(Index);
       Item.Free;
-      if ScriptUseItem = Item then
-        ScriptUseItem := nil;
+      if Session.ScriptUseItem = Item then
+        Session.ScriptUseItem := nil;
       GetPlayer.RefreshDerivedStats(True);
       Ship.NextDay;
       GetPlayer.AchievementStats.CheckTranclucatorFleetAchievement;
@@ -15406,8 +15407,8 @@ begin
         end;
       end;
       Item.Free;
-      if ScriptUseItem = Item then
-        ScriptUseItem := nil;
+      if Session.ScriptUseItem = Item then
+        Session.ScriptUseItem := nil;
       GetPlayer.RefreshDerivedStats(True);
       SoundManager.PlaySound('Sound.UseATranc');
       ShowMessageBoxGI(
@@ -15432,8 +15433,8 @@ var
   Artefact: TArtefactTransmitter;
   ShowFeedback: Boolean;
 begin
-  if (ScriptUseItem <> nil) and (ScriptUseItem is TArtefactTransmitter) then
-    Artefact := TArtefactTransmitter(ScriptUseItem)
+  if (Session.ScriptUseItem <> nil) and (Session.ScriptUseItem is TArtefactTransmitter) then
+    Artefact := TArtefactTransmitter(Session.ScriptUseItem)
   else
   begin
     if High(av) < 1 then
@@ -15477,7 +15478,7 @@ begin
   else if ShowFeedback then
   begin
     SoundManager.PlaySound('Sound.NoMoney');
-    // The native failure message reads ScriptUseItem even when an explicit artefact was supplied.
+    // The native failure message reads Session.ScriptUseItem even when an explicit artefact was supplied.
     ShowMessageBoxGI(
         ShipScreen,
         FormatText1(
@@ -15485,7 +15486,7 @@ begin
             '<color=255,240,100>',
             '<Count>',
             WideString(
-                IntToStr(MinTransmitterPower - (ScriptUseItem as TArtefactTransmitter).Power)
+                IntToStr(MinTransmitterPower - (Session.ScriptUseItem as TArtefactTransmitter).Power)
             )
         ),
         mbgCancel or mbgUnused04
@@ -15501,8 +15502,8 @@ var
   Event: TGalaxyEvent;
 begin
   av[0].SetDword(0);
-  if (ScriptUseItem <> nil) and (ScriptUseItem is TArtefact) then
-    Item := TArtefact(ScriptUseItem)
+  if (Session.ScriptUseItem <> nil) and (Session.ScriptUseItem is TArtefact) then
+    Item := TArtefact(Session.ScriptUseItem)
   else
   begin
     if High(av) < 1 then
@@ -15533,8 +15534,8 @@ begin
       if Index >= 0 then
         GetPlayer.Inventory.Delete(Index);
       Item.Free;
-      if ScriptUseItem = Item then
-        ScriptUseItem := nil;
+      if Session.ScriptUseItem = Item then
+        Session.ScriptUseItem := nil;
       GetPlayer.RefreshDerivedStats(True);
       Hole := THole.Create;
       av[0].SetDword(PtrUInt(Hole));
@@ -19751,13 +19752,13 @@ begin
     Scope.Add(ScriptActionTypeNames[ActionIndex], vkInt).SetInt(ActionIndex);
   ScriptRequestThread := TScriptThread.Create;
   ScriptRequestThread.SetPriority(2);
-  ScriptItemContextStack := TList.Create;
-  ScriptItemInfoContextStack := TList.Create;
-  ScriptActionShipStack := TList.Create;
-  ScriptActionObject1Stack := TList.Create;
-  ScriptActionObject2Stack := TList.Create;
-  ScriptActionParamStack := TList.Create;
-  ScriptActionTypeStack := TList.Create;
+  Session.ScriptItemContextStack := TList.Create;
+  Session.ScriptItemInfoContextStack := TList.Create;
+  Session.ScriptActionShipStack := TList.Create;
+  Session.ScriptActionObject1Stack := TList.Create;
+  Session.ScriptActionObject2Stack := TList.Create;
+  Session.ScriptActionParamStack := TList.Create;
+  Session.ScriptActionTypeStack := TList.Create;
   QueuedTextQuests := TList.Create;
   QueuedArcadeBattles := TList.Create;
   QueuedPlanetaryBattles := TList.Create;

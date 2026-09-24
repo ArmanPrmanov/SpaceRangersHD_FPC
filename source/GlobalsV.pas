@@ -110,7 +110,6 @@ var
   SmoothIntroFontName: WideString;
   PendingLoadFileName: AnsiString;
   LoadedFilmCount: Integer;
-  GameEndReason: Integer;
   ShipTail: Integer = 0;
   ThreeDimensionalModeEnabled: Boolean = False;
   AnimCaptain: Boolean = False;
@@ -194,7 +193,6 @@ var
   GameMenuReturnScreenId: TGameScreenId = screenNone;
   SettingsReturnScreenId: TGameScreenId = screenNone;
   AchievementsReturnScreenId: TGameScreenId = screenNone;
-  LoadedSaveVersion: Integer = 0;
   LoadingFilmCount: Integer = -1;
   BackgroundShade: Boolean = False;
   BackgroundBlur: Boolean = False;
@@ -213,7 +211,6 @@ var
   SatelliteRenderTemplates: TList = nil;
   SpaceImageTemplates: array of TSpaceImageTemplate = nil;
   StarFieldImageTemplates: array of TStarFieldImageTemplate = nil;
-  ForcedPlanetQuestId: Integer = -1;
 function FormToId(Screen: TObject): TGameScreenId;
 function GetRegisteredScreenLoop(ScreenId: TGameScreenId): TObject;
 function IsSpaceBackdropScreen(ScreenId: TGameScreenId): Boolean;

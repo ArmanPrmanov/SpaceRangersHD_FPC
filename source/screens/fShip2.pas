@@ -320,6 +320,7 @@ function CompareStoredItems(
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   GI_GI,
   aCalc,
@@ -1232,7 +1233,7 @@ begin
     CancelCallbackTimer(RightPanelSlideTimer);
     RightPanelSlideTimer := nil;
   end;
-  ScriptUseItem := nil;
+  Session.ScriptUseItem := nil;
   aCalc.WaitForTurnCalculationUI;
   if (SavedShipExperience >= 0) and CanUsePlayerExperience then
   begin
@@ -2361,7 +2362,7 @@ begin
           SetImagePath('GI,' + GetShopItemIconName(Entry.Item) + 's');
           SetImageKindX(ikxCenter);
           SetImageKindY(ikyCenter);
-          if Entry.Item = ScriptUseItem then
+          if Entry.Item = Session.ScriptUseItem then
             SetImagePath('');
         end
         else if Entry.Kind = phkArtefact then
@@ -2369,7 +2370,7 @@ begin
           SetImagePath('GI,' + GetShopItemIconName(Entry.Item) + 's');
           SetImageKindX(ikxCenter);
           SetImageKindY(ikyCenter);
-          if Entry.Item = ScriptUseItem then
+          if Entry.Item = Session.ScriptUseItem then
             SetImagePath('');
         end;
       end;
@@ -2403,7 +2404,7 @@ begin
             SetImagePath('GI,' + GetShopItemIconName(Entry.Item) + 's');
             SetImageKindX(ikxCenter);
             SetImageKindY(ikyCenter);
-            if Entry.Item = ScriptUseItem then
+            if Entry.Item = Session.ScriptUseItem then
               SetImagePath('');
           end
           else if Entry.Kind = phkArtefact then
@@ -2411,7 +2412,7 @@ begin
             SetImagePath('GI,' + GetShopItemIconName(Entry.Item) + 's');
             SetImageKindX(ikxCenter);
             SetImageKindY(ikyCenter);
-            if Entry.Item = ScriptUseItem then
+            if Entry.Item = Session.ScriptUseItem then
               SetImagePath('');
           end;
         end;
@@ -8744,7 +8745,7 @@ begin
         else
         begin
           SetImagePath('GI,' + GetShopItemIconName(Entry.Item) + 's');
-          if Entry.Item = ScriptUseItem then
+          if Entry.Item = Session.ScriptUseItem then
             SetImagePath('');
         end;
         SetImageKindX(ikxCenter);

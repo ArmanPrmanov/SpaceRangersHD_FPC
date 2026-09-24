@@ -123,6 +123,8 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
+  aSession,
   aSaveLoad,
   Windows,
   Classes,
@@ -1997,7 +1999,7 @@ begin
     begin
       ScoreScreen.RecordPlayerResult(False);
       GetPlayer.Free;
-      GameEndReason := 1;
+      Session.GameEndReason := 1;
       RequestedScreenId := screenGameEnd;
     end;
   end;
@@ -2110,7 +2112,7 @@ begin
         if ActiveQueuedTextQuest.Script <> nil then
           Variable := ActiveQueuedTextQuest.Script.InitCode.LocalVar.GetVarNE(Name);
       if Variable = nil then
-        Variable := SharedScriptVariables.GetVarNE(Name);
+        Variable := Session.SharedScriptVariables.GetVarNE(Name);
       if Variable <> nil then
         if Variable.RealVType = vkInt then
         begin
@@ -2136,7 +2138,7 @@ begin
         if ActiveQueuedTextQuest.Script <> nil then
           Variable := ActiveQueuedTextQuest.Script.InitCode.LocalVar.GetVarNE(Name);
       if Variable = nil then
-        Variable := SharedScriptVariables.GetVarNE(Name);
+        Variable := Session.SharedScriptVariables.GetVarNE(Name);
       if Variable <> nil then
         if Variable.RealVType = vkInt then
         begin
@@ -2163,7 +2165,7 @@ begin
       Token[1] := 't';
       Token := '<' + Token + '>';
       Name := 'GQuestVar' + Name;
-      Variable := SharedScriptVariables.GetVarNE(Name);
+      Variable := Session.SharedScriptVariables.GetVarNE(Name);
       if Variable <> nil then
         Expanded :=
             ReplaceAllWideString(

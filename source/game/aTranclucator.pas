@@ -123,6 +123,8 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
+  aSession,
   EC_Struct,
   Classes,
   SysUtils,
@@ -362,20 +364,20 @@ begin
   SeekItems := Buffer.GetBoolean;
   AutoArrange := Buffer.GetBoolean;
   ArtefactSize := Buffer.GetInt32;
-  if LoadedSaveVersion < 129 then
+  if Session.LoadedSaveVersion < 129 then
     Buffer.GetByte;
-  if (LoadedSaveVersion >= 86) and Buffer.GetBoolean then
+  if (Session.LoadedSaveVersion >= 86) and Buffer.GetBoolean then
     ArtefactSystemName := Buffer.ReadWideString;
-  if LoadedSaveVersion >= 131 then
+  if Session.LoadedSaveVersion >= 131 then
     for Kind := Low(TTranclucatorCollectionKind) to High(TTranclucatorCollectionKind) do
       CollectionPermissions[Ord(Kind)] := Buffer.GetBoolean
   else
   begin
-    if LoadedSaveVersion < 78 then
+    if Session.LoadedSaveVersion < 78 then
       OldItemCount := 68
-    else if LoadedSaveVersion < 96 then
+    else if Session.LoadedSaveVersion < 96 then
       OldItemCount := 72
-    else if LoadedSaveVersion < 127 then
+    else if Session.LoadedSaveVersion < 127 then
       OldItemCount := 73
     else
       OldItemCount := 74;

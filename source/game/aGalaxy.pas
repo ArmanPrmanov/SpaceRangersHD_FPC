@@ -794,6 +794,7 @@ procedure UpdateTurnFilmActivity(
 implementation
 
 uses
+  aSession,
   aHuman,
   ObserverHooks,
   SE_Garbage,
@@ -895,7 +896,7 @@ begin
   if Block.CountParams('CheatsDisabled') > 0 then
     if ParseCheatsDisabledFlag(TrimWideString(Block.GetParamByPathOrMarker('CheatsDisabled'))) then
       CheatsDisabled := True;
-  GameEndReason := 0;
+  Session.GameEndReason := 0;
   PlayerRangerIndex := -1;
   for I := 0 to 8 do
     LocalHuman.HangarShipIds[I] := 0;
@@ -938,14 +939,14 @@ begin
   NextShipId := 1;
   NextItemId := 1;
   NextMissileId := 1;
-  SharedScriptVariables.CopyFrom(GlobalScriptVariables, True);
-  TemplateCount := ScriptTemplates.Count;
+  Session.SharedScriptVariables.CopyFrom(Session.GlobalScriptVariables, True);
+  TemplateCount := Session.ScriptTemplates.Count;
   for I := 0 to TemplateCount - 1 do
   begin
-    Template := ScriptTemplates[I];
+    Template := Session.ScriptTemplates[I];
     Template.UseCount := 0;
     Template.LastTurn := 0;
-    Template.ConditionCode.LinkAll(SharedScriptVariables, False);
+    Template.ConditionCode.LinkAll(Session.SharedScriptVariables, False);
     Template.ConditionCode.LinkAll(ScriptFunctionScope, False);
     Template.ConditionCode.ScriptFunLinked := True;
     Template.ActiveScriptIndex := -1;
@@ -1296,12 +1297,12 @@ begin
     ShopSlot := LocalHuman.TemporaryShopSlots[I];
     ShopSlot.SaveToBuffer(Buffer);
   end;
-  SharedScriptVariables.SaveToBuffer(Buffer);
-  Count := ScriptTemplates.Count;
+  Session.SharedScriptVariables.SaveToBuffer(Buffer);
+  Count := Session.ScriptTemplates.Count;
   Buffer.AddWideChar(WideChar(Count));
   for I := 0 to Count - 1 do
   begin
-    Template := ScriptTemplates[I];
+    Template := Session.ScriptTemplates[I];
     Buffer.AddWideStringZ(Template.Name);
     Buffer.AddWideChar(WideChar(Template.UseCount));
     Buffer.AddIntegerValue(Template.LastTurn);
@@ -1559,12 +1560,12 @@ var
 begin
   Stage := 0;
   try
-    if LoadedSaveVersion >= 101 then
+    if Session.LoadedSaveVersion >= 101 then
     begin
       SavedMods := Buffer.ReadWideString;
       if SavedMods <> SelectedMods then
       begin
-        LoadedSaveModSet := SavedMods;
+        Session.LoadedSaveModSet := SavedMods;
         AppendLogLineThreadSafe('Warning! Mod sets mismatch:');
         if SavedMods <> '' then
           AppendLogLineThreadSafe(
@@ -1594,7 +1595,7 @@ begin
     SetCheatPoints(Buffer.GetInt32);
     SaveCount := Buffer.GetInt32;
     LoadCount := Buffer.GetInt32 + 1;
-    if LoadedSaveVersion >= 127 then
+    if Session.LoadedSaveVersion >= 127 then
       Count := Buffer.GetWord
     else
       Count := 0;
@@ -1622,7 +1623,7 @@ begin
       WeaponInfo.DamageFlags := Buffer.GetUInt32;
       WeaponInfo.ShotType := TWeaponShotType(Buffer.GetByte);
       WeaponInfo.ShotCount := Buffer.GetByte;
-      if LoadedSaveVersion >= 132 then
+      if Session.LoadedSaveVersion >= 132 then
         WeaponInfo.AttackCount := Buffer.GetByte
       else
         WeaponInfo.AttackCount := 1;
@@ -1678,7 +1679,7 @@ begin
       Holes.Add(Hole);
       Hole.LoadFromBuffer(Buffer, Self);
     end;
-    if LoadedSaveVersion >= 122 then
+    if Session.LoadedSaveVersion >= 122 then
     begin
       Count := Buffer.GetWord;
       if (Count < 0) or (Count > 10000) then
@@ -1736,10 +1737,10 @@ begin
       raise EAbort.Create('Err');
     for I := 0 to Count - 1 do
       Rangers.Add(Pointer(Buffer.GetUInt32));
-    if LoadedSaveVersion >= 133 then
+    if Session.LoadedSaveVersion >= 133 then
       for Race := 0 to 4 do
         RangerSpawnQuotas[Race] := Buffer.GetInt32;
-    if LoadedSaveVersion < 102 then
+    if Session.LoadedSaveVersion < 102 then
     begin
       Stage := 7;
       Count := Buffer.GetWord;
@@ -1769,16 +1770,16 @@ begin
     for I := 0 to Variables.Count - 1 do
     begin
       Variable := Variables.GetItem(I);
-      Existing := SharedScriptVariables.GetVarNE(Variable.Name);
+      Existing := Session.SharedScriptVariables.GetVarNE(Variable.Name);
       if Existing <> nil then
         Existing.AssignFrom(Variable, True);
     end;
     Variables.Free;
     Stage := 10;
-    Count := ScriptTemplates.Count;
+    Count := Session.ScriptTemplates.Count;
     for I := 0 to Count - 1 do
     begin
-      Template := ScriptTemplates[I];
+      Template := Session.ScriptTemplates[I];
       Template.UseCount := 0;
       Template.LastTurn := 0;
     end;
@@ -1796,7 +1797,7 @@ begin
       end
       else
       begin
-        Template := ScriptTemplates[TemplateIndex];
+        Template := Session.ScriptTemplates[TemplateIndex];
         Template.UseCount := Buffer.GetWord;
         Template.LastTurn := Buffer.GetInt32;
         Template.ActiveScriptIndex := Buffer.GetInt32;
@@ -1809,7 +1810,7 @@ begin
       Script := TScript.Create;
       Scripts.Add(Script);
       Script.LoadState(Buffer, Self);
-      if (LoadedSaveVersion = 146) and (Script.ScriptFileName = 'Script.PC_part7') then
+      if (Session.LoadedSaveVersion = 146) and (Script.ScriptFileName = 'Script.PC_part7') then
         if Script.InitCode.LocalVar.GetVar('player_traitor').GetInt = 1 then
           Script.InitCode.LocalVar.GetVar('pirates_killed_init').SetInt(1);
     end;
@@ -1944,7 +1945,7 @@ begin
     end;
     Buffer.GetSingle;
     Stage := 29;
-    if LoadedSaveVersion >= 62 then
+    if Session.LoadedSaveVersion >= 62 then
     begin
       WarDeltaWin[1] := Buffer.GetInt32;
       WarDeltaWin[2] := Buffer.GetInt32;
@@ -1999,7 +2000,7 @@ begin
     TerronLandingLockTurn := Buffer.GetInt32;
     TerronToStarTurn := Buffer.GetInt32;
     KellerLeaveTurn := Buffer.GetInt32;
-    if LoadedSaveVersion >= 47 then
+    if Session.LoadedSaveVersion >= 47 then
       KellerResearchTargetStarId := Buffer.GetUInt32;
     BlazerLandingPlanetId := Buffer.GetUInt32;
     BlazerSelfDestructTurn := Buffer.GetInt32;
@@ -2008,13 +2009,13 @@ begin
     BlazerSeriesResolvedTurn := Buffer.GetInt32;
     PirateWinTurn := Buffer.GetInt32;
     PirateWinType := Buffer.GetInt32;
-    if LoadedSaveVersion >= 46 then
+    if Session.LoadedSaveVersion >= 46 then
       CoalitionDefeatedTurn := Buffer.GetInt32;
     GraphDominatorSurfacesEnabled := Buffer.GetBoolean;
     SpaceEffectKind := Buffer.GetByte;
     IronWill := Buffer.GetBoolean;
     Stage := 36;
-    if LoadedSaveVersion >= 71 then
+    if Session.LoadedSaveVersion >= 71 then
     begin
       DominatorModLevel := Buffer.GetByte;
       TechnicModEnabled := Buffer.GetByte;
@@ -2029,7 +2030,7 @@ begin
       TechnicModEnabled := Buffer.GetInt32;
       AmmoModEnabled := Buffer.GetInt32;
       GodModEnabled := Buffer.GetInt32;
-      if LoadedSaveVersion >= 65 then
+      if Session.LoadedSaveVersion >= 65 then
         UltraScanModEnabled := Buffer.GetInt32
       else
         UltraScanModEnabled := 0;
@@ -2046,7 +2047,7 @@ begin
       GalaxyEvents.Add(Event);
       Event.LoadFromBuffer(Buffer);
     end;
-    if LoadedSaveVersion >= 112 then
+    if Session.LoadedSaveVersion >= 112 then
     begin
       Count := Buffer.GetWord;
       if (Count < 0) or (Count > 10000) then
@@ -2058,7 +2059,7 @@ begin
         StateOverride.LoadFromBuffer(Buffer);
       end;
     end;
-    if LoadedSaveVersion >= 117 then
+    if Session.LoadedSaveVersion >= 117 then
     begin
       Count := Buffer.GetWord;
       if (Count < 0) or (Count > 10000) then
@@ -2079,7 +2080,7 @@ begin
         ImageOverride.LoadFromBuffer(Buffer);
       end;
     end;
-    if LoadedSaveVersion >= 119 then
+    if Session.LoadedSaveVersion >= 119 then
     begin
       Count := Buffer.GetWord;
       if (Count < 0) or (Count > 10000) then
@@ -2091,7 +2092,7 @@ begin
         PositionOverride.LoadFromBuffer(Buffer);
       end;
     end;
-    if LoadedSaveVersion >= 134 then
+    if Session.LoadedSaveVersion >= 134 then
     begin
       Count := Buffer.GetWord;
       if (Count < 0) or (Count > 10000) then
@@ -2104,13 +2105,13 @@ begin
       end;
     end;
     Stage := 39;
-    if LoadedSaveVersion >= 70 then
+    if Session.LoadedSaveVersion >= 70 then
     begin
       NextShipId := Buffer.GetUInt32;
       NextItemId := Buffer.GetUInt32;
     end;
     Stage := 40;
-    if LoadedSaveVersion >= 56 then
+    if Session.LoadedSaveVersion >= 56 then
       Buffer.GetUInt32;
     Stage := 41;
     Count := Scripts.Count;
@@ -2156,7 +2157,7 @@ begin
           (Ship as TRanger).RegisterInGalaxyRelations;
       end;
     end;
-    if (LoadedSaveVersion < 121) and (MainPiratePlanet <> nil) then
+    if (Session.LoadedSaveVersion < 121) and (MainPiratePlanet <> nil) then
       for I := 0 to Stars.Count - 1 do
       begin
         Star := TStar(Stars[I]);
@@ -2211,7 +2212,7 @@ begin
         TPlayer(Rangers[I]).CreateRuinsProxy;
     RandomState := SavedRandomState;
     Stage := 49;
-    if LoadedSaveVersion >= 61 then
+    if Session.LoadedSaveVersion >= 61 then
     begin
       EditableStateApplied := Buffer.GetBoolean;
       FinalizationName := DecodeLegacySaveLabel(Buffer.ReadWideString);
@@ -2222,7 +2223,7 @@ begin
       FinalizationName := '';
     end;
     Stage := 50;
-    if LoadedSaveVersion >= 63 then
+    if Session.LoadedSaveVersion >= 63 then
     begin
       CustomRules.Enabled := Buffer.GetBoolean;
       CustomRules.DominatorStrength := Buffer.GetByte;
@@ -2232,7 +2233,7 @@ begin
       CustomRules.CoalitionAggression := Buffer.GetByte;
       CustomRules.AsteroidModifier := Buffer.GetByte;
       CustomRules.SunDamageModifier := Buffer.GetByte;
-      if LoadedSaveVersion >= 64 then
+      if Session.LoadedSaveVersion >= 64 then
       begin
         CustomRules.ExtraInventions := Buffer.GetByte;
       end
@@ -2240,7 +2241,7 @@ begin
       begin
         CustomRules.ExtraInventions := 0;
       end;
-      if LoadedSaveVersion >= 64 then
+      if Session.LoadedSaveVersion >= 64 then
       begin
         CustomRules.AcrynModifier := Buffer.GetByte;
       end
@@ -2248,7 +2249,7 @@ begin
       begin
         CustomRules.AcrynModifier := 16;
       end;
-      if LoadedSaveVersion >= 66 then
+      if Session.LoadedSaveVersion >= 66 then
       begin
         CustomRules.NodeDropModifier := Buffer.GetByte;
         CustomRules.ArcadeDropValueModifier := Buffer.GetByte;
@@ -2278,7 +2279,7 @@ begin
       CustomRules.UnrestrictedEquipmentKnowledge := Buffer.GetBoolean;
       CustomRules.StationsNearStars := Buffer.GetBoolean;
       CustomRules.FullStationTargeting := Buffer.GetBoolean;
-      if LoadedSaveVersion >= 64 then
+      if Session.LoadedSaveVersion >= 64 then
       begin
         CustomRules.SpecialShips := Buffer.GetBoolean;
       end
@@ -2286,10 +2287,10 @@ begin
       begin
         CustomRules.SpecialShips := False;
       end;
-      if LoadedSaveVersion >= 66 then
+      if Session.LoadedSaveVersion >= 66 then
       begin
         CustomRules.ZeroStartingExperience := Buffer.GetBoolean;
-        if LoadedSaveVersion < 92 then
+        if Session.LoadedSaveVersion < 92 then
           Buffer.GetBoolean;
         CustomRules.ArcadeBattleRoyale := Buffer.GetBoolean;
         CustomRules.DominatorRacialWeapons := Buffer.GetBoolean;
@@ -2300,7 +2301,7 @@ begin
         CustomRules.ArcadeBattleRoyale := False;
         CustomRules.DominatorRacialWeapons := False;
       end;
-      if LoadedSaveVersion >= 72 then
+      if Session.LoadedSaveVersion >= 72 then
       begin
         CustomRules.StartInCenter := Buffer.GetBoolean;
       end
@@ -2308,7 +2309,7 @@ begin
       begin
         CustomRules.StartInCenter := False;
       end;
-      if LoadedSaveVersion >= 73 then
+      if Session.LoadedSaveVersion >= 73 then
       begin
         CustomRules.MaxRangeMissiles := Buffer.GetBoolean;
       end
@@ -2316,7 +2317,7 @@ begin
       begin
         CustomRules.MaxRangeMissiles := False;
       end;
-      if LoadedSaveVersion >= 75 then
+      if Session.LoadedSaveVersion >= 75 then
       begin
         CustomRules.OldHyperspace := Buffer.GetBoolean;
         CustomRules.PirateNodes := Buffer.GetBoolean;
@@ -2326,7 +2327,7 @@ begin
         CustomRules.OldHyperspace := False;
         CustomRules.PirateNodes := False;
       end;
-      if LoadedSaveVersion >= 84 then
+      if Session.LoadedSaveVersion >= 84 then
       begin
         CustomRules.AIUseShops := Buffer.GetBoolean;
         CustomRules.StationsUseShop := Buffer.GetBoolean;
@@ -2336,7 +2337,7 @@ begin
         CustomRules.AIUseShops := False;
         CustomRules.StationsUseShop := False;
       end;
-      if LoadedSaveVersion >= 136 then
+      if Session.LoadedSaveVersion >= 136 then
       begin
         CustomRules.DuplicateArtefacts := Buffer.GetBoolean;
       end
@@ -2344,7 +2345,7 @@ begin
       begin
         CustomRules.DuplicateArtefacts := False;
       end;
-      if LoadedSaveVersion >= 156 then
+      if Session.LoadedSaveVersion >= 156 then
       begin
         CustomRules.HullGrowth := Buffer.GetByte;
       end
@@ -2352,7 +2353,7 @@ begin
       begin
         CustomRules.HullGrowth := 0;
       end;
-      if LoadedSaveVersion >= 166 then
+      if Session.LoadedSaveVersion >= 166 then
       begin
         CustomRules.ArcadeEquipmentChange := Buffer.GetBoolean;
         CustomRules.OldSpeedCalculation := Buffer.GetBoolean;
@@ -2422,7 +2423,7 @@ begin
     ShipCount := CountDelimitedPartsW(SelectedMods, ',');
     for I := 0 to ShipCount - 1 do
       Event.AddTextData(ExtractDelimitedPartW(SelectedMods, I, ','));
-    Event.AddData(Ord(ApplyEditableSaveOnLoad));
+    Event.AddData(Ord(Session.ApplyEditableSaveOnLoad));
     Stage := 52;
     aGalaxy.Galaxy := Self;
     // CHANGE: BUGFIX - Point script variables at the loaded objects, not stale addresses.
@@ -2466,47 +2467,47 @@ var
   Hole: THole;
   HoleBlock: TBlockParEC;
 begin
-  GR_Main.EditableSaveBlock.Clear;
-  GR_Main.EditableSaveBlock.AddParam('FinalizationName', Self.FinalizationName);
-  GR_Main.EditableSaveBlock.AddParam('IDay', WideString(SysUtils.IntToStr(Self.CurrentTurn)));
-  GR_Main
+  Session.EditableSaveBlock.Clear;
+  Session.EditableSaveBlock.AddParam('FinalizationName', Self.FinalizationName);
+  Session.EditableSaveBlock.AddParam('IDay', WideString(SysUtils.IntToStr(Self.CurrentTurn)));
+  Session
       .EditableSaveBlock
       .AddParam('DifPirate', WideString(SysUtils.IntToStr(Self.DifficultyLevels[0])));
-  GR_Main
+  Session
       .EditableSaveBlock
       .AddParam('DifTrade', WideString(SysUtils.IntToStr(Self.DifficultyLevels[1])));
-  GR_Main
+  Session
       .EditableSaveBlock
       .AddParam('DifScn', WideString(SysUtils.IntToStr(Self.DifficultyLevels[2])));
-  GR_Main
+  Session
       .EditableSaveBlock
       .AddParam('DifRepair', WideString(SysUtils.IntToStr(Self.DifficultyLevels[3])));
-  GR_Main
+  Session
       .EditableSaveBlock
       .AddParam('DifTech', WideString(SysUtils.IntToStr(Self.DifficultyLevels[4])));
-  GR_Main
+  Session
       .EditableSaveBlock
       .AddParam('DifQuest', WideString(SysUtils.IntToStr(Self.DifficultyLevels[5])));
-  GR_Main
+  Session
       .EditableSaveBlock
       .AddParam('DifHole', WideString(SysUtils.IntToStr(Self.DifficultyLevels[6])));
-  GR_Main
+  Session
       .EditableSaveBlock
       .AddParam('DifBalance', WideString(SysUtils.IntToStr(Self.DifficultyLevels[7])));
-  GR_Main
+  Session
       .EditableSaveBlock
       .AddParam('KlingsDeltaWin', WideString(SysUtils.IntToStr(Self.WarDeltaWin[1])));
-  GR_Main
+  Session
       .EditableSaveBlock
       .AddParam('PiratesDeltaWin', WideString(SysUtils.IntToStr(Self.WarDeltaWin[2])));
-  GR_Main
+  Session
       .EditableSaveBlock
       .AddParam('NormalsDeltaWin', WideString(SysUtils.IntToStr(Self.WarDeltaWin[0])));
-  GR_Main
+  Session
       .EditableSaveBlock
       .AddParam('RejectPB', BoolToWideString(GetPlayer.DeclinePlanetBattleOffers));
-  GetPlayer.SaveToBlock(GR_Main.EditableSaveBlock.AddBlockByPath('Player'));
-  HoleBlock := GR_Main.EditableSaveBlock.AddBlockByPath('HoleList');
+  GetPlayer.SaveToBlock(Session.EditableSaveBlock.AddBlockByPath('Player'));
+  HoleBlock := Session.EditableSaveBlock.AddBlockByPath('HoleList');
   for i := 0 to Self.Holes.Count - 1 do
   begin
     Hole := THole(Self.Holes[i]);
@@ -2514,7 +2515,7 @@ begin
     Hole.SaveToBlock(HoleBlock.AddBlockByPath(Name));
   end;
   HoleBlock.AddParam('CreateNewHoles', WideString(SysUtils.IntToStr(0)));
-  with GR_Main.EditableSaveBlock.AddBlockByPath('StarList') do
+  with Session.EditableSaveBlock.AddBlockByPath('StarList') do
     for i := 0 to Self.Stars.Count - 1 do
     begin
       Star := TStar(Self.Stars[i]);
@@ -2534,32 +2535,32 @@ begin
   if FinalizationName = '' then
   begin
     EditableStateApplied := True;
-    FinalizationName := EditableSaveBlock.GetParam('FinalizationName');
+    FinalizationName := Session.EditableSaveBlock.GetParam('FinalizationName');
     if FinalizationName <> '' then
       SetCheatPoints(0);
     DifficultyLevels[0] :=
-        Max(0, Min(9, StrToInt(AnsiString(EditableSaveBlock.GetParam('DifPirate')))));
+        Max(0, Min(9, StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('DifPirate')))));
     DifficultyLevels[1] :=
-        Max(0, Min(9, StrToInt(AnsiString(EditableSaveBlock.GetParam('DifTrade')))));
+        Max(0, Min(9, StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('DifTrade')))));
     DifficultyLevels[2] :=
-        Max(0, Min(9, StrToInt(AnsiString(EditableSaveBlock.GetParam('DifScn')))));
+        Max(0, Min(9, StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('DifScn')))));
     DifficultyLevels[3] :=
-        Max(0, Min(9, StrToInt(AnsiString(EditableSaveBlock.GetParam('DifRepair')))));
+        Max(0, Min(9, StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('DifRepair')))));
     DifficultyLevels[4] :=
-        Max(0, Min(9, StrToInt(AnsiString(EditableSaveBlock.GetParam('DifTech')))));
+        Max(0, Min(9, StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('DifTech')))));
     DifficultyLevels[5] :=
-        Max(0, Min(9, StrToInt(AnsiString(EditableSaveBlock.GetParam('DifQuest')))));
+        Max(0, Min(9, StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('DifQuest')))));
     DifficultyLevels[6] :=
-        Max(0, Min(9, StrToInt(AnsiString(EditableSaveBlock.GetParam('DifHole')))));
+        Max(0, Min(9, StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('DifHole')))));
     DifficultyLevels[7] :=
-        Max(0, Min(9, StrToInt(AnsiString(EditableSaveBlock.GetParam('DifBalance')))));
-    WarDeltaWin[1] := StrToInt(AnsiString(EditableSaveBlock.GetParam('KlingsDeltaWin')));
-    WarDeltaWin[2] := StrToInt(AnsiString(EditableSaveBlock.GetParam('PiratesDeltaWin')));
-    WarDeltaWin[0] := StrToInt(AnsiString(EditableSaveBlock.GetParam('NormalsDeltaWin')));
+        Max(0, Min(9, StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('DifBalance')))));
+    WarDeltaWin[1] := StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('KlingsDeltaWin')));
+    WarDeltaWin[2] := StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('PiratesDeltaWin')));
+    WarDeltaWin[0] := StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('NormalsDeltaWin')));
     GetPlayer.DeclinePlanetBattleOffers :=
-        LowerCase(AnsiString(EditableSaveBlock.GetParam('RejectPB'))) = 'true';
-    GetPlayer.LoadFromBlock(EditableSaveBlock.GetBlockByPath('Player'));
-    HoleBlock := EditableSaveBlock.GetBlockByPath('HoleList');
+        LowerCase(AnsiString(Session.EditableSaveBlock.GetParam('RejectPB'))) = 'true';
+    GetPlayer.LoadFromBlock(Session.EditableSaveBlock.GetBlockByPath('Player'));
+    HoleBlock := Session.EditableSaveBlock.GetBlockByPath('HoleList');
     for I := 0 to Holes.Count - 1 do
     begin
       Hole := THole(Holes[I]);
@@ -2583,14 +2584,14 @@ begin
       Hole.HoleType := 1;
       Holes.Add(Hole);
     end;
-    with EditableSaveBlock.GetBlockByPath('StarList') do
+    with Session.EditableSaveBlock.GetBlockByPath('StarList') do
       for I := 0 to Stars.Count - 1 do
       begin
         Star := TStar(Stars[I]);
         Key := 'StarId' + IntToStr(Int64(Star.Id));
         Star.LoadFromBlock(GetBlockByPath(Key));
       end;
-    EditableSaveBlock.Clear;
+    Session.EditableSaveBlock.Clear;
   end;
 end;
 procedure TGalaxy.RunConfigOnStartHandlers;
@@ -2762,11 +2763,11 @@ begin
             AppendLogLineThreadSafe('Error Galaxy.Script.Free');
           end;
           Stage := 7;
-          for J := 0 to ScriptTemplates.Count - 1 do
-            if TScriptTemplUnit(ScriptTemplates[J]).ActiveScriptIndex = I then
-              TScriptTemplUnit(ScriptTemplates[J]).ActiveScriptIndex := -1
-            else if TScriptTemplUnit(ScriptTemplates[J]).ActiveScriptIndex > I then
-              Dec(TScriptTemplUnit(ScriptTemplates[J]).ActiveScriptIndex);
+          for J := 0 to Session.ScriptTemplates.Count - 1 do
+            if TScriptTemplUnit(Session.ScriptTemplates[J]).ActiveScriptIndex = I then
+              TScriptTemplUnit(Session.ScriptTemplates[J]).ActiveScriptIndex := -1
+            else if TScriptTemplUnit(Session.ScriptTemplates[J]).ActiveScriptIndex > I then
+              Dec(TScriptTemplUnit(Session.ScriptTemplates[J]).ActiveScriptIndex);
         end
         else
           Inc(I);
@@ -4470,7 +4471,7 @@ begin
       Galaxy.NextStarId := Id + 1;
     GenerationSeed := Buffer.GetInt32;
     RandomState := Buffer.GetUInt32;
-    if LoadedSaveVersion < 158 then
+    if Session.LoadedSaveVersion < 158 then
       Buffer.GetBoolean;
     Name := Buffer.ReadWideString;
     Position.X := Buffer.GetSingle;
@@ -4549,7 +4550,7 @@ begin
     end;
     Stage := 10;
     Count := Buffer.GetWord;
-    if LoadedSaveVersion <= 127 then
+    if Session.LoadedSaveVersion <= 127 then
     begin
       for I := 0 to Count - 1 do
       begin
@@ -4571,30 +4572,30 @@ begin
     Stage := 11;
     Constellation := TConstellation(Buffer.GetUInt32);
     SystemProcessName := Buffer.ReadWideString;
-    if LoadedSaveVersion >= 141 then
+    if Session.LoadedSaveVersion >= 141 then
       Battle := Byte(Buffer.GetBoolean);
     ThreatLevel := Buffer.GetByte;
 
     TrafficLevel := Buffer.GetByte;
     ControlFaction := TStarFaction(Buffer.GetByte);
-    if LoadedSaveVersion >= 53 then
+    if Session.LoadedSaveVersion >= 53 then
       PreviousControlFaction := TStarFaction(Buffer.GetByte)
     else
       PreviousControlFaction := ControlFaction;
     DominatorSeries := TDominatorSeries(Buffer.GetByte);
     Stage := 12;
-    if LoadedSaveVersion >= 149 then
+    if Session.LoadedSaveVersion >= 149 then
       Status.CustomFaction := Buffer.ReadWideString
     else
       Status.CustomFaction := '';
-    if LoadedSaveVersion = 149 then
+    if Session.LoadedSaveVersion = 149 then
       Buffer.GetByte;
     Stage := 13;
     SafeRadius := Buffer.GetSingle;
     DamageRadius := Buffer.GetSingle;
     Radius := Buffer.GetWord;
     Stage := 14;
-    if LoadedSaveVersion >= 154 then
+    if Session.LoadedSaveVersion >= 154 then
       RetainSpaceObject(
           Graphic,
           CreateSpaceObjectByName('Star', Buffer.ReadWideString, Classes.Point(0, 0))
@@ -4609,7 +4610,7 @@ begin
     end;
     Graphic.SetPosition(MakePointF(0, 0));
     Stage := 15;
-    if LoadedSaveVersion <= 123 then
+    if Session.LoadedSaveVersion <= 123 then
       Buffer.GetBoolean;
     PlayerCombatOccurred := Buffer.GetBoolean;
     Flag80 := Buffer.GetByte;
@@ -4620,9 +4621,9 @@ begin
     LastLiberationRewardsTurn := Buffer.GetInt32;
     PlayerPresenceLevel := Buffer.GetInt32;
     NoComeKling := Buffer.GetBoolean;
-    if LoadedSaveVersion >= 105 then
+    if Session.LoadedSaveVersion >= 105 then
       Dominion := TObject(Buffer.GetUInt32);
-    if LoadedSaveVersion >= 111 then
+    if Session.LoadedSaveVersion >= 111 then
     begin
       MapLabel := Buffer.ReadWideString;
       Count := Buffer.GetWord;
@@ -7450,7 +7451,7 @@ begin
     Segment^.EndPoint.Y := Buffer.GetSingle;
     Self.OutlineSegments.Add(Segment);
   end;
-  if GlobalsV.LoadedSaveVersion >= 45 then
+  if Session.LoadedSaveVersion >= 45 then
   begin
     Count := Buffer.GetWord;
     for i := 0 to Count - 1 do
@@ -7502,7 +7503,7 @@ begin
     Polygon.Bounds.Right := Buffer.GetSingle;
     Polygon.Bounds.Bottom := Buffer.GetSingle;
   end;
-  if GlobalsV.LoadedSaveVersion >= 45 then
+  if Session.LoadedSaveVersion >= 45 then
   begin
     Count := Buffer.GetWord;
     for i := 0 to Count - 1 do
@@ -12821,7 +12822,7 @@ begin
       if Self.PlayerPresenceLevel > 0 then
         Dec(Self.PlayerPresenceLevel);
     end;
-    if not Globals.PlayerStarDayPrepared then
+    if not Session.PlayerStarDayPrepared then
       Inc(Self.DaysSinceLastNpcShipSpawn);
     Self.RecordingTurnFilm := RecordFilm;
     Self.PlayerCombatOccurred := False;
@@ -12830,10 +12831,10 @@ begin
     StepIndex := 0;
     Self.CurrentStepIndex := 0;
     Stage := 1;
-    if not Globals.PlayerStarDayPrepared then
+    if not Session.PlayerStarDayPrepared then
       Self.TryGenerateSystemNews;
     Stage := 2;
-    if not Globals.PlayerStarDayPrepared and (Galaxy.StasisModEnabled <> 1) then
+    if not Session.PlayerStarDayPrepared and (Galaxy.StasisModEnabled <> 1) then
       for Index := 0 to (Self.Asteroids.Count - 1) do
       begin
         Asteroid := Self.Asteroids[Index];
@@ -12842,7 +12843,7 @@ begin
     Stage := 3;
     if WingmenPendingLeadershipPenalty = nil then
       WingmenPendingLeadershipPenalty := TList.Create;
-    if not Globals.PlayerStarDayPrepared then
+    if not Session.PlayerStarDayPrepared then
     begin
       for Index := (Self.Ships.Count - 1) downto 0 do
       begin
@@ -15739,7 +15740,7 @@ begin
     end;
     Self.RefreshDerivedStats;
     Stage := 41;
-    if not Globals.PlayerStarDayPrepared and (Galaxy.StasisModEnabled <> 1) then
+    if not Session.PlayerStarDayPrepared and (Galaxy.StasisModEnabled <> 1) then
       for Index := 0 to (Self.Planets.Count - 1) do
       begin
         Planet := Self.Planets[Index];
@@ -15881,7 +15882,7 @@ procedure TInterfaceStateOverride.LoadFromBuffer(Buffer: TBufEC);
 begin
   FormName := Buffer.ReadWideString;
   ControlPath := Buffer.ReadWideString;
-  if LoadedSaveVersion >= 160 then
+  if Session.LoadedSaveVersion >= 160 then
   begin
     State := Buffer.GetByte;
     OriginalState := Buffer.GetByte;

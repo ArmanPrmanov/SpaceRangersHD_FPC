@@ -38,6 +38,7 @@ procedure WaitForTurnCalculation;
 procedure ProcessPlayerStarTurn;
 implementation
 uses
+  aSession,
   aHuman,
   SimulationThread,
   SimEvents,
@@ -54,30 +55,30 @@ uses
   aShip;
 procedure StartGalaxyTurnCalculation;
 begin
-  TurnCalculationThread.Job := tcjGalaxy;
-  TurnCalculationThread.Start;
+  Session.TurnCalculationThread.Job := tcjGalaxy;
+  Session.TurnCalculationThread.Start;
 end;
 procedure StartPlayerStarTurnCalculation;
 begin
-  TurnCalculationThread.Job := tcjPlayerStar;
-  TurnCalculationThread.Start;
+  Session.TurnCalculationThread.Job := tcjPlayerStar;
+  Session.TurnCalculationThread.Start;
 end;
 procedure StartPlayerStarPreparation;
 begin
-  TurnCalculationThread.Job := tcjPreparePlayerStar;
-  TurnCalculationThread.Start;
+  Session.TurnCalculationThread.Job := tcjPreparePlayerStar;
+  Session.TurnCalculationThread.Start;
 end;
 function IsTurnCalculationRunning: Boolean;
 begin
-  if TurnCalculationThread = nil then
+  if Session.TurnCalculationThread = nil then
     Result := False
   else
-    Result := TurnCalculationThread.IsRunning;
+    Result := Session.TurnCalculationThread.IsRunning;
 end;
 procedure WaitForTurnCalculation;
 begin
-  if (TurnCalculationThread <> nil) and TurnCalculationThread.IsRunning then
-    TurnCalculationThread.WaitForIdle(INFINITE);
+  if (Session.TurnCalculationThread <> nil) and Session.TurnCalculationThread.IsRunning then
+    Session.TurnCalculationThread.WaitForIdle(INFINITE);
 end;
 procedure ProcessPlayerStarTurn;
 var
@@ -86,7 +87,7 @@ var
 begin
   Stage := 0;
   try
-    if not PlayerStarDayPrepared then
+    if not Session.PlayerStarDayPrepared then
       PrimaryFilm.Clear;
     Stage := 1;
     RecordFilm :=
@@ -101,7 +102,7 @@ begin
     Stage := 3;
     Galaxy.TransferShipsInTransit;
     Stage := 4;
-    PlayerStarDayPrepared := False;
+    Session.PlayerStarDayPrepared := False;
   except
     on E: Exception do
     begin
@@ -208,7 +209,7 @@ begin
   else
   begin
     TurnCalculationPhase := tcpPlayerStarPreparationRunning;
-    PlayerStarDayPrepared := True;
+    Session.PlayerStarDayPrepared := True;
     try
       PrimaryFilm.Clear;
       if Galaxy.StasisModEnabled <> 1 then

@@ -9,6 +9,8 @@ procedure RunRangers;
 implementation
 
 uses
+  aHuman,
+  aSession,
   RTLFileSystem,
   fIntroduction,
   fGameSettings2,
@@ -369,11 +371,11 @@ procedure Shutdown;
 begin
   Stage('shutdown');
   ExitScreenLoop := True;
-  if TurnCalculationThread <> nil then
+  if Session.TurnCalculationThread <> nil then
   begin
     WaitForTurnCalculation;
     // Join the worker while the galaxy and script/UI owners are still alive.
-    FreeAndNil(TurnCalculationThread);
+    FreeAndNil(Session.TurnCalculationThread);
   end;
   if CampaignRuntimeStarted then
     try
@@ -408,7 +410,7 @@ begin
   end;
   Direct3DDevice := nil;
   Direct3D := nil;
-  ReleaseObject(EditableSaveBlock, 'save configuration');
+  ReleaseObject(Session.EditableSaveBlock, 'save configuration');
   ReleaseObject(NewGameSettingsConfig, 'new-game configuration');
   UiStyleConfig := nil;
   UiDepthConfig := nil;

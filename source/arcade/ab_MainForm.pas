@@ -222,6 +222,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHold,
   aHuman,
   GI_GI,
@@ -2949,7 +2950,7 @@ begin
       begin
         ScoreScreen.RecordPlayerResult(False);
         GetPlayer.Free;
-        GameEndReason := 3;
+        Session.GameEndReason := 3;
         RequestedScreenId := screenGameEnd;
         ClearPendingScriptRequests;
         ActiveArcadeRequest := nil;
@@ -3405,16 +3406,16 @@ begin
           ArcadeKellerReward := nil;
         end;
         Stage := 29;
-        ScriptDialogIndex := -1;
+        Session.ScriptDialogIndex := -1;
         TScriptShip(KellerShip.ScriptShip)
             .Script
             .PublishShipContext(KellerShip.ScriptShip as TScriptShip);
         CurrentScript.CallDialogByVariable(TScriptShip(KellerShip.ScriptShip).State.AuxiliaryText);
-        if ScriptDialogIndex < 0 then
+        if Session.ScriptDialogIndex < 0 then
           RaiseWideMessage('Not found dialog');
-        TalkShip := KellerShip;
-        TalkPlanet := nil;
-        TalkScripted := True;
+        LocalHuman.TalkShip := KellerShip;
+        LocalHuman.TalkPlanet := nil;
+        LocalHuman.TalkScripted := True;
         SetCursorActive(False);
         Present;
         CaptureScreenBackground(True, 0);

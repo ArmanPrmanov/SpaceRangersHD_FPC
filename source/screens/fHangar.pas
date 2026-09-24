@@ -85,6 +85,7 @@ const
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   fLoad,
   WorkerErrors,
@@ -645,7 +646,7 @@ begin
     Exit;
   if GetPlayer = nil then
   begin
-    GameEndReason := 2;
+    Session.GameEndReason := 2;
     RequestedScreenId := screenGameEnd;
     TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
     Exit;

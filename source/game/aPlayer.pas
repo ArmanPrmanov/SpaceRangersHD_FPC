@@ -249,6 +249,7 @@ procedure SetPlayer(Player: TPlayer; Galaxy: TGalaxy);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   aCalc,
   SimEvents,
@@ -613,17 +614,17 @@ var
   KillIndex, LogicIndex: Byte;
 begin
   inherited LoadFromBuffer(Buffer, Galaxy);
-  if LoadedSaveVersion <= 164 then
+  if Session.LoadedSaveVersion <= 164 then
     ClearRecentlyDroppedItems;
   InPrison := Buffer.GetBoolean;
   TalkLocked := Buffer.GetBoolean;
   ScanLocked := Buffer.GetBoolean;
   HyperspaceKillCount := Buffer.GetInt32;
   BlackHoleKillCount := Buffer.GetInt32;
-  if LoadedSaveVersion >= 89 then
+  if Session.LoadedSaveVersion >= 89 then
     for KillIndex := 0 to 7 do
       DominatorKillsByType[KillIndex] := Buffer.GetInt32
-  else if LoadedSaveVersion >= 74 then
+  else if Session.LoadedSaveVersion >= 74 then
   begin
     for KillIndex := 0 to 5 do
       DominatorKillsByType[KillIndex] := Buffer.GetInt32;
@@ -633,7 +634,7 @@ begin
   else
     for KillIndex := 0 to 7 do
       DominatorKillsByType[KillIndex] := 0;
-  if LoadedSaveVersion >= 155 then
+  if Session.LoadedSaveVersion >= 155 then
     for LogicIndex := 0 to 2 do
       ChameleonLogic[LogicIndex] := Buffer.GetByte;
   Count := Buffer.GetInt32;
@@ -659,7 +660,7 @@ begin
   DepositDayCount := Buffer.GetInt32;
   DepositInterestRate := Buffer.GetSingle;
   MedicalPolicyTicks := Buffer.GetInt32;
-  if LoadedSaveVersion >= 103 then
+  if Session.LoadedSaveVersion >= 103 then
   begin
     PirateLicenseTicks := Buffer.GetInt32;
     PirateLicenseCash := Buffer.GetInt32;
@@ -671,7 +672,7 @@ begin
     PirateLicenseCash := 0;
     PendingPirateLicenseCash := 0;
   end;
-  if LoadedSaveVersion >= 108 then
+  if Session.LoadedSaveVersion >= 108 then
     QueuedTravelTarget := TStar(Buffer.GetUInt32)
   else
     QueuedTravelTarget := nil;
@@ -680,7 +681,7 @@ begin
   for I := 1 to 24 do
     StatusEffectSourceNames[I] := Buffer.ReadWideString;
   DiseaseImmunity := Buffer.GetByte;
-  if LoadedSaveVersion < 49 then
+  if Session.LoadedSaveVersion < 49 then
   begin
     ProgramRewardStocks[prgKellerCall] := 0;
     for RewardIndex := prgLogicalNegation to High(ProgramRewardStocks) do
@@ -715,7 +716,7 @@ begin
   end;
   PlanetBattles := Buffer.GetInt32;
   LastPlanetBattleTurn := Buffer.GetInt32;
-  if LoadedSaveVersion >= 59 then
+  if Session.LoadedSaveVersion >= 59 then
     DeclinePlanetBattleOffers := Buffer.GetBoolean
   else
     DeclinePlanetBattleOffers := False;
@@ -770,10 +771,10 @@ begin
   AchievementStats.LoadFromBuffer(Buffer);
   ExperienceByDominators := Buffer.GetInt32;
   ExperienceByPirates := Buffer.GetInt32;
-  if LoadedSaveVersion >= 57 then
+  if Session.LoadedSaveVersion >= 57 then
     ExperienceByNormals := Buffer.GetInt32;
   ExperienceByTraderCareer := Buffer.GetInt32;
-  if LoadedSaveVersion >= 51 then
+  if Session.LoadedSaveVersion >= 51 then
   begin
     RuinsMode := Buffer.GetByte;
     RuinsProxy := TRuins.Create;
@@ -794,24 +795,24 @@ begin
     RuinsSavedDockedTo := nil;
     RuinsSavedPlanet := nil;
   end;
-  if LoadedSaveVersion >= 114 then
+  if Session.LoadedSaveVersion >= 114 then
     RuinsStatusText := Buffer.ReadWideString
   else
     RuinsStatusText := '';
-  if LoadedSaveVersion >= 120 then
+  if Session.LoadedSaveVersion >= 120 then
   begin
     Count := Buffer.GetInt32;
     for I := 0 to Count - 1 do
       AwardedAchievementKeys.AddChildBlock(Buffer.ReadWideString);
   end
-  else if LoadedSaveVersion >= 99 then
+  else if Session.LoadedSaveVersion >= 99 then
   begin
     for AchievementIndex := 0 to 82 do
       if Buffer.GetBoolean then
         AwardedAchievementKeys
             .AddChildBlock(WideString(AchievementDefinitionTable[AchievementIndex].Key));
   end
-  else if LoadedSaveVersion >= 55 then
+  else if Session.LoadedSaveVersion >= 55 then
   begin
     for AchievementIndex := 0 to 61 do
       if Buffer.GetBoolean then
@@ -841,7 +842,7 @@ begin
       end;
     end;
   end;
-  LastLoadedPlayerName := Name;
+  Session.LastLoadedPlayerName := Name;
   RefreshPlayerQuestTargets;
 end;
 
@@ -881,7 +882,7 @@ begin
     RuinsSavedPlanet := TObject(Galaxy.IdToPlanet(Cardinal(RuinsSavedPlanet))) as TPlanet;
   if RuinsSavedDockedTo <> nil then
     RuinsSavedDockedTo := TObject(Galaxy.IdToShip(Cardinal(RuinsSavedDockedTo), True)) as TShip;
-  if (LoadedSaveVersion < 146) and (CurrentPlanet = nil) and (DockedTo = nil) then
+  if (Session.LoadedSaveVersion < 146) and (CurrentPlanet = nil) and (DockedTo = nil) then
   begin
     Found := False;
     for I := 1 to Inventory.Count - 1 do

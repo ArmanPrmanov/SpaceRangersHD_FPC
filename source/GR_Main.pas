@@ -119,7 +119,6 @@ var
   UiStyleConfig: TBlockParEC;
   SelectedMods: WideString;
   SelectedModsDisplaySuffix: WideString;
-  LoadedSaveModSet: WideString;
   SuppressModRetryPrompt: Boolean = False;
   SkipModsOnReload: Boolean = False;
   WindowedModeRequested: Boolean = False;
@@ -139,7 +138,6 @@ var
   DisableTripleBuffer: Boolean = False;
   ModInstallConfigs: TList = nil;
   ModLanguageInstallConfigs: TList = nil;
-  ApplyEditableSaveOnLoad: Boolean = False;
   EditableSaveFileName: WideString = '';
   PlatformCheckAnchor: Integer = -35753766;
   ModShipNameConfig: TBlockParEC = nil;
@@ -181,7 +179,6 @@ var
   PresentationFrameRate: Cardinal = 0;
   RuntimeWatchdog: TThreadEC = nil;
   PresentationDepth: Integer = 0;
-  EditableSaveBlock: TBlockParEC;
   GameDataConfig: TBlockParEC;
   NewGameSettingsConfig: TBlockParEC;
   UiDepthConfig: TBlockParEC;
@@ -1102,6 +1099,8 @@ var
   FastTravelTransitions: Boolean = True;
 implementation
 uses
+  aHuman,
+  aSession,
   ZLib,
   CrashSymbols,
   GameNative,
@@ -2805,7 +2804,7 @@ begin
         ShowWineWarning := True;
       end;
   end;
-  EditableSaveBlock := TBlockParEC.Create;
+  Session.EditableSaveBlock := TBlockParEC.Create;
   NewGameSettingsConfig := TBlockParEC.Create;
   Text := GetGameUserDirectory + 'newgame.txt';
   if RTLFileSystem.FileExists(AnsiString(PWideChar(Text))) then

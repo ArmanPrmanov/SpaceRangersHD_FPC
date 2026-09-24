@@ -38,6 +38,8 @@ type
   end;
 implementation
 uses
+  aHuman,
+  aSession,
   aCalc,
   GI_MessageBox,
   aGalaxyStruct,
@@ -235,7 +237,7 @@ begin
   begin
     if not LoadThread.Succeeded then
     begin
-      if SelectedMods <> LoadedSaveModSet then
+      if SelectedMods <> Session.LoadedSaveModSet then
       begin
         if ShowMessageBoxGI(
                 GetInnermostScreenLoop,
@@ -247,7 +249,7 @@ begin
             = 1 then
         begin
           Block := TBlockParEC.Create;
-          Block.AddParam('CurrentMod', LoadedSaveModSet);
+          Block.AddParam('CurrentMod', Session.LoadedSaveModSet);
           Block.SaveTextFile('Mods\ModCFG.txt', True, False);
           Block.Free;
           RequestedScreenId := screenNone;
@@ -269,7 +271,7 @@ begin
             0
         );
       RequestedScreenId := screenMainMenu;
-      ApplyEditableSaveOnLoad := False;
+      Session.ApplyEditableSaveOnLoad := False;
       RequestClose(1);
       Exit;
     end;

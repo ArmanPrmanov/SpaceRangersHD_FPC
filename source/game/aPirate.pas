@@ -116,6 +116,8 @@ const
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aHuman,
+  aSession,
   aPlayer,
   Achievements,
   aGalaxyEvent,
@@ -341,12 +343,12 @@ end;
 procedure TPirate.LoadFromBuffer(Buffer: TBufEC; Galaxy: TGalaxy);
 begin
   inherited;
-  if LoadedSaveVersion >= 60 then
+  if Session.LoadedSaveVersion >= 60 then
     PrisonTermRemaining := Buffer.GetUInt32
   else
     PrisonTermRemaining := Buffer.GetByte;
   PirateType := Buffer.GetByte;
-  if LoadedSaveVersion >= 79 then
+  if Session.LoadedSaveVersion >= 79 then
     RaidPressure := Buffer.GetSingle
   else
     RaidPressure := 0;

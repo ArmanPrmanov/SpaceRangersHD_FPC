@@ -215,47 +215,20 @@ var
   AchievementsScreen: TfAchievements;
   SpaceViewPosition: TPointF;
   FilmCameraFollow: Boolean;
-  TalkShip: TShip;
-  TalkPlanet: TPlanet;
-  TalkScripted: Boolean;
-  TalkType: Byte;
-  TalkAmount: Integer;
-  TalkResponse: Byte;
-  TalkText: WideString;
-  ScriptUseItem: TItem;
-  ScriptItemContextStack: TList;
-  ScriptItemInfoContextStack: TList;
-  ScriptActionShipStack: TList;
-  ScriptActionObject1Stack: TList;
-  ScriptActionObject2Stack: TList;
-  ScriptActionParamStack: TList;
-  ScriptActionTypeStack: TList;
   ScreenLoadMode: Byte;
-  ScriptTemplates: TList;
-  SharedScriptVariables: TVarArrayEC;
-  GlobalScriptVariables: TVarArrayEC;
-  ScriptTemplateStartRequested: Boolean;
-  LastLoadedPlayerName: WideString;
   ReloadScriptTemplates: Boolean = True;
   ReloadModsRequested: Boolean = False;
   StandaloneQuestMode: Boolean = False;
   ScannerTarget: TObject = nil;
-  ScriptDialogIndex: Integer = -1;
   AwardSubject: TObject = nil;
-  PlayerStarDayPrepared: Boolean = False;
   PreviousFilmActivity: Cardinal = 0;
   FilmSoundEffectsEnabled: Boolean = True;
-  TurnCalculationThread: TThreadCalc = nil;
   DefaultArcadeLaserEffect: WideString = 'Laser.W1';
   DefaultArcadeHitEffect: WideString = 'Anim.H1';
   DefaultArcadeExplosionEffect: WideString = 'Anim.E1';
   FilmHistory: TFilmFile = nil;
   CacheLoader: TCacheLoader = nil;
   SaveManagerMode: TSaveManagerMode = smmLoad;
-  TalkRequestEvent: Cardinal = 0;
-  TalkCompletedEvent: Cardinal = 0;
-  ScriptUiRequestEvent: Cardinal = 0;
-  ScriptUiAbortEvent: Cardinal = 0;
   PlanetRenderTemplates: TList = nil;
   MinimapFrameCounter: Integer = 0;
   Skip1C: Boolean = False;
@@ -310,7 +283,6 @@ type
     PlayerPlayCount: Integer;
   end;
 var
-  UselessItemRemainsCount: Integer;
   RobotMapDefinitions: array of TRobotMap;
 type
   PointerToTPlanetAdvtGroup = ^TPlanetAdvtGroup;
@@ -548,6 +520,7 @@ function GetInnermostScreenLoop: TMessageLoopGI;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   aPacket,
   aSaveLoad,
@@ -579,17 +552,17 @@ begin
   GetLastError;
   InitializePathNodePool;
   FilmHistory := TFilmFile.Create;
-  TalkRequestEvent := CreateEvent(nil, False, False, nil);
-  TalkCompletedEvent := CreateEvent(nil, False, False, nil);
-  ScriptUiRequestEvent := CreateEvent(nil, True, False, nil);
-  ScriptUiAbortEvent := CreateEvent(nil, True, False, nil);
-  TurnCalculationThread := TThreadCalc.Create;
-  TurnCalculationThread.SetPriority(2);
-  ScriptTemplates := TList.Create;
-  GlobalScriptVariables := TVarArrayEC.Create;
-  SharedScriptVariables := TVarArrayEC.Create;
-  GlobalScriptVariables.Add('GRunFrom', vkInt).SetInt(0);
-  GlobalScriptVariables.Add('GRunStar', vkDword).SetInt(0);
+  Session.TalkRequestEvent := CreateEvent(nil, False, False, nil);
+  Session.TalkCompletedEvent := CreateEvent(nil, False, False, nil);
+  Session.ScriptUiRequestEvent := CreateEvent(nil, True, False, nil);
+  Session.ScriptUiAbortEvent := CreateEvent(nil, True, False, nil);
+  Session.TurnCalculationThread := TThreadCalc.Create;
+  Session.TurnCalculationThread.SetPriority(2);
+  Session.ScriptTemplates := TList.Create;
+  Session.GlobalScriptVariables := TVarArrayEC.Create;
+  Session.SharedScriptVariables := TVarArrayEC.Create;
+  Session.GlobalScriptVariables.Add('GRunFrom', vkInt).SetInt(0);
+  Session.GlobalScriptVariables.Add('GRunStar', vkDword).SetInt(0);
   InitializeScriptEngine;
 end;
 procedure FinalizeScriptHostRuntime;
@@ -599,50 +572,50 @@ var
   Index: Integer;
 begin
   FinalizeScriptEngine;
-  if GlobalScriptVariables <> nil then
+  if Session.GlobalScriptVariables <> nil then
   begin
-    GlobalScriptVariables.Free;
-    GlobalScriptVariables := nil;
+    Session.GlobalScriptVariables.Free;
+    Session.GlobalScriptVariables := nil;
   end;
-  if SharedScriptVariables <> nil then
+  if Session.SharedScriptVariables <> nil then
   begin
-    SharedScriptVariables.Free;
-    SharedScriptVariables := nil;
+    Session.SharedScriptVariables.Free;
+    Session.SharedScriptVariables := nil;
   end;
-  if ScriptTemplates <> nil then
+  if Session.ScriptTemplates <> nil then
   begin
-    for Index := 0 to ScriptTemplates.Count - 1 do
+    for Index := 0 to Session.ScriptTemplates.Count - 1 do
     begin
-      Item := ScriptTemplates[Index];
+      Item := Session.ScriptTemplates[Index];
       Item.Free;
     end;
-    ScriptTemplates.Free;
-    ScriptTemplates := nil;
+    Session.ScriptTemplates.Free;
+    Session.ScriptTemplates := nil;
   end;
-  if TurnCalculationThread <> nil then
+  if Session.TurnCalculationThread <> nil then
   begin
-    TurnCalculationThread.Free;
-    TurnCalculationThread := nil;
+    Session.TurnCalculationThread.Free;
+    Session.TurnCalculationThread := nil;
   end;
-  if TalkRequestEvent <> 0 then
+  if Session.TalkRequestEvent <> 0 then
   begin
-    CloseHandle(TalkRequestEvent);
-    TalkRequestEvent := 0;
+    CloseHandle(Session.TalkRequestEvent);
+    Session.TalkRequestEvent := 0;
   end;
-  if TalkCompletedEvent <> 0 then
+  if Session.TalkCompletedEvent <> 0 then
   begin
-    CloseHandle(TalkCompletedEvent);
-    TalkCompletedEvent := 0;
+    CloseHandle(Session.TalkCompletedEvent);
+    Session.TalkCompletedEvent := 0;
   end;
-  if ScriptUiRequestEvent <> 0 then
+  if Session.ScriptUiRequestEvent <> 0 then
   begin
-    CloseHandle(ScriptUiRequestEvent);
-    ScriptUiRequestEvent := 0;
+    CloseHandle(Session.ScriptUiRequestEvent);
+    Session.ScriptUiRequestEvent := 0;
   end;
-  if ScriptUiAbortEvent <> 0 then
+  if Session.ScriptUiAbortEvent <> 0 then
   begin
-    CloseHandle(ScriptUiAbortEvent);
-    ScriptUiAbortEvent := 0;
+    CloseHandle(Session.ScriptUiAbortEvent);
+    Session.ScriptUiAbortEvent := 0;
   end;
   for Race := 0 to 7 do
   begin
@@ -968,13 +941,13 @@ begin
       Text := Section.GetParamValue(Index);
       ScriptTemplate.ConfigValue := ExtractDigitsToIntW(ExtractDelimitedPartW(Text, 0, ','));
       ScriptTemplate.FileName := ExtractDelimitedPartW(Text, 1, ',');
-      ScriptTemplates.Add(ScriptTemplate);
-      CompileScriptTemplateCondition(ScriptTemplates.Count - 1);
+      Session.ScriptTemplates.Add(ScriptTemplate);
+      CompileScriptTemplateCondition(Session.ScriptTemplates.Count - 1);
     end;
-    for Index := GlobalScriptVariables.Count - 2 downto 0 do
+    for Index := Session.GlobalScriptVariables.Count - 2 downto 0 do
     begin
-      Variable := GlobalScriptVariables.GetItemByNameOrder(Index);
-      Other := GlobalScriptVariables.GetItemByNameOrder(Index + 1);
+      Variable := Session.GlobalScriptVariables.GetItemByNameOrder(Index);
+      Other := Session.GlobalScriptVariables.GetItemByNameOrder(Index + 1);
       if Variable.Name = Other.Name then
       begin
         if Variable.RealVType <> Other.RealVType then
@@ -993,7 +966,7 @@ begin
                     + ', '
                     + ScriptVariableTypeNames[Integer(Variable.RealVType) and $7F]
                     + ' will be discarded';
-            GlobalScriptVariables.Remove(Variable);
+            Session.GlobalScriptVariables.Remove(Variable);
           end
           else
           begin
@@ -1002,7 +975,7 @@ begin
                     + ', '
                     + ScriptVariableTypeNames[Integer(Other.RealVType) and $7F]
                     + ' will be discarded';
-            GlobalScriptVariables.Remove(Other);
+            Session.GlobalScriptVariables.Remove(Other);
           end;
           AppendLogLineThreadSafe(AnsiString(WarningText));
         end
@@ -1010,7 +983,7 @@ begin
         begin
           if Variable.EqualsValue(Other)
               or not (Variable.RealVType in [vkInt, vkDword, vkFloat, vkString]) then
-            GlobalScriptVariables.Remove(Other)
+            Session.GlobalScriptVariables.Remove(Other)
           else
           begin
             WarningText :=
@@ -1023,7 +996,7 @@ begin
                     + '. Value '
                     + Variable.GetString
                     + ' will be used';
-            GlobalScriptVariables.Remove(Other);
+            Session.GlobalScriptVariables.Remove(Other);
           end;
         end;
       end;
@@ -1395,7 +1368,7 @@ begin
   InitializeGovernmentGreetingDefinitions;
   InitializePlanetAdvertDefinitions;
   InitializeRobotMapDefinitions;
-  UselessItemRemainsCount :=
+  Session.UselessItemRemainsCount :=
       StrToInt(AnsiString(LookupLocalizedTextByKey('UselessItems.CntRemains')));
   Section := GameDataConfig.GetBlock('ABSound').GetBlock('Explosion');
   Count := Section.GetParamCount;
@@ -1762,17 +1735,17 @@ var
   Race, Kind, Series: Byte;
   Index: Integer;
 begin
-  if ScriptTemplates <> nil then
-    for Index := ScriptTemplates.Count - 1 downto 0 do
+  if Session.ScriptTemplates <> nil then
+    for Index := Session.ScriptTemplates.Count - 1 downto 0 do
     begin
-      TObject(ScriptTemplates[Index]).Free;
-      ScriptTemplates.Delete(Index);
+      TObject(Session.ScriptTemplates[Index]).Free;
+      Session.ScriptTemplates.Delete(Index);
     end;
-  if GlobalScriptVariables <> nil then
+  if Session.GlobalScriptVariables <> nil then
   begin
-    GlobalScriptVariables.Clear;
-    GlobalScriptVariables.Add('GRunFrom', vkInt).SetInt(0);
-    GlobalScriptVariables.Add('GRunStar', vkDword).SetInt(0);
+    Session.GlobalScriptVariables.Clear;
+    Session.GlobalScriptVariables.Add('GRunFrom', vkInt).SetInt(0);
+    Session.GlobalScriptVariables.Add('GRunStar', vkDword).SetInt(0);
   end;
   if ArtefactScriptCache <> nil then
   begin
@@ -1904,7 +1877,7 @@ begin
   Targets[2].PlanetId := Buffer.GetUInt32;
   WasRead := Buffer.GetBoolean;
   NotificationSoundPlayed := Buffer.GetBoolean;
-  if LoadedSaveVersion >= 109 then
+  if Session.LoadedSaveVersion >= 109 then
     ImageNameOverride := Buffer.ReadWideString;
 end;
 function TMessagePlayer.GetNormalImageName: WideString;
@@ -2286,10 +2259,10 @@ var
   Item: TScriptTemplUnit;
   Count, Index: Integer;
 begin
-  Count := ScriptTemplates.Count;
+  Count := Session.ScriptTemplates.Count;
   for Index := 0 to Count - 1 do
   begin
-    Item := ScriptTemplates[Index];
+    Item := Session.ScriptTemplates[Index];
     if Item.Name = Name then
     begin
       Result := Index;
@@ -2304,10 +2277,10 @@ var
   Count, Index, First, Second: Integer;
 begin
   Dest.Clear;
-  Count := ScriptTemplates.Count;
+  Count := Session.ScriptTemplates.Count;
   for Index := 0 to Count - 1 do
   begin
-    Item := ScriptTemplates[Index];
+    Item := Session.ScriptTemplates[Index];
     if Item.ActiveScriptIndex < 0 then
       Dest.Add(Item);
   end;

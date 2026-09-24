@@ -124,6 +124,7 @@ var
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aSession,
   aHuman,
   GI_MessageBox,
   aGalaxyEvent,
@@ -319,7 +320,7 @@ begin
         VerticalScrollBar.SetSize(
             Point(VerticalScrollBar.ClientSize.X, VerticalScrollBar.ClientSize.Y + HalfWidth)
         );
-        with FindByNameRecursive('TalkText') do
+        with FindByNameRecursive('LocalHuman.TalkText') do
           SetSize(Point(ClientSize.X, ClientSize.Y + HalfWidth));
       end;
       with FindByNameRecursive('TalkPA') as TPanelScrollBarGI do
@@ -407,7 +408,7 @@ begin
     begin
       Event := AddGalaxyEvent('PlayerDeath');
       Event.AddTextData('PlanetCaptured');
-      GameEndReason := 2;
+      Session.GameEndReason := 2;
       RequestedScreenId := screenGameEnd;
       RequestClose(1);
       Exit;
@@ -497,7 +498,7 @@ begin
     end;
     Stage := 5;
     Stage := 6;
-    with GetByName('TalkText') as TLabelGI do
+    with GetByName('LocalHuman.TalkText') as TLabelGI do
     begin
       SetText('');
       if FontDialog = 0 then
@@ -544,7 +545,7 @@ begin
               + GetPlayer.CurrentStar.Name;
       Stage := 9;
       if IsTurnCalculationRunning
-          and (WaitForSingleObject(ScriptUiRequestEvent, 0) <> WAIT_OBJECT_0) then
+          and (WaitForSingleObject(Session.ScriptUiRequestEvent, 0) <> WAIT_OBJECT_0) then
         WaitForTurnCalculation;
       if not MemorySnapshotActive then
         SaveGameToMemorySnapshot;
@@ -792,7 +793,7 @@ begin
   if GetPlayer <> nil then
     GetPlayer.ScriptItemsAct($19, nil, nil, 0);
   LoadPanel.OnClose;
-  ScriptDialogIndex := -1;
+  Session.ScriptDialogIndex := -1;
   ClearDialogChoices;
   MainPanel.OnClose;
   PlanetPanel.OnClose;
@@ -1060,7 +1061,7 @@ begin
   begin
     Choices := GetByName('TalkPA') as TPanelScrollBarGI;
     Choices.SetActive(True);
-    Choices.VerticalScrollBar.SetSmallChange((GetByName('TalkText') as TLabelGI).GetLineHeight);
+    Choices.VerticalScrollBar.SetSmallChange((GetByName('LocalHuman.TalkText') as TLabelGI).GetLineHeight);
     Choices.VerticalScrollBar.SetLargeChange(Choices.ClientSize.Y);
     Choices.VerticalScrollBar.SetPageSize(Choices.ClientSize.Y);
     Choices.SetScrollOffset(Point(0, 0));
@@ -1085,16 +1086,16 @@ begin
     DialogText := ReplaceAllWideString(DialogText, #13#10, #13#10 + LocalizedTextLinePrefix);
     FormattedTextLength := Length(DialogText);
     DialogText := ReplaceAllWideString(DialogText, '<color=255,240,100>', '<color=0,50,200>');
-    (GetByName('TalkText') as TLabelGI).SetText(DialogText);
+    (GetByName('LocalHuman.TalkText') as TLabelGI).SetText(DialogText);
     TextPanel := GetByName('TextScroll') as TPanelScrollBarGI;
     TextPanel.SetScrollOffset(Point(0, 0));
     TextPanel.UpdateScrollRanges;
     TextPanel.VerticalScrollBar.SetActive(
-        (TextPanel.FindByNameRecursive('TalkText') as TLabelGI).ClientSize.Y
+        (TextPanel.FindByNameRecursive('LocalHuman.TalkText') as TLabelGI).ClientSize.Y
             > TextPanel.ClientSize.Y
     );
     TextPanel.VerticalScrollBar.SetSmallChange(
-        (TextPanel.FindByNameRecursive('TalkText') as TLabelGI).GetLineHeight
+        (TextPanel.FindByNameRecursive('LocalHuman.TalkText') as TLabelGI).GetLineHeight
     );
     TextPanel.VerticalScrollBar.SetLargeChange(TextPanel.ClientSize.Y);
     TextPanel.VerticalScrollBar.SetPageSize(TextPanel.ClientSize.Y);
@@ -1175,7 +1176,7 @@ procedure TfGov.AddMessageClicked(Sender: TObjectGI);
 var
   Text: WideString;
 begin
-  Text := (GetByName('TalkText') as TLabelGI).GetText;
+  Text := (GetByName('LocalHuman.TalkText') as TLabelGI).GetText;
   Text := ReplaceAllWideString(Text, '<color=0,50,200>', '<color=255,240,100>');
   (Sender as TGraphButtonGI).SetDisabled(True);
   SoundManager.PlaySound('Sound.UserMsgAdd');
@@ -1280,18 +1281,18 @@ begin
   GetPlayer.CurrentPlanet.CollectScriptDialogChoices(ScriptDialogNames);
   ScriptDialogCursor := 0;
   Script := nil;
-  ScriptDialogIndex := -1;
+  Session.ScriptDialogIndex := -1;
   while ScriptDialogCursor < ScriptDialogNames.GetCount do
   begin
     Script := TScript(ScriptDialogNames.GetDataAt(ScriptDialogCursor));
     Script.CallDialogByVariable(ScriptDialogNames.GetTextAt(ScriptDialogCursor));
-    if ScriptDialogIndex >= 0 then
+    if Session.ScriptDialogIndex >= 0 then
       Break;
     Inc(ScriptDialogCursor);
   end;
   if GetPlayer.TryTurnInAnyQuest(Text) then
     DialogText := Text;
-  if ScriptDialogIndex < 0 then
+  if Session.ScriptDialogIndex < 0 then
   begin
     for I := 0 to Galaxy.Scripts.Count - 1 do
     begin
@@ -1318,7 +1319,7 @@ begin
       if Text <> '' then
       begin
         Script.CallDialogByVariable(Text);
-        if ScriptDialogIndex < 0 then
+        if Session.ScriptDialogIndex < 0 then
           AppendLogLineThreadSafe(
               AnsiString(
                   Script.ScriptFileName
@@ -1328,7 +1329,7 @@ begin
               )
           );
       end;
-      if ScriptDialogIndex < 0 then
+      if Session.ScriptDialogIndex < 0 then
         AddBuiltinGovernmentChoices
       else
       begin
@@ -1427,18 +1428,18 @@ procedure TfGov.ContinueScriptDialog;
 var
   Script: TScript;
 begin
-  ScriptDialogIndex := -1;
+  Session.ScriptDialogIndex := -1;
   Inc(ScriptDialogCursor);
   Script := nil;
   while ScriptDialogCursor < ScriptDialogNames.GetCount do
   begin
     Script := ScriptDialogNames.GetDataAt(ScriptDialogCursor);
     Script.CallDialogByVariable(ScriptDialogNames.GetTextAt(ScriptDialogCursor));
-    if ScriptDialogIndex >= 0 then
+    if Session.ScriptDialogIndex >= 0 then
       Break;
     Inc(ScriptDialogCursor);
   end;
-  if ScriptDialogIndex < 0 then
+  if Session.ScriptDialogIndex < 0 then
     BuildGovernmentChoices(True)
   else
     AddChoice(LocalizedColorText('FormGov.I_Continue'), PtrInt(Script), StartScriptMessage);
@@ -1482,16 +1483,16 @@ procedure TfGov.StartScriptMessage(Action: PtrInt);
 begin
   ClearDialogChoices;
   CurrentScript := TScript(Action);
-  CurrentScript.CallDialogMessage(ScriptDialogIndex);
+  CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
 end;
 procedure TfGov.RunScriptAnswer(Answer: PtrInt);
 begin
   ClearDialogChoices;
-  ScriptDialogIndex := -1;
+  Session.ScriptDialogIndex := -1;
   CurrentScript.ExecuteDialogAnswer(Answer);
-  if ScriptDialogIndex < 0 then
+  if Session.ScriptDialogIndex < 0 then
     RaiseWideMessage('I_Script');
-  CurrentScript.CallDialogMessage(ScriptDialogIndex);
+  CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
 end;
 procedure TfGov.RunScriptAnswerKeepingScroll(Answer: PtrInt);
 begin
@@ -1728,7 +1729,7 @@ begin
       MapId := -1
     else
       MapId := GetPlayer.SelectPlanetBattleMap;
-    if (MapId >= 0) and (ForcedPlanetQuestId < 0) then
+    if (MapId >= 0) and (Session.ForcedPlanetQuestId < 0) then
     begin
       MapIndex := FindRobotMapById(MapId);
       DialogText := RobotMapDefinitions[MapIndex].GovTextStart;
@@ -2227,12 +2228,12 @@ begin
   ClearDialogChoices;
   CurrentScript := Injection.Script;
   CurrentScript.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Injection.AnswerData);
-  ScriptDialogIndex := -1;
+  Session.ScriptDialogIndex := -1;
   CurrentScript.CallDialogByVariable(Injection.DialogName);
-  if ScriptDialogIndex < 0 then
+  if Session.ScriptDialogIndex < 0 then
     BuildGovernmentChoices(True)
   else
-    CurrentScript.CallDialogMessage(ScriptDialogIndex);
+    CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
 end;
 procedure TfGov.RunInjectedAnswerKeepingScroll(Answer: PtrInt);
 begin
