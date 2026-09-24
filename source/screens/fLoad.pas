@@ -63,6 +63,7 @@ procedure LinkRecoveredTypes;
 implementation
 
 uses
+  StarScene,
   aHuman,
   EC_CacheGAI,
   Windows,

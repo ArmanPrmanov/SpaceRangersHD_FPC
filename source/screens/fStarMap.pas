@@ -308,6 +308,7 @@ procedure LinkRecoveredTypes;
 implementation
 
 uses
+  StarScene,
   aHuman,
   EC_Cache,
   GI_GI,
