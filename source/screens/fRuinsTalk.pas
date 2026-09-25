@@ -93,6 +93,7 @@ type
     function StopScriptVideo(Unused: Boolean): Boolean;
     procedure I_Start;
     function ShowDominatorVictoryDialog: Boolean;
+    procedure ShowDominatorVictoryText;
     procedure ContinueDominatorVictoryDialog(Action: PtrInt);
     procedure M_Main(KeepText: Boolean);
     procedure CloseHullMode(Action: PtrInt);
@@ -274,7 +275,6 @@ type
         Prefix: WideString;
         CreditCost: Single
     ): Boolean;
-    procedure SpendDominionServiceCredit(CreditCost: Single);
     function CheckDominionAvailable: Boolean;
     procedure ShowDominionTravelDialog(Action: PtrInt);
     procedure ConfirmDominionTravel(Action: PtrInt);
@@ -342,13 +342,14 @@ function GetStationBackgroundPath: WideString;
 function GetConstructionShopCost: Integer;
 function GetConstructionFreeSpace: Integer;
 procedure SelectConstructionItem(Item: TEquipment; Source: Byte);
-function GetDominionRelocationCost(Star: TStar): Integer;
-function ApplyRecentDominionOrderSurcharge(Cost: Single): Integer;
 procedure LinkRecoveredTypes;
 implementation
 uses
   aDialogActions,
   aPlayerActions,
+  aPlanetActions,
+  aStationActions,
+  aTalkActions,
   aSession,
   aHuman,
   Achievements,
@@ -394,70 +395,12 @@ uses
   aConst,
   aGalaxyStruct,
   aRuins;
-procedure PayDepositMoney; inline;
-var
-  Remaining, Payment: Integer;
-  Player: TPlayer;
-begin
-  Player := GetPlayer;
-  Remaining := GetPlayer.Money - GetPlayer.DepositAmount;
-  if Remaining < 0 then
-    Payment := 0
-  else
-    Payment := Remaining;
-  Player.SetMoney(Payment);
-end;
 // Native M_Main reserves four unreferenced bytes after its inline scalar cells.
 // Keep that gap without moving the named locals or emitting an instruction.
 procedure ReserveGreetingFrame; inline;
 var
   UnresolvedFrameBytes: array[0..3] of Byte;
 begin
-end;
-// Preserve the native clamp cells before the captured money receiver.
-procedure PayStationModernization(QuotedCost: Cardinal); inline;
-var
-  Remaining, Payment: Int64;
-  Player: TPlayer;
-begin
-  Player := GetPlayer;
-  Remaining := GetPlayer.Money - Trunc(QuotedCost);
-  if Remaining < 0 then
-    Payment := 0
-  else
-    Payment := Remaining;
-  Player.SetMoney(Integer(Payment));
-end;
-procedure PayNationalityMoney; inline;
-var
-  QuotedCost, Cost, Remaining, Payment: Integer;
-  Player: TPlayer;
-begin
-  Player := GetPlayer;
-  QuotedCost := SelectFaceScreen.AcceptedCost;
-  if QuotedCost < 0 then
-    Cost := 0
-  else
-    Cost := QuotedCost;
-  Remaining := GetPlayer.Money - Cost;
-  if Remaining < 0 then
-    Payment := 0
-  else
-    Payment := Remaining;
-  Player.SetMoney(Payment);
-end;
-procedure PayChameleonMoney(Cost: Integer); inline;
-var
-  Remaining, Payment: Integer;
-  Player: TPlayer;
-begin
-  Player := GetPlayer;
-  Remaining := GetPlayer.Money - Cost;
-  if Remaining < 0 then
-    Payment := 0
-  else
-    Payment := Remaining;
-  Player.SetMoney(Payment);
 end;
 // Native reads the active count before evaluating the rank clamps.
 procedure ComputeStimulantOfferLimit(
@@ -487,19 +430,6 @@ begin
   else
     Maximum := Drawn;
   Limit := Maximum;
-end;
-procedure PayConstructionMoney(Price: Integer); inline;
-var
-  Remaining, Payment: Integer;
-  Player: TPlayer;
-begin
-  Player := GetPlayer;
-  Remaining := GetPlayer.Money - Price;
-  if Remaining < 0 then
-    Payment := 0
-  else
-    Payment := Remaining;
-  Player.SetMoney(Payment);
 end;
 
 procedure ResetStationImprovement;
@@ -805,7 +735,7 @@ begin
     StationType := GetPlayer.DockedTo.TypeId;
     StationBridgeMode := GetPlayer.RuinsMode;
     if StationBridgeMode > 0 then
-      GetPlayer.CurrentPlanet := nil;
+      EnterBridgeScreen;
     Stage := 4;
     MainPanel.OnOpen;
     Stage := 5;
@@ -816,12 +746,11 @@ begin
       SelectMusic;
       if LocalHuman.TemporaryShopSlots <> nil then
         ReturnShopStock;
-      RunGlobalScriptsForContext(GetPlayer.CurrentStar, 0);
-      PruneExpiredPersistentPlayerMessages;
+      RunGlobalScripts(GetPlayer.CurrentStar, 0);
+      PruneMessages;
       OpenShopStock;
     end;
-    if GetPlayer.PendingDockDialogue = 1 then
-      GetPlayer.PendingDockDialogue := 0;
+    EnterStation;
     Stage := 7;
     Galaxy.ReleaseItemGraphics;
     Stage := 8;
@@ -964,7 +893,7 @@ begin
     Stage := 25;
     MainPanel.RebuildMessageButtons(False);
     if GetPlayer <> nil then
-      GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
+      RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
     Stage := 26;
     SelectPortraitAnimation(True);
     NextPortraitCycleAlternate := False;
@@ -983,12 +912,12 @@ procedure TfRuinsTalk.OnClose;
 begin
   aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
   StopScriptVideo(False);
   LoadPanel.OnClose;
   HideStationTransientControl;
   StationBridgeMode := 0;
-  Session.ScriptDialogIndex := -1;
+  ClearStationDialog;
   ClearChoices;
   MainPanel.OnClose;
   StationPanel.OnClose;
@@ -1817,36 +1746,21 @@ begin
   end;
 end;
 
-function TfRuinsTalk.ShowDominatorVictoryDialog: Boolean;
-var
-  MessageEntry: TMessagePlayer;
-  Variant: Integer;
+// The news of a defeated dominator series, which ReportDominatorVictory or BeginStationDialog
+// found and rewarded (StationVictorySeries).
+procedure TfRuinsTalk.ShowDominatorVictoryText;
 begin
-  Result := False;
-  if (Galaxy.TerronSeriesResolvedTurn <> 0)
-      or (Galaxy.KellerSeriesResolvedTurn <> 0)
-      or (Galaxy.BlazerSeriesResolvedTurn <> 0) then
-  begin
-    MessageEntry := FindPlayerBubbleByKey('BlazerWin', False);
-    if (MessageEntry <> nil) and (MessageEntry.Kind = 3) then
+  case StationVictorySeries of
+    1:
     begin
-      MessageEntry.Kind := 4;
-      MessageEntry.WasRead := False;
-      Result := True;
-      if (BlazerShip = nil) and (Galaxy.BlazerSelfDestructTurn <> 0) then
-        Variant := 1
-      else if Galaxy.BlazerLandingPlanetId <> 0 then
-        Variant := 2
-      else
-        Variant := 3;
       DialogText :=
           ReplaceColoredToken(
-              LocalizedColorText('FormRuinsRC.Win.Blazer' + IntToStr(Variant)),
+              LocalizedColorText('FormRuinsRC.Win.Blazer' + IntToStr(StationVictoryVariant)),
               '<Date>',
               FormatGameTurnDate(Galaxy.BlazerSeriesResolvedTurn),
               '<color=255,240,100>'
           );
-      if (Variant = 2) and (BlazerShip <> nil) and (BlazerShip.CurrentPlanet <> nil) then
+      if (StationVictoryVariant = 2) and (BlazerShip <> nil) and (BlazerShip.CurrentPlanet <> nil) then
         DialogText :=
             ReplaceColoredToken(
                 DialogText,
@@ -1854,120 +1768,53 @@ begin
                 BlazerShip.CurrentPlanet.Name,
                 '<color=255,240,100>'
             );
+    end;
+    2:
       DialogText :=
-          DialogText
-              + #13#10
-              + ' '
-              + #13#10
-              + ReplaceColoredToken(
-                  LocalizedColorText('FormRuinsRC.Win.Reward'),
-                  '<Reward>',
-                  GetPlayer.AwardRandomMedal,
-                  '<color=255,240,100>');
-      ClearChoices;
-      AddChoice(
-          '- ' + LocalizedColorText('FormRuinsRC.Continue'),
-          0,
-          ContinueDominatorVictoryDialog
-      );
-    end
-    else
+          ReplaceColoredToken(
+              LocalizedColorText('FormRuinsRC.Win.Keller' + IntToStr(StationVictoryVariant)),
+              '<Date>',
+              FormatGameTurnDate(Galaxy.KellerSeriesResolvedTurn),
+              '<color=255,240,100>'
+          );
+    3:
     begin
-      MessageEntry := FindPlayerBubbleByKey('KellerWin', False);
-      if (MessageEntry <> nil) and (MessageEntry.Kind = 3) then
-      begin
-        MessageEntry.Kind := 4;
-        MessageEntry.WasRead := False;
-        Result := True;
-        if KellerShip = nil then
-          Variant := 1
-        else
-          Variant := 2;
+      DialogText :=
+          ReplaceColoredToken(
+              LocalizedColorText('FormRuinsRC.Win.Terron' + IntToStr(StationVictoryVariant)),
+              '<Date>',
+              FormatGameTurnDate(Galaxy.TerronSeriesResolvedTurn),
+              '<color=255,240,100>'
+          );
+      if (StationVictoryVariant = 1) and (TerronShip <> nil) and (TerronShip.CurrentStar <> nil) then
         DialogText :=
             ReplaceColoredToken(
-                LocalizedColorText('FormRuinsRC.Win.Keller' + IntToStr(Variant)),
-                '<Date>',
-                FormatGameTurnDate(Galaxy.KellerSeriesResolvedTurn),
+                DialogText,
+                '<Star>',
+                TerronShip.CurrentStar.Name,
                 '<color=255,240,100>'
             );
-        DialogText :=
-            DialogText
-                + #13#10
-                + ' '
-                + #13#10
-                + ReplaceColoredToken(
-                    LocalizedColorText('FormRuinsRC.Win.Reward'),
-                    '<Reward>',
-                    GetPlayer.AwardRandomMedal,
-                    '<color=255,240,100>');
-        ClearChoices;
-        AddChoice(
-            '- ' + LocalizedColorText('FormRuinsRC.Continue'),
-            0,
-            ContinueDominatorVictoryDialog
-        );
-      end
-      else
-      begin
-        MessageEntry := FindPlayerBubbleByKey('TerronWin', False);
-        if (MessageEntry <> nil) and (MessageEntry.Kind = 3) then
-        begin
-          MessageEntry.Kind := 4;
-          MessageEntry.WasRead := False;
-          Result := True;
-          if Galaxy.TerronToStarTurn <> 0 then
-            Variant := 1
-          else if Galaxy.TerronWeaponLockTurn <> 0 then
-            Variant := 2
-          else if Galaxy.TerronGrowLockTurn <> 0 then
-            Variant := 3
-          else if Galaxy.TerronLandingLockTurn <> 0 then
-            Variant := 4
-          else
-          begin
-            if TerronShip = nil then
-              Variant := 5
-            else
-            begin
-              Variant := 1;
-              RaiseWideMessage('Terron status');
-            end;
-          end;
-          DialogText :=
-              ReplaceColoredToken(
-                  LocalizedColorText('FormRuinsRC.Win.Terron' + IntToStr(Variant)),
-                  '<Date>',
-                  FormatGameTurnDate(Galaxy.TerronSeriesResolvedTurn),
-                  '<color=255,240,100>'
-              );
-          if (Variant = 1) and (TerronShip <> nil) and (TerronShip.CurrentStar <> nil) then
-            DialogText :=
-                ReplaceColoredToken(
-                    DialogText,
-                    '<Star>',
-                    TerronShip.CurrentStar.Name,
-                    '<color=255,240,100>'
-                );
-          DialogText :=
-              DialogText
-                  + #13#10
-                  + ' '
-                  + #13#10
-                  + ReplaceColoredToken(
-                      LocalizedColorText('FormRuinsRC.Win.Reward'),
-                      '<Reward>',
-                      GetPlayer.AwardRandomMedal,
-                      '<color=255,240,100>');
-          ClearChoices;
-          AddChoice(
-              '- ' + LocalizedColorText('FormRuinsRC.Continue'),
-              0,
-              ContinueDominatorVictoryDialog
-          );
-        end;
-      end;
     end;
   end;
+  DialogText :=
+      DialogText
+          + #13#10
+          + ' '
+          + #13#10
+          + ReplaceColoredToken(
+              LocalizedColorText('FormRuinsRC.Win.Reward'),
+              '<Reward>',
+              StationVictoryMedal,
+              '<color=255,240,100>');
+  ClearChoices;
+  AddChoice('- ' + LocalizedColorText('FormRuinsRC.Continue'), 0, ContinueDominatorVictoryDialog);
+end;
+
+function TfRuinsTalk.ShowDominatorVictoryDialog: Boolean;
+begin
+  Result := ReportDominatorVictory <> 0;
+  if Result then
+    ShowDominatorVictoryText;
 end;
 
 procedure TfRuinsTalk.ContinueDominatorVictoryDialog(Action: PtrInt);
@@ -1982,38 +1829,22 @@ const
 var
   Script: TScript;
   Text, Prefix: WideString;
-  Item: TItem;
-  I, J, SelectedIndex, BestPriority, ModuleIndex, Place, ExcludedBefore, RangerCount, Parts:
-      Integer;
+  I, SelectedIndex, BestPriority, Place, ExcludedBefore, RangerCount, Parts, Outcome: Integer;
   Ranger: TRanger;
-  SwapEntry: TObject;
-  Seed: Cardinal;
-  ItemType: Byte;
-  Weight, Level: Integer;
-  Info: PWeaponInfo;
-  MinimumSizeFactor, MaximumSizeFactor: Single;
   Stage: Integer;
 begin
   Stage := 0;
   try
-    ClearScriptDialogRules;
-    Stage := 1;
+    // CHANGE: ENHANCEMENT - The choices are cleared before the dialog rules, which the
+    // command clears; clearing the choices does not read them.
     ClearChoices;
-    Session.ScriptDialogIndex := -1;
-    Script := nil;
     Stage := 2;
-    if (GetPlayer.DockedTo.TypeId = Byte(rstRangerCenter)) and ShowDominatorVictoryDialog then
-      Exit;
-    Stage := 3;
-    if GetPlayer.DockedTo.ScriptShip <> nil then
+    Outcome := BeginStationDialog(GetPlayer.DockedTo.TypeId = Byte(rstRangerCenter));
+    Script := StationScript;
+    if Outcome = sdVictory then
     begin
-      Script := TScriptShip(GetPlayer.DockedTo.ScriptShip).Script;
-      Text := TScriptShip(GetPlayer.DockedTo.ScriptShip).GetGroup.DefinitionText;
-      if Text <> '' then
-      begin
-        Script.PublishShipContext(TScriptShip(GetPlayer.DockedTo.ScriptShip));
-        Script.CallDialogByVariable(Text);
-      end;
+      ShowDominatorVictoryText;
+      Exit;
     end;
     Stage := 4;
     if not KeepText then
@@ -2179,7 +2010,7 @@ begin
           Ord(rstRangerCenter):
           begin
             Stage := 8;
-            Galaxy.RefreshRangerRatingPlaces;
+            RefreshRangerRatings;
             DialogText := LocalizedColorText('FormRuins.RC.Greeting');
             Place := GetPlayer.PlaceInRating;
             ExcludedBefore := 0;
@@ -2259,7 +2090,7 @@ begin
             end
             else
             begin
-              if (GetPlayer.OwnerId <> Byte(oiPirate)) and GetPlayer.TryPromoteRank then
+              if (GetPlayer.OwnerId <> Byte(oiPirate)) and PromoteAtMilitaryBase(StationOwner) then
               begin
                 Stage := 12;
                 DialogText :=
@@ -2274,85 +2105,8 @@ begin
                     '<color=255,240,100>'
                 );
                 if GetPlayer.Rank = 7 then
-                begin
-                  ModuleIndex := FindMicroModuleTemplateByCustomTag('AkrinAmplifier');
-                  Item := TMicroModule.Create;
-                  if ModuleIndex >= 0 then
-                    (Item as TMicroModule).Init(ModuleIndex)
-                  else
-                    (Item as TMicroModule)
-                        .Init(
-                            Galaxy.SelectMicroModule(
-                                1,
-                                15,
-                                Galaxy.GenerationSeed + Cardinal(Galaxy.CurrentTurn),
-                                GetPlayer.DockedTo
-                            ));
-                  GetPlayer.Inventory.Add(Item);
-                  ReplaceTextToken(
-                      DialogText,
-                      '<MMName>',
-                      (Item as TMicroModule).GetPlainName,
-                      '<color=255,240,100>'
-                  );
-                end;
-                Seed := Galaxy.CurrentTurn div 50 * (GetPlayer.DockedTo.Id * (GetPlayer.Rank + 11));
-                MinimumSizeFactor := EquipmentSizeFactors[4];
-                MaximumSizeFactor := EquipmentSizeFactors[2];
-                if NextRandomIntRange(1, 100, Seed) > 70 then
-                begin
-                  Info :=
-                      Galaxy.SelectWeaponInfo(
-                          Seed,
-                          [0, 1, Ord(OwnerWeaponAvailability[StationOwner])],
-                          Min(Galaxy.TechLevel + 2, 8),
-                          Galaxy.TechLevel
-                      );
-                  Seed :=
-                      Galaxy.CurrentTurn div 33 * (GetPlayer.DockedTo.Id * (GetPlayer.Rank + 17));
-                  Weight :=
-                      NextRandomIntRange(
-                          Round(Info.AverageSize * MinimumSizeFactor),
-                          Round(Info.AverageSize * MaximumSizeFactor),
-                          Seed
-                      );
-                  Level :=
-                      Round(
-                          RemapClamped(
-                              Round(RemapClamped(ShortInt(GetPlayer.Rank * 1), 0, 7, 1, 5)),
-                              1,
-                              5,
-                              3,
-                              8
-                          )
-                      );
-                  Item := CreateGeneratedWeapon(Info, Weight, Level, StationOwner);
-                end
-                else
-                begin
-                  ItemType := PickRandomItemType([Ord(t_FuelTanks)..Ord(t_DefGenerator)]);
-                  Seed :=
-                      Galaxy.CurrentTurn div 33 * (GetPlayer.DockedTo.Id * (GetPlayer.Rank + 17));
-                  Weight :=
-                      NextRandomIntRange(
-                          Round(GetAverageItemSize(ItemType) * MinimumSizeFactor),
-                          Round(GetAverageItemSize(ItemType) * MaximumSizeFactor),
-                          Seed
-                      );
-                  Level := Round(RemapClamped(ShortInt(GetPlayer.Rank * 1), 0, 7, 3, 8));
-                  Item :=
-                      CreateGeneratedEquipment(TItemType(ItemType), Weight, Level, StationOwner);
-                end;
-                if Item <> nil then
-                  ReplaceTextToken(
-                      DialogText,
-                      '<ItemName>',
-                      Item.GetDisplayName,
-                      '<color=255,240,100>'
-                  )
-                else
-                  RaiseWideMessage('eq=nil');
-                GetPlayer.Inventory.Add(Item);
+                  ReplaceTextToken(DialogText, '<MMName>', StationText, '<color=255,240,100>');
+                ReplaceTextToken(DialogText, '<ItemName>', StationText2, '<color=255,240,100>');
               end
               else
                 DialogText :=
@@ -2473,42 +2227,12 @@ begin
     if Session.ScriptDialogIndex < 0 then
     begin
       Stage := 18;
-      for I := 0 to Galaxy.Scripts.Count - 1 do
-      begin
-        Script := TScript(Galaxy.Scripts[I]);
-        Script.RunAuxiliaryCode;
-      end;
+      RunScriptsAuxiliaryCode;
       Stage := 19;
       if ScriptDialogOverrides.Count > 0 then
       begin
         Stage := 20;
-        SelectedIndex := 0;
-        BestPriority := PScriptDialogOverride(ScriptDialogOverrides[0]).Priority;
-        for I := 0 to ScriptDialogOverrides.Count - 1 do
-          if PScriptDialogOverride(ScriptDialogOverrides[I]).Priority > BestPriority then
-          begin
-            SelectedIndex := I;
-            BestPriority := PScriptDialogOverride(ScriptDialogOverrides[I]).Priority;
-          end;
-        Script := PScriptDialogOverride(ScriptDialogOverrides[SelectedIndex]).Script;
-        Script
-            .InitCode
-            .LocalVar
-            .GetVar('GAnswerData')
-            .SetDword(PScriptDialogOverride(ScriptDialogOverrides[SelectedIndex]).AnswerData);
-        Text := PScriptDialogOverride(ScriptDialogOverrides[SelectedIndex]).DialogName;
-        if Text <> '' then
-        begin
-          Script.PublishCurrentShip(GetPlayer.DockedTo);
-          Script.CallDialogByVariable(Text);
-          if Session.ScriptDialogIndex < 0 then
-            AppendLogLineThreadSafe(
-                Script.ScriptFileName
-                    + ' has overriden dialog with '
-                    + Text
-                    + ' but it failed to start'
-            );
-        end;
+        Script := ApplyStationDialogOverride;
         if Session.ScriptDialogIndex < 0 then
         begin
           Stage := 21;
@@ -2537,15 +2261,7 @@ begin
               end;
         if SelectedIndex >= 0 then
           DialogText := PScriptDialogInjection(ScriptDialogInjections[SelectedIndex]).Text;
-        for I := 1 to ScriptDialogInjections.Count - 1 do
-          for J := ScriptDialogInjections.Count - 1 downto I do
-            if PScriptDialogInjection(ScriptDialogInjections[J]).Priority
-                > PScriptDialogInjection(ScriptDialogInjections[J - 1]).Priority then
-            begin
-              SwapEntry := ScriptDialogInjections[J];
-              ScriptDialogInjections[J] := ScriptDialogInjections[J - 1];
-              ScriptDialogInjections[J - 1] := SwapEntry;
-            end;
+        SortTalkDialogInjections;
         for I := 0 to ScriptDialogInjections.Count - 1 do
         begin
           if not PScriptDialogInjection(ScriptDialogInjections[I]).ReplaceGreeting then
@@ -2584,17 +2300,14 @@ begin
     else
     begin
       Stage := 25;
-      if not Script.SkipGreeting then
+      if Outcome <> sdSkipGreeting then
         AddChoice(
             '- ' + LocalizedColorText('FormRuins.I_Continue'),
             PtrInt(Script),
             SelectScriptDialog
         )
       else
-      begin
-        Script.SkipGreeting := False;
         SelectScriptDialog(PtrInt(Script));
-      end;
     end;
     ReserveGreetingFrame;
   except
@@ -2614,13 +2327,12 @@ end;
 
 procedure TfRuinsTalk.CloseHullMode(Action: PtrInt);
 begin
-  GetPlayer.CloseRuinsModeScreen;
+  CloseBridge;
 end;
 
 procedure TfRuinsTalk.ToggleImpulseShields(Action: PtrInt);
 begin
-  GetPlayer.GetHull.ImpulseShieldsEnabled := not GetPlayer.GetHull.ImpulseShieldsEnabled;
-  GetPlayer.GetHull.Energy := Max(0, GetPlayer.GetHull.Energy - 10);
+  SwitchImpulseShields;
   ClearChoices;
   M_Main(False);
 end;
@@ -2871,7 +2583,7 @@ end;
 
 procedure TfRuinsTalk.RecallInterceptorsFromTarget(Action: PtrInt);
 begin
-  TShip(Action).ClearIncomingInterceptors;
+  RecallInterceptorsFrom(TShip(Action));
   if GetPlayer.CountActiveInterceptorTargets > 0 then
     ShowActiveInterceptors(0)
   else
@@ -2879,21 +2591,8 @@ begin
 end;
 
 procedure TfRuinsTalk.RecallAllInterceptors(Action: PtrInt);
-var
-  I, J: Integer;
-  Star: TStar;
-  Ship: TShip;
 begin
-  for I := 0 to Galaxy.Stars.Count - 1 do
-  begin
-    Star := GetPlayer.CurrentStar.StarDistances[I].Star;
-    for J := 0 to Star.Ships.Count - 1 do
-    begin
-      Ship := TShip(Star.Ships[J]);
-      if GetPlayer = Ship.InterceptorSourceShip then
-        Ship.ClearIncomingInterceptors;
-    end;
-  end;
+  RecallEveryInterceptor;
   ShowInterceptorDialog(0);
 end;
 
@@ -2948,13 +2647,13 @@ end;
 
 procedure TfRuinsTalk.IncreaseInterceptorPassCount(Action: PtrInt);
 begin
-  GetPlayer.GetHull.InterceptorPassCountOverride := GetPlayer.GetInterceptorPassCount + 1;
+  ChangeInterceptorPassCount(1);
   ShowInterceptorPassDialog(0);
 end;
 
 procedure TfRuinsTalk.DecreaseInterceptorPassCount(Action: PtrInt);
 begin
-  GetPlayer.GetHull.InterceptorPassCountOverride := GetPlayer.GetInterceptorPassCount - 1;
+  ChangeInterceptorPassCount(-1);
   ShowInterceptorPassDialog(0);
 end;
 
@@ -3002,13 +2701,13 @@ end;
 
 procedure TfRuinsTalk.SelectInterceptorTarget(Action: PtrInt);
 begin
-  GetPlayer.GetHull.InterceptorTarget := Pointer(Action);
+  SetInterceptorTarget(TShip(Action));
   ShowInterceptorDialog(0);
 end;
 
 procedure TfRuinsTalk.ClearInterceptorTarget(Action: PtrInt);
 begin
-  GetPlayer.GetHull.InterceptorTarget := nil;
+  SetInterceptorTarget(nil);
   ShowInterceptorDialog(0);
 end;
 
@@ -3083,7 +2782,7 @@ end;
 
 procedure TfRuinsTalk.SelectInterceptorStrategy(Action: PtrInt);
 begin
-  GetPlayer.GetHull.InterceptorTargetingStrategy := TInterceptorTargetingStrategy(Action);
+  SetInterceptorStrategy(Action);
   ShowInterceptorDialog(0);
 end;
 
@@ -3568,7 +3267,7 @@ end;
 
 procedure TfRuinsTalk.ContinueScriptDialog;
 begin
-  CurrentScript.ExecuteDialogAnswer(CurrentScript.CurrentAnswer);
+  ScriptAnswerOnly(CurrentScript.CurrentAnswer);
   M_Main(True);
 end;
 
@@ -3608,7 +3307,7 @@ procedure TfRuinsTalk.SelectScriptDialog(ScriptValue: PtrInt);
 begin
   ClearChoices;
   CurrentScript := TScript(ScriptValue);
-  CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
+  ScriptCallDialogMessage(Session.ScriptDialogIndex);
 end;
 
 procedure TfRuinsTalk.RunScriptAnswer(Answer: PtrInt);
@@ -3629,7 +3328,7 @@ begin
   CaptureGalaxyPreview(Self);
   SaveManagerReturnScreenId := FormToId(Self);
   SaveGameToFile(SaveManagerScreen.GetAutoSavePath, 'as');
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   if not HangarScreen.TryTakeOff then
     RequestedScreenId := screenHangar;
   RequestClose(1);
@@ -3637,13 +3336,13 @@ end;
 
 procedure TfRuinsTalk.RunScriptNewsExit(Answer: PtrInt);
 begin
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   StationPanel.InformationClicked(nil);
 end;
 
 procedure TfRuinsTalk.RunScriptHangar(Answer: PtrInt);
 begin
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   StationPanel.HangarClicked(nil);
 end;
 
@@ -3654,14 +3353,13 @@ end;
 
 procedure TfRuinsTalk.RunScriptGoods(Answer: PtrInt);
 begin
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   StationPanel.GoodsShopClicked(nil);
 end;
 
 procedure TfRuinsTalk.RunScriptGameEnd(Answer: PtrInt);
 begin
-  CurrentScript.ExecuteDialogAnswer(Answer);
-  Session.GameEndReason := 0;
+  EndGameByScriptAnswer(Answer);
   RequestedScreenId := screenGameEnd;
   RequestClose(1);
 end;
@@ -3681,9 +3379,8 @@ begin
   Station := GetPlayer.DockedTo as TRuins;
   if Cardinal(QuotedCost) > 0 then
   begin
-    PayStationModernization(Cardinal(QuotedCost));
+    PayForModernization(Integer(QuotedCost));
     SoundManager.PlaySound('Sound.Sell');
-    Station.ModernizationSponsor := True;
   end
   else
     Cost := Station.CalculateEquippedItemCostWithoutHull;
@@ -3737,9 +3434,8 @@ var
   Count: Integer;
 begin
   Count := GetPlayer.GetCarriedNodeCount;
-  GetPlayer.DepositCarriedNodes;
+  DepositNodes;
   GetPlayer.AchievementStats.CheckNodesAchievement;
-  Galaxy.RefreshRangerRatingPlaces;
   SoundManager.PlaySound('Sound.Sell');
   DialogText := LocalizedColorText('FormRuins.RC.SaleNod.RCAnswer');
   ReplaceTextToken(DialogText, '<Count>', IntToStr(Count), '<color=255,240,100>');
@@ -3935,8 +3631,6 @@ end;
 procedure TfRuinsTalk.BuyRangerCenterMicroModule(Action: PtrInt);
 var
   Cost, ModuleIndex: Integer;
-  Item: TMicroModule;
-  Event: TGalaxyEvent;
 begin
   case Action of
     1:
@@ -3961,11 +3655,7 @@ begin
     end;
   end;
 
-  Dec(GetPlayer.BaseNodes, Cost);
-
-  Item := TMicroModule.Create;
-  Item.Init(ModuleIndex);
-  GetPlayer.Inventory.Add(Item);
+  TakeServiceMicroModule(ModuleIndex, Cost);
   DialogText := LocalizedColorText('FormRuins.RC.TakeNod.RCAfterPlayerOk');
   ReplaceTextToken(DialogText, '<NodCnt>', IntToStr(Cost), '<color=255,240,100>');
   ReplaceTextToken(
@@ -3976,10 +3666,6 @@ begin
   );
   ReplaceTextToken(DialogText, '<RC>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
   SoundManager.PlaySound('Sound.Sell');
-  Event := AddGalaxyEvent('PlayerReceivesMM');
-  Event.AddData(Item.Id);
-  Event.AddData(ModuleIndex);
-  Event.AddData(Cost);
   M_Main(True);
 end;
 
@@ -4177,44 +3863,17 @@ begin
 end;
 
 procedure TfRuinsTalk.ExchangeMicroModuleForNodes(Action: PtrInt);
-var
-  I, Value: Integer;
-  Item: TItem;
-  Module: TMicroModule;
 begin
-  Module := nil;
-  for I := 0 to GetPlayer.Inventory.Count - 1 do
-  begin
-    Item := TItem(GetPlayer.Inventory[I]);
-    if Item.ItemType = t_MicroModule then
-    begin
-      Module := Item as TMicroModule;
-      if Module.Id = Action then
-        Break;
-      Module := nil;
-    end;
-  end;
-  if Module = nil then
-    RaiseWideMessage(
-        'Косяк: TfRuinsTalk.I_GiveNodOk [FId = ' + IntToStr(Cardinal(Action)) + ']'
-    );
-  Value :=
-      Module
-          .CalculateNodeExchangeValue(NodeExchangeLowPriorityCost, NodeExchangeMediumPriorityCost);
+  GiveMicroModuleForNodes(Action, NodeExchangeLowPriorityCost, NodeExchangeMediumPriorityCost);
   DialogText :=
       FormatText2(
           LocalizedColorText('FormRuins.RC.GiveNod.AfterOk'),
           '<color=255,240,100>',
           '<Name>',
-          Module.GetHighlightedName,
+          StationText,
           '<Count>',
-          IntToStr(Value)
+          IntToStr(StationAmount)
       );
-  GetPlayer.Inventory.Delete(GetPlayer.Inventory.IndexOf(Module));
-  Module.Free;
-  Inc(GetPlayer.BaseNodes, Value);
-  GetPlayer.AchievementStats.CheckNodesAchievement;
-  GetPlayer.RefreshDerivedStats(True);
   SoundManager.PlaySound('Sound.Sell');
   ShowRangerCenterGiveNodeDialog(Action);
 end;
@@ -4352,13 +4011,8 @@ begin
 end;
 
 procedure TfRuinsTalk.AcceptPirateBaseNationality(Action: PtrInt);
-const
-  RelationShipTypes = [htRanger, htPirate..htDiplomat];
 var
-  RangerIndex, J: Integer;
-  Relation: Byte;
   I: Integer;
-  Event: TGalaxyEvent;
   Factor: Double;
 begin
   Factor := 1;
@@ -4382,49 +4036,14 @@ begin
   if RunSelectFaceDialog(Self) then
   begin
     aCalc.WaitForTurnCalculationUI;
-    GetPlayer.PortraitFaceId := SelectFaceScreen.CaptainPortraitIndex;
-    GetPlayer.PilotRace := SelectFaceScreen.PlayerRace;
-    if GetPlayer.OwnerId <> Byte(oiPirate) then
-      GetPlayer.OwnerId := RaceToOwner(SelectFaceScreen.PlayerRace);
-    GetPlayer.Name := SelectFaceScreen.PlayerName;
-    Session.LastLoadedPlayerName := GetPlayer.Name;
-    PayNationalityMoney;
-    GetPlayer.AddPirateCareerActivity(8);
-    Inc(GetPlayer.NationalityChangeCount);
+    ChangeNationality(
+        SelectFaceScreen.PlayerRace,
+        SelectFaceScreen.CaptainPortraitIndex,
+        SelectFaceScreen.PlayerName,
+        SelectFaceScreen.AcceptedCost
+    );
     TryAddAchievementProgress('MANYFACES', 1);
-    for J := 1 to 12 do
-      if not CaptainHealthDefinitions[J].Disabled then
-        if not (RaceToOwner(GetPlayer.PilotRace) in CaptainHealthDefinitions[J].AllowedOwners)
-            and (GetPlayer.CaptainHealth[J].Progress < 100) then
-        begin
-          GetPlayer.CaptainHealth[J].Progress := 0;
-          GetPlayer.StatusEffectSourceNames[J] := '';
-        end;
-    GetPlayer.ChangePlanetRelations(nil, rcmRaiseTo, 70, TOwnerMask(PlanetOwnerMasks.Coalition));
-    GetPlayer.ChangeShipRelations(
-        nil,
-        rcmRaiseTo,
-        70,
-        RelationShipTypes,
-        TOwnerMask(PlanetOwnerMasks.Coalition)
-    );
-    if MainPiratePlanet <> nil then
-    begin
-      RangerIndex := Galaxy.Rangers.IndexOf(GetPlayer);
-      Relation := Byte(MainPiratePlanet.RangerRelations[RangerIndex]);
-      if Relation < 45 then
-        MainPiratePlanet.RangerRelations[RangerIndex] := Pointer(45);
-    end;
-    GetPlayer.ChangeShipRelations(
-        nil,
-        rcmRaiseTo,
-        45,
-        RelationShipTypes,
-        TOwnerMask(PlanetOwnerMasks.PirateClan)
-    );
     SoundManager.PlaySound('Sound.Sell');
-    Event := AddGalaxyEvent('PlayerChangesNationality');
-    Event.AddData(GetPlayer.PilotRace);
     case SelectFaceScreen.PlayerRace of
       0: DialogText := LocalizedColorText('FormRuins.PB.ChangeNationality.AfterOperationMaloc');
       1: DialogText := LocalizedColorText('FormRuins.PB.ChangeNationality.AfterOperationPeleng');
@@ -4493,78 +4112,15 @@ begin
 end;
 
 procedure TfRuinsTalk.AcceptPirateBaseSideChange(Action: PtrInt);
-const
-  RelationShipTypes = [htRanger, htPirate..htDiplomat];
-var
-  Event: TGalaxyEvent;
-  I, RangerIndex: Integer;
-  Relation: Byte;
 begin
-  if GetPlayer.OwnerId = Byte(oiPirate) then
-    GetPlayer.OwnerId := RaceToOwner(GetPlayer.PilotRace)
-  else
-    GetPlayer.OwnerId := Byte(oiPirate);
-  StationServiceQuoteCost := Galaxy.ComputeScaledHugeMoney(2);
-  for I := Galaxy.GalaxyEvents.Count - 1 downto 0 do
-  begin
-    if TGalaxyEvent(Galaxy.GalaxyEvents[I]).Turn + 365 < Galaxy.CurrentTurn then
-      Break;
-    if TGalaxyEvent(Galaxy.GalaxyEvents[I]).EventType = 'PlayerChangesSide' then
-      StationServiceQuoteCost := Min(Int64(100000000), Round(StationServiceQuoteCost * 1.5));
-  end;
-  GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
+  ChangeSide;
+  StationServiceQuoteCost := StationAmount;
   SoundManager.PlaySound('Sound.Sell');
-  Inc(GetPlayer.SideChangeCount);
   TrySetAchievementProgress('SIDECHANGER', GetPlayer.SideChangeCount);
-  RangerIndex := Galaxy.Rangers.IndexOf(GetPlayer);
-  if MainPiratePlanet <> nil then
-    Relation := Byte(MainPiratePlanet.RangerRelations[RangerIndex])
-  else
-    Relation := 0;
   if GetPlayer.OwnerId = Byte(oiPirate) then
-  begin
-    if (Relation < 45) and (MainPiratePlanet <> nil) then
-      MainPiratePlanet.RangerRelations[RangerIndex] := Pointer(45);
-    GetPlayer.ChangeShipRelations(
-        nil,
-        rcmRaiseTo,
-        45,
-        RelationShipTypes,
-        TOwnerMask(PlanetOwnerMasks.PirateClan)
-    );
-    GetPlayer.ChangePlanetRelations(nil, rcmCapAt, 20, TOwnerMask(PlanetOwnerMasks.Coalition));
-    GetPlayer.ChangeShipRelations(
-        nil,
-        rcmCapAt,
-        20,
-        RelationShipTypes,
-        TOwnerMask(PlanetOwnerMasks.Coalition)
-    );
-    DialogText := LocalizedColorText('FormRuins.PB.ChangeSide.AnswerPlayerOkPirate');
-  end
+    DialogText := LocalizedColorText('FormRuins.PB.ChangeSide.AnswerPlayerOkPirate')
   else
-  begin
-    GetPlayer.ChangePlanetRelations(nil, rcmRaiseTo, 45, TOwnerMask(PlanetOwnerMasks.Coalition));
-    GetPlayer.ChangeShipRelations(
-        nil,
-        rcmRaiseTo,
-        45,
-        RelationShipTypes,
-        TOwnerMask(PlanetOwnerMasks.Coalition)
-    );
-    if (Relation > 20) and (MainPiratePlanet <> nil) then
-      MainPiratePlanet.RangerRelations[RangerIndex] := Pointer(20);
-    GetPlayer.ChangeShipRelations(
-        nil,
-        rcmCapAt,
-        20,
-        RelationShipTypes,
-        TOwnerMask(PlanetOwnerMasks.PirateClan)
-    );
     DialogText := LocalizedColorText('FormRuins.PB.ChangeSide.AnswerPlayerOkNormal');
-  end;
-  Event := AddGalaxyEvent('PlayerChangesSide');
-  Event.AddData(Ord(GetPlayer.OwnerId = Byte(oiPirate)));
   ClearChoices;
   M_Main(True);
 end;
@@ -4625,39 +4181,8 @@ begin
 end;
 
 procedure TfRuinsTalk.BuyPirateBaseNodes(Action: PtrInt);
-var
-  Count, Cost, DiscountedCost: Integer;
-  Stack: TProtoplasm;
-  Item: TItem;
-  I: Integer;
-  NewStack: Boolean;
-  Discount: Byte;
 begin
-  Count := (GetPlayer.DockedTo as TRuins).GetNodeSaleBatchSize;
-  Cost := Galaxy.ScaleGoodsPriceByGalaxyAge(Count * 10 * 3);
-  Discount := GetPlayer.GetPirateServiceDiscount;
-  DiscountedCost := Max(Int64(1), Cost - Round(Cost / 100 * Discount));
-  GetPlayer.SetMoney(GetPlayer.Money - DiscountedCost);
-  Dec(GetPlayer.DockedTo.NodeReserve, Count);
-  GetPlayer.AddPirateCareerActivity(4);
-  NewStack := True;
-  for I := 1 to GetPlayer.Inventory.Count - 1 do
-  begin
-    Item := GetPlayer.Inventory[I];
-    if Item is TProtoplasm then
-    begin
-      Stack := Item as TProtoplasm;
-      Stack.Init(Stack.StackCount + Count, 1);
-      NewStack := False;
-      Break;
-    end;
-  end;
-  if NewStack then
-  begin
-    Stack := TProtoplasm.Create;
-    Stack.Init(Count, 1);
-    GetPlayer.Inventory.Add(Stack);
-  end;
+  PurchasePirateNodes;
   DialogText := LocalizedColorText('FormRuins.PB.Nod.PBSell');
   SoundManager.PlaySound('Sound.Sell');
   ClearChoices;
@@ -4762,21 +4287,11 @@ end;
 procedure TfRuinsTalk.BuyPirateBaseProgram(Action: PtrInt);
 var
   ProgramIndex: Byte;
-  Cost, CarriedNodes, BaseNodes: Integer;
 begin
   ProgramIndex := Action;
-  Cost := PirateProgramQuoteCosts[ProgramIndex];
-  CarriedNodes := GetPlayer.GetAvailableNodeCount(nil);
-
-  if CarriedNodes + BaseNodes >= Cost then
+  if PurchasePirateProgram(ProgramIndex, PirateProgramQuoteCosts[ProgramIndex]) then
   begin
-    if CarriedNodes > 0 then
-      GetPlayer.ConsumeAvailableNodes(Cost, nil);
-    if Cost > CarriedNodes then
-      GetPlayer.BaseNodes := Max(0, GetPlayer.BaseNodes - (Cost - CarriedNodes));
-    Inc(GetPlayer.ProgramCounts[ProgramIndex], PirateProgramBatchSizes[ProgramIndex]);
     SoundManager.PlaySound('Sound.Sell');
-    GetPlayer.AddPirateCareerActivity(3);
     DialogText :=
         FormatText1(
             LocalizedColorText('FormRuins.PB.Program.PBAfterOk'),
@@ -4866,39 +4381,9 @@ begin
 end;
 
 procedure TfRuinsTalk.AcceptPirateBaseRepair(Action: PtrInt);
-var
-  Cost, DiscountedCost: Integer;
-  Discount: Byte;
-  I, NodeCost: Integer;
-  Item: TEquipment;
 begin
-  NodeCost := 0;
-  for I := 0 to GetPlayer.Inventory.Count - 1 do
+  if PirateBaseRepair then
   begin
-    Item := GetPlayer.Inventory[I];
-    if Item.EquippedFlag <> 0 then
-      if (Item is TWeapon)
-          and (TWeapon(Item).GetWeaponInfo.Availability = waNotSoldAndNodeRepair)
-          and Item.NeedsRepair then
-        if (GetPlayer.DockedTo as TRuins).CanRepairEquipmentTech(Item) then
-          Inc(NodeCost, Item.CalculateRepairCost);
-  end;
-  if NodeCost > 0 then
-  begin
-    NodeCost := Round(NodeCost * 0.0025);
-    if NodeCost = 0 then
-      NodeCost := 1;
-  end;
-  Cost := (GetPlayer.DockedTo as TRuins).GetRepairCost(GetPlayer);
-  Discount := GetPlayer.GetPirateServiceDiscount;
-  DiscountedCost := Max(Int64(1), Cost - Round(Cost / 100 * Discount));
-  if (GetPlayer.Money >= DiscountedCost) and (GetPlayer.GetAvailableNodeCount(nil) >= NodeCost) then
-  begin
-    GetPlayer.ConsumeAvailableNodes(NodeCost, nil);
-    GetPlayer.SetMoney(GetPlayer.Money + (Cost - DiscountedCost));
-    (GetPlayer.DockedTo as TRuins).RepairShipEquipment(GetPlayer);
-    GetPlayer.RefreshDerivedStats(True);
-    GetPlayer.AddPirateCareerActivity(4);
     DialogText := LocalizedColorText('FormRuins.PB.Repair.PBAfterOk');
     SoundManager.PlaySound('Sound.Repair');
     ClearChoices;
@@ -4969,15 +4454,9 @@ end;
 procedure TfRuinsTalk.BuyPirateBaseSubCrack(Action: PtrInt);
 begin
   DialogText := LocalizedColorText('FormRuins.PB.SabCrack.PBAfterOk');
-  GetPlayer.SetMoney(GetPlayer.Money - GetPlayer.GetSubCrackCost);
+  PurchaseSubCrack(False);
   ReplaceTextToken(DialogText, '<PB>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-  ReplaceTextToken(
-      DialogText,
-      '<Money>',
-      IntToStr(GetPlayer.GetSubCrackCost),
-      '<color=255,240,100>'
-  );
-  GetPlayer.ProgramCounts[prgSabCrack] := 1;
+  ReplaceTextToken(DialogText, '<Money>', IntToStr(StationAmount), '<color=255,240,100>');
   ClearChoices;
   M_Main(True);
 end;
@@ -4986,12 +4465,10 @@ procedure TfRuinsTalk.BuyPirateBaseSubCrackHalfPrice(Action: PtrInt);
 var
   Cost: Integer;
 begin
-  Cost := GetPlayer.GetSubCrackCost div 2;
+  Cost := PurchaseSubCrack(True);
   DialogText := LocalizedColorText('FormRuins.PB.SabCrack.PBAfterOkHalf');
   ReplaceTextToken(DialogText, '<PB>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
   ReplaceTextToken(DialogText, '<Money>', IntToStr(Cost), '<color=255,240,100>');
-  GetPlayer.SetMoney(GetPlayer.Money - Cost);
-  GetPlayer.ProgramCounts[prgSabCrack] := 1;
   ClearChoices;
   M_Main(True);
 end;
@@ -5075,8 +4552,7 @@ var
 begin
   Series := Action;
   Cost := PirateChameleonQuoteCosts[Series];
-  Inc(GetPlayer.ChameleonCharges[Series]);
-  PayChameleonMoney(Cost);
+  PurchaseChameleon(Series, Cost);
   SoundManager.PlaySound('Sound.Sell');
   DialogText := LocalizedColorText('FormRuins.PB.Chameleon.PBAfterOk');
   ClearChoices;
@@ -5267,8 +4743,7 @@ end;
 
 procedure TfRuinsTalk.AcceptMilitaryBaseRepair(Action: PtrInt);
 begin
-  (GetPlayer.DockedTo as TRuins).RepairShipEquipment(GetPlayer);
-  GetPlayer.RefreshDerivedStats(True);
+  MilitaryBaseRepair;
   DialogText := LocalizedColorText('FormRuins.WB.Repair.WBAfterOk');
   SoundManager.PlaySound('Sound.Repair');
   M_Main(True);
@@ -5325,17 +4800,8 @@ begin
 end;
 
 procedure TfRuinsTalk.AcceptMilitaryBasePrograms(Action: PtrInt);
-var
-  I: Byte;
 begin
-  for I := Low(ProgramNames) to High(ProgramNames) do
-    if GetPlayer.ProgramRewardStocks[I] > 0 then
-    begin
-      Inc(GetPlayer.ProgramCounts[I], GetPlayer.ProgramRewardStocks[I]);
-      GetPlayer.ProgramRewardStocks[I] := 0;
-    end;
-  GetPlayer.LastDominatorProgramRewardTurn := Galaxy.CurrentTurn;
-  GetPlayer.DestroyedDominatorHullMass := 0;
+  CollectMilitaryPrograms;
   DialogText := LocalizedColorText('FormRuins.WB.Programms.WBAfterOk');
   M_Main(True);
 end;
@@ -5401,14 +4867,9 @@ var
   FromStar, ToStar: TStar;
 begin
   DialogText := LocalizedColorText('FormRuins.WB.WarOperation.WBAfterOk');
-  if Galaxy.TryCreateLiberationGroup then
+  if OrderLiberationOperation(StationServiceQuoteCost, BusinessQuoteSmallAmount) then
   begin
     Group := Galaxy.LiberationGroups[Galaxy.LiberationGroups.Count - 1];
-    GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-    GetPlayer.StationServiceLastUseTurns[cpWarOperation] := Galaxy.CurrentTurn;
-    GetPlayer.ChangePlanetRelations(nil, rcmIncrease, 25, [0]);
-    GetPlayer.ChangePlanetRelations(nil, rcmIncrease, 15, [2, 3, 4]);
-    GetPlayer.ChangePlanetRelations(nil, rcmIncrease, 5, [1]);
     for I := Group.Ships.Count - 1 downto 0 do
     begin
       Ship := Group.Ships[I];
@@ -5451,7 +4912,6 @@ begin
   end
   else
   begin
-    GetPlayer.SetMoney(GetPlayer.Money - BusinessQuoteSmallAmount);
     DialogText :=
         DialogText + #13#10 + LocalizedColorText('FormRuins.WB.WarOperation.WBAfterOkBad');
     ReplaceTextToken(
@@ -5874,24 +5334,12 @@ procedure TfRuinsTalk.AcceptScienceBaseImprovement(Action: PtrInt);
 var
   Item: TEquipment;
   Kind: TImprovementKind;
-  Cost, Nodes: Integer;
 begin
   StationImprovementDetail := Action;
   Item := StationImprovementItem;
   Kind := StationImprovementKind;
-  Cost := Item.CalculateImprovementCost(Kind);
-  if Item.OwnerId = Byte(oiDominator) then
-    Nodes := Round(Cost * 0.01)
-  else
-    Nodes := 0;
-  if (GetPlayer.Money >= Cost) and (GetPlayer.GetAvailableNodeCount(nil) >= Nodes) then
+  if ImproveEquipment(Item, Kind, StationImprovementDetail) then
   begin
-    GetPlayer.SetMoney(GetPlayer.Money - Cost);
-    if Item.OwnerId = Byte(oiDominator) then
-      GetPlayer.ConsumeAvailableNodes(Nodes, nil);
-    Item.DetailImprovement := StationImprovementDetail;
-    Item.Improve(Kind);
-    GetPlayer.RefreshDerivedStats(True);
     case Kind of
       ikMinor: DialogText := LocalizedColorText('FormRuins.SB.Improvement.SBAfterOkMin');
       ikMedium: DialogText := LocalizedColorText('FormRuins.SB.Improvement.SBAfterOkAverage');
@@ -6003,32 +5451,9 @@ begin
 end;
 
 procedure TfRuinsTalk.AcceptScienceBaseRepair(Action: PtrInt);
-var
-  I, NodeCost: Integer;
-  Item: TEquipment;
 begin
-  NodeCost := 0;
-  for I := 0 to GetPlayer.Inventory.Count - 1 do
+  if ScienceBaseRepair then
   begin
-    Item := GetPlayer.Inventory[I];
-    if Item.EquippedFlag <> 0 then
-      if (Item is TWeapon)
-          and (TWeapon(Item).GetWeaponInfo.Availability = waNotSoldAndNodeRepair)
-          and Item.NeedsRepair then
-        if (GetPlayer.DockedTo as TRuins).CanRepairEquipmentTech(Item) then
-          Inc(NodeCost, Item.CalculateRepairCost);
-  end;
-  if NodeCost > 0 then
-  begin
-    NodeCost := Round(NodeCost * 0.0025);
-    if NodeCost = 0 then
-      NodeCost := 1;
-  end;
-  if GetPlayer.GetAvailableNodeCount(nil) >= NodeCost then
-  begin
-    GetPlayer.ConsumeAvailableNodes(NodeCost, nil);
-    (GetPlayer.DockedTo as TRuins).RepairShipEquipment(GetPlayer);
-    GetPlayer.RefreshDerivedStats(True);
     DialogText := LocalizedColorText('FormRuins.SB.Repair.SBAfterOk');
     SoundManager.PlaySound('Sound.Repair');
     M_Main(True);
@@ -6110,10 +5535,7 @@ begin
   Satellite := (GetPlayer.DockedTo as TRuins).SatelliteOffer;
   DialogText := LocalizedColorText('FormRuins.SB.Satellite.SBAfterOk');
   ReplaceTextToken(DialogText, '<SatName>', Satellite.GetDisplayName, '<color=255,240,100>');
-  GetPlayer.SetMoney(GetPlayer.Money - Satellite.Cost);
-  GetPlayer.Inventory.Add(Satellite);
-  (GetPlayer.DockedTo as TRuins).SatelliteOffer := nil;
-  (GetPlayer.DockedTo as TRuins).RegenerateSatelliteOffer;
+  PurchaseSatellite;
   SoundManager.PlaySound('Sound.Sell');
   M_Main(True);
 end;
@@ -6248,28 +5670,10 @@ end;
 procedure TfRuinsTalk.SellResearchRemains(Action: PtrInt);
 var
   Text: WideString;
-  Money, I: Integer;
-  Item: TEquipment;
+  Money: Integer;
 begin
-  Money := 0;
-  for I := GetPlayer.Inventory.Count - 1 downto 0 do
-  begin
-    Item := GetPlayer.Inventory[I];
-    if (Item.OwnerId = Byte(oiDominator))
-        and (Item.DominatorSeries = TDominatorSeries(SelectedResearchSeries))
-        and (Item.NoDropFlag = 0)
-        and (Item is TUselessItem) then
-      if not IsResearchItemQuestLetter(Item as TUselessItem) and (Item.CustomFaction = '') then
-      begin
-        Inc(Galaxy.DominatorResearch[SelectedResearchSeries].Material, Item.Weight);
-        Inc(Money, 2 * Item.Cost);
-        GetPlayer.Inventory.Delete(I);
-        Item.Free;
-      end;
-  end;
+  Money := SellAllResearchRemains(SelectedResearchSeries);
   SoundManager.PlaySound('Sound.Sell');
-  GetPlayer.SetMoney(GetPlayer.Money + Money);
-  GetPlayer.RefreshDerivedStats(True);
   ClearChoices;
   BuildResearchItemChoices(SelectedResearchSeries, Text);
   DialogText := LocalizedColorText('FormRuins.SB.Scn.SBSection2');
@@ -6318,30 +5722,10 @@ end;
 procedure TfRuinsTalk.SellResearchEquipment(Action: PtrInt);
 var
   Text: WideString;
-  Money, I: Integer;
-  Item: TEquipment;
+  Money: Integer;
 begin
-  Money := 0;
-  for I := GetPlayer.Inventory.Count - 1 downto 0 do
-  begin
-    Item := GetPlayer.Inventory[I];
-    if (Item.OwnerId = Byte(oiDominator))
-        and not (Item is TUselessItem)
-        and (Item.EquippedFlag = 0)
-        and (Item.NoDropFlag = 0)
-        and (Item.ItemType <> t_Protoplasm)
-        and (Item.ItemType <> t_MicroModule)
-        and (Item.CustomFaction = '') then
-    begin
-      Inc(Galaxy.DominatorResearch[SelectedResearchSeries].Material, Item.Weight);
-      Inc(Money, Item.Cost);
-      GetPlayer.Inventory.Delete(I);
-      Item.Free;
-    end;
-  end;
+  Money := SellAllResearchEquipment(SelectedResearchSeries);
   SoundManager.PlaySound('Sound.Sell');
-  GetPlayer.SetMoney(GetPlayer.Money + Money);
-  GetPlayer.RefreshDerivedStats(True);
   ClearChoices;
   BuildResearchItemChoices(SelectedResearchSeries, Text);
   DialogText := LocalizedColorText('FormRuins.SB.Scn.SBSection2');
@@ -6391,20 +5775,9 @@ procedure TfRuinsTalk.SellResearchItem(Action: PtrInt);
 var
   Text: WideString;
   Money: Integer;
-  Item: TEquipment;
 begin
-  Item := GetPlayer.Inventory[Action];
-  Inc(Galaxy.DominatorResearch[SelectedResearchSeries].Material, Item.Weight);
-  if (Item.DominatorSeries = TDominatorSeries(SelectedResearchSeries))
-      and (Item is TUselessItem) then
-    Money := Item.Cost * 2
-  else
-    Money := Item.Cost;
-  GetPlayer.SetMoney(GetPlayer.Money + Money);
+  Money := SellOneResearchItem(SelectedResearchSeries, GetPlayer.Inventory[Action]);
   SoundManager.PlaySound('Sound.Sell');
-  GetPlayer.Inventory.Delete(GetPlayer.Inventory.IndexOf(Item));
-  GetPlayer.RefreshDerivedStats(True);
-  Item.Free;
   ClearChoices;
   BuildResearchItemChoices(SelectedResearchSeries, Text);
   DialogText := LocalizedColorText('FormRuins.SB.Scn.SBSection2');
@@ -6514,13 +5887,8 @@ var
   Cost: Integer;
 begin
   Cost := Action;
-  GetPlayer.SetMoney(GetPlayer.Money - Cost);
+  PurchaseResearchProgram(SelectedResearchSeries, Cost);
   SoundManager.PlaySound('Sound.Sell');
-  case SelectedResearchSeries of
-    Ord(dsBlazer): GetPlayer.ProgramCounts[prgLogicalNegation] := 1;
-    Ord(dsKeller): GetPlayer.ProgramCounts[prgDematerial] := 1;
-    Ord(dsTerron): GetPlayer.ProgramCounts[prgEnergotron] := 1;
-  end;
   DialogText :=
       LocalizedColorText(
           'FormRuins.SB.Scn.SBAfterPlayerBuyTech' + DominatorSeriesNames[SelectedResearchSeries]
@@ -6745,26 +6113,23 @@ end;
 
 procedure TfRuinsTalk.AcceptBusinessCenterDebtQuote(Quote: PtrInt);
 var
-  Amount: Integer;
+  Amount, DueTurn: Integer;
 begin
   case Quote of
     1:
     begin
-      GetPlayer.DebtAmount := Round(BusinessQuoteLargeAmount * 1.2);
-      GetPlayer.DebtDueTurn := BusinessQuoteLargeDueTurn;
       Amount := BusinessQuoteLargeAmount;
+      DueTurn := BusinessQuoteLargeDueTurn;
     end;
     2:
     begin
-      GetPlayer.DebtAmount := Round(BusinessQuoteMediumAmount * 1.15);
-      GetPlayer.DebtDueTurn := BusinessQuoteMediumDueTurn;
       Amount := BusinessQuoteMediumAmount;
+      DueTurn := BusinessQuoteMediumDueTurn;
     end;
     3:
     begin
-      GetPlayer.DebtAmount := Round(BusinessQuoteSmallAmount * 1.1);
-      GetPlayer.DebtDueTurn := BusinessQuoteSmallDueTurn;
       Amount := BusinessQuoteSmallAmount;
+      DueTurn := BusinessQuoteSmallDueTurn;
     end;
   else
     begin
@@ -6773,8 +6138,7 @@ begin
       Exit;
     end;
   end;
-  GetPlayer.DebtDefaultCount := 0;
-  GetPlayer.SetMoney(GetPlayer.Money + Amount);
+  TakeLoan(Quote, Amount, DueTurn);
   DialogText := LocalizedColorText('FormRuins.BK.TakeDebt.BKAfterOk');
   ReplaceTextToken(DialogText, '<SendMoney>', IntToStr(Amount), '<color=255,240,100>');
   ReplaceTextToken(
@@ -6805,10 +6169,7 @@ procedure TfRuinsTalk.RepayBusinessCenterDebt(Action: PtrInt);
 begin
   DialogText := LocalizedColorText('FormRuins.BK.RetDebt.BK');
   ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-  GetPlayer.DebtDefaultCount := 0;
-  GetPlayer.SetMoney(GetPlayer.Money - GetPlayer.DebtAmount);
-  GetPlayer.DebtAmount := 0;
-  GetPlayer.DebtDueTurn := 0;
+  RepayLoan;
   M_Main(True);
 end;
 
@@ -6887,16 +6248,17 @@ begin
 end;
 
 procedure TfRuinsTalk.AcceptBusinessCenterDepositQuote(Quote: PtrInt);
+var
+  Amount: Integer;
 begin
   case Quote of
-    1: GetPlayer.DepositAmount := Round(BusinessQuoteLargeAmount);
-    2: GetPlayer.DepositAmount := Round(BusinessQuoteMediumAmount);
-    3: GetPlayer.DepositAmount := Round(BusinessQuoteSmallAmount);
+    1: Amount := BusinessQuoteLargeAmount;
+    2: Amount := BusinessQuoteMediumAmount;
+    3: Amount := BusinessQuoteSmallAmount;
+  else
+    Amount := GetPlayer.DepositAmount;
   end;
-  GetPlayer.DepositInterestRate := BusinessDepositQuoteInterestRate;
-  GetPlayer.DepositDayCount := 0;
-  GetPlayer.DepositStartTurn := Galaxy.CurrentTurn;
-  PayDepositMoney;
+  OpenDeposit(Amount, BusinessDepositQuoteInterestRate);
   DialogText := LocalizedColorText('FormRuins.BK.Deposit.BKAfterOk');
   ReplaceTextToken(
       DialogText,
@@ -6923,22 +6285,14 @@ begin
 end;
 
 procedure TfRuinsTalk.WithdrawBusinessCenterDeposit(Action: PtrInt);
-var
-  Profit: Integer;
 begin
-  if GetPlayer.CurrentStar.Battle <> 0 then
+  if not CloseDeposit then
     DialogText := LocalizedColorText('FormRuins.BK.RetDeposit.War')
   else
   begin
     DialogText := LocalizedColorText('FormRuins.BK.RetDeposit.BK');
     ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-    Profit := GetPlayer.ComputeDepositAccruedValue - GetPlayer.DepositAmount;
-    GetPlayer.SetMoney(GetPlayer.Money + GetPlayer.ComputeDepositAccruedValue);
-    GetPlayer.AchievementStats.CheckInvestorAchievement(Profit);
-    GetPlayer.DepositAmount := 0;
-    GetPlayer.DepositStartTurn := 0;
-    GetPlayer.DepositDayCount := 0;
-    GetPlayer.DepositInterestRate := 0;
+    GetPlayer.AchievementStats.CheckInvestorAchievement(StationAmount);
     SoundManager.PlaySound('Sound.Sell');
   end;
   M_Main(True);
@@ -6995,8 +6349,7 @@ begin
       '<color=255,240,100>'
   );
   ReplaceTextToken(DialogText, '<Year>', IntToStr(5), '<color=255,240,100>');
-  GetPlayer.SetMoney(GetPlayer.Money - Galaxy.ComputeScaledAverageMoney(2));
-  GetPlayer.MedicalPolicyTicks := 1825;
+  PurchaseMedicalPolicy;
   SoundManager.PlaySound('Sound.Sell');
   M_Main(True);
 end;
@@ -7944,543 +7297,33 @@ begin
 end;
 
 procedure TfRuinsTalk.AcceptBusinessCenterInvestment(Action: PtrInt);
-const
-  RangerTypes = [htRanger];
-  FriendlyTypes = [htRanger, htTransport..htDiplomat];
-  PirateTypes = [htPirate];
-  TransportTypes = [htRanger..15] - [htRanger..htPirate, htDiplomat..15];
 var
   Kind: Byte;
-  RangerCenter, PirateBase, MilitaryBase, ScienceBase, BusinessCenter, MedicalBase: TRuins;
-  I, J, Experience, RankPoints, Count: Integer;
-  Star: TStar;
-  Ship: TShip;
-  Ranger: TRanger;
-  Warrior: TWarrior;
-  Text, ShipNames: WideString;
+  Target: TObject;
 begin
   Kind := Action;
   StationServiceQuoteCost := InvestmentQuoteCosts[Kind];
-  GetPlayer.StationServiceLastUseTurns[Kind] := Galaxy.CurrentTurn;
   case Kind of
-    cpCreateRangerCenter:
-    begin
-      GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-      RangerCenter := TRuins.Create;
-      RangerCenter.Init(rstRangerCenter, InvestmentRangerCenterStar, '');
-      Galaxy.AddPlanetNewsWithPlayerBubble(
-          41,
-          FormatText3(
-              PickLocalizedTextVariant(
-                  'GalaxyNews.CreateNewObject.RC',
-                  Galaxy.CurrentTurn div 10 * GetPlayer.DockedTo.Seed
-              ),
-              '<color=255,240,100>',
-              '<Name>',
-              RangerCenter.GetName,
-              '<Star>',
-              RangerCenter.CurrentStar.Name,
-              '<Sector>',
-              RangerCenter.CurrentStar.Constellation.GetName
-          )
-      );
-      DialogText := LocalizedColorText('FormRuins.BK.Investment.BKAfterInvestment');
-      ReplaceTextToken(
-          DialogText,
-          '<InvestmentText>',
-          LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.Text'),
-          ''
-      );
-      ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Name>', RangerCenter.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Star>', RangerCenter.CurrentStar.Name, '<color=255,240,100>');
-      Experience := SeededRandomIntRange(1000, 1500, RangerCenter.Seed);
-      GetPlayer.GainExperience(Experience, 0);
-      ReplaceTextToken(DialogText, '<Point>', IntToStr(Experience), '<color=255,240,100>');
-      Galaxy.UpdateConstellationMilitaryStats;
-      GetPlayer.ChangePlanetRelations(nil, rcmIncrease, 10, TOwnerMask(PlanetOwnerMasks.Coalition));
-      GetPlayer.ChangeShipRelations(
-          nil,
-          rcmIncrease,
-          40,
-          RangerTypes,
-          TOwnerMask(PlanetOwnerMasks.Coalition)
-      );
-      TryAddAchievementProgress('RUINS', 1);
-    end;
-    cpCreatePirateBase:
-    begin
-      GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-      PirateBase := TRuins.Create;
-      PirateBase.Init(rstPirateBase, InvestmentPirateBaseStar, '');
-      Galaxy.AddPlanetNewsWithPlayerBubble(
-          41,
-          FormatText3(
-              PickLocalizedTextVariant(
-                  'GalaxyNews.CreateNewObject.PB',
-                  Galaxy.CurrentTurn div 10 * GetPlayer.DockedTo.Seed
-              ),
-              '<color=255,240,100>',
-              '<Name>',
-              PirateBase.GetName,
-              '<Star>',
-              PirateBase.CurrentStar.Name,
-              '<Sector>',
-              PirateBase.CurrentStar.Constellation.GetName
-          )
-      );
-      DialogText := LocalizedColorText('FormRuins.BK.Investment.BKAfterInvestment');
-      ReplaceTextToken(
-          DialogText,
-          '<InvestmentText>',
-          LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.Text'),
-          ''
-      );
-      ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Name>', PirateBase.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Star>', PirateBase.CurrentStar.Name, '<color=255,240,100>');
-      Galaxy.UpdateConstellationMilitaryStats;
-      GetPlayer.ChangePlanetRelations(nil, rcmDecreaseWithFloor20, 30, [3, 4]);
-      GetPlayer.ChangePlanetRelations(nil, rcmDecreaseWithFloor20, 10, [0, 2]);
-      GetPlayer.ChangePlanetRelations(nil, rcmIncrease, 20, [1]);
-    end;
-    cpCreateMilitaryBase:
-    begin
-      GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-      MilitaryBase := TRuins.Create;
-      MilitaryBase.Init(rstMilitaryBase, InvestmentMilitaryBaseStar, '');
-      Galaxy.AddPlanetNewsWithPlayerBubble(
-          41,
-          FormatText3(
-              PickLocalizedTextVariant(
-                  'GalaxyNews.CreateNewObject.WB',
-                  Galaxy.CurrentTurn div 10 * GetPlayer.DockedTo.Seed
-              ),
-              '<color=255,240,100>',
-              '<Name>',
-              MilitaryBase.GetName,
-              '<Star>',
-              MilitaryBase.CurrentStar.Name,
-              '<Sector>',
-              MilitaryBase.CurrentStar.Constellation.GetName
-          )
-      );
-      DialogText := LocalizedColorText('FormRuins.BK.Investment.BKAfterInvestment');
-      if GetPlayer.OwnerId <> Byte(oiPirate) then
-        ReplaceTextToken(
-            DialogText,
-            '<InvestmentText>',
-            LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.Text'),
-            ''
-        )
-      else
-        ReplaceTextToken(
-            DialogText,
-            '<InvestmentText>',
-            LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.TextAlt'),
-            ''
-        );
-      ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Name>', MilitaryBase.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Star>', MilitaryBase.CurrentStar.Name, '<color=255,240,100>');
-      if GetPlayer.OwnerId <> Byte(oiPirate) then
-      begin
-        RankPoints := SeededRandomIntRange(50, 200, MilitaryBase.Seed);
-        GetPlayer.AddRankPoints(RankPoints);
-        ReplaceTextToken(DialogText, '<Point>', IntToStr(RankPoints), '<color=255,240,100>');
-      end;
-      Galaxy.UpdateConstellationMilitaryStats;
-      GetPlayer.ChangePlanetRelations(nil, rcmIncrease, 30, TOwnerMask(PlanetOwnerMasks.Coalition));
-      GetPlayer.ChangeShipRelations(
-          nil,
-          rcmIncrease,
-          10,
-          FriendlyTypes,
-          TOwnerMask(PlanetOwnerMasks.Coalition)
-      );
-      GetPlayer.ChangeShipRelations(
-          nil,
-          rcmDecreaseWithFloor20,
-          30,
-          PirateTypes,
-          TOwnerMask(PlanetOwnerMasks.Coalition)
-      );
-      TryAddAchievementProgress('RUINS', 1);
-    end;
-    cpCreateScienceBase:
-    begin
-      GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-      ScienceBase := TRuins.Create;
-      ScienceBase.Init(rstScienceBase, InvestmentScienceBaseStar, '');
-      Galaxy.AddPlanetNewsWithPlayerBubble(
-          41,
-          FormatText3(
-              PickLocalizedTextVariant(
-                  'GalaxyNews.CreateNewObject.SB',
-                  Galaxy.CurrentTurn div 10 * GetPlayer.DockedTo.Seed
-              ),
-              '<color=255,240,100>',
-              '<Name>',
-              ScienceBase.GetName,
-              '<Star>',
-              ScienceBase.CurrentStar.Name,
-              '<Sector>',
-              ScienceBase.CurrentStar.Constellation.GetName
-          )
-      );
-      DialogText := LocalizedColorText('FormRuins.BK.Investment.BKAfterInvestment');
-      ReplaceTextToken(
-          DialogText,
-          '<InvestmentText>',
-          LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.Text'),
-          ''
-      );
-      ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Name>', ScienceBase.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Star>', ScienceBase.CurrentStar.Name, '<color=255,240,100>');
-      Galaxy.UpdateConstellationMilitaryStats;
-      GetPlayer.ChangeShipRelations(
-          nil,
-          rcmIncrease,
-          25,
-          RangerTypes,
-          TOwnerMask(PlanetOwnerMasks.Coalition)
-      );
-      TryAddAchievementProgress('RUINS', 1);
-    end;
-    cpCreateBusinessCenter:
-    begin
-      GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-      BusinessCenter := TRuins.Create;
-      BusinessCenter.Init(rstBusinessCenter, InvestmentBusinessCenterStar, '');
-      Galaxy.AddPlanetNewsWithPlayerBubble(
-          41,
-          FormatText3(
-              PickLocalizedTextVariant(
-                  'GalaxyNews.CreateNewObject.BK',
-                  Galaxy.CurrentTurn div 10 * GetPlayer.DockedTo.Seed
-              ),
-              '<color=255,240,100>',
-              '<Name>',
-              BusinessCenter.GetName,
-              '<Star>',
-              BusinessCenter.CurrentStar.Name,
-              '<Sector>',
-              BusinessCenter.CurrentStar.Constellation.GetName
-          )
-      );
-      DialogText := LocalizedColorText('FormRuins.BK.Investment.BKAfterInvestment');
-      ReplaceTextToken(
-          DialogText,
-          '<InvestmentText>',
-          LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.Text'),
-          ''
-      );
-      ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Name>', BusinessCenter.Name, '<color=255,240,100>');
-      ReplaceTextToken(
-          DialogText,
-          '<Star>',
-          BusinessCenter.CurrentStar.Name,
-          '<color=255,240,100>'
-      );
-      Galaxy.UpdateConstellationMilitaryStats;
-      GetPlayer.ChangeShipRelations(
-          nil,
-          rcmIncrease,
-          30,
-          TransportTypes,
-          TOwnerMask(PlanetOwnerMasks.Coalition)
-      );
-      TryAddAchievementProgress('RUINS', 1);
-    end;
-    cpCreateMedicalBase:
-    begin
-      GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-      MedicalBase := TRuins.Create;
-      MedicalBase.Init(rstMedicalBase, InvestmentMedicalBaseStar, '');
-      Galaxy.AddPlanetNewsWithPlayerBubble(
-          41,
-          FormatText3(
-              PickLocalizedTextVariant(
-                  'GalaxyNews.CreateNewObject.MC',
-                  Galaxy.CurrentTurn div 10 * GetPlayer.DockedTo.Seed
-              ),
-              '<color=255,240,100>',
-              '<Name>',
-              MedicalBase.GetName,
-              '<Star>',
-              MedicalBase.CurrentStar.Name,
-              '<Sector>',
-              MedicalBase.CurrentStar.Constellation.GetName
-          )
-      );
-      DialogText := LocalizedColorText('FormRuins.BK.Investment.BKAfterInvestment');
-      ReplaceTextToken(
-          DialogText,
-          '<InvestmentText>',
-          LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.Text'),
-          ''
-      );
-      ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Name>', MedicalBase.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Star>', MedicalBase.CurrentStar.Name, '<color=255,240,100>');
-      Galaxy.UpdateConstellationMilitaryStats;
-      GetPlayer.ChangeShipRelations(
-          nil,
-          rcmIncrease,
-          30,
-          FriendlyTypes,
-          TOwnerMask(PlanetOwnerMasks.Coalition)
-      );
-      TryAddAchievementProgress('RUINS', 1);
-    end;
-    cpRangersSubsidy:
-    begin
-      GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-      Count := 0;
-      for I := 1 to Galaxy.Rangers.Count - 1 do
-      begin
-        Ranger := Galaxy.Rangers[I];
-        if (GetPlayer <> Ranger)
-            and not Ranger.ExcludedFromRating
-            and (Ranger.Wealth <= Galaxy.AverageRangerCapital) then
-          Inc(Count);
-      end;
-      for I := 1 to Galaxy.Rangers.Count - 1 do
-      begin
-        Ranger := Galaxy.Rangers[I];
-        if (GetPlayer <> Ranger)
-            and not Ranger.ExcludedFromRating
-            and (Ranger.Wealth <= Galaxy.AverageRangerCapital) then
-          Ranger.SetMoney(Ranger.Money + Round(StationServiceQuoteCost / Count));
-      end;
-      Galaxy.AddPlanetNewsWithPlayerBubble(
-          42,
-          FormatText1(
-              PickLocalizedTextVariant(
-                  'Investment.' + CoalitionProjectNames[Kind] + '.GalaxyMessage',
-                  Kind + Galaxy.CurrentTurn div 10 * GetPlayer.DockedTo.Seed
-              ),
-              '<color=255,240,100>',
-              '<Money>',
-              IntToStr(StationServiceQuoteCost)
-          )
-      );
-      DialogText := LocalizedColorText('FormRuins.BK.Investment.BKAfterInvestment');
-      ReplaceTextToken(
-          DialogText,
-          '<InvestmentText>',
-          LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.Text'),
-          ''
-      );
-      ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(
-          DialogText,
-          '<Money>',
-          IntToStr(StationServiceQuoteCost),
-          '<color=255,240,100>'
-      );
-    end;
-    cpPiratesSubsidy:
-    begin
-      GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-      Count := Max(1, Galaxy.ShipTypeCounts[stPirate]);
-      for I := 0 to Galaxy.Stars.Count - 1 do
-      begin
-        Star := Galaxy.Stars[I];
-        for J := 0 to Star.Ships.Count - 1 do
-        begin
-          Ship := Star.Ships[J];
-          if Ship.TypeId = stPirate then
-            Ship.SetMoney(Ship.Money + StationServiceQuoteCost div Count);
-        end;
-      end;
-      Galaxy.AddPlanetNewsWithPlayerBubble(
-          42,
-          FormatText2(
-              PickLocalizedTextVariant(
-                  'Investment.' + CoalitionProjectNames[Kind] + '.GalaxyMessage',
-                  Kind + Galaxy.CurrentTurn div 10 * GetPlayer.DockedTo.Seed
-              ),
-              '<color=255,240,100>',
-              '<Money>',
-              IntToStr(StationServiceQuoteCost),
-              '<BK>',
-              GetPlayer.DockedTo.Name
-          )
-      );
-      DialogText := LocalizedColorText('FormRuins.BK.Investment.BKAfterInvestment');
-      ReplaceTextToken(
-          DialogText,
-          '<InvestmentText>',
-          LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.Text'),
-          ''
-      );
-      ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(
-          DialogText,
-          '<Money>',
-          IntToStr(StationServiceQuoteCost),
-          '<color=255,240,100>'
-      );
-    end;
-    cpTransportSubsidy:
-    begin
-      GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-      Count := Max(1, Galaxy.ShipTypeCounts[stTransport]);
-      for I := 0 to Galaxy.Stars.Count - 1 do
-      begin
-        Star := Galaxy.Stars[I];
-        for J := 0 to Star.Ships.Count - 1 do
-        begin
-          Ship := Star.Ships[J];
-          if Ship.TypeId = stTransport then
-            Ship.SetMoney(Ship.Money + StationServiceQuoteCost div Count);
-        end;
-      end;
-      Galaxy.AddPlanetNewsWithPlayerBubble(
-          42,
-          FormatText2(
-              PickLocalizedTextVariant(
-                  'Investment.' + CoalitionProjectNames[Kind] + '.GalaxyMessage',
-                  Kind + Galaxy.CurrentTurn div 10 * GetPlayer.DockedTo.Seed
-              ),
-              '<color=255,240,100>',
-              '<Money>',
-              IntToStr(StationServiceQuoteCost),
-              '<BK>',
-              GetPlayer.DockedTo.Name
-          )
-      );
-      DialogText := LocalizedColorText('FormRuins.BK.Investment.BKAfterInvestment');
-      ReplaceTextToken(
-          DialogText,
-          '<InvestmentText>',
-          LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.Text'),
-          ''
-      );
-      ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(
-          DialogText,
-          '<Money>',
-          IntToStr(StationServiceQuoteCost),
-          '<color=255,240,100>'
-      );
-    end;
-    cpLostSubsidy:
-    begin
-      GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-      Galaxy.AddPlanetNewsWithPlayerBubble(
-          42,
-          FormatText2(
-              PickLocalizedTextVariant(
-                  'Investment.' + CoalitionProjectNames[Kind] + '.GalaxyMessage',
-                  Kind + Galaxy.CurrentTurn div 10 * GetPlayer.DockedTo.Seed
-              ),
-              '<color=255,240,100>',
-              '<Money>',
-              IntToStr(StationServiceQuoteCost),
-              '<BK>',
-              GetPlayer.DockedTo.Name
-          )
-      );
-      DialogText := LocalizedColorText('FormRuins.BK.Investment.BKAfterInvestment');
-      ReplaceTextToken(
-          DialogText,
-          '<InvestmentText>',
-          LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.Text'),
-          ''
-      );
-      ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(
-          DialogText,
-          '<Money>',
-          IntToStr(StationServiceQuoteCost),
-          '<color=255,240,100>'
-      );
-      GetPlayer.ChangePlanetRelations(nil, rcmIncrease, 30, TOwnerMask(PlanetOwnerMasks.Coalition));
-      GetPlayer.ChangeShipRelations(
-          nil,
-          rcmIncrease,
-          20,
-          FriendlyTypes,
-          TOwnerMask(PlanetOwnerMasks.Coalition)
-      );
-      GetPlayer.ChangeShipRelations(
-          nil,
-          rcmDecreaseWithFloor20,
-          20,
-          PirateTypes,
-          TOwnerMask(PlanetOwnerMasks.Coalition)
-      );
-    end;
-    cpWarSubsidy:
-    begin
-      GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-      Count :=
-          SeededRandomIntRange(
-              4,
-              7,
-              InvestmentDefensePlanet.GenerationSeed + Galaxy.CurrentTurn div 60
-          );
-      ShipNames := #13#10;
-      for I := 1 to Count do
-      begin
-        Warrior := TObject(InvestmentDefensePlanet.BuyWarrior(100)) as TWarrior;
-        Warrior.Name := Warrior.Name + ' ' + GetPlayer.Name;
-        ShipNames := ShipNames + Warrior.GetName + #13#10;
-      end;
-      Text :=
-          PickLocalizedTextVariant(
-              'Investment.' + CoalitionProjectNames[Kind] + '.GalaxyMessage',
-              Kind + Galaxy.CurrentTurn div 10 * GetPlayer.DockedTo.Seed
-          );
-      ReplaceTextToken(Text, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(Text, '<Count>', IntToStr(Count), '<color=255,240,100>');
-      ReplaceTextToken(Text, '<Planet>', InvestmentDefensePlanet.Name, '<color=255,240,100>');
-      ReplaceTextToken(
-          Text,
-          '<Star>',
-          InvestmentDefensePlanet.CurrentStar.Name,
-          '<color=255,240,100>'
-      );
-      ReplaceTextToken(Text, '<Money>', IntToStr(StationServiceQuoteCost), '<color=255,240,100>');
-      Galaxy.AddPlanetNewsWithPlayerBubble(42, Text);
-      DialogText := LocalizedColorText('FormRuins.BK.Investment.BKAfterInvestment');
-      ReplaceTextToken(
-          DialogText,
-          '<InvestmentText>',
-          LocalizedColorText('Investment.' + CoalitionProjectNames[Kind] + '.Text'),
-          ''
-      );
-      ReplaceTextToken(DialogText, '<BK>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<ShipsName>', ShipNames, '');
-      ReplaceTextToken(DialogText, '<Count>', IntToStr(Count), '<color=255,240,100>');
-      ReplaceTextToken(DialogText, '<Planet>', InvestmentDefensePlanet.Name, '<color=255,240,100>');
-      ReplaceTextToken(
-          DialogText,
-          '<Star>',
-          InvestmentDefensePlanet.CurrentStar.Name,
-          '<color=255,240,100>'
-      );
-      ReplaceTextToken(
-          DialogText,
-          '<Money>',
-          IntToStr(StationServiceQuoteCost),
-          '<color=255,240,100>'
-      );
-      InvestmentDefensePlanet.ChangeRelationToRanger(GetPlayer, 100);
-      GetPlayer.ChangePlanetRelations(nil, rcmIncrease, 20, TOwnerMask(PlanetOwnerMasks.Coalition));
-      GetPlayer.ChangeShipRelations(
-          nil,
-          rcmDecreaseWithFloor20,
-          30,
-          PirateTypes,
-          TOwnerMask(PlanetOwnerMasks.Coalition)
-      );
-    end;
+    cpCreateRangerCenter: Target := InvestmentRangerCenterStar;
+    cpCreatePirateBase: Target := InvestmentPirateBaseStar;
+    cpCreateMilitaryBase: Target := InvestmentMilitaryBaseStar;
+    cpCreateScienceBase: Target := InvestmentScienceBaseStar;
+    cpCreateBusinessCenter: Target := InvestmentBusinessCenterStar;
+    cpCreateMedicalBase: Target := InvestmentMedicalBaseStar;
+    cpWarSubsidy: Target := InvestmentDefensePlanet;
+  else
+    Target := nil;
   end;
+  Invest(Kind, StationServiceQuoteCost, Target);
+  if Kind <= cpWarSubsidy then
+    DialogText := StationText;
+  if Kind in [
+      cpCreateRangerCenter,
+      cpCreateMilitaryBase,
+      cpCreateScienceBase,
+      cpCreateBusinessCenter,
+      cpCreateMedicalBase] then
+    TryAddAchievementProgress('RUINS', 1);
   M_Main(True);
 end;
 
@@ -8588,106 +7431,11 @@ end;
 
 procedure TfRuinsTalk.BuyBusinessCenterTradeAdvice(Action: PtrInt);
 var
-  Text: WideString;
-  Count: Integer;
+  Count, Cost: Integer;
   Paths: WideString;
-  Nearby, Found: Boolean;
+  Nearby: Boolean;
   Dialog, Greeting, Panel: WideString;
-  procedure FindBusinessCenterTradeRoutes; // @addr $5CCFE4 @ida "void __cdecl $name(void *ParentFrame);" @calls "0x5CD5F9"
-  type
-    TRoute = record
-      FromPlanet, ToPlanet: TPlanet;
-      GoodsIndex: Byte;
-    end;
-  var
-    I, Attempts, J: Integer;
-    GoodsMask: TItemTypeMask;
-    Routes: array[1..3] of TRoute;
-  begin
-    GoodsMask := [Ord(t_Food)..Ord(t_Narcotics)];
-    for I := Low(Routes) to High(Routes) do
-    begin
-      Routes[I].FromPlanet := nil;
-      Routes[I].ToPlanet := nil;
-    end;
-    for I := Low(Routes) to High(Routes) do
-    begin
-      Attempts := 0;
-      repeat
-        Inc(Attempts);
-        if Attempts > 100 then
-        begin
-          if I = Low(Routes) then
-          begin
-            Count := 0;
-            Paths := '';
-          end;
-          Exit;
-        end;
-        Found :=
-            GetPlayer.FindProfitableTradeRoute(
-                Nearby,
-                AdvanceRandomSeed(Galaxy.RandomState) + Byte(Nearby),
-                Routes[I].FromPlanet,
-                Routes[I].ToPlanet,
-                Routes[I].GoodsIndex,
-                GoodsMask
-            );
-        for J := Low(Routes) to I - 1 do
-          if Routes[I].GoodsIndex = Routes[J].GoodsIndex then
-            Found := False;
-      until Found;
-      Exclude(GoodsMask, Routes[I].GoodsIndex);
-      Inc(Count);
-      Text := LocalizedColorText('FormRuins.BK.Trade.BKFindTradePath');
-      ReplaceTextToken(Text, '<Num>', IntToStr(I), '');
-      ReplaceTextToken(
-          Text,
-          '<Goods>',
-          GoodsMarket[Routes[I].GoodsIndex].DisplayName,
-          '<color=255,240,100>'
-      );
-      ReplaceTextToken(Text, '<FromPlanet>', Routes[I].FromPlanet.Name, '<color=255,240,100>');
-      ReplaceTextToken(
-          Text,
-          '<FromStar>',
-          Routes[I].FromPlanet.CurrentStar.Name,
-          '<color=255,240,100>'
-      );
-      ReplaceTextToken(
-          Text,
-          '<Buy>',
-          IntToStr(GetPlayer.ShopGoodsPurchasePrice(Routes[I].GoodsIndex, Routes[I].FromPlanet)),
-          '<color=255,240,100>'
-      );
-      ReplaceTextToken(
-          Text,
-          '<Cnt>',
-          IntToStr(Routes[I].FromPlanet.Goods[Routes[I].GoodsIndex].Count),
-          '<color=255,240,100>'
-      );
-      ReplaceTextToken(Text, '<ToPlanet>', Routes[I].ToPlanet.Name, '<color=255,240,100>');
-      ReplaceTextToken(
-          Text,
-          '<ToStar>',
-          Routes[I].ToPlanet.CurrentStar.Name,
-          '<color=255,240,100>'
-      );
-      ReplaceTextToken(
-          Text,
-          '<Sale>',
-          IntToStr(GetPlayer.ShopGoodsSellPrice(Routes[I].GoodsIndex, Routes[I].ToPlanet)),
-          '<color=255,240,100>'
-      );
-      if Paths = '' then
-        Paths := Text
-      else
-        Paths := Paths + #13#10 + Text;
-    end;
-  end;
 begin
-  Paths := '';
-  Count := 0;
   if Action = 1 then
     Nearby := True
   else
@@ -8702,7 +7450,12 @@ begin
     Panel := LocalizedColorText('FormRuins.BK.Trade.BKAfterOkFarPanel');
   ReplaceTextToken(Panel, '<Date>', Galaxy.FormatTurnDate(Galaxy.CurrentTurn), '<color=0,255,0>');
   ReplaceTextToken(Panel, '<BK>', GetPlayer.DockedTo.Name, '<color=0,255,0>');
-  FindBusinessCenterTradeRoutes;
+  if Action = 1 then
+    Cost := NearbyTradeAdviceCost
+  else
+    Cost := DistantTradeAdviceCost;
+  Count := PurchaseTradeAdvice(Nearby, Cost);
+  Paths := StationText;
   if Count = 0 then
     DialogText := Greeting + #13#10 + LocalizedColorText('FormRuins.BK.Trade.BKNotVariant')
   else
@@ -8711,10 +7464,6 @@ begin
     ReplaceTextToken(Dialog, '<BKFindTradePath>', Paths, '');
     ReplaceTextToken(Dialog, '<Count>', IntToStr(Count), '<color=255,240,100>');
     DialogText := Dialog;
-    if Action = 1 then
-      GetPlayer.SetMoney(GetPlayer.Money - NearbyTradeAdviceCost)
-    else
-      GetPlayer.SetMoney(GetPlayer.Money - DistantTradeAdviceCost);
     SoundManager.PlaySound('Sound.Sell');
     AddOrUpdatePlayerBubble(7, Galaxy.CurrentTurn, Panel + #13#10 + Paths, '');
     MainPanel.RebuildMessageButtons(False);
@@ -8763,6 +7512,8 @@ begin
     TotalCost := 0;
     IllnessText := '';
     if HasDisease then
+      ExamineDiseases;
+    if HasDisease then
       for I := 1 to 12 do
       begin
         Text := '';
@@ -8790,8 +7541,6 @@ begin
                 LocalizedColorText('FormRuins.MC.Illnes.MCSeeIllType2'),
                 ''
             );
-            Inc(GetPlayer.CaptainHealth[I].ApplicationCount);
-            GetPlayer.AchievementStats.CheckAllDiseasesAchievement;
           end;
           ReplaceTextToken(
               Text,
@@ -8939,36 +7688,14 @@ end;
 
 procedure TfRuinsTalk.TreatSelectedDiseaseAtMedicalCenter(DiseaseIndex: PtrInt);
 var
-  I, Cost: Integer;
   Name: WideString;
 begin
-  for I := 1 to 12 do
-    if I = DiseaseIndex then
-    begin
-      if I = 3 then
-      begin
-        Galaxy.GraphDominatorSurfacesEnabled := True;
-        Galaxy.DisableDominatorSurfaces;
-      end;
-      GetPlayer.CaptainHealth[I].Progress := 0;
-      GetPlayer.StatusEffectSourceNames[I] := '';
-      Name := CaptainHealthDefinitions[I].Name;
-      Cost :=
-          GenerateValueForSizeLevel(
-              CaptainHealthDefinitions[I].EffectClass0D,
-              Galaxy.ComputeScaledMiniMoney(GetPlayer.DockedTo.OwnerId),
-              Galaxy.ComputeScaledAverageMoney(GetPlayer.DockedTo.OwnerId),
-              50,
-              (Galaxy.CurrentTurn div 10) * Galaxy.GenerationSeed * I
-          );
-      if (GetPlayer.MedicalPolicyTicks > 0)
-          and (GetPlayer.DockedTo.CurrentStar.ControlFaction <> sfPirates) then
-        Cost := Cost div 2;
-      GetPlayer.SetMoney(GetPlayer.Money - Cost);
-      GetPlayer.DiseaseImmunity := Min(100, GetPlayer.DiseaseImmunity + 40);
-      SoundManager.PlaySound('Sound.Sell');
-      Break;
-    end;
+  if (DiseaseIndex >= 1) and (DiseaseIndex <= 12) then
+  begin
+    Name := CaptainHealthDefinitions[DiseaseIndex].Name;
+    TreatDisease(DiseaseIndex);
+    SoundManager.PlaySound('Sound.Sell');
+  end;
   if GetPlayer.DockedTo.CurrentStar.ControlFaction <> sfPirates then
     DialogText := LocalizedColorText('FormRuins.MC.Illnes.MCSeeAfterIll')
   else
@@ -8984,7 +7711,6 @@ end;
 
 procedure TfRuinsTalk.TreatAllDiseasesAtMedicalCenter(QuotedCost: PtrInt);
 var
-  I: Integer;
   Date: TDateTime;
   YearText: AnsiString;
 begin
@@ -8993,19 +7719,7 @@ begin
   Date := Now;
   DateTimeToString(YearText, 'yyyy', Date);
   ReplaceTextToken(DialogText, '<CurrentYear>', YearText, '<color=255,240,100>');
-  for I := 1 to 12 do
-    if GetPlayer.CaptainHealth[I].Progress <> 0 then
-    begin
-      if I = 3 then
-      begin
-        Galaxy.GraphDominatorSurfacesEnabled := True;
-        Galaxy.DisableDominatorSurfaces;
-      end;
-      GetPlayer.CaptainHealth[I].Progress := 0;
-      GetPlayer.StatusEffectSourceNames[I] := '';
-    end;
-  GetPlayer.SetMoney(GetPlayer.Money - QuotedCost);
-  GetPlayer.DiseaseImmunity := Min(100, GetPlayer.DiseaseImmunity + 80);
+  TreatAllDiseases(QuotedCost);
   SoundManager.PlaySound('Sound.Sell');
   M_Main(True);
 end;
@@ -9206,41 +7920,14 @@ end;
 
 procedure TfRuinsTalk.BuySelectedStimulantAtMedicalCenter(StimulantIndex: PtrInt);
 var
-  I, Cost, Duration: Integer;
+  I: Integer;
   Name: WideString;
 begin
   for I := 13 to 24 do
     if I = StimulantIndex then
     begin
-      GetPlayer.CaptainHealth[I].Progress := 100;
-      GetPlayer.StatusEffectSourceNames[I] := '';
       Name := CaptainHealthDefinitions[I].Name;
-      Duration :=
-          CaptainHealthDefinitions[I].Duration
-              + SeededRandomIntRange(
-                  CaptainHealthDefinitions[I].Duration div 10,
-                  CaptainHealthDefinitions[I].Duration div 3,
-                  GetPlayer.DockedTo.Id + I + Galaxy.CurrentTurn div 13);
-      Duration :=
-          Round(
-              Duration / GalaxyDifficultyTuning[Galaxy.DifficultyLevels[7]].GoodsEventDurationFactor
-          );
-      GetPlayer.CaptainHealth[I].AppliedTurn := Galaxy.CurrentTurn;
-      GetPlayer.CaptainHealth[I].ExpireTurn := Duration + Galaxy.CurrentTurn;
-      Cost :=
-          GenerateValueForSizeLevel(
-              CaptainHealthDefinitions[I].EffectClass0D,
-              Galaxy.ComputeScaledSmallMoney(GetPlayer.DockedTo.OwnerId),
-              2 * Galaxy.ComputeScaledAverageMoney(GetPlayer.DockedTo.OwnerId),
-              50,
-              (Galaxy.CurrentTurn div 13) * Galaxy.GenerationSeed * I
-          );
-      if (GetPlayer.MedicalPolicyTicks > 0)
-          and (GetPlayer.DockedTo.CurrentStar.ControlFaction <> sfPirates) then
-        Cost := Cost div 2;
-      GetPlayer.SetMoney(GetPlayer.Money - Cost);
-      GetPlayer.DiseaseImmunity := Max(0, GetPlayer.DiseaseImmunity - 20);
-      Inc(GetPlayer.StimulantPurchaseCount);
+      PurchaseStimulant(I);
       SoundManager.PlaySound('Sound.Sell');
       DialogText := LocalizedColorText('FormRuins.MC.Stimulants.MCAfterPlayerStim');
       ReplaceTextToken(DialogText, '<StimName>', Name, '<color=255,240,100>');
@@ -9251,8 +7938,6 @@ begin
           '<color=255,240,100>'
       );
       ReplaceTextToken(DialogText, '<MC>', GetPlayer.DockedTo.Name, '<color=255,240,100>');
-      Inc(GetPlayer.CaptainHealth[I].ApplicationCount);
-      GetPlayer.AchievementStats.CheckAllDrugsAchievement;
       M_Main(True);
       Break;
     end;
@@ -9272,31 +7957,11 @@ procedure TfRuinsTalk.ShowStationSpecialShipDialog(Action: PtrInt);
 var
   CanBuy: Boolean;
   Price: Integer;
-  Hull: THull;
   I, CompletedQuests: Integer;
   Quest: PPlayerOldQuest;
 begin
   CanBuy := True;
-  Hull := THull.Create;
-  if GetPlayer.DockedTo.TypeId = Byte(rstPirateBase) then
-  begin
-    Hull.Init(1000, 8, GetPlayer.DockedTo.OwnerId, 9, -1, False);
-    ApplySpecialMicroModule(FindMicroModuleTemplateByCustomTag('SuperHullPB'), Hull);
-  end
-  else if GetPlayer.DockedTo.TypeId = Byte(rstMilitaryBase) then
-  begin
-    Hull.Init(1000, 8, GetPlayer.DockedTo.OwnerId, 9, -1, False);
-    ApplySpecialMicroModule(FindMicroModuleTemplateByCustomTag('SuperHullWB'), Hull);
-  end
-  else if GetPlayer.DockedTo.TypeId = Byte(rstScienceBase) then
-  begin
-    Hull.Init(1000, 8, GetPlayer.DockedTo.OwnerId, 9, -1, False);
-    ApplySpecialMicroModule(FindMicroModuleTemplateByCustomTag('SuperHullSB'), Hull);
-  end
-  else
-    RaiseWideMessage('Ask special ship');
-  Price := Hull.GetConditionAdjustedCost;
-  Hull.Free;
+  Price := PriceSpecialShip;
   DialogText :=
       LocalizedColorText('FormRuins.' + GetPlayer.DockedTo.GetTypeNameKey + '.SpecialShip.Info');
   if GetPlayer.DockedTo.TypeId = Byte(rstPirateBase) then
@@ -9476,52 +8141,8 @@ begin
 end;
 
 procedure TfRuinsTalk.BuyStationSpecialShip(Action: PtrInt);
-const
-  RelationShipTypes = [htRanger, htPirate..htDiplomat];
-  PirateOwners = [1];
-  CoalitionOwners = [0, 2..4];
-var
-  Price: Integer;
-  Hull: THull;
 begin
-  (GetPlayer.DockedTo as TRuins).SpecialServiceActive := False;
-  Hull := THull.Create;
-  if GetPlayer.DockedTo.TypeId = Byte(rstPirateBase) then
-  begin
-    Hull.Init(1000, 8, GetPlayer.DockedTo.OwnerId, 9, -1, False);
-    ApplySpecialMicroModule(FindMicroModuleTemplateByCustomTag('SuperHullPB'), Hull);
-  end
-  else if GetPlayer.DockedTo.TypeId = Byte(rstMilitaryBase) then
-  begin
-    Hull.Init(1000, 8, GetPlayer.DockedTo.OwnerId, 9, -1, False);
-    ApplySpecialMicroModule(FindMicroModuleTemplateByCustomTag('SuperHullWB'), Hull);
-  end
-  else if GetPlayer.DockedTo.TypeId = Byte(rstScienceBase) then
-  begin
-    Hull.Init(1000, 8, GetPlayer.DockedTo.OwnerId, 9, -1, False);
-    ApplySpecialMicroModule(FindMicroModuleTemplateByCustomTag('SuperHullSB'), Hull);
-  end
-  else
-    RaiseWideMessage('Buy special ship');
-  Price := Hull.GetConditionAdjustedCost;
-  if GetPlayer.Money >= Price then
-  begin
-    GetPlayer.SetMoney(GetPlayer.Money - Price);
-    if GetPlayer.IsOnPlanet then
-      GetPlayer.AddItemToPlayerStorage(Hull, GetPlayer.CurrentPlanet, -1)
-    else
-      GetPlayer.AddItemToPlayerStorage(Hull, GetPlayer.DockedTo, -1);
-    if GetPlayer.DockedTo.TypeId = Byte(rstPirateBase) then
-    begin
-      GetPlayer.ChangePlanetRelations(nil, rcmIncrease, 30, [1]);
-      GetPlayer.ChangeShipRelations(nil, rcmIncrease, 30, RelationShipTypes, PirateOwners);
-      GetPlayer.ChangePlanetRelations(nil, rcmDecreaseWithFloor20, 50, [0, 2, 3, 4]);
-      GetPlayer
-          .ChangeShipRelations(nil, rcmDecreaseWithFloor20, 50, RelationShipTypes, CoalitionOwners);
-    end;
-  end
-  else
-    Hull.Free;
+  PurchaseSpecialShip;
   DialogText :=
       LocalizedColorText(
           'FormRuins.' + GetPlayer.DockedTo.GetTypeNameKey + '.SpecialShip.AfterBuy'
@@ -9536,11 +8157,7 @@ var
   Parts: Integer;
 begin
   Injection := PScriptDialogInjection(Action);
-  if Injection.ActionCode <> '' then
-  begin
-    CurrentScript := Injection.ActionScript;
-    ExecuteScriptText(Injection.ActionCode, CurrentScript.InitCode.LocalVar);
-  end;
+  RunInjectedAnswerAction(Injection);
   Text := Injection.Answer;
   Parts := CountDelimitedPartsW(Text, '~');
   if Parts > 1 then
@@ -9550,14 +8167,8 @@ begin
       RememberChoiceScroll;
   end;
   ClearChoices;
-  Injection.Script.PublishCurrentShip(GetPlayer.DockedTo);
-  CurrentScript.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Injection.AnswerData);
-  Session.ScriptDialogIndex := -1;
-  CurrentScript.CallDialogByVariable(Injection.DialogName);
-  if Session.ScriptDialogIndex < 0 then
-    M_Main(True)
-  else
-    CurrentScript.CallDialogMessage(Session.ScriptDialogIndex);
+  if not RunStationInjectedDialog(Injection) then
+    M_Main(True);
 end;
 
 procedure TfRuinsTalk.RunInjectedDialogKeepingScroll(Action: PtrInt);
@@ -9569,7 +8180,7 @@ end;
 procedure TfRuinsTalk.RunScriptRestart(Answer: PtrInt);
 begin
   DialogText := '';
-  CurrentScript.ExecuteDialogAnswer(Answer);
+  ScriptAnswerOnly(Answer);
   M_Main(False);
 end;
 
@@ -9580,7 +8191,7 @@ end;
 
 procedure TfRuinsTalk.CloseRuinsMode(Sender: TObjectGI);
 begin
-  GetPlayer.CloseRuinsModeScreen;
+  CloseBridge;
 end;
 
 function GetConstructionShopCost: Integer;
@@ -10091,107 +8702,35 @@ end;
 
 procedure TfRuinsTalk.CompleteDominionConstruction(Action: PtrInt);
 var
-  Ship: TPirate;
-  Planet: TPlanet;
-  TotalCost, Price: Integer;
+  Parts: TConstructionParts;
   Kind: Byte;
-  J, Months: Integer;
-  Item: TEquipment;
-  procedure RemoveConstructionStoredItem(
-      Item: TEquipment
-  ); // @addr $5D432C @ida "void __usercall $name(TEquipment *Item@<eax>, void *ParentFrame@<^0>);" @stackpop 0 @calls "0x5D4540 0x5D45F7"
-  var
-    I: Integer;
-    Entry: PStorageEntry;
-  begin
-    for I := 0 to GetPlayer.StorageEntries.Count - 1 do
-    begin
-      Entry := GetPlayer.StorageEntries[I];
-      if (Entry <> nil) and (Entry.Item = Item) then
-      begin
-        GetPlayer.StorageEntries.Delete(I);
-        GetPlayer.RefreshStorageBubbles;
-        Dispose(Entry);
-        Break;
-      end;
-    end;
-  end;
-  procedure RemoveConstructionShopItem(
-      Item: TEquipment
-  ); // @addr $5D43B4 @ida "void __usercall $name(TEquipment *Item@<eax>, void *ParentFrame@<^0>);" @stackpop 0 @calls "0x5D454C 0x5D4603"
-  var
-    Station: TRuins;
-  begin
-    if LocalHuman.TemporaryShopSlots <> nil then
-    begin
-      ReturnShopStock;
-      Station := TRuins(GetPlayer.DockedTo);
-      Station.EquipmentShop.Delete(Station.EquipmentShop.IndexOf(Item));
-      OpenShopStock;
-      EquipmentShopScreen.ClearGoodsControls;
-      EquipmentShopScreen.BuildGoodsControls;
-      EquipmentShopScreen.UpdateScrollButtons;
-    end;
-  end;
+  I, J, ShopItems: Integer;
 begin
-  Price := GetConstructionShopCost;
-  if Price > 0 then
-  begin
-    PayConstructionMoney(Price);
-    SoundManager.PlaySound('Sound.Sell');
-  end;
-  Ship := TPirate.Create;
-  Planet := GetPlayer.DockedTo.CurrentStar.SelectRandomInhabitedPlanet;
-  TotalCost := 0;
   for Kind := 42 to 49 do
-    if ConstructionEquipment[Kind].Item <> nil then
-    begin
-      Item := ConstructionEquipment[Kind].Item;
-      if ConstructionEquipment[Kind].Source = 0 then
-        GetPlayer.Inventory.Delete(GetPlayer.Inventory.IndexOf(Item))
-      else if ConstructionEquipment[Kind].Source = 1 then
-        RemoveConstructionStoredItem(Item)
-      else
-        RemoveConstructionShopItem(Item);
-      Ship.Inventory.Add(Item);
-      Ship.EquipItem(Item);
-      Inc(TotalCost, ConstructionEquipment[Kind].Item.Cost);
-    end;
-  for J := 1 to 5 do
-    if ConstructionWeapons[J].Item <> nil then
-    begin
-      Item := ConstructionWeapons[J].Item;
-      if ConstructionWeapons[J].Source = 0 then
-        GetPlayer.Inventory.Delete(GetPlayer.Inventory.IndexOf(Item))
-      else if ConstructionWeapons[J].Source = 1 then
-        RemoveConstructionStoredItem(Item)
-      else
-        RemoveConstructionShopItem(Item);
-      Ship.Inventory.Add(Item);
-      Ship.EquipItem(Item);
-      Inc(TotalCost, ConstructionWeapons[J].Item.Cost);
-    end;
-  Ship.InitGenerated(Planet, TotalCost div 10 + 1000, 0);
-  Ship.DockedTo := GetPlayer.DockedTo;
-  Ship.TrainSkillsAutomatically;
-  Ship.RefreshEquipmentEvaluationMetrics;
-  Ship.ChangeRelationToRanger(GetPlayer, 100);
-  if GetPlayer.GetMaxDominionShips > GetPlayer.PiratePartners.Count then
   begin
-    Ship.PartnerShip := GetPlayer;
-    Months := Ship.CalculatePartnershipMonths(TotalCost, Ship);
-    Ship.PartnershipDaysRemaining := 30 * Months;
-    GetPlayer.PiratePartners.Add(Ship);
-    GetPlayer.AchievementStats.CheckMasterAchievement;
-    DialogText := LocalizedColorText('FormRuins.CB.ConstructPirate.CompletionText');
-  end
-  else
-  begin
-    Months := 0;
-    DialogText := LocalizedColorText('FormRuins.CB.ConstructPirate.CompletionTextNotPartner');
+    Parts[Kind - 42].Item := ConstructionEquipment[Kind].Item;
+    Parts[Kind - 42].Source := ConstructionEquipment[Kind].Source;
   end;
-  ReplaceTextToken(DialogText, '<FullName>', Ship.GetFullName(' '), '<color=255,240,100>');
-  ReplaceTextToken(DialogText, '<CntMonth>', IntToStr(Months), '<color=255,240,100>');
+  for J := 1 to 5 do
+  begin
+    Parts[7 + J].Item := ConstructionWeapons[J].Item;
+    Parts[7 + J].Source := ConstructionWeapons[J].Source;
+  end;
+  if GetConstructionShopCost > 0 then
+    SoundManager.PlaySound('Sound.Sell');
+  ShopItems := BuildPirateShip(Parts);
+  for I := 1 to ShopItems do
+  begin
+    EquipmentShopScreen.ClearGoodsControls;
+    EquipmentShopScreen.BuildGoodsControls;
+    EquipmentShopScreen.UpdateScrollButtons;
+  end;
+  if StationOutcome <> 0 then
+    DialogText := LocalizedColorText('FormRuins.CB.ConstructPirate.CompletionText')
+  else
+    DialogText := LocalizedColorText('FormRuins.CB.ConstructPirate.CompletionTextNotPartner');
+  ReplaceTextToken(DialogText, '<FullName>', StationText, '<color=255,240,100>');
+  ReplaceTextToken(DialogText, '<CntMonth>', IntToStr(StationAmount), '<color=255,240,100>');
   M_Main(True);
 end;
 
@@ -10366,24 +8905,10 @@ end;
 procedure TfRuinsTalk.AcceptDominionImprovement(Action: PtrInt);
 var
   Item: TEquipment;
-  Cost, Nodes: Integer;
-  Discount: Byte;
 begin
-  Discount := GetPlayer.GetPirateServiceDiscount;
   Item := TEquipment(Action);
-  Cost := Item.CalculateImprovementCost(ikMajor);
-  if Item.OwnerId = Byte(oiDominator) then
-    Nodes := Round(Cost * 0.01 * 1.5 * (100 - Discount) / 100)
-  else
-    Nodes := 0;
-  Cost := Round(Cost * (100 - Discount) / 100);
-  if (GetPlayer.Money >= Cost) and (GetPlayer.GetAvailableNodeCount(nil) >= Nodes) then
+  if ImproveAtDominion(Item) then
   begin
-    GetPlayer.SetMoney(GetPlayer.Money - Cost);
-    if Item.OwnerId = Byte(oiDominator) then
-      GetPlayer.ConsumeAvailableNodes(Nodes, nil);
-    Item.ImproveAtScientificBase;
-    GetPlayer.RefreshDerivedStats(True);
     DialogText := LocalizedColorText('FormRuins.CB.Improvement.CBAfterOk');
     ReplaceTextToken(DialogText, '<ShortName>', WideLowerCase(Item.GetShortName), '');
     SoundManager.PlaySound('Sound.Sell');
@@ -10472,8 +8997,7 @@ begin
     DialogText := LocalizedColorText('FormRuins.CB.PirateLicense.CBAfterOk')
   else
     DialogText := LocalizedColorText('FormRuins.CB.PirateLicense.CBAfterOkProlongate');
-  GetPlayer.SetMoney(GetPlayer.Money - Action);
-  GetPlayer.PirateLicenseTicks := 365;
+  PurchasePirateLicense(Action);
   SoundManager.PlaySound('Sound.Sell');
   M_Main(True);
 end;
@@ -10520,17 +9044,6 @@ begin
   end
   else
     Result := True;
-end;
-
-procedure TfRuinsTalk.SpendDominionServiceCredit(CreditCost: Single);
-begin
-  GetPlayer.PirateLicenseCash :=
-      Max(
-          0,
-          Round(
-              (GetPlayer.PirateLicenseCash - Galaxy.AverageRangerCapital * CreditCost / 600) * 0.85
-          )
-      );
 end;
 
 function TfRuinsTalk.CheckDominionAvailable: Boolean;
@@ -10709,10 +9222,7 @@ end;
 procedure TfRuinsTalk.AcceptDominionTravel(Action: PtrInt);
 begin
   DialogText := LocalizedColorText('FormRuins.CB.ShuffleTeleport.CBAfterConfirm');
-  GetPlayer.QueuedTravelTarget := DominionTravelQuotes[Action].Star;
-  GetPlayer.SetMoney(GetPlayer.Money - DominionTravelQuotes[Action].Cost);
-  SpendDominionServiceCredit(0.5);
-  TRuins(GetPlayer.DockedTo).RelocationAge := (TRuins(GetPlayer.DockedTo).RelocationAge - 45) div 2;
+  QueueDominionTravel(DominionTravelQuotes[Action].Star, DominionTravelQuotes[Action].Cost);
   SoundManager.PlaySound('Sound.Sell');
   ReplaceTextToken(
       DialogText,
@@ -10748,7 +9258,7 @@ end;
 procedure TfRuinsTalk.CancelDominionTravel(Action: PtrInt);
 begin
   DialogText := LocalizedColorText('FormRuins.CB.ShuffleTeleport.CBAfterCancelTeleport');
-  GetPlayer.QueuedTravelTarget := nil;
+  DropDominionTravel;
   M_Main(True);
 end;
 
@@ -10762,27 +9272,6 @@ begin
       '<color=255,240,100>'
   );
   M_Main(True);
-end;
-
-function GetDominionRelocationCost(Star: TStar): Integer;
-var
-  Discount: Byte;
-begin
-  Discount := GetPlayer.GetPirateServiceDiscount;
-  Result :=
-      Min(
-          100000000,
-          Round(
-              (PointDistanceSquared(GetPlayer.DockedTo.CurrentStar.Position, Star.Position) + 6400)
-                  * SeededRandomIntRange(
-                      Galaxy.ComputeScaledHugeMoney(2) div 2,
-                      Galaxy.ComputeScaledHugeMoney(2) * 2,
-                      Star.GenerationSeed + 1171 + GetPlayer.DockedTo.CurrentStar.GenerationSeed)
-                  / 6400
-                  * (100 - Discount)
-                  / 100
-          )
-      );
 end;
 
 procedure TfRuinsTalk.ShowDominionRelocationDialog(Action: PtrInt);
@@ -10905,16 +9394,8 @@ begin
   DialogText := LocalizedColorText('FormRuins.CB.WarPlans.Relocate.CBAfterConfirm');
   Star := TStar(Action);
   ReplaceTextToken(DialogText, '<ToStar>', Star.Name, '<color=255,240,100>');
-  GetPlayer.SetMoney(GetPlayer.Money - GetDominionRelocationCost(Star));
-  SpendDominionServiceCredit(1);
-  TRuins(GetPlayer.DockedTo).RelocationAge :=
-      (TRuins(GetPlayer.DockedTo).RelocationAge - 150) div 2;
+  RelocateDominion(Star);
   SoundManager.PlaySound('Sound.Sell');
-  GetPlayer
-      .DockedTo
-      .OrderTeleport(Star, TRuins(GetPlayer.DockedTo).SelectTeleportArrivalPoint(Star), 10, True);
-  GetPlayer.DockedTo.CurrentStar.Dominion := nil;
-  Star.Dominion := GetPlayer.DockedTo;
   ClearChoices;
   AddChoice('- ' + LocalizedColorText('FormRuins.CB.WarPlans.Relocate.ToHangar'), 0, OpenHangar);
   AddChoice(
@@ -11066,24 +9547,6 @@ begin
   BuildDominionWarOptions;
 end;
 
-function ApplyRecentDominionOrderSurcharge(Cost: Single): Integer;
-var
-  I: Integer;
-  EventType: WideString;
-begin
-  for I := Galaxy.GalaxyEvents.Count - 1 downto 0 do
-  begin
-    if TGalaxyEvent(Galaxy.GalaxyEvents[I]).Turn + 60 < Galaxy.CurrentTurn then
-      Break;
-    EventType := TGalaxyEvent(Galaxy.GalaxyEvents[I]).EventType;
-    if (EventType = 'PlayerOrdersPirateAmbush')
-        or (EventType = 'PlayerOrdersPirateRaid')
-        or (EventType = 'PlayerOrdersPirateAssault') then
-      Cost := Min(100000000.0, Cost * 1.5);
-  end;
-  Result := RoundAndTruncateToHundreds(Cost);
-end;
-
 procedure TfRuinsTalk.ShowDominionWarOperationDialog(Action: PtrInt);
 begin
   if not CheckDominionServiceStanding(
@@ -11128,72 +9591,12 @@ begin
 end;
 
 procedure TfRuinsTalk.AcceptDominionWarOperation(Action: PtrInt);
-var
-  Names: WideString;
-  I, J, K, Available, BestAvailable, Total, BestTotal: Integer;
-  Ship: TShip;
-  Strength: Extended;
-  Target, Candidate, Origin: TStar;
-  Event: TGalaxyEvent;
 begin
   DialogText := LocalizedColorText('FormRuins.CB.WarPlans.WarOperation.CBAfterOk');
   SoundManager.PlaySound('Sound.Sell');
-  StationServiceQuoteCost := ApplyRecentDominionOrderSurcharge(Galaxy.ComputeScaledHugeMoney(2));
-  GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-  if MainPiratePlanet <> nil then
-    MainPiratePlanet.ChangeRelationToRanger(GetPlayer, 10);
-  Target := nil;
-  BestAvailable := 0;
-  BestTotal := 0;
-  for I := 0 to Galaxy.Stars.Count - 1 do
+  if not OrderPirateRaid then
   begin
-    Candidate := Galaxy.Stars[I];
-    if (Candidate.Constellation.Id <> 20)
-        and Candidate.IsConstellationVisible
-        and not Candidate.NoComeKling
-        and not IsStarProtectedByScript(Candidate)
-        and (Candidate.ControlFaction <> sfPirates) then
-    begin
-      Available := 0;
-      Total := 0;
-      for J := 0 to Galaxy.Stars.Count - 1 do
-      begin
-        Origin := Galaxy.Stars[J];
-        if (Candidate <> Origin)
-            and (Origin.ControlFaction = sfPirates)
-            and (Origin.Status.CustomFaction = '')
-            and (Origin.Battle = 0)
-            and (Origin.CountForcesByOwnerGroups(Strength, True, True, False, False) <= 0) then
-          for K := 0 to Origin.Ships.Count - 1 do
-          begin
-            Ship := Origin.Ships[K];
-            if (Ship is TPirate)
-                and (Ship.OwnerId = Byte(oiPirate))
-                and (Ship.PartnerShip = nil) then
-              if not ((Ship.GetFuelTanks = nil)
-                  or (Ship.GetEngine = nil)
-                  or (PointDistance(Origin.Position, Candidate.Position)
-                      > Min(Ship.GetFuelTanks.Capacity, Ship.GetEngine.JumpRange) + 10)) then
-              begin
-                Inc(Total);
-                if not Ship.OrderAbsolute
-                    and (Ship.AbsoluteScriptOrder = 0)
-                    and not Ship.IsOutsideStarSpace
-                    and (Ship.ScriptShip = nil) then
-                  Inc(Available);
-              end;
-          end;
-      end;
-      if Available > BestAvailable then
-      begin
-        BestAvailable := Available;
-        BestTotal := Total;
-        Target := Candidate;
-      end;
-    end;
-  end;
-  if (Target = nil) or (BestTotal < 10) or (BestAvailable < 7) then
-  begin
+    StationServiceQuoteCost := StationAmount;
     DialogText :=
         DialogText + #13#10 + LocalizedColorText('FormRuins.CB.WarPlans.WarOperation.CBAfterOkBad');
     ClearChoices;
@@ -11201,60 +9604,23 @@ begin
   end
   else
   begin
-    BestAvailable := Min(GetPlayer.PirateRank + 7, BestAvailable);
-    // Native completes each pass even after the requested ship count is reached.
-    while BestAvailable > 0 do
-      for J := 1 to Galaxy.Stars.Count - 1 do
-      begin
-        Origin := Target.StarDistances[J].Star;
-        if (Origin.ControlFaction = sfPirates)
-            and (Origin.Status.CustomFaction = '')
-            and (Origin.Battle = 0)
-            and (Origin.CountForcesByOwnerGroups(Strength, True, True, False, False) <= 0) then
-          for K := 0 to Origin.Ships.Count - 1 do
-          begin
-            Ship := Origin.Ships[K];
-            if (Ship is TPirate)
-                and (Ship.OwnerId = Byte(oiPirate))
-                and (Ship.PartnerShip = nil) then
-              if not ((Ship.GetFuelTanks = nil)
-                  or (Ship.GetEngine = nil)
-                  or (PointDistance(Origin.Position, Target.Position)
-                      > Min(Ship.GetFuelTanks.Capacity, Ship.GetEngine.JumpRange) + 10)) then
-                if not Ship.OrderAbsolute
-                    and (Ship.AbsoluteScriptOrder = 0)
-                    and not Ship.IsOutsideStarSpace
-                    and (Ship.ScriptShip = nil) then
-                  if NextRandomIntRange(1, 10, GetPlayer.DockedTo.RandomState) < 3 then
-                  begin
-                    Ship.OrderJump(Target, True);
-                    TPirate(Ship).RaidPressure := TPirate(Ship).RaidPressure + 10;
-                    if Names = '' then
-                      Names := Ship.GetFullName(' ')
-                    else
-                      Names := Names + #13#10 + Ship.GetFullName(' ');
-                    Dec(BestAvailable);
-                  end;
-          end;
-      end;
-    Event := AddGalaxyEvent('PlayerOrdersPirateRaid');
-    Event.AddData(Target.Id);
+    StationServiceQuoteCost := StationAmount;
     DialogText :=
         DialogText
             + #13#10
             + LocalizedColorText('FormRuins.CB.WarPlans.WarOperation.CBAfterOkGood');
-    ReplaceTextToken(DialogText, '<Names>', Names, '');
+    ReplaceTextToken(DialogText, '<Names>', StationText, '');
     ReplaceTextToken(
         DialogText,
         '<Money>',
         IntToStr(StationServiceQuoteCost),
         '<color=255,240,100>'
     );
-    ReplaceTextToken(DialogText, '<StarEnemy>', Target.Name, '<color=255,240,100>');
+    ReplaceTextToken(DialogText, '<StarEnemy>', StationTargetStar.Name, '<color=255,240,100>');
     ReplaceTextToken(
         DialogText,
         '<SectorEnemy>',
-        Target.Constellation.GetName,
+        StationTargetStar.Constellation.GetName,
         '<color=255,240,100>'
     );
     ClearChoices;
@@ -11413,25 +9779,13 @@ end;
 procedure TfRuinsTalk.AcceptDominionAmbush(Action: PtrInt);
 var
   Star: TStar;
-  Event: TGalaxyEvent;
 begin
   Star := TStar(Action);
   DialogText := LocalizedColorText('FormRuins.CB.WarPlans.Ambush.CBAfterOk');
   ReplaceTextToken(DialogText, '<ToStar>', Star.Name, '<color=255,240,100>');
-  StationServiceQuoteCost :=
-      ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(Star) * 1.5);
-  Event := AddGalaxyEvent('PlayerOrdersPirateAmbush');
-  Event.AddData(Star.Id);
+  OrderPirateAmbush(Star);
+  StationServiceQuoteCost := StationAmount;
   SoundManager.PlaySound('Sound.Sell');
-  GetPlayer.SetMoney(GetPlayer.Money - StationServiceQuoteCost);
-  SpendDominionServiceCredit(1.5);
-  TRuins(GetPlayer.DockedTo).RelocationAge :=
-      (TRuins(GetPlayer.DockedTo).RelocationAge - 150) div 2;
-  TRuins(GetPlayer.DockedTo).FlyToStar := Star;
-  if Star.ControlFaction = sfPirates then
-    TRuins(GetPlayer.DockedTo).FlyDate := Galaxy.CurrentTurn + 12
-  else
-    TRuins(GetPlayer.DockedTo).FlyDate := Galaxy.CurrentTurn + 16;
   M_Main(True);
 end;
 
@@ -11568,15 +9922,8 @@ begin
   DialogText := LocalizedColorText('FormRuins.CB.WarPlans.Assault.CBAfterConfirm');
   Star := TStar(Action);
   ReplaceTextToken(DialogText, '<ToStar>', Star.Name, '<color=255,240,100>');
-  GetPlayer.SetMoney(
-      GetPlayer.Money - ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(Star) * 2.5)
-  );
-  SpendDominionServiceCredit(1);
-  TRuins(GetPlayer.DockedTo).RelocationAge :=
-      (TRuins(GetPlayer.DockedTo).RelocationAge - 150) div 2;
+  OrderPirateAssault(Star);
   SoundManager.PlaySound('Sound.Sell');
-  TRuins(GetPlayer.DockedTo).FlyToStar := Star;
-  TRuins(GetPlayer.DockedTo).FlyDate := Galaxy.CurrentTurn + 12;
   M_Main(True);
 end;
 
