@@ -309,6 +309,7 @@ implementation
 
 uses
   aPlanetActions,
+  aUiScriptActions,
   aSession,
   StarScene,
   aHuman,
@@ -3044,7 +3045,6 @@ var
   Hole: THole;
   Index, Mode, SelectedCount, ActionResult: Integer;
   TargetPosition: TPointF;
-  Info: PCustomShipInfo;
   HadWeapons, OutOfRange: Boolean;
   Weapon: TWeapon;
   Node, FollowingNode: PSPathNode;
@@ -3100,35 +3100,8 @@ begin
       ShowLargeHelp(CustomSelectionOutOfRangeText)
     else
     begin
-      ActionResult := 0;
-      if CustomSelectionItem <> nil then
-      begin
-        if CustomSelectionItem.ScriptItem <> nil then
-          ActionResult :=
-              TScriptItem(CustomSelectionItem.ScriptItem)
-                  .RunActionCode($35, GetPlayer, CursorObject, nil, ActionResult);
-        if CustomSelectionItem is TEquipmentWithActCode then
-          ActionResult :=
-              RunItemConfigActionCode(
-                  CustomSelectionItem,
-                  $35,
-                  GetPlayer,
-                  CursorObject,
-                  nil,
-                  ActionResult
-              );
-      end
-      else
-        for Index := 0 to GetPlayer.CustomShipInfos.Count - 1 do
-        begin
-          Info := GetPlayer.CustomShipInfos[Index];
-          if not Info.DeleteQueued and (Info.TypeName = CustomSelectionInfoName) then
-          begin
-            ActionResult :=
-                RunCustomShipInfoActionCode(Info, $35, GetPlayer, CursorObject, nil, ActionResult);
-            Break;
-          end;
-        end;
+      ActionResult :=
+          RunCustomSelectionAction($35, CustomSelectionItem, CustomSelectionInfoName, CursorObject);
       if ActionResult > 0 then
         ShowLargeHelp(CustomSelectionSuccessText)
       else if ActionResult = 0 then
@@ -4330,11 +4303,7 @@ begin
         if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
         begin
           ItemObject := Obj as TItem;
-          if ItemObject.ScriptItem <> nil then
-            TScriptItem(ItemObject.ScriptItem)
-                .RunActionCode(satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil, 0);
-          if ItemObject is TEquipmentWithActCode then
-            RunItemConfigActionCode(ItemObject, satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil, 0);
+          RunItemInfoActionCode(ItemObject, satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil);
         end;
         GetByName('InfoStdGB').SetActive(False);
         with GetByName('InfoStdImage') as TImageGI do
@@ -4700,11 +4669,7 @@ begin
       if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
       begin
         ItemObject := Obj as TItem;
-        if ItemObject.ScriptItem <> nil then
-          TScriptItem(ItemObject.ScriptItem)
-              .RunActionCode(satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil, 0);
-        if ItemObject is TEquipmentWithActCode then
-          RunItemConfigActionCode(ItemObject, satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil, 0);
+        RunItemInfoActionCode(ItemObject, satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil);
       end;
       with GetByName('InfoItemImage') as TImageGI do
       begin
@@ -6415,7 +6380,6 @@ var
   Point: TPointF;
   Obj: TObject;
   Index, Range, ActionResult: Integer;
-  Info: PCustomShipInfo;
   AnyWeapon: Boolean;
   Weapon: TWeapon;
 begin
@@ -6509,30 +6473,7 @@ begin
     end
     else
     begin
-      ActionResult := 0;
-      if CustomSelectionItem <> nil then
-      begin
-        if CustomSelectionItem.ScriptItem <> nil then
-          ActionResult :=
-              TScriptItem(CustomSelectionItem.ScriptItem)
-                  .RunActionCode($36, GetPlayer, Obj, nil, ActionResult);
-        if CustomSelectionItem is TEquipmentWithActCode then
-          ActionResult :=
-              RunItemConfigActionCode(CustomSelectionItem, $36, GetPlayer, Obj, nil, ActionResult);
-      end
-      else
-      begin
-        for Index := 0 to GetPlayer.CustomShipInfos.Count - 1 do
-        begin
-          Info := GetPlayer.CustomShipInfos[Index];
-          if not Info.DeleteQueued and (Info.TypeName = CustomSelectionInfoName) then
-          begin
-            ActionResult :=
-                RunCustomShipInfoActionCode(Info, $36, GetPlayer, Obj, nil, ActionResult);
-            Break;
-          end;
-        end;
-      end;
+      ActionResult := RunCustomSelectionAction($36, CustomSelectionItem, CustomSelectionInfoName, Obj);
       if ActionResult > 0 then
       begin
         if not IsCursorImageSelected(CustomSelectionAllowedCursor) then

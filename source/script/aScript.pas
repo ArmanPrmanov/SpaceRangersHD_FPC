@@ -35,6 +35,12 @@ const
   sskJumpToStar = 3;
   sskLandOnPlanet = 4;
   sskNormalAI = 5;
+  // The queue a resuming script's request is in (FindResumingScriptRequest).
+  srqNone = 0;
+  srqVideo = 1;
+  srqTextQuest = 2;
+  srqArcadeBattle = 3;
+  srqPlanetaryBattle = 4;
 type
   TLibraryCache = class;
   TLibraryHandler = class;
@@ -517,6 +523,9 @@ function TryShowQueuedVideo: Boolean;
 function TryDispatchScriptTakeoff: Boolean;
 function TryDispatchScriptEndTurn: Boolean;
 function TryDispatchResumingScriptRequest: Boolean;
+// The queue (srq...) holding the resuming script's request, and its index there.
+function FindResumingScriptRequest(out Index: Integer): Integer;
+procedure MoveScriptRequestToFront(Queue, Index: Integer);
 function DispatchPendingScriptRequests: Boolean;
 procedure StartScriptRequestThread;
 procedure CompleteQueuedArcadeBattle(Status: Integer);
@@ -563,7 +572,10 @@ function GetCachedActionCode(
     Name: WideString;
     Config: TBlockParEC
 ): TScriptCacheUnit;
+// Runs Block's code as a command (aUiScriptActions).
 procedure ExecuteGameplayUiCode(Block: TBlockParEC; VirtualKey: Cardinal);
+// Runs Entry's code; the executor of that command.
+procedure RunGameplayUiCodeEntry(Entry: TScriptGICacheUnit; VirtualKey, KeyModifiers: Cardinal);
 procedure ScriptSnap(out Snapshot: TScriptContextSnapshot);
 procedure ScriptUnSnap(Snapshot: TScriptContextSnapshot);
 function RunItemUseCode(Item: TItem; Ship: TShip): Integer;
@@ -613,6 +625,7 @@ uses
   aRuins,
   aScriptFun,
   aTranclucator,
+  aUiScriptActions,
   aWarrior;
 
 procedure LogScriptCallHistory;
@@ -791,7 +804,7 @@ begin
       Status := 3;
     RequestedScreenId := CurrentScreenId;
     TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
-    CompleteQueuedPlanetaryBattle(Status);
+    FinishQueuedPlanetaryBattle(Status);
     Result := True;
   end;
 end;
@@ -834,10 +847,10 @@ begin
             RuinsTalkScreen.ScheduleCallbackTimer(5, 5, RuinsTalkScreen.AdvanceScriptVideo);
       end
       else
-        CompleteQueuedVideo(3);
+        FinishQueuedVideo(3);
     end
     else
-      CompleteQueuedVideo(3);
+      FinishQueuedVideo(3);
     Result := True;
   end;
 end;
@@ -847,15 +860,13 @@ begin
   Result := False;
   if ScriptTakeoffRequested then
   begin
-    ScriptTakeoffRequested := False;
-    if (GetPlayer.CurrentPlanet <> nil) or (GetPlayer.DockedTo <> nil) then
+    if OrderScriptTakeoff then
     begin
-      GetPlayer.OrderTakeoff;
       aCalc.WaitForTurnCalculationUI;
       if GetPlayer.Order = soTakeoff then
       begin
         HangarScreen.TryTakeOff;
-        ScriptEndTurnRequested := False;
+        ClearScriptEndTurn;
         TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
         Result := True;
       end;
@@ -868,7 +879,7 @@ begin
   Result := False;
   if ScriptEndTurnRequested then
   begin
-    ScriptEndTurnRequested := False;
+    ClearScriptEndTurn;
     if CurrentScreenId = screenRuinsTalk then
       TMessageLoopGIWithMainPanel(TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]))
           .MainPanel
@@ -887,12 +898,15 @@ begin
   end;
 end;
 
-function TryDispatchResumingScriptRequest: Boolean;
+// CHANGE: ENHANCEMENT - Finding the resuming script's request, moving it (a command,
+// aUiScriptActions) and showing it are apart.
+function FindResumingScriptRequest(out Index: Integer): Integer;
 var
   I: Integer;
   Quest, Arcade, Planetary, Video: PQueuedTextQuest;
 begin
-  Result := False;
+  Result := srqNone;
+  Index := -1;
   if ResumingScript = nil then
     Exit;
   // Native code uses the text-quest record view for all four queues. The
@@ -903,14 +917,8 @@ begin
     Video := PQueuedTextQuest(QueuedVideos[I]);
     if Video.Script = ResumingScript then
     begin
-      if I > 0 then
-      begin
-        QueuedVideos.Delete(I);
-        QueuedVideos.Insert(0, Video);
-      end;
-      TryShowQueuedVideo;
-      Result := True;
-      Exit;
+      Index := I;
+      Exit(srqVideo);
     end;
   end;
   for I := 0 to QueuedTextQuests.Count - 1 do
@@ -918,14 +926,8 @@ begin
     Quest := PQueuedTextQuest(QueuedTextQuests[I]);
     if Quest.Script = ResumingScript then
     begin
-      if I > 0 then
-      begin
-        QueuedTextQuests.Delete(I);
-        QueuedTextQuests.Insert(0, Quest);
-      end;
-      TryShowQueuedTextQuest;
-      Result := True;
-      Exit;
+      Index := I;
+      Exit(srqTextQuest);
     end;
   end;
   for I := 0 to QueuedArcadeBattles.Count - 1 do
@@ -933,14 +935,8 @@ begin
     Arcade := PQueuedTextQuest(QueuedArcadeBattles[I]);
     if Arcade.Script = ResumingScript then
     begin
-      if I > 0 then
-      begin
-        QueuedArcadeBattles.Delete(I);
-        QueuedArcadeBattles.Insert(0, Arcade);
-      end;
-      TryShowQueuedArcadeBattle;
-      Result := True;
-      Exit;
+      Index := I;
+      Exit(srqArcadeBattle);
     end;
   end;
   for I := 0 to QueuedPlanetaryBattles.Count - 1 do
@@ -948,16 +944,47 @@ begin
     Planetary := PQueuedTextQuest(QueuedPlanetaryBattles[I]);
     if Planetary.Script = ResumingScript then
     begin
-      if I > 0 then
-      begin
-        QueuedPlanetaryBattles.Delete(I);
-        QueuedPlanetaryBattles.Insert(0, Planetary);
-      end;
-      TryRunQueuedPlanetaryBattle;
-      Result := True;
-      Exit;
+      Index := I;
+      Exit(srqPlanetaryBattle);
     end;
   end;
+end;
+
+procedure MoveScriptRequestToFront(Queue, Index: Integer);
+var
+  List: TList;
+  Request: Pointer;
+begin
+  case Queue of
+    srqVideo: List := QueuedVideos;
+    srqTextQuest: List := QueuedTextQuests;
+    srqArcadeBattle: List := QueuedArcadeBattles;
+    srqPlanetaryBattle: List := QueuedPlanetaryBattles;
+  else
+    Exit;
+  end;
+  Request := List[Index];
+  List.Delete(Index);
+  List.Insert(0, Request);
+end;
+
+function TryDispatchResumingScriptRequest: Boolean;
+var
+  Queue, Index: Integer;
+begin
+  Result := False;
+  Queue := FindResumingScriptRequest(Index);
+  if Queue = srqNone then
+    Exit;
+  if Index > 0 then
+    MoveResumingScriptRequestToFront;
+  case Queue of
+    srqVideo: TryShowQueuedVideo;
+    srqTextQuest: TryShowQueuedTextQuest;
+    srqArcadeBattle: TryShowQueuedArcadeBattle;
+    srqPlanetaryBattle: TryRunQueuedPlanetaryBattle;
+  end;
+  Result := True;
 end;
 
 function DispatchPendingScriptRequests: Boolean;
@@ -5125,13 +5152,11 @@ begin
   Result := Cache.GetOrCompile(Name, Config);
 end;
 
+// CHANGE: ENHANCEMENT - Each run is a command (aUiScriptActions); the command carries the
+// keyboard state.
 procedure ExecuteGameplayUiCode(Block: TBlockParEC; VirtualKey: Cardinal);
 var
   Entry: TScriptGICacheUnit;
-  Code: TCodeEC;
-  SavedScript: TScript;
-  Text: WideString;
-  Cell: TVarEC;
   KeyModifiers: Cardinal;
 begin
   if Block = nil then
@@ -5141,6 +5166,22 @@ begin
   Entry := GameplayUiScriptCache.GetOrCompile(Block);
   if Entry = nil then
     Exit;
+  KeyModifiers := 0;
+  if VirtualKey <> 0 then
+    KeyModifiers :=
+        Ord(IsVirtualKeyDown(VK_SHIFT))
+            + Ord(IsVirtualKeyDown(VK_CONTROL)) * 2
+            + Ord(IsVirtualKeyDown(VK_MENU)) * 4;
+  RunUiCode(Entry, VirtualKey, KeyModifiers);
+end;
+
+procedure RunGameplayUiCodeEntry(Entry: TScriptGICacheUnit; VirtualKey, KeyModifiers: Cardinal);
+var
+  Code: TCodeEC;
+  SavedScript: TScript;
+  Text: WideString;
+  Cell: TVarEC;
+begin
   Code := Entry.Code;
   Code.LinkAll(Session.SharedScriptVariables, False);
   Code.LinkAll(ScriptFunctionScope, False);
@@ -5155,10 +5196,6 @@ begin
         Cell.SetDword(VirtualKey)
       else
         Code.LocalVar.Add('KEY', vkDword).SetDword(VirtualKey);
-      KeyModifiers :=
-          Ord(IsVirtualKeyDown(VK_SHIFT))
-              + Ord(IsVirtualKeyDown(VK_CONTROL)) * 2
-              + Ord(IsVirtualKeyDown(VK_MENU)) * 4;
       Cell := Code.LocalVar.GetVarNE('KEYMOD');
       if Cell <> nil then
         Cell.SetDword(KeyModifiers)

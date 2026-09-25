@@ -105,6 +105,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aPlayerActions,
+  aUiScriptActions,
   aPlanetActions,
   aHuman,
   fGalaxy2,
@@ -1768,20 +1769,7 @@ begin
       else
       begin
         if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
-        begin
-          if Item.ScriptItem <> nil then
-            TScriptItem(Item.ScriptItem)
-                .RunActionCode(satOnShowingItemInfo, nil, GetPlayer.CurrentPlanet, nil, 0);
-          if Item is TEquipmentWithActCode then
-            RunItemConfigActionCode(
-                Item,
-                satOnShowingItemInfo,
-                nil,
-                GetPlayer.CurrentPlanet,
-                nil,
-                0
-            );
-        end;
+          RunItemInfoActionCode(Item, satOnShowingItemInfo, nil, GetPlayer.CurrentPlanet, nil);
         Equipment := Item as TEquipment;
         ItemInfoWindow.SetActive(True);
         with ItemInfoImage do

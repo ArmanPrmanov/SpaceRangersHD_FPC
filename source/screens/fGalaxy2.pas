@@ -237,7 +237,7 @@ begin
     CaptureScreenBackground(True, 0);
   (GetByName('BGBuf') as TGraphBufGI).BindExternalGraphBuf(AuxRenderBuffer);
   if (GetPlayer <> nil) and not CapturePreviewOnOpen then
-    GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
   MainPanel.OnOpen;
   (GetByName('PM_Ship') as TGraphButtonGI).SetHitTestDisabled(True);
   (GetByName('PM_Gal') as TGraphButtonGI).SetHitTestDisabled(True);
@@ -804,7 +804,7 @@ begin
   inherited OnClose;
   aCalc.WaitForTurnCalculationUI;
   if (GetPlayer <> nil) and not CapturePreviewOnOpen then
-    GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
   CapturePreviewOnOpen := False;
   if JumpAnimationTimer <> nil then
   begin
@@ -1424,7 +1424,7 @@ var
   Value: WideString;
 begin
   if (Star <> nil) and (GetPlayer <> nil) then
-    GetPlayer.ScriptItemsAct(satOnShowingStarInfo, Star, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnShowingStarInfo, Star, nil, 0);
   if StarInfoHideTimer <> nil then
   begin
     CancelCallbackTimer(StarInfoHideTimer);

@@ -350,6 +350,7 @@ uses
   aPlanetActions,
   aStationActions,
   aTalkActions,
+  aUiScriptActions,
   aSession,
   aHuman,
   Achievements,
@@ -1635,7 +1636,7 @@ begin
   Film.SetActive(False);
   InvalidateViewport;
   if Result and (QueuedVideos.Count > 0) then
-    CompleteQueuedVideo(2);
+    FinishQueuedVideo(2);
 end;
 
 procedure TfRuinsTalk.ProcessWindowMessage(Message, WParam: Cardinal; LParam: Integer);

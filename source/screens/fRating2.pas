@@ -75,6 +75,7 @@ function ShowRangerRating(Parent: TMessageLoopGI): Boolean;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
   aCalc,
   aGalaxyStruct,
   GI_Panel,
@@ -152,7 +153,7 @@ begin
     CaptureScreenBackground(True, 0);
   (GetByName('BGBuf') as TGraphBufGI).BindExternalGraphBuf(AuxRenderBuffer);
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
   MainPanel.OnOpen;
   (GetByName('PM_Ship') as TGraphButtonGI).SetHitTestDisabled(True);
   (GetByName('PM_Gal') as TGraphButtonGI).SetHitTestDisabled(True);
@@ -197,7 +198,7 @@ begin
   inherited OnClose;
   aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
   ClearRows;
   MainPanel.OnClose;
 end;

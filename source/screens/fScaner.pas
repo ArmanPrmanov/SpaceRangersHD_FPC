@@ -101,6 +101,8 @@ function GetPirateRankSmallImagePath(Rank: Byte): WideString;
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aPlayerActions,
+  aUiScriptActions,
   GI_GI,
   GI_Main,
   aCalc,
@@ -223,9 +225,9 @@ begin
     ShipToInspect := ScannerTarget as TShip;
     Stage := 3;
     if GetPlayer <> nil then
-      GetPlayer.ScriptItemsAct($10, ShipToInspect, nil, 0);
+      RunScriptItemsAct(GetPlayer, $10, ShipToInspect, nil, 0);
     Stage := 4;
-    ShipToInspect.ScriptItemsAct($18, nil, nil, 0);
+    RunScriptItemsAct(ShipToInspect, $18, nil, nil, 0);
     Stage := 5;
     CompactHullInfo := ShipToInspect.TypeId in [Ord(rstRangerCenter)..Ord(rstCustomStation)];
     Stage := 6;
@@ -459,7 +461,7 @@ end;
 
 procedure TfScaner.OnClose;
 begin
-  ShipToInspect.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+  RunScriptItemsAct(ShipToInspect, satOnLeavingForm, nil, nil, 0);
   if ItemHoverTimer <> nil then
   begin
     CancelCallbackTimer(ItemHoverTimer);
@@ -1582,12 +1584,7 @@ begin
       HideItemTimer := nil;
     end;
     if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
-    begin
-      if Item.ScriptItem <> nil then
-        TScriptItem(Item.ScriptItem).RunActionCode($31, ShipToInspect, nil, nil, 0);
-      if Item is TEquipmentWithActCode then
-        RunItemConfigActionCode(Item, $31, ShipToInspect, nil, nil, 0);
-    end;
+      RunItemInfoActionCode(Item, $31, ShipToInspect, nil, nil);
     if (Item.ItemType = t_Hull)
         and (ShipToInspect.TypeId <> stTranclucator)
         and (ShipToInspect.TypeId <> stKling)
