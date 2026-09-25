@@ -9089,11 +9089,7 @@ begin
         if TerronShip.Graphic = Obj then
         begin
           Obj.DetachFromSpace;
-          TerronShip.Order := soJump;
-          TerronShip.OrderTarget := TerronShip.CurrentStar;
-          TerronShip.InHyperspace := True;
-          TerronShip.OrderStateData := 2;
-          TerronShip.Position := MakePointF(0, 0);
+          TerronEnterStar;
           Break;
         end;
         Obj := Obj.Next;
@@ -9115,7 +9111,7 @@ begin
         begin
           if not Assigned(TStarSE(Obj).Animation.CycleCompleteCallback) then
           begin
-            Galaxy.TerronToStarTurn := $40000000;
+            BeginTerronTransformation;
             TStarSE(Obj).Animation.CycleCompleteCallback := TerronTransformationStarted;
             Obj := SpaceProcess.Space.FirstObject;
             while Obj <> nil do
@@ -9134,11 +9130,7 @@ begin
                   TRuinsSE(Obj).StaticImage := nil;
                 end;
                 Obj.DetachFromSpace;
-                TerronShip.Order := soJump;
-                TerronShip.OrderTarget := TerronShip.CurrentStar;
-                TerronShip.InHyperspace := True;
-                TerronShip.OrderStateData := 2;
-                TerronShip.Position := MakePointF(0, 0);
+                TerronEnterStar;
                 Break;
               end;
               Obj := Obj.Next;
@@ -9214,7 +9206,7 @@ begin
   Animation.RestartPlayback;
   Animation.FrameAdvancedCallback := nil;
   Animation.CycleCompleteCallback := nil;
-  Galaxy.TerronToStarTurn := Galaxy.TerronToStarTurn or $20000000;
+  FinishTerronTransformation;
 end;
 procedure TfStarMap.ExecuteUiCode(Block: TBlockParEC; Key: Cardinal);
 begin

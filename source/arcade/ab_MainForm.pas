@@ -2917,7 +2917,7 @@ begin
       if (GetPlayer = nil) or (GetPlayer.GetHull.HullPoints <= 0) then
       begin
         if GetPlayer <> nil then
-          Galaxy.ScoreScreenDismissed := 1;
+          DismissScoreScreen;
         while GetPlayer <> nil do
           SysUtils.Sleep(1);
         RequestedScreenId := screenGameEnd;
@@ -3524,7 +3524,7 @@ begin
   if (Galaxy <> nil) and ((GetPlayer = nil) or (GetPlayer.GetHull.HullPoints <= 0)) then
   begin
     if GetPlayer <> nil then
-      Galaxy.ScoreScreenDismissed := 1;
+      DismissScoreScreen;
     while GetPlayer <> nil do
       SysUtils.Sleep(1);
     RequestedScreenId := screenGameEnd;
@@ -3577,7 +3577,7 @@ begin
       UpdateTimer := nil;
     end;
     if GetPlayer <> nil then
-      Galaxy.ScoreScreenDismissed := 1;
+      DismissScoreScreen;
     while GetPlayer <> nil do
       SysUtils.Sleep(1);
     RequestedScreenId := screenGameEnd;

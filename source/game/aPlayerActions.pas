@@ -46,6 +46,10 @@ const
   ckOrderTeleport = 35;
   ckReturnShopStock = 36;
   ckOpenShopStock = 37;
+  ckTerronEnterStar = 38;
+  ckBeginTerronTransformation = 39;
+  ckFinishTerronTransformation = 40;
+  ckDismissScoreScreen = 41;
 type
   TSlotList = array of Integer;
 procedure AddWeaponSlot(var Slots: TSlotList; Slot: Integer);
@@ -140,6 +144,14 @@ procedure BeginSpaceDay;
 // A save returns stock left by a shop the player has left, and runs mod OnSave handlers.
 procedure PrepareSave;
 procedure PrepareGalaxyForSave;
+// The Terron ship dives into its star: it leaves normal space on a jump to that star.
+procedure TerronEnterStar;
+// The star map starts the Terron star's transformation animation, and ends it.
+procedure BeginTerronTransformation;
+procedure FinishTerronTransformation;
+// The jump screen or the arcade battle no longer shows the dead player's ship; the turn
+// thread, waiting in the player ship's release, goes on.
+procedure DismissScoreScreen;
 var
   // The days to land that the last PreparePlayerPath found, for the star map.
   PreparedLandingTurns: Integer;
@@ -161,6 +173,7 @@ uses
   aConst,
   aGalaxyEvent,
   aGalaxyStruct,
+  aKling,
   ThreadCalc,
   Globals;
 
@@ -971,6 +984,55 @@ begin
   SubmitCommand(NewCommand(ckPrepareSave));
 end;
 
+// Moved from TfStarMap.UpdateTerronTransformation.
+procedure ExecuteTerronEnterStar(const Command: TPlayerCommand);
+begin
+  TerronShip.Order := soJump;
+  TerronShip.OrderTarget := TerronShip.CurrentStar;
+  TerronShip.InHyperspace := True;
+  TerronShip.OrderStateData := 2;
+  TerronShip.Position := MakePointF(0, 0);
+end;
+
+procedure TerronEnterStar;
+begin
+  SubmitCommand(NewCommand(ckTerronEnterStar));
+end;
+
+// Moved from TfStarMap.UpdateTerronTransformation.
+procedure ExecuteBeginTerronTransformation(const Command: TPlayerCommand);
+begin
+  Galaxy.TerronToStarTurn := $40000000;
+end;
+
+procedure BeginTerronTransformation;
+begin
+  SubmitCommand(NewCommand(ckBeginTerronTransformation));
+end;
+
+// Moved from TfStarMap.TerronTransformationFinished.
+procedure ExecuteFinishTerronTransformation(const Command: TPlayerCommand);
+begin
+  Galaxy.TerronToStarTurn := Galaxy.TerronToStarTurn or $20000000;
+end;
+
+procedure FinishTerronTransformation;
+begin
+  SubmitCommand(NewCommand(ckFinishTerronTransformation));
+end;
+
+// Moved from TfJump.AdvanceTravel, TfAB.TimerTakt, TfAB.ScrollMapTimer and
+// TfAB.FinishCampaignTransition.
+procedure ExecuteDismissScoreScreen(const Command: TPlayerCommand);
+begin
+  Galaxy.ScoreScreenDismissed := 1;
+end;
+
+procedure DismissScoreScreen;
+begin
+  SubmitCommand(NewCommand(ckDismissScoreScreen));
+end;
+
 initialization
   RegisterCommand(ckParkPlayer, 'ParkPlayer', @ExecuteParkPlayer);
   RegisterCommand(ckPruneMessages, 'PruneMessages', @ExecutePruneMessages);
@@ -1006,4 +1068,16 @@ initialization
   RegisterCommand(ckHyperspaceStep, 'HyperspaceStep', @ExecuteHyperspaceStep);
   RegisterCommand(ckReturnShopStock, 'ReturnShopStock', @ExecuteReturnShopStock);
   RegisterCommand(ckOpenShopStock, 'OpenShopStock', @ExecuteOpenShopStock);
+  RegisterCommand(ckTerronEnterStar, 'TerronEnterStar', @ExecuteTerronEnterStar);
+  RegisterCommand(
+      ckBeginTerronTransformation,
+      'BeginTerronTransformation',
+      @ExecuteBeginTerronTransformation
+  );
+  RegisterCommand(
+      ckFinishTerronTransformation,
+      'FinishTerronTransformation',
+      @ExecuteFinishTerronTransformation
+  );
+  RegisterCommand(ckDismissScoreScreen, 'DismissScoreScreen', @ExecuteDismissScoreScreen);
 end.
