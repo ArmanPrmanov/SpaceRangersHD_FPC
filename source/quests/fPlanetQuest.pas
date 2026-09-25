@@ -126,6 +126,8 @@ uses
   aHuman,
   aSession,
   aSaveLoad,
+  aPlayerActions,
+  aQuestActions,
   Windows,
   Classes,
   Math,
@@ -300,7 +302,7 @@ begin
   Quest.PlayerInterface := QuestPlayerInterface;
   ImportExternalParameters;
   // CHANGE: BUGFIX - Seed the quest's own stream from the simulation stream.
-  TextQuestRandomState := Cardinal(GameRandomIntRange(0, MaxInt));
+  TextQuestRandomState := QuestRandomSeed;
   if GetPlayer = nil then
     Quest.Start(-1, False)
   else
@@ -1138,7 +1140,7 @@ begin
       EvictMainMenuShipCachesWhenAddressSpaceHigh;
     Stage := 1;
     if GetPlayer <> nil then
-      GetPlayer.ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
+      RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
     Stage := 2;
     if (QuestStyleIndex < 0) or (QuestStyleIndex >= QuestStyleCount) then
       QuestStyleIndex := 0;
@@ -1307,14 +1309,11 @@ begin
 end;
 
 procedure TfPlanetQuest.OnClose;
-var
-  Money, CappedMoney: Int64;
-  Player: TPlayer;
 begin
   if Galaxy <> nil then
     aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
-    GetPlayer.ScriptItemsAct(satOnLeavingForm, nil, nil, 0);
+    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
   QuestId := -1;
   if PageAnimationTimer <> nil then
   begin
@@ -1323,24 +1322,14 @@ begin
   end;
   ClearParameterPanel;
   ClearChoices;
-  if GetPlayer <> nil then
-  begin
-    Player := GetPlayer;
-    Money := GetPlayer.Money;
-    // The native inlined Int64 minimum compares an unsigned limit with signed money.
-    if Int64(MoneyLimit) < Money then
-      CappedMoney := MoneyLimit
-    else
-      CappedMoney := Money;
-    Player.SetMoney(Integer(CappedMoney));
-  end;
   if Quest <> nil then
   begin
     Quest.Free;
     Quest := nil;
   end;
+  // The money cap and the quest timers, in that order.
   if GetPlayer <> nil then
-    GetPlayer.ProcessQuestTimersAndOutcomes;
+    CloseQuest(MoneyLimit);
   if (RequestedScreenId = screenMainMenu) or (RequestedScreenId = screenLoad) then
     ClearPendingScriptRequests;
 end;
@@ -1811,70 +1800,12 @@ begin
 end;
 
 procedure TfPlanetQuest.CompleteQuestSuccess(Value: Integer);
-var
-  News, ItemName: WideString;
-  GovernmentQuest: PQuest;
-  I: Integer;
-  Item: TUselessItem;
 begin
   ClearChoices;
   if ActiveQueuedTextQuest = nil then
     if GetPlayer <> nil then
-      if not GetPlayer.InPrison then
-        if GetPlayer.Quests.Count > 0 then
-          for I := 0 to GetPlayer.Quests.Count - 1 do
-          begin
-            GovernmentQuest := GetPlayer.Quests[I];
-            if (GovernmentQuest.QuestType = qtPlanetQuest)
-                and (GovernmentQuest.ObjectiveTarget is TPlanet)
-                and (GetPlayer.CurrentPlanet = (GovernmentQuest.ObjectiveTarget as TPlanet)) then
-            begin
-              if Quest.CompleteOnFinish then
-              begin
-                GovernmentQuest.Successful := True;
-                News :=
-                    PickLocalizedTextVariant(
-                        'GalaxyNews.Quest.Successful.PlanetaryQuest',
-                        (Galaxy.CurrentTurn div 10) * Integer(Galaxy.GenerationSeed)
-                    );
-                ReplaceTextToken(
-                    News,
-                    '<FromPlanet>',
-                    GovernmentQuest.Planet.Name,
-                    '<color=255,240,100>'
-                );
-                ReplaceTextToken(
-                    News,
-                    '<ToPlanet>',
-                    GetPlayer.CurrentPlanet.Name,
-                    '<color=255,240,100>'
-                );
-                AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, News, '');
-              end;
-              ItemName :=
-                  LookupLocalizedTextByKey(
-                      'PlanetQuest.ItemForPlanetQuest.' + IntToStr(GovernmentQuest.QuestNumber)
-                  );
-              if ItemName <> 'none' then
-              begin
-                Item := TUselessItem.Create;
-                Item.Init(ItemName, dsBlazer, 0, False);
-                GetPlayer.Inventory.Add(Item);
-              end;
-              GetPlayer.CurrentPlanet.TextQuestId := -1;
-              (GetByName('QuestPanel') as TPanelGI).SetActive(False);
-              if GetPlayer.CurrentPlanet.IsCoalitionOwned
-                  or (GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate)) then
-              begin
-                GetPlayer
-                    .CurrentPlanet
-                    .ChangeRelationToRanger(GetPlayer, Quest.SuccessRelationDelta);
-                if GetPlayer.CurrentPlanet.RelationToShip(GetPlayer) < 20 then
-                  GetPlayer.CurrentPlanet.SetRelationLevelToRanger(GetPlayer, rlBad);
-              end;
-              Break;
-            end;
-          end;
+      if CompleteGovernmentQuest(Quest.CompleteOnFinish, Quest.SuccessRelationDelta) then
+        (GetByName('QuestPanel') as TPanelGI).SetActive(False);
   if QuestId >= 0 then
     if (ActiveQueuedTextQuest = nil)
         or (GetPlayer = nil)
@@ -1891,26 +1822,17 @@ begin
   if ActiveQueuedTextQuest <> nil then
   begin
     ActiveQueuedTextQuest := nil;
-    CompleteQueuedTextQuest(sqsSuccess);
+    FinishQueuedTextQuest(sqsSuccess);
   end;
 end;
 
 procedure TfPlanetQuest.CompleteQuestFailure(Value: Integer);
-var
-  News: WideString;
-  GovernmentQuest: PQuest;
-  I: Integer;
 begin
   if GetPlayer = nil then
     RequestedScreenId := QuestReturnScreenId
   else if GetPlayer.InPrison then
   begin
-    GetPlayer.InPrison := False;
-    if GetPlayer.CurrentPlanet <> nil then
-      if (GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate)) and (MainPiratePlanet <> nil) then
-        MainPiratePlanet.SetRelationLevelToRanger(GetPlayer, rlHostile)
-      else
-        GetPlayer.CurrentPlanet.SetRelationLevelToRanger(GetPlayer, rlHostile);
+    ReleaseFromPrison;
     if not HangarScreen.TryTakeOff then
       RequestedScreenId := screenHangar;
   end
@@ -1918,45 +1840,7 @@ begin
   begin
     if ActiveQueuedTextQuest = nil then
       if GetPlayer <> nil then
-        if GetPlayer.Quests.Count > 0 then
-          for I := GetPlayer.Quests.Count - 1 downto 0 do
-          begin
-            GovernmentQuest := GetPlayer.Quests[I];
-            if (GovernmentQuest.QuestType = qtPlanetQuest)
-                and (GovernmentQuest.ObjectiveTarget is TPlanet)
-                and (GetPlayer.CurrentPlanet = (GovernmentQuest.ObjectiveTarget as TPlanet)) then
-            begin
-              GovernmentQuest.Successful := False;
-              GetPlayer.PublishQuestStatus(GovernmentQuest, -1);
-              News :=
-                  PickLocalizedTextVariant(
-                      'GalaxyNews.Quest.Failure.PlanetaryQuest',
-                      Integer(GetPlayer.Seed) * (Galaxy.CurrentTurn div 10)
-                  );
-              ReplaceTextToken(
-                  News,
-                  '<ToPlanet>',
-                  GetPlayer.CurrentPlanet.Name,
-                  '<color=255,240,100>'
-              );
-              ReplaceTextToken(
-                  News,
-                  '<FromPlanet>',
-                  GovernmentQuest.Planet.Name,
-                  '<color=255,240,100>'
-              );
-              ReplaceTextToken(
-                  News,
-                  '<Relation>',
-                  GovernmentQuest.Planet.GetRelationLevelTextToShip(GetPlayer),
-                  '<color=255,240,100>'
-              );
-              AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, News, '');
-              GetPlayer.CurrentPlanet.TextQuestId := -1;
-              GetPlayer.ArchiveQuest(I);
-              Break;
-            end;
-          end;
+        FailGovernmentQuest;
     if (ActiveQueuedTextQuest = nil)
         and SaveManagerScreen.AutoSaveExists
         and (ShowMessageBoxGI(
@@ -1975,7 +1859,7 @@ begin
   if ActiveQueuedTextQuest <> nil then
   begin
     ActiveQueuedTextQuest := nil;
-    CompleteQueuedTextQuest(sqsFailure);
+    FinishQueuedTextQuest(sqsFailure);
   end;
 end;
 
@@ -1998,8 +1882,7 @@ begin
     else
     begin
       ScoreScreen.RecordPlayerResult(False);
-      GetPlayer.Free;
-      Session.GameEndReason := 1;
+      DieInQuest;
       RequestedScreenId := screenGameEnd;
     end;
   end;
@@ -2075,7 +1958,7 @@ begin
       if Quest.GetParameter(I).Enabled then
         if Quest.GetParameter(I).IsMoney then
         begin
-          GetPlayer.SetMoney(Quest.GetParameter(I).Value);
+          SetQuestMoney(Quest.GetParameter(I).Value);
           Quest.GetParameter(I).Value := GetPlayer.Money;
           Break;
         end;
@@ -2095,57 +1978,67 @@ begin
         end;
 end;
 
+// The script the queued quest came from, whose variables come before the shared ones.
+function QueuedQuestScript: TScript;
+begin
+  Result := nil;
+  if ActiveQueuedTextQuest <> nil then
+    Result := ActiveQueuedTextQuest.Script;
+end;
+
 procedure TfPlanetQuest.ExportExternalParameters;
 var
   I: Integer;
   Name: WideString;
-  Variable: TVarEC;
+  Names: array of WideString;
+  Values: array of Integer;
 begin
+  Names := nil;
+  Values := nil;
   for I := 1 to Quest.GetParameterCount do
     if FindTextPosW('ext_', Quest.GetParameter(I).NameText.Text) = 1 then
     begin
       Name := Quest.GetParameter(I).NameText.Text;
       Name[1] := 'E';
       Name := 'GQuestVar' + Name;
-      Variable := nil;
-      if ActiveQueuedTextQuest <> nil then
-        if ActiveQueuedTextQuest.Script <> nil then
-          Variable := ActiveQueuedTextQuest.Script.InitCode.LocalVar.GetVarNE(Name);
-      if Variable = nil then
-        Variable := Session.SharedScriptVariables.GetVarNE(Name);
-      if Variable <> nil then
-        if Variable.RealVType = vkInt then
-        begin
-          Variable.SetInt(Quest.GetParameter(I).Value);
-        end;
+      SetLength(Names, Length(Names) + 1);
+      Names[High(Names)] := Name;
+      SetLength(Values, Length(Values) + 1);
+      Values[High(Values)] := Quest.GetParameter(I).Value;
     end;
+  SetQuestVariables(QueuedQuestScript, Names, Values);
 end;
 
+// The quest takes the variables' values, within its parameters' limits, and the variables
+// then take the quest's values back.
 procedure TfPlanetQuest.ImportExternalParameters;
 var
   I: Integer;
   Name: WideString;
   Variable: TVarEC;
+  Names: array of WideString;
+  Values: array of Integer;
 begin
+  Names := nil;
+  Values := nil;
   for I := 1 to Quest.GetParameterCount do
     if FindTextPosW('ext_', Quest.GetParameter(I).NameText.Text) = 1 then
     begin
       Name := Quest.GetParameter(I).NameText.Text;
       Name[1] := 'E';
       Name := 'GQuestVar' + Name;
-      Variable := nil;
-      if ActiveQueuedTextQuest <> nil then
-        if ActiveQueuedTextQuest.Script <> nil then
-          Variable := ActiveQueuedTextQuest.Script.InitCode.LocalVar.GetVarNE(Name);
-      if Variable = nil then
-        Variable := Session.SharedScriptVariables.GetVarNE(Name);
+      Variable := FindQuestVariable(QueuedQuestScript, Name);
       if Variable <> nil then
         if Variable.RealVType = vkInt then
         begin
           Quest.GetParameter(I).SetValue(Variable.GetInt);
-          Variable.SetInt(Quest.GetParameter(I).Value);
+          SetLength(Names, Length(Names) + 1);
+          Names[High(Names)] := Name;
+          SetLength(Values, Length(Values) + 1);
+          Values[High(Values)] := Quest.GetParameter(I).Value;
         end;
     end;
+  SetQuestVariables(QueuedQuestScript, Names, Values);
 end;
 
 function TfPlanetQuest.ExpandExternalText(Text: WideString): WideString;
@@ -2326,7 +2219,7 @@ begin
     if StandaloneQuestMode then
       Break;
     WaitForTurnCalculation;
-    PruneExpiredPersistentPlayerMessages;
+    PruneMessages;
     CalculatePlayerStarTurnAndWait;
     if ExitScreenLoop then
       Break;
