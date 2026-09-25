@@ -54,9 +54,9 @@ numbers are part of the log format.
 | --- | --- |
 | 0–99 | `aPlayerActions`: travel, orders, the day |
 | 100–199 | shops: equipment, goods, hangar |
-| 200–299 | the ship and hold screen (`fShip2`) |
+| 200–299 | the ship and hold screen (`fShip2`), awards (`fRewards`, 250–252) |
 | 300–399 | conversations (`fTalk`, script dialogs) |
-| 400–499 | planets and the government (`fGov`, `fPlanet`, `fPlanetNO`, `fInfo`, `fRewards`, `fJournal`) |
+| 400–499 | planets and the government (`fGov`, `fPlanet`, `fPlanetNO`, `fInfo`, `fJournal`) |
 | 500–599 | stations (`fRuinsTalk`) |
 | 600–699 | text quests, arcade battles, cheats, UI scripts |
 
