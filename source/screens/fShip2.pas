@@ -2004,6 +2004,7 @@ var
   Artefact: TArtefact;
   Text: WideString;
   SlotImage: TImageGI;
+  SlotTypes: array[0..7] of Byte;
 begin
   aCalc.WaitForTurnCalculationUI;
   RefreshEquipmentConfigurationButtons;
@@ -2081,6 +2082,9 @@ begin
       );
   end;
   for I := 0 to 7 do
+    SlotTypes[I] := Byte(EquipmentSlotLayouts[I].ItemType);
+  CheckHeldUsability(SlotTypes, HighlightRepairableEquipment);
+  for I := 0 to 7 do
   begin
     SlotCount := LocalHuman.PlayerHoldShip.GetSlotCountForItemType(Byte(EquipmentSlotLayouts[I].ItemType));
     for Slot := 0 to SlotCount - 1 do
@@ -2141,78 +2145,7 @@ begin
             .SetActive(False);
       with GetByName('S_' + EquipmentSlotLayouts[I].Name + '_' + IntToStr(Slot) + 'z') as TZoneGI do
         ZoneMouseDownCallback := EquipmentSlotMouseDown;
-      if HighlightRepairableEquipment
-          and (Item <> nil)
-          and ((Item.EquippedFlag <> 0) or (Item is THull))
-          and Item.NeedsRepair then
-        Highlight := True
-      else if (SelectedHoldKind = phkEquipment)
-          and (SelectedHoldItem.ItemType = t_MicroModule)
-          and (Item <> nil)
-          and (Item.MicroModuleIndex = 0)
-          and (SelectedHoldItem as TMicroModule).CanInstallOn(Item) then
-        Highlight := True
-      else if (SelectedHoldKind in [phkEquipment, phkArtefact])
-          and (SelectedHoldItem is TEquipmentWithActCode)
-          and (Item <> nil)
-          and (RunItemConfigActionCode(
-                  SelectedHoldItem,
-                  satOnCheckingUsability,
-                  LocalHuman.PlayerHoldShip,
-                  Item,
-                  nil,
-                  0)
-              > 0) then
-        Highlight := True
-      else if (SelectedHoldKind in [phkEquipment, phkArtefact])
-          and (SelectedHoldItem.ScriptItem <> nil)
-          and (Item <> nil)
-          and (TScriptItem(SelectedHoldItem.ScriptItem)
-                  .RunActionCode(satOnCheckingUsability, LocalHuman.PlayerHoldShip, Item, nil, 0)
-              > 0) then
-        Highlight := True
-      else if (SelectedHoldKind in [phkEquipment, phkArtefact])
-          and (Item <> nil)
-          and (Item is TEquipmentWithActCode)
-          and (RunItemConfigActionCode(
-                  Item,
-                  satOnCheckingUsability2,
-                  LocalHuman.PlayerHoldShip,
-                  SelectedHoldItem,
-                  nil,
-                  0)
-              > 0) then
-        Highlight := True
-      else if (SelectedHoldKind in [phkEquipment, phkArtefact])
-          and (Item <> nil)
-          and (Item.ScriptItem <> nil)
-          and (TScriptItem(Item.ScriptItem)
-                  .RunActionCode(satOnCheckingUsability2, LocalHuman.PlayerHoldShip, SelectedHoldItem, nil, 0)
-              > 0) then
-        Highlight := True
-      else if (SelectedHoldKind = phkGoods)
-          and (Item <> nil)
-          and (Item.ScriptItem <> nil)
-          and (TScriptItem(Item.ScriptItem)
-                  .RunActionCode(
-                      satOnCheckingUsabilityGoods,
-                      LocalHuman.PlayerHoldShip,
-                      TObject(SelectedGoodsIndex),
-                      TObject(SelectedGoodsQuantity),
-                      0)
-              > 0) then
-        Highlight := True
-      else if (SelectedHoldKind = phkEquipment)
-          and (SelectedHoldItem.ItemType = t_Cistern)
-          and (Item <> nil)
-          and (Item.ItemType = t_FuelTanks)
-          and ((SelectedHoldItem as TCistern).Fuel > 0)
-          and ((Item as TFuelTanks).Fuel < (Item as TFuelTanks).Capacity) then
-        Highlight := True
-      else
-        Highlight :=
-            (SelectedHoldKind = phkEquipment)
-                and IsCompatibleSlot(SelectedHoldItem.ItemType, EquipmentSlotLayouts[I].ItemType);
+      Highlight := HeldSlotHighlights[I][Slot];
       Boost :=
           (SelectedHoldKind = phkArtefact)
               and (SelectedHoldItem is TArtefact)
@@ -2431,54 +2364,7 @@ begin
         end;
       end;
     end;
-  if (HighlightRepairableEquipment and LocalHuman.PlayerHoldShip.GetHull.NeedsRepair) then
-    GetByName('HullA').SetActive(True)
-  else if ((SelectedHoldKind = phkEquipment)
-      and (SelectedHoldItem.ItemType = t_MicroModule)
-      and (LocalHuman.PlayerHoldShip.GetHull.MicroModuleIndex = 0)
-      and (SelectedHoldItem as TMicroModule).CanInstallOn(LocalHuman.PlayerHoldShip.GetHull)) then
-    GetByName('HullA').SetActive(True)
-  else if ((SelectedHoldKind in [phkEquipment, phkArtefact])
-      and (SelectedHoldItem is TEquipmentWithActCode)
-      and (RunItemConfigActionCode(
-              SelectedHoldItem,
-              satOnCheckingUsability,
-              LocalHuman.PlayerHoldShip,
-              LocalHuman.PlayerHoldShip.GetHull,
-              nil,
-              0)
-          > 0)) then
-    GetByName('HullA').SetActive(True)
-  else if ((SelectedHoldKind in [phkEquipment, phkArtefact])
-      and (SelectedHoldItem.ScriptItem <> nil)
-      and (TScriptItem(SelectedHoldItem.ScriptItem)
-              .RunActionCode(satOnCheckingUsability, LocalHuman.PlayerHoldShip, LocalHuman.PlayerHoldShip.GetHull, nil, 0)
-          > 0)) then
-    GetByName('HullA').SetActive(True)
-  else if ((SelectedHoldKind in [phkEquipment, phkArtefact])
-      and (LocalHuman.PlayerHoldShip.GetHull.ScriptItem <> nil)
-      and (TScriptItem(LocalHuman.PlayerHoldShip.GetHull.ScriptItem)
-              .RunActionCode(satOnCheckingUsability2, LocalHuman.PlayerHoldShip, SelectedHoldItem, nil, 0)
-          > 0)) then
-    GetByName('HullA').SetActive(True)
-  else if ((SelectedHoldKind = phkGoods)
-      and (LocalHuman.PlayerHoldShip.GetHull.ScriptItem <> nil)
-      and (TScriptItem(LocalHuman.PlayerHoldShip.GetHull.ScriptItem)
-              .RunActionCode(
-                  satOnCheckingUsabilityGoods,
-                  LocalHuman.PlayerHoldShip,
-                  TObject(SelectedGoodsIndex),
-                  TObject(SelectedGoodsQuantity),
-                  0)
-          > 0)) then
-    GetByName('HullA').SetActive(True)
-  else
-    GetByName('HullA')
-        .SetActive(
-            (SelectedHoldKind = phkEquipment)
-                and (SelectedHoldItem.ItemType = t_Hull)
-                and IsHoldNormalShip
-                and (TItem(LocalHuman.PlayerHoldShip.Inventory[0]).NoDropFlag = 0));
+  GetByName('HullA').SetActive(HeldHullHighlight);
   if (SelectedHoldKind = phkArtefact)
       and (SelectedHoldItem is TArtefact)
       and not GetByName('HullA').Active

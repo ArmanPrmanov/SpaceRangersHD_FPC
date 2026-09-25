@@ -76,6 +76,7 @@ const
   ckShowAwards = 250;
   ckExchangeAwards = 251;
   ckChangeAwardVisibleCount = 252;
+  ckCheckHeldUsability = 253;
 const
   // Where a held item is used or installed (UseHeldGoodsOn, UseHeldItemOn,
   // InstallHeldMicroModule, TransferHeldFuel). A and B name the target: an equipment slot's
@@ -115,6 +116,10 @@ var
   SalePlaySound: Boolean;
   // What the last RepairAll repaired, for the screen's animations.
   RepairedItems: TEquipmentArray;
+  // What the last CheckHeldUsability found: whether each equipment slot (by the slot types
+  // passed and slot index), and the hull, are highlighted for the held entry.
+  HeldSlotHighlights: array[0..7] of array of Boolean;
+  HeldHullHighlight: Boolean;
 
 function CanUseLocalStorage: Boolean;
 function GetLocalStorageOwner: TObject;
@@ -195,6 +200,11 @@ function ChooseEquipmentConfiguration(Index: Integer; Apply: Boolean): Boolean;
 procedure SetHoldAfterburner(Active: Boolean);
 // The item scripts that run when the screen shows Item's description.
 procedure RunItemInfoScripts(Item: TItem);
+// Which equipment slots of the edited ship, and whether its hull, take the held entry, as
+// the screen highlights them; SlotTypes are the item types of the screen's eight slot rows.
+// The held entry's and the slot items' usability checks run item scripts, so with anything
+// held this is a command. Results: HeldSlotHighlights, HeldHullHighlight.
+procedure CheckHeldUsability(const SlotTypes: array of Byte; HighlightRepairable: Boolean);
 
 procedure ShowAwards(Ship: TShip);
 procedure ExchangeAwards(Ship: TShip; First: Integer; Second: Integer);
@@ -3386,6 +3396,182 @@ begin
   SubmitCommand(Command);
 end;
 
+// Moved from TfShip2.IsCompatibleSlot.
+function IsCompatibleSlot(ItemType, SlotType: TItemType): Boolean;
+begin
+  Result :=
+      (ItemType = SlotType)
+          or ((ItemType in [t_Weapon1..t_CustomWeapon])
+              and (SlotType in [t_Weapon1..t_CustomWeapon]));
+end;
+
+// Moved from TfShip2.RefreshShipView: the highlight of each equipment slot, then the hull's.
+procedure CheckHeldUsabilityNow(const SlotTypes: array of Byte; HighlightRepairable: Boolean);
+var
+  I, Slot, SlotCount: Integer;
+  Item: TEquipment;
+  Highlight: Boolean;
+begin
+  for I := 0 to 7 do
+  begin
+    SlotCount := LocalHuman.PlayerHoldShip.GetSlotCountForItemType(SlotTypes[I]);
+    SetLength(HeldSlotHighlights[I], SlotCount);
+    for Slot := 0 to SlotCount - 1 do
+    begin
+      Item := LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(SlotTypes[I], Slot);
+      if HighlightRepairable
+          and (Item <> nil)
+          and ((Item.EquippedFlag <> 0) or (Item is THull))
+          and Item.NeedsRepair then
+        Highlight := True
+      else if (LocalHuman.SelectedHoldKind = phkEquipment)
+          and (LocalHuman.SelectedHoldItem.ItemType = t_MicroModule)
+          and (Item <> nil)
+          and (Item.MicroModuleIndex = 0)
+          and (LocalHuman.SelectedHoldItem as TMicroModule).CanInstallOn(Item) then
+        Highlight := True
+      else if (LocalHuman.SelectedHoldKind in [phkEquipment, phkArtefact])
+          and (LocalHuman.SelectedHoldItem is TEquipmentWithActCode)
+          and (Item <> nil)
+          and (RunItemConfigActionCode(
+                  LocalHuman.SelectedHoldItem,
+                  satOnCheckingUsability,
+                  LocalHuman.PlayerHoldShip,
+                  Item,
+                  nil,
+                  0)
+              > 0) then
+        Highlight := True
+      else if (LocalHuman.SelectedHoldKind in [phkEquipment, phkArtefact])
+          and (LocalHuman.SelectedHoldItem.ScriptItem <> nil)
+          and (Item <> nil)
+          and (TScriptItem(LocalHuman.SelectedHoldItem.ScriptItem)
+                  .RunActionCode(satOnCheckingUsability, LocalHuman.PlayerHoldShip, Item, nil, 0)
+              > 0) then
+        Highlight := True
+      else if (LocalHuman.SelectedHoldKind in [phkEquipment, phkArtefact])
+          and (Item <> nil)
+          and (Item is TEquipmentWithActCode)
+          and (RunItemConfigActionCode(
+                  Item,
+                  satOnCheckingUsability2,
+                  LocalHuman.PlayerHoldShip,
+                  LocalHuman.SelectedHoldItem,
+                  nil,
+                  0)
+              > 0) then
+        Highlight := True
+      else if (LocalHuman.SelectedHoldKind in [phkEquipment, phkArtefact])
+          and (Item <> nil)
+          and (Item.ScriptItem <> nil)
+          and (TScriptItem(Item.ScriptItem)
+                  .RunActionCode(satOnCheckingUsability2, LocalHuman.PlayerHoldShip, LocalHuman.SelectedHoldItem, nil, 0)
+              > 0) then
+        Highlight := True
+      else if (LocalHuman.SelectedHoldKind = phkGoods)
+          and (Item <> nil)
+          and (Item.ScriptItem <> nil)
+          and (TScriptItem(Item.ScriptItem)
+                  .RunActionCode(
+                      satOnCheckingUsabilityGoods,
+                      LocalHuman.PlayerHoldShip,
+                      TObject(LocalHuman.SelectedGoodsIndex),
+                      TObject(LocalHuman.SelectedGoodsQuantity),
+                      0)
+              > 0) then
+        Highlight := True
+      else if (LocalHuman.SelectedHoldKind = phkEquipment)
+          and (LocalHuman.SelectedHoldItem.ItemType = t_Cistern)
+          and (Item <> nil)
+          and (Item.ItemType = t_FuelTanks)
+          and ((LocalHuman.SelectedHoldItem as TCistern).Fuel > 0)
+          and ((Item as TFuelTanks).Fuel < (Item as TFuelTanks).Capacity) then
+        Highlight := True
+      else
+        Highlight :=
+            (LocalHuman.SelectedHoldKind = phkEquipment)
+                and IsCompatibleSlot(LocalHuman.SelectedHoldItem.ItemType, TItemType(SlotTypes[I]));
+      HeldSlotHighlights[I][Slot] := Highlight;
+    end;
+  end;
+  if (HighlightRepairable and LocalHuman.PlayerHoldShip.GetHull.NeedsRepair) then
+    HeldHullHighlight := True
+  else if ((LocalHuman.SelectedHoldKind = phkEquipment)
+      and (LocalHuman.SelectedHoldItem.ItemType = t_MicroModule)
+      and (LocalHuman.PlayerHoldShip.GetHull.MicroModuleIndex = 0)
+      and (LocalHuman.SelectedHoldItem as TMicroModule).CanInstallOn(LocalHuman.PlayerHoldShip.GetHull)) then
+    HeldHullHighlight := True
+  else if ((LocalHuman.SelectedHoldKind in [phkEquipment, phkArtefact])
+      and (LocalHuman.SelectedHoldItem is TEquipmentWithActCode)
+      and (RunItemConfigActionCode(
+              LocalHuman.SelectedHoldItem,
+              satOnCheckingUsability,
+              LocalHuman.PlayerHoldShip,
+              LocalHuman.PlayerHoldShip.GetHull,
+              nil,
+              0)
+          > 0)) then
+    HeldHullHighlight := True
+  else if ((LocalHuman.SelectedHoldKind in [phkEquipment, phkArtefact])
+      and (LocalHuman.SelectedHoldItem.ScriptItem <> nil)
+      and (TScriptItem(LocalHuman.SelectedHoldItem.ScriptItem)
+              .RunActionCode(satOnCheckingUsability, LocalHuman.PlayerHoldShip, LocalHuman.PlayerHoldShip.GetHull, nil, 0)
+          > 0)) then
+    HeldHullHighlight := True
+  else if ((LocalHuman.SelectedHoldKind in [phkEquipment, phkArtefact])
+      and (LocalHuman.PlayerHoldShip.GetHull.ScriptItem <> nil)
+      and (TScriptItem(LocalHuman.PlayerHoldShip.GetHull.ScriptItem)
+              .RunActionCode(satOnCheckingUsability2, LocalHuman.PlayerHoldShip, LocalHuman.SelectedHoldItem, nil, 0)
+          > 0)) then
+    HeldHullHighlight := True
+  else if ((LocalHuman.SelectedHoldKind = phkGoods)
+      and (LocalHuman.PlayerHoldShip.GetHull.ScriptItem <> nil)
+      and (TScriptItem(LocalHuman.PlayerHoldShip.GetHull.ScriptItem)
+              .RunActionCode(
+                  satOnCheckingUsabilityGoods,
+                  LocalHuman.PlayerHoldShip,
+                  TObject(LocalHuman.SelectedGoodsIndex),
+                  TObject(LocalHuman.SelectedGoodsQuantity),
+                  0)
+          > 0)) then
+    HeldHullHighlight := True
+  else
+    HeldHullHighlight :=
+        (LocalHuman.SelectedHoldKind = phkEquipment)
+            and (LocalHuman.SelectedHoldItem.ItemType = t_Hull)
+            and (LocalHuman.PlayerHoldShip is TNormalShip)
+            and (TItem(LocalHuman.PlayerHoldShip.Inventory[0]).NoDropFlag = 0);
+end;
+
+// Ints: the flag to highlight repairable equipment, then the eight slot types.
+procedure ExecuteCheckHeldUsability(const Command: TPlayerCommand);
+var
+  SlotTypes: array[0..7] of Byte;
+  I: Integer;
+begin
+  for I := 0 to 7 do
+    SlotTypes[I] := Byte(IntArg(Command, 1 + I));
+  CheckHeldUsabilityNow(SlotTypes, IntArg(Command, 0) <> 0);
+end;
+
+procedure CheckHeldUsability(const SlotTypes: array of Byte; HighlightRepairable: Boolean);
+var
+  Command: TPlayerCommand;
+  I: Integer;
+begin
+  // With nothing held no script runs, and nothing changes.
+  if not (LocalHuman.SelectedHoldKind in [phkEquipment, phkArtefact, phkGoods]) then
+  begin
+    CheckHeldUsabilityNow(SlotTypes, HighlightRepairable);
+    Exit;
+  end;
+  Command := NewCommand(ckCheckHeldUsability);
+  AddInt(Command, Ord(HighlightRepairable));
+  for I := 0 to 7 do
+    AddInt(Command, SlotTypes[I]);
+  SubmitCommand(Command);
+end;
+
 // Moved from TfRewards.OnOpen.
 procedure ExecuteShowAwards(const Command: TPlayerCommand);
 var
@@ -3504,4 +3690,5 @@ initialization
   RegisterCommand(ckShowAwards, 'ShowAwards', @ExecuteShowAwards);
   RegisterCommand(ckExchangeAwards, 'ExchangeAwards', @ExecuteExchangeAwards);
   RegisterCommand(ckChangeAwardVisibleCount, 'ChangeAwardVisibleCount', @ExecuteChangeAwardVisibleCount);
+  RegisterCommand(ckCheckHeldUsability, 'CheckHeldUsability', @ExecuteCheckHeldUsability);
 end.
