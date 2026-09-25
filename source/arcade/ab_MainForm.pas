@@ -29,6 +29,7 @@ uses
   fLoad,
   fPanelLoad,
   aPath,
+  aArcadeActions,
   ab_Item,
   ab_Zone;
 type
@@ -167,7 +168,7 @@ type
     procedure UpdateAutopilotButtons;
     procedure ToggleAutopilot(Sender: TObjectGI);
     procedure TogglePause(Sender: TObjectGI);
-    procedure ReportSurvivingShips;
+    function CollectSurvivingShips: TArcadeSurvivors;
     procedure ClearBattle;
     procedure ClearMap;
     procedure LoadMap(Buffer: TBufEC; LoadPolygons: Boolean);
@@ -223,6 +224,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aPlayerActions,
+  aPlanetActions,
   aSession,
   aHold,
   aHuman,
@@ -559,7 +561,7 @@ begin
           GetPlayer.Graphic.GraphKey,
           Round((GetPlayer.Graphic.Size.X shl 10) / 800)
       );
-    GetPlayer.ScriptItemsAct($37, Ship, nil, 0);
+    RunScriptItemsAct(GetPlayer, $37, Ship, nil, 0);
   end;
   Ship.MaxSpeed := 11;
   Ship.TurnSpeed := PlayerInitialTurnSpeed;
@@ -718,7 +720,7 @@ begin
     aCalc.WaitForTurnCalculationUI;
   if GetPlayer <> nil then
   begin
-    RunGlobalScriptsForContext(GetPlayer.CurrentStar, 2);
+    RunGlobalScripts(GetPlayer.CurrentStar, 2);
     CacheLoader := TCacheLoader.Create;
   end;
   if Galaxy <> nil then
@@ -1778,11 +1780,10 @@ begin
       if Galaxy <> nil then
         aCalc.WaitForTurnCalculationUI;
       if GetPlayer <> nil then
-        with GetPlayer.FindEquippedItemInSlot(
-                Ord(t_Weapon1),
-                PlayerArcadeShip.Weapons[Index].SlotData and EquipmentSlotIndexMask)
-            as TWeapon do
-          AssignedSlotData := PlayerArcadeShip.Weapons[Index].SlotData;
+        SetArcadeWeaponSlotData(
+            PlayerArcadeShip.Weapons[Index].SlotData and EquipmentSlotIndexMask,
+            PlayerArcadeShip.Weapons[Index].SlotData
+        );
       NormalizeWeaponSelection;
       UpdateWeaponPanel;
       if Galaxy <> nil then
@@ -1854,35 +1855,34 @@ begin
   BreakUiMessage;
 end;
 
-procedure TfAB.ReportSurvivingShips;
+// The labelled ships alive at the end, in the order the battle reports them to the script
+// (ExitArcadeBattle).
+function TfAB.CollectSurvivingShips: TArcadeSurvivors;
 var
   Index: Integer;
   Ship: TabShip;
-  Event: TGalaxyEvent;
+  procedure AddSurvivor;
+  begin
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)].ScriptLabel := Ship.ScriptLabel;
+    Result[High(Result)].Health := Ship.Health;
+    Result[High(Result)].MaxHealth := Ship.MaxHealth;
+  end;
 begin
+  Result := nil;
   if (PlayerArcadeShip <> nil) and (PlayerArcadeShip.Health > 0) then
   begin
     for Index := 0 to PlayerArcadeShip.TrackedShips.Count - 1 do
     begin
       Ship := PlayerArcadeShip.TrackedShips[Index];
       if (Ship <> nil) and (Ship.ScriptLabel <> '') and (Ship.Health > 0) then
-      begin
-        Event := AddGalaxyEvent('LabeledShipSurvivedInAB');
-        Event.AddTextData(Ship.ScriptLabel);
-        Event.AddData(Ship.Health);
-        Event.AddData(Ship.MaxHealth);
-      end;
+        AddSurvivor;
     end;
     for Index := 0 to PlayerArcadeShip.InitialEnemies.Count - 1 do
     begin
       Ship := PlayerArcadeShip.InitialEnemies[Index];
       if (Ship <> nil) and (Ship.ScriptLabel <> '') and (Ship.Health > 0) then
-      begin
-        Event := AddGalaxyEvent('LabeledShipSurvivedInAB');
-        Event.AddTextData(Ship.ScriptLabel);
-        Event.AddData(Ship.Health);
-        Event.AddData(Ship.MaxHealth);
-      end;
+        AddSurvivor;
     end;
   end;
 end;
@@ -2950,18 +2950,12 @@ begin
       if DefeatCountdownTicks <= 0 then
       begin
         ScoreScreen.RecordPlayerResult(False);
-        GetPlayer.Free;
-        Session.GameEndReason := 3;
+        // The ranger's death, then the Keller encounter's reward.
+        ApplyArcadeDefeat;
         RequestedScreenId := screenGameEnd;
         ClearPendingScriptRequests;
         ActiveArcadeRequest := nil;
         ActiveArcadeRequestShips := nil;
-        ArcadeKellerDefeats := 0;
-        if ArcadeKellerReward <> nil then
-        begin
-          ArcadeKellerReward.Free;
-          ArcadeKellerReward := nil;
-        end;
         if UpdateTimer <> nil then
         begin
           CancelCallbackTimer(UpdateTimer);
@@ -3397,26 +3391,8 @@ begin
         if (KellerShip = nil) or (KellerShip.ScriptShip = nil) then
           RaiseWideMessage('Not found script');
         aCalc.WaitForTurnCalculationUI;
-        if ArcadeKellerReward <> nil then
-        begin
-          ClearPlayerHoldEntries;
-          if ArcadeKellerReward is TArtefact then
-            GetPlayer.Artefacts.Insert(0, ArcadeKellerReward)
-          else
-            GetPlayer.Inventory.Add(ArcadeKellerReward);
-          ArcadeKellerReward := nil;
-        end;
         Stage := 29;
-        Session.ScriptDialogIndex := -1;
-        TScriptShip(KellerShip.ScriptShip)
-            .Script
-            .PublishShipContext(KellerShip.ScriptShip as TScriptShip);
-        CurrentScript.CallDialogByVariable(TScriptShip(KellerShip.ScriptShip).State.AuxiliaryText);
-        if Session.ScriptDialogIndex < 0 then
-          RaiseWideMessage('Not found dialog');
-        LocalHuman.TalkShip := KellerShip;
-        LocalHuman.TalkPlanet := nil;
-        LocalHuman.TalkScripted := True;
+        BeginArcadeKellerTalk;
         SetCursorActive(False);
         Present;
         CaptureScreenBackground(True, 0);
@@ -4599,34 +4575,32 @@ begin
 end;
 
 procedure TfAB.BeginBattleExit;
+var
+  HullPoints: Integer;
+  ScriptedBattle: Boolean;
+  Survivors: TArcadeSurvivors;
 begin
   LocalHuman.StarMapWeaponPanelOpen := False;
   if Galaxy <> nil then
   begin
     aCalc.WaitForTurnCalculationUI;
     aCalc.WaitForTurnCalculationUI;
+    HullPoints := 0;
     if GetPlayer <> nil then
+      HullPoints := PlayerArcadeShip.Health;
+    ScriptedBattle := ActiveArcadeRequest <> nil;
+    Survivors := nil;
+    if ScriptedBattle then
     begin
-      GetPlayer.GetHull.HullPoints := PlayerArcadeShip.Health;
-      if not (GetPlayer.Order in [soJump, soJumpHole]) then
-        GetPlayer.InHyperspace := False;
-    end;
-    if ActiveArcadeRequest <> nil then
-    begin
-      ReportSurvivingShips;
+      Survivors := CollectSurvivingShips;
       ActiveArcadeRequest := nil;
       ActiveArcadeRequestShips := nil;
-      CompleteQueuedArcadeBattle(2);
-      RequestedScreenId := TGameScreenId(ScriptArcadeReturnScreenId);
-    end
+    end;
+    ExitArcadeBattle(HullPoints, ScriptedBattle, Survivors);
+    if ScriptedBattle then
+      RequestedScreenId := TGameScreenId(ScriptArcadeReturnScreenId)
     else
       RequestedScreenId := screenStarMap;
-    ArcadeKellerDefeats := 0;
-    if ArcadeKellerReward <> nil then
-    begin
-      ArcadeKellerReward.Free;
-      ArcadeKellerReward := nil;
-    end;
     aCalc.WaitForTurnCalculationUI;
   end;
   ClearWeaponPanel;
@@ -5122,7 +5096,7 @@ begin
     TurnRightKeyDown := False;
     PrimaryFireKeyDown := False;
     SecondaryFireKeyDown := False;
-    GetPlayer.GetHull.HullPoints := PlayerArcadeShip.Health;
+    SetArcadeHull(PlayerArcadeShip.Health);
     SetCursorActive(False);
     Present;
     CaptureScreenBackground(True, 0);
@@ -5380,7 +5354,7 @@ begin
   if (GetPlayer <> nil) and (PlayerArcadeShip <> nil) and not PlayerArcadeShip.HasFiredWeapon then
   begin
     aCalc.WaitForTurnCalculationUI;
-    GetPlayer.AchievementStats.CheckNoShotsArcadeVictoryAchievement;
+    CheckNoShotsArcadeVictory;
     aCalc.WaitForTurnCalculationUI;
   end;
 end;

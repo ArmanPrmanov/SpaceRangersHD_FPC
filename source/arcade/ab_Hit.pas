@@ -43,6 +43,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aCalc,
+  aArcadeActions,
   Types,
   aKling,
   Math,
@@ -298,9 +299,7 @@ begin
       end;
       DeletionPending := True;
       aCalc.WaitForTurnCalculationUI;
-      Inc(GetPlayer.DominatorKillsByType[0]);
-      KellerShip.ScriptItemsAct(61, nil, nil, 0);
-      KellerShip.Free;
+      DestroyKellerInArcade;
       aCalc.WaitForTurnCalculationUI;
     end
     else
