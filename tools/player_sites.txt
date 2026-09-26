@@ -35,9 +35,9 @@ game/aShopStock.pas	simulation	0	3	0	0	0
 game/aStationActions.pas	simulation	4	1	56	0	0
 game/aTalkActions.pas	simulation	7	187	39	0	0
 game/aTranclucator.pas	simulation	15	0	0	0	0
-game/aTransport.pas	simulation	43	0	0	0	0
+game/aTransport.pas	simulation	4	0	0	0	18
 game/aUiScriptActions.pas	simulation	2	0	2	0	0
-game/aWarrior.pas	simulation	32	0	0	0	0
+game/aWarrior.pas	simulation	4	0	0	0	8
 game/ThreadCalc.pas	simulation	0	4	0	2	0
 GameBootstrap.pas	presentation	0	1	0	0	0
 Globals.pas	presentation	0	20	0	0	0
@@ -84,5 +84,5 @@ screens/fTalk.pas	presentation	0	722	0	0	0
 screens/SimEventHandlers.pas	presentation	0	1	0	0	0
 script/aScript.pas	simulation	18	0	0	0	0
 script/aScriptFun.pas	simulation	326	62	0	0	3
-total	simulation	812	1453	219	173	342
+total	simulation	745	1453	219	173	368
 total	presentation	0	4416	0	4	1

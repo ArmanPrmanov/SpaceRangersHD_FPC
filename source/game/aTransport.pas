@@ -113,6 +113,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   EC_Struct,
+  aHuman,
   aPlayer,
   aGalaxyEvent,
   aMissile,
@@ -230,6 +231,7 @@ begin
     CargoGoods[Good].Count := 0;
     CargoGoods[Good].TotalCost := 0;
   end;
+  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
   if GetPlayer <> nil then
   begin
     Rank := NextRandomIntRange(0, GetPlayer.Rank, RandomState);
@@ -714,6 +716,7 @@ procedure TTransport.ProcessUnseenProgression;
 var
   Award: Byte;
 begin
+  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
   if (DaysSincePlayerSeen >= 60) and (GetPlayer <> nil) then
   begin
     if NextRandomUnitFloat(RandomState) < 0.06 then
@@ -859,7 +862,7 @@ begin
   Result :=
       (GetHull.HullPoints < GetHull.Weight * 0.2)
           or ((EnemyShip <> nil)
-              and ((EnemyShip.OrderTarget = Self) or (GetPlayer = EnemyShip))
+              and ((EnemyShip.OrderTarget = Self) or IsHuman(EnemyShip))
               and AcceptsRansomDemandFrom(EnemyShip));
   if not Result then
   begin
@@ -927,7 +930,7 @@ begin
         Round(Max(100, RemapClamped(GetHull.HullPoints, 0, GetHull.Weight, HighOffer, LowOffer)));
     Ship := EnemyShip;
     Accepted := Ship.BuildTrucePaymentResponse(Self, Response, Amount);
-    if (GetPlayer <> Ship) and (GetPlayer.CurrentStar = CurrentStar) then
+    if StarHasHuman(CurrentStar, Ship) then
       NotifyTruceOffer(Ship, Response, Amount);
     if Accepted and RecomputeFearState then
       TryOfferRansomToPursuer;
@@ -938,7 +941,7 @@ function TTransport.AcceptsRansomDemandFrom(Ship: TShip): Boolean;
 var
   LicenseFactor, AbductionFactor: Single;
 begin
-  if (GetPlayer = Ship) and (GetPlayer.PirateLicenseTicks > 0) then
+  if IsHuman(Ship) and (TPlayer(Ship).PirateLicenseTicks > 0) then
     LicenseFactor := 1.2
   else
     LicenseFactor := 1;
@@ -1037,7 +1040,7 @@ begin
           end;
       end;
   end;
-  if GetPlayer.CurrentStar = CurrentStar then
+  if StarHasHuman(CurrentStar) then
     for I := 0 to CurrentStar.Asteroids.Count - 1 do
     begin
       Asteroid := CurrentStar.Asteroids[I];
@@ -1067,12 +1070,7 @@ begin
           and ((Item.ItemType = t_Minerals)
               or (2 * Galaxy.GetAIJunkToleranceLevel <= CurrentStar.Items.Count))
           and ((Item.ItemType = t_Minerals) or (Item.OwnerId = Byte(oiDominator))) then
-        if (GetPlayer.CurrentStar <> CurrentStar)
-            or not GetPlayer.InNormalSpace
-            or (GetRelationLevelToShip(GetPlayer) <= rlBad)
-            or (PointDistance(GetPlayer.Position, Item.Position) >= 800)
-            or ((NextRandomUnitFloat(RandomState) <= 0.1)
-                and (PointDistance(GetPlayer.Position, Item.Position) >= 200)) then
+        if not IsItemKeptForHuman(Item, True, 800, 0.1) then
           if CanSafelyDetonateItem(Item) and not IsRecentlyDroppedItem(Item) then
             for J := 1 to WeaponCount do
             begin
@@ -1090,24 +1088,7 @@ begin
                 end;
             end;
     end;
-  if GetPlayer <> nil then
-    if GetPlayer.CurrentStar = CurrentStar then
-      if GetPlayer.InNormalSpace and IsPlayerChameleonEffectiveAgainstSelf then
-        for J := 1 to WeaponCount do
-        begin
-          Weapon := Weapons[J];
-          if (not (Weapon.GetWeaponInfo^.ShotType in [wstTorpedo..wstRocket]) or (Weapon.Ammo <> 0))
-              and (Weapon.Target = nil)
-              and IsEquipmentUsable(Weapon) then
-            if PointDistanceSquared(Position, GetPlayer.Position)
-                <= Sqr(GetWeaponRange(Weapon)) then
-            begin
-              Weapon.Target := GetPlayer;
-              Inc(Assigned);
-              if Assigned = WeaponCount then
-                Exit;
-            end;
-        end;
+  AimFreeWeaponsAtFooledHumans(Assigned);
 end;
 
 procedure TTransport.SelectEnemyShipInStar;
@@ -1158,7 +1139,7 @@ end;
 
 procedure TTransport.ReactToExtortionDemand(Ranger: Pointer);
 begin
-  if (GetPlayer = Ranger) or (NextRandomUnitFloat(RandomState) < 0.05) then
+  if IsHuman(TObject(Ranger)) or (NextRandomUnitFloat(RandomState) < 0.05) then
   begin
     ChangeRelationToRanger(Ranger, -15);
     HomePlanet.ChangeRelationToRanger(Ranger, -2);
@@ -1179,7 +1160,7 @@ var
     Event: TGalaxyEvent;
   begin
     AbductedByPirateClan := False;
-    if GetPlayer = OtherShip then
+    if IsHuman(OtherShip) then
     begin
       LastPlayerExtortionTurn := Galaxy.CurrentTurn;
       Event := AddGalaxyEvent('PlayerExtortsMoney');
@@ -1190,15 +1171,15 @@ var
       Event.AddData(OwnerId);
       Event.AddTextData(GetName);
       Event.AddTextData(TypeNameOverrideKey);
-      if GetPlayer.PirateLicenseTicks > 0 then
+      if TPlayer(OtherShip).PirateLicenseTicks > 0 then
       begin
-        GetPlayer.SetMoney(GetPlayer.Money + Round(DemandedAmount * 0.9));
-        Inc(GetPlayer.PendingPirateLicenseCash, Round(DemandedAmount * 0.1));
-        if GetPlayer.PendingPirateLicenseCash > 100000000 then
-          GetPlayer.PendingPirateLicenseCash := 100000000;
+        OtherShip.SetMoney(OtherShip.Money + Round(DemandedAmount * 0.9));
+        Inc(TPlayer(OtherShip).PendingPirateLicenseCash, Round(DemandedAmount * 0.1));
+        if TPlayer(OtherShip).PendingPirateLicenseCash > 100000000 then
+          TPlayer(OtherShip).PendingPirateLicenseCash := 100000000;
       end
       else
-        GetPlayer.SetMoney(GetPlayer.Money + DemandedAmount);
+        OtherShip.SetMoney(OtherShip.Money + DemandedAmount);
     end
     else
       OtherShip.SetMoney(OtherShip.Money + DemandedAmount);
@@ -1211,20 +1192,20 @@ var
   end;
 begin
   Result := False;
-  if (GetPlayer = OtherShip) and (GetPlayer.PirateLicenseTicks > 0) then
+  if IsHuman(OtherShip) and (TPlayer(OtherShip).PirateLicenseTicks > 0) then
     LicenseFactor := 0.8
   else
     LicenseFactor := 1;
   NextDemandTurn := LastPlayerExtortionTurn + 30;
   if OtherShip is TRanger then
     ReactToExtortionDemand(OtherShip);
-  if (GetPlayer <> OtherShip) and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
+  if not IsHuman(OtherShip) and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
     EnemyShip := OtherShip;
   if OtherShip.TruceShip = Self then
     Response := LookupVisibleTalkText('Talk.Money.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and PlayerExtortionPactActive then
+  else if IsHuman(OtherShip) and PlayerExtortionPactActive then
     Response := LookupVisibleTalkText('Talk.Money.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
+  else if IsHuman(OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
     Response := LookupVisibleTalkText('Talk.Money.WeAlreadyHavePact', OtherShip)
   else if not AcceptsRansomDemandFrom(OtherShip) then
     Response := LookupVisibleTalkText('Talk.Money.' + GetTypeNameKey + 'No', OtherShip)
@@ -1294,7 +1275,7 @@ var
         Break;
     end;
     OtherShip.TruceWithShip(Self);
-    if GetPlayer = OtherShip then
+    if IsHuman(OtherShip) then
     begin
       LastPlayerExtortionTurn := Galaxy.CurrentTurn;
       Event := AddGalaxyEvent('PlayerExtortsGoods');
@@ -1314,17 +1295,17 @@ var
   end;
 begin
   Result := False;
-  Forced := (GetPlayer = OtherShip) and OtherShip.IsHealthEffectActive(14);
+  Forced := IsHuman(OtherShip) and OtherShip.IsHealthEffectActive(14);
   NextDemandTurn := LastPlayerExtortionTurn + 30;
   if OtherShip is TRanger then
     ReactToExtortionDemand(OtherShip);
-  if (GetPlayer <> OtherShip) and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
+  if not IsHuman(OtherShip) and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
     EnemyShip := OtherShip;
   if OtherShip.TruceShip = Self then
     Response := LookupVisibleTalkText('Talk.Goods.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and PlayerExtortionPactActive then
+  else if IsHuman(OtherShip) and PlayerExtortionPactActive then
     Response := LookupVisibleTalkText('Talk.Goods.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
+  else if IsHuman(OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
     Response := LookupVisibleTalkText('Talk.Goods.WeAlreadyHavePact', OtherShip)
   else if not AcceptsRansomDemandFrom(OtherShip) and not Forced then
     Response := LookupVisibleTalkText('Talk.Goods.' + GetTypeNameKey + 'No', OtherShip)
@@ -1336,7 +1317,7 @@ begin
   begin
     Response := LookupVisibleTalkText('Talk.Goods.' + GetTypeNameKey + 'Ok', OtherShip);
     DropDemand;
-    if GetPlayer = OtherShip then
+    if IsHuman(OtherShip) then
       PlayerExtortionPactActive := True;
     Result := True;
   end;
@@ -1362,9 +1343,9 @@ begin
     (OtherShip as TRanger).AddTraderCareerActivity(1);
   if OtherShip.TruceShip = Self then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and PlayerExtortionPactActive then
+  else if IsHuman(OtherShip) and PlayerExtortionPactActive then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
+  else if IsHuman(OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
   else if RecomputeFearState
       or ((ChanceToWin(OtherShip) < 1) and (GetHullIntegrityPercent < 40))

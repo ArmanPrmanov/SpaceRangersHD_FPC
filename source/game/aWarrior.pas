@@ -222,6 +222,7 @@ begin
             + IntToStr(Cardinal(Id) mod 100 + 1)
             + '-';
   end;
+  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
   if GetPlayer <> nil then
   begin
     Rank := NextRandomIntRange(0, Min(5, GetPlayer.Rank + 2), RandomState);
@@ -619,7 +620,7 @@ var
           Inc(GetHull.HullPoints, Restored);
           AddCombatStatusStrength(cseBWRepairDebuff, Restored / 2, nil);
           RefreshDerivedStats(True);
-          if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
+          if StarHasHumanInSpace(CurrentStar) then
           begin
             Effect := TWeaponSE.Create('Weapon.NoGraph', Classes.Point(0, 0), 0, -1);
             Effect.SetEndpoints(nil, Graphic);
@@ -1034,6 +1035,7 @@ procedure TWarrior.ProcessUnseenProgression;
 var
   Award: Byte;
 begin
+  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
   if (DaysSincePlayerSeen >= 60) and (GetPlayer <> nil) then
   begin
     if NextRandomUnitFloat(RandomState) < 0.05 then
@@ -1325,7 +1327,7 @@ begin
           end;
       end;
       Stage := 5;
-      if GetPlayer.CurrentStar = CurrentStar then
+      if StarHasHuman(CurrentStar) then
         for I := 0 to CurrentStar.Asteroids.Count - 1 do
         begin
           Asteroid := CurrentStar.Asteroids[I];
@@ -1354,11 +1356,7 @@ begin
           Item := CurrentStar.Items[I];
           if ((Item.ItemType = t_Minerals) or (Item.OwnerId = Byte(oiDominator)))
               and ((Item.ScriptItem = nil) or (TScriptItem(Item.ScriptItem).Name = '')) then
-            if (GetPlayer.CurrentStar <> CurrentStar)
-                or (GetRelationLevelToShip(GetPlayer) <= rlBad)
-                or (PointDistance(GetPlayer.Position, Item.Position) >= 800)
-                or ((NextRandomUnitFloat(RandomState) <= 0.1)
-                    and (PointDistance(GetPlayer.Position, Item.Position) >= 200)) then
+            if not IsItemKeptForHuman(Item, False, 800, 0.1) then
               if CanSafelyDetonateItem(Item) then
                 for J := 1 to WeaponCount do
                 begin
@@ -1378,25 +1376,7 @@ begin
                 end;
         end;
       Stage := 7;
-      if (GetPlayer <> nil)
-          and (GetPlayer.CurrentStar = CurrentStar)
-          and GetPlayer.InNormalSpace
-          and IsPlayerChameleonEffectiveAgainstSelf then
-        for J := 1 to WeaponCount do
-        begin
-          Weapon := Weapons[J];
-          if (not (Weapon.GetWeaponInfo.ShotType in [wstTorpedo..wstRocket]) or (Weapon.Ammo <> 0))
-              and (Weapon.Target = nil)
-              and IsEquipmentUsable(Weapon) then
-            if PointDistanceSquared(Position, GetPlayer.Position)
-                <= Sqr(GetWeaponRange(Weapon)) then
-            begin
-              Weapon.Target := GetPlayer;
-              Inc(Assigned);
-              if Assigned = WeaponCount then
-                Exit;
-            end;
-        end;
+      AimFreeWeaponsAtFooledHumans(Assigned);
     except
       on E: Exception do
       begin
@@ -1519,7 +1499,7 @@ begin
         end;
     end;
     Stage := 5;
-    if GetPlayer.CurrentStar = CurrentStar then
+    if StarHasHuman(CurrentStar) then
       for I := 0 to CurrentStar.Asteroids.Count - 1 do
       begin
         Asteroid := CurrentStar.Asteroids[I];
@@ -1549,11 +1529,7 @@ begin
         if ((Item.ItemType = t_Minerals) or (Item.OwnerId = Byte(oiDominator)))
             and ((Item.ScriptItem = nil) or (TScriptItem(Item.ScriptItem).Name = ''))
             and not AcceptPickupItem(Item) then
-          if (GetPlayer.CurrentStar <> CurrentStar)
-              or (GetRelationLevelToShip(GetPlayer) <= rlBad)
-              or (PointDistance(GetPlayer.Position, Item.Position) >= 800)
-              or ((NextRandomUnitFloat(RandomState) <= 0.1)
-                  and (PointDistance(GetPlayer.Position, Item.Position) >= 200)) then
+          if not IsItemKeptForHuman(Item, False, 800, 0.1) then
             if CanSafelyDetonateItem(Item) then
               for J := 1 to WeaponCount do
               begin
@@ -1573,24 +1549,7 @@ begin
               end;
       end;
     Stage := 7;
-    if (GetPlayer <> nil)
-        and (GetPlayer.CurrentStar = CurrentStar)
-        and GetPlayer.InNormalSpace
-        and IsPlayerChameleonEffectiveAgainstSelf then
-      for J := 1 to WeaponCount do
-      begin
-        Weapon := Weapons[J];
-        if (not (Weapon.GetWeaponInfo.ShotType in [wstTorpedo..wstRocket]) or (Weapon.Ammo <> 0))
-            and (Weapon.Target = nil)
-            and IsEquipmentUsable(Weapon) then
-          if PointDistanceSquared(Position, GetPlayer.Position) <= Sqr(GetWeaponRange(Weapon)) then
-          begin
-            Weapon.Target := GetPlayer;
-            Inc(Assigned);
-            if Assigned = WeaponCount then
-              Exit;
-          end;
-      end;
+    AimFreeWeaponsAtFooledHumans(Assigned);
   except
     on E: Exception do
     begin
@@ -1721,7 +1680,7 @@ begin
               Exit;
           end
           else if (LiberationGroup = nil)
-              or ((GetPlayer = Ship) and (Ship.CurrentStanding = ssPirateActive)) then
+              or (IsHuman(Ship) and (Ship.CurrentStanding = ssPirateActive)) then
           begin
             Chance := ChanceToWin(Ship);
             TravelTime := PointDistance(Position, Ship.Position) / (Speed + 1) + 0.1;
@@ -2273,7 +2232,7 @@ end;
 
 procedure TWarrior.ReactToExtortionDemand(Ranger: Pointer);
 begin
-  if (GetPlayer = Ranger) or (NextRandomUnitFloat(RandomState) < 0.05) then
+  if IsHuman(TObject(Ranger)) or (NextRandomUnitFloat(RandomState) < 0.05) then
   begin
     HomePlanet.ChangeRelationToRanger(Ranger, -5);
     (TObject(Ranger) as TRanger).AddPirateCareerActivity(4);
@@ -2289,7 +2248,7 @@ begin
   Result := False;
   if OtherShip is TRanger then
     ReactToExtortionDemand(OtherShip);
-  if (GetPlayer <> OtherShip) and ((EnemyShip = nil) or (EnemyShip.CurrentStar <> CurrentStar)) then
+  if not IsHuman(OtherShip) and ((EnemyShip = nil) or (EnemyShip.CurrentStar <> CurrentStar)) then
     EnemyShip := OtherShip;
   Response := LookupVisibleTalkText('Talk.Money.' + GetTypeNameKey + 'No', OtherShip);
 end;
@@ -2299,7 +2258,7 @@ begin
   Result := False;
   if OtherShip is TRanger then
     ReactToExtortionDemand(OtherShip);
-  if (GetPlayer <> OtherShip) and ((EnemyShip = nil) or (EnemyShip.CurrentStar <> CurrentStar)) then
+  if not IsHuman(OtherShip) and ((EnemyShip = nil) or (EnemyShip.CurrentStar <> CurrentStar)) then
     EnemyShip := OtherShip;
   Response := LookupVisibleTalkText('Talk.Goods.' + GetTypeNameKey + 'No', OtherShip);
 end;
@@ -2365,9 +2324,9 @@ begin
   end
   else if OtherShip.TruceShip = Self then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and PlayerExtortionPactActive then
+  else if IsHuman(OtherShip) and PlayerExtortionPactActive then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
+  else if IsHuman(OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
   else if (OtherShip is TNormalShip)
       and (OtherShip.OwnerId = Byte(oiPirate))
