@@ -25,6 +25,9 @@ type
     SessionProbe: Boolean;
     // Print the per-human state at the end (DescribeHumans).
     HumansDump: Boolean;
+    // Destroy the local human's ranger and the last human's before this turn and report how
+    // they respawn (KillHumans; 0: never).
+    KillHumansAt: Integer;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 implementation
@@ -41,6 +44,8 @@ uses
   aGalaxyStruct,
   aHold,
   aHuman,
+  aCommands,
+  aItem,
   aPlanet,
   aPlayer,
   aPlayerActions,
@@ -348,6 +353,7 @@ begin
     for J := 0 to High(Human.UsedCheats) do
       Part := Part + UTF8Encode(Human.UsedCheats[J]) + ',';
     Line := Line + ' cheats=' + Part;
+    Line := Line + Format(' finished=%d:%d', [Ord(Human.Finished), Human.FinishReason]);
     Lines.Add(Line);
   end;
   for I := 0 to Galaxy.Scripts.Count - 1 do
@@ -371,13 +377,16 @@ end;
 // Gives the session, the humans, the scripts and an event state that a load without the
 // per-human save block would lose: the flags, set by command, a cheat for every human, the
 // other humans' THuman state with a shop for those who are landed, scripts bound to every
-// human in turn, and the last event bound to the last human.
+// human in turn, and the last event bound to the last human. With more than one human, the
+// last one's game ends, as a script's EndGame ends it, and a command it issues must be
+// refused.
 procedure ProbeSession;
 var
   I: Integer;
   Human: THuman;
   OldQuest: PPlayerOldQuest;
   Entry: TPlayerHoldUnit;
+  Command: TPlayerCommand;
 begin
   SetSessionFlagValue(SessionFlagTextQuestsDisabled, True);
   SetSessionFlagValue(SessionFlagFriendlyFire, False);
@@ -417,6 +426,20 @@ begin
   if Galaxy.GalaxyEvents.Count > 0 then
     TGalaxyEvent(Galaxy.GalaxyEvents.Last).HumanId :=
         Session.Humans[Session.Humans.Count - 1].Id;
+  if Session.Humans.Count > 1 then
+  begin
+    Human := Session.Humans[Session.Humans.Count - 1];
+    FinishHuman(Human, 7);
+    Command := NewCommand(ckSetSessionFlag);
+    Command.Actor := Cardinal(Human.Id);
+    AddInt(Command, SessionFlagTextQuestsDisabled);
+    AddInt(Command, 0);
+    SubmitCommand(Command);
+    if Session.TextQuestsDisabled then
+      Emit(Format('probe finished human=%d command=refused', [Human.Id]))
+    else
+      Emit(Format('probe finished human=%d command=applied', [Human.Id]));
+  end;
 end;
 
 // Save, load that save, and compare the state before and after in hashable
@@ -531,6 +554,90 @@ begin
   Emit(Format('reloaded day=%d', [Galaxy.CurrentTurn]));
 end;
 
+// What a human keeps through death and respawn: its money, and its items by count and ids.
+function HumanBelongings(Player: TPlayer): AnsiString;
+var
+  I: Integer;
+  Ids: Int64;
+begin
+  Ids := 0;
+  for I := 0 to Player.Inventory.Count - 1 do
+    Inc(Ids, TItem(Player.Inventory[I]).Id);
+  for I := 0 to Player.Artefacts.Count - 1 do
+    Inc(Ids, TItem(Player.Artefacts[I]).Id);
+  Result := Format(
+      'money=%d items=%d:%d cargo-free=%d',
+      [Player.Money, Player.Inventory.Count + Player.Artefacts.Count, Ids,
+          Player.GetCargoFreeSpace]
+  );
+end;
+
+// Destroys the local human's ranger and the last human's, as damage does (ROADMAP.md,
+// Phase 4, item 9). The day that follows respawns them in multiplayer. The planets of the
+// last human's star turn hostile to it first, so that it respawns in another star.
+procedure KillHumans(Killed: TList);
+var
+  I, J: Integer;
+  Human: THuman;
+  Star: TStar;
+begin
+  Killed.Clear;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if (Human <> LocalHuman) and (I <> Session.Humans.Count - 1) then
+      Continue;
+    Killed.Add(Pointer(PtrInt(Human.Id)));
+    Emit(
+        Format(
+            'kill human id=%d local=%d star=%d %s',
+            [Human.Id, Ord(Human = LocalHuman), Human.Player.CurrentStar.Id,
+                HumanBelongings(Human.Player)]
+        )
+    );
+    if (Human <> LocalHuman) and (Human.Player.CurrentPlanet <> nil) then
+    begin
+      Star := Human.Player.CurrentStar;
+      for J := 0 to Star.Planets.Count - 1 do
+        TPlanet(Star.Planets[J]).SetRelationLevelToRanger(Human.Player, rlHostile);
+    end;
+    Human.Player.GetHull.HullPoints := 0;
+    Human.Player.RecordHumanDeath('KilledByExplosion');
+  end;
+end;
+
+// Where each killed human is after the day: still a human, landed at a planet, repaired,
+// with what it had.
+procedure ReportRespawns(Killed: TList);
+var
+  I: Integer;
+  Human: THuman;
+  Player: TPlayer;
+  Planet: Integer;
+begin
+  for I := 0 to Killed.Count - 1 do
+  begin
+    Human := FindHuman(Integer(PtrInt(Killed[I])));
+    if (Human = nil) or (Human.Player = nil) then
+    begin
+      Emit(Format('respawn human id=%d present=0', [Integer(PtrInt(Killed[I]))]));
+      Continue;
+    end;
+    Player := Human.Player;
+    if Player.CurrentPlanet <> nil then
+      Planet := Player.CurrentPlanet.Id
+    else
+      Planet := 0;
+    Emit(
+        Format(
+            'respawn human id=%d present=1 star=%d playerstar=%d planet=%d hull=%d/%d %s',
+            [Human.Id, Player.CurrentStar.Id, Human.PlayerStar.Id, Planet,
+                Player.GetHull.HullPoints, Player.GetHull.Weight, HumanBelongings(Player)]
+        )
+    );
+  end;
+end;
+
 procedure EmitHumans(const Options: TSimulationOptions);
 var
   Lines: TStringList;
@@ -551,6 +658,7 @@ end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 var
   Turn: Integer;
+  Killed: TList;
 begin
   Result := 0;
   LoadSave(Options.SavePath, Options.Seed);
@@ -579,13 +687,22 @@ begin
   RequestedScreenId := screenNone;
   if Options.Hash and not Options.HashLastOnly then
     EmitHash(0, Options.DumpDirectory);
-  for Turn := 1 to Options.Turns do
-  begin
-    SimulateParkedTurn;
-    if Turn = Options.ReloadAt then
-      ReloadFromCheckpoint;
-    if Options.Hash and (not Options.HashLastOnly or (Turn = Options.Turns)) then
-      EmitHash(Turn, Options.DumpDirectory);
+  Killed := TList.Create;
+  try
+    for Turn := 1 to Options.Turns do
+    begin
+      if Turn = Options.KillHumansAt then
+        KillHumans(Killed);
+      SimulateParkedTurn;
+      if Turn = Options.KillHumansAt then
+        ReportRespawns(Killed);
+      if Turn = Options.ReloadAt then
+        ReloadFromCheckpoint;
+      if Options.Hash and (not Options.HashLastOnly or (Turn = Options.Turns)) then
+        EmitHash(Turn, Options.DumpDirectory);
+    end;
+  finally
+    Killed.Free;
   end;
   // A game that has run turns holds script references made during play, which
   // a round trip from the save alone does not exercise.

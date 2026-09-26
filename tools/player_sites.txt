@@ -41,7 +41,7 @@ game/aWarrior.pas	simulation	4	0	0	0	9
 game/ThreadCalc.pas	simulation	0	4	0	2	0
 GameBootstrap.pas	presentation	0	1	0	0	0
 Globals.pas	presentation	0	20	0	0	0
-observer/HeadlessSim.pas	presentation	0	5	0	12	1
+observer/HeadlessSim.pas	presentation	0	8	0	18	2
 observer/ObserverCapture.pas	presentation	0	2	0	0	0
 observer/ObserverHost.pas	presentation	0	1	0	0	0
 observer/ObserverSimulation.pas	presentation	0	4	0	0	0
@@ -85,4 +85,4 @@ screens/SimEventHandlers.pas	presentation	0	1	0	0	0
 script/aScript.pas	simulation	0	7	73	6	3
 script/aScriptFun.pas	simulation	0	67	269	3	51
 total	simulation	109	415	732	261	523
-total	presentation	0	4476	0	12	1
+total	presentation	0	4479	0	18	2

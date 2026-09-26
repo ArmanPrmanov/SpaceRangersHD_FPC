@@ -24,6 +24,9 @@ LOG_TURNS = 10
 # two" fails.
 HUMAN_COUNTS = (2, 8)
 HUMAN_TURNS = 20
+# The turn before which the runs with extra humans destroy two humans' rangers, which must
+# respawn (ROADMAP.md, Phase 4, item 9).
+HUMAN_KILL_TURN = 5
 REPLAYS = ROOT / "tests" / "replays"
 
 
@@ -129,16 +132,50 @@ def check_session(args, binary: Path, save: Path) -> tuple[bool, str]:
     return True, "session flags and cheats survive a save"
 
 
+def check_respawns(output: str) -> str:
+    """The humans killed before a turn respawned: still humans, landed at a planet in the star
+    they are filmed in, repaired, with the same money and items. Returns what is wrong."""
+    kills = {}
+    for line in output.splitlines():
+        if line.startswith("kill human "):
+            fields = dict(part.split("=", 1) for part in line.split()[2:])
+            kills[fields["id"]] = fields
+    if len(kills) < 2:
+        return "fewer than two humans were killed"
+    respawned = 0
+    for line in output.splitlines():
+        if not line.startswith("respawn human "):
+            continue
+        fields = dict(part.split("=", 1) for part in line.split()[2:])
+        killed = kills.get(fields["id"])
+        if killed is None or fields["present"] != "1":
+            return f"not respawned: {line}"
+        hull, weight = fields["hull"].split("/")
+        if fields["planet"] == "0" or fields["star"] != fields["playerstar"] or hull != weight:
+            return f"not landed and repaired: {line}"
+        if any(fields[key] != killed[key] for key in ("money", "items", "cargo-free")):
+            return f"lost belongings: {line}"
+        if killed["local"] != "1" and fields["star"] == killed["star"]:
+            return f"respawned among hostile planets: {line}"
+        respawned += 1
+    if respawned != len(kills):
+        return f"{len(kills) - respawned} killed humans did not report"
+    return ""
+
+
 def check_humans(args, binary: Path, save: Path, count: int) -> tuple[bool, str]:
     """Play with extra humans: no crash, a clean round trip, the same hashes twice.
 
     Before each round trip the probe gives every human, script and one event state that a
     load without the per-human save block would lose; the round trip compares it field by
-    field (roundtrip humans=...), besides the state hash, which covers the block.
+    field (roundtrip humans=...), besides the state hash, which covers the block. The probe
+    also ends the last human's game, whose commands must then be refused. Before turn
+    HUMAN_KILL_TURN the local human's ranger and the last human's are destroyed; they must
+    respawn, and no human may leave the game.
     """
     options = [
         f"--sim-humans={count}", "--sim-roundtrip", f"--sim-turns={HUMAN_TURNS}", "--sim-hash",
-        f"--sim-seed={args.seed}", "--sim-session-probe",
+        f"--sim-seed={args.seed}", "--sim-session-probe", f"--sim-kill-human={HUMAN_KILL_TURN}",
     ]  # fmt: skip
     runs = []
     for _ in range(2):
@@ -146,12 +183,21 @@ def check_humans(args, binary: Path, save: Path, count: int) -> tuple[bool, str]
         roundtrip = [line for line in output.splitlines() if line.startswith("roundtrip ")]
         if code != 0 or not roundtrip or any("=ok" not in line for line in roundtrip):
             return False, f"{count} humans failed:" + output_tail(output)
-        # TODO(Phase 4, respawn): a lost human fails the test once destroyed humans respawn.
-        lost = "" if f" humans={count} " in last_line(output, "done ") + " " else ", a human was lost"
+        if f" humans={count} " not in last_line(output, "done ") + " ":
+            return False, f"{count} humans: a human was lost:" + output_tail(output)
+        problem = check_respawns(output)
+        if problem:
+            return False, f"{count} humans: {problem}"
+        probes = [line for line in output.splitlines() if line.startswith("probe finished ")]
+        if not probes or any(not line.endswith("command=refused") for line in probes):
+            return False, f"{count} humans: a finished human's command was not refused"
         runs.append(turn_lines(output))
     if runs[0] != runs[1]:
         return False, f"{count} humans nondeterministic: " + first_divergence(runs[0], runs[1])
-    return True, f"{count} humans: {HUMAN_TURNS} turns, round trip ok, deterministic{lost}"
+    return True, (
+        f"{count} humans: {HUMAN_TURNS} turns, round trip ok, deterministic, respawn ok, "
+        "script game end ok"
+    )
 
 
 def turn_lines(output: str) -> list[str]:

@@ -197,6 +197,8 @@ begin
       Simulation.SessionProbe := True
     else if Argument = '--sim-humans-dump' then
       Simulation.HumansDump := True
+    else if Pos('--sim-kill-human=', Argument) = 1 then
+      Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then
       Simulation.ReloadAt := StrToInt(Copy(Argument, 17, MaxInt))
     else if Pos('--sim-dump=', Argument) = 1 then
