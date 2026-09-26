@@ -149,8 +149,15 @@ begin
       or ((LocalPlayer.CurrentPlanet <> nil)
           and (LocalPlayer.CurrentStar.ControlFaction = sfDominators)) then
   begin
-    ReportPlanetCaptured;
-    RequestedScreenId := screenGameEnd;
+    if ReportPlanetCaptured then
+    begin
+      RequestedScreenId := screenGameEnd;
+      RequestClose(1);
+      Exit;
+    end;
+    // CHANGE: ENHANCEMENT - Multiplayer respawns the captured human instead of ending the
+    // game (ROADMAP.md, Phase 6, item 14); this planet is no longer where they are.
+    RequestedScreenId := screenStarMap;
     RequestClose(1);
     Exit;
   end;

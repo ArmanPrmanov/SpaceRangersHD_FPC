@@ -103,8 +103,11 @@ var
 
 // The global scripts for Star, as a screen runs them when the player lands (RunFrom 0).
 procedure RunGlobalScripts(Star: TStar; RunFrom: Integer);
-// The player loses the game: the planet was captured by the dominators.
-procedure ReportPlanetCaptured;
+// The dominators capture the planet the local human is on. Single player loses the game.
+// CHANGE: ENHANCEMENT - In multiplayer the captured human respawns like any destroyed human
+// instead (ROADMAP.md, Phase 6, item 14; ApplyPlanetCaptured). Returns whether the game ended
+// for the local human, so the caller still shows game end only then.
+function ReportPlanetCaptured: Boolean;
 
 // The government screen.
 // Forgets that the government asked to see the player on docking.
@@ -234,29 +237,54 @@ begin
   SubmitCommand(Command);
 end;
 
-// Moved from TfPlanet.OnOpen, TfGov.OnOpen and TfPanelMain.EndTurnClicked.
-procedure ApplyPlanetCaptured;
+// Moved from TfPlanet.OnOpen, TfGov.OnOpen and TfPanelMain.EndTurnClicked. This is a human
+// being captured: the actor is whoever docked or landed on ground that fell to the
+// dominators, named by the PlanetCaptured PlayerDeath event, as RecordHumanDeath names a
+// destroyed ranger's human. In multiplayer that human respawns like any destroyed one
+// (ROADMAP.md, Phase 6, item 14) instead of ending the game for everyone; single player is
+// unchanged, since ActingHuman is the one player and always has nowhere better to go than
+// game over. Returns whether the game ended for the captured human.
+function ApplyPlanetCaptured: Boolean;
 var
   Event: TGalaxyEvent;
+  CapturedHuman: THuman;
+  RespawnPlanet: TPlanet;
 begin
+  Result := True;
+  CapturedHuman := ActingHuman;
   Event := AddGalaxyEvent('PlayerDeath');
   Event.AddTextData('PlanetCaptured');
+  if CapturedHuman <> nil then
+    Event.HumanId := CapturedHuman.Id;
+  if IsMultiplayer and (CapturedHuman <> nil) and (CapturedHuman.Player <> nil) then
+  begin
+    RespawnPlanet := CapturedHuman.Player.FindRespawnPlanet;
+    if RespawnPlanet <> nil then
+    begin
+      CapturedHuman.Player.RespawnHuman(RespawnPlanet);
+      Result := False;
+      Exit;
+    end;
+  end;
   Session.GameEndReason := 2;
 end;
 
 procedure ExecutePlanetCaptured(const Command: TPlayerCommand);
 begin
-  ApplyPlanetCaptured;
+  PlanetOutcome := Ord(ApplyPlanetCaptured);
 end;
 
-procedure ReportPlanetCaptured;
+function ReportPlanetCaptured: Boolean;
 begin
   // With no player there is no one to act; this runs unrecorded, and the log's next
   // boundary writes a checkpoint.
   if LocalPlayer = nil then
-    ApplyPlanetCaptured
+    Result := ApplyPlanetCaptured
   else
+  begin
     SubmitSimple(ckPlanetCaptured);
+    Result := PlanetOutcome <> 0;
+  end;
 end;
 
 { The government }

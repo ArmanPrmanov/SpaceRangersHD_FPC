@@ -528,9 +528,18 @@ begin
       or ((LocalPlayer.CurrentPlanet <> nil)
           and (LocalPlayer.CurrentPlanet.OwnerId = Byte(oiDominator))) then
   begin
-    ReportPlanetCaptured;
-    RequestedScreenId := screenGameEnd;
-    Screen.RequestClose(1);
+    if ReportPlanetCaptured then
+    begin
+      RequestedScreenId := screenGameEnd;
+      Screen.RequestClose(1);
+    end
+    else
+    begin
+      // CHANGE: ENHANCEMENT - Multiplayer respawns the captured human instead of ending the
+      // game (ROADMAP.md, Phase 6, item 14); this planet is no longer where they are.
+      RequestedScreenId := screenStarMap;
+      Screen.RequestClose(1);
+    end;
   end
   else
   begin
