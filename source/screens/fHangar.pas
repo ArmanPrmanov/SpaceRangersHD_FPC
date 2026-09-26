@@ -137,7 +137,8 @@ uses
   aMyFunction,
   EC_Struct,
   ThreadCalc,
-  aCalc;
+  aCalc,
+  HotSeat;
 
 constructor TfHangar.Create;
 var
@@ -630,6 +631,13 @@ begin
   Result := True;
   LocalHuman.StarMapWeaponPanelOpen := False;
   FilmCameraFollow := True;
+  // CHANGE: ENHANCEMENT - The day starts only when every human has ended the turn
+  // (ROADMAP.md, Phase 4, item 2); in hot-seat the next human's screen follows instead.
+  if not EndTurn(False) then
+  begin
+    SwitchToNextHuman;
+    Exit;
+  end;
   CalculatePlayerStarTurnAndWait;
   if ExitScreenLoop then
     Exit;

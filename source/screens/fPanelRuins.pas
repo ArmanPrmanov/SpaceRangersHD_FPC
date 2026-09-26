@@ -57,7 +57,8 @@ uses
   fSaveManager,
   fStarMap,
   ThreadCalc,
-  aCalc;
+  aCalc,
+  HotSeat;
 
 constructor TfPanelRuins.Create;
 begin
@@ -225,6 +226,13 @@ begin
   Takeoff(tfEndAutomaticControl or tfReturnShopStock);
   LocalHuman.StarMapWeaponPanelOpen := False;
   FilmCameraFollow := True;
+  // CHANGE: ENHANCEMENT - The day starts only when every human has ended the turn
+  // (ROADMAP.md, Phase 4, item 2); in hot-seat the screen passes to the next human.
+  if not EndTurn(False) then
+  begin
+    PassTurn(Screen);
+    Exit;
+  end;
   CalculatePlayerStarTurnAndWait;
   if ExitScreenLoop then
     Exit;

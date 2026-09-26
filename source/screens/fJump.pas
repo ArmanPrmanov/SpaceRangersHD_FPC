@@ -63,7 +63,8 @@ uses
   aCalc,
   fLoad,
   fStarMap,
-  fRuinsTalk;
+  fRuinsTalk,
+  HotSeat;
 
 constructor TfJump.Create;
 begin
@@ -235,6 +236,13 @@ begin
     Exit;
   if TurnCalculationPhase = tcpGalaxyFinished then
   begin
+    // CHANGE: ENHANCEMENT - A human in hyperspace does not hold the day, but the others do
+    // (ROADMAP.md, Phase 4, item 2); in hot-seat the screen passes to the next one of them.
+    if not EndTurn(False) then
+    begin
+      PassTurn(Self);
+      Exit;
+    end;
     QueuePlayerStarTurnCalculation;
     Exit;
   end;

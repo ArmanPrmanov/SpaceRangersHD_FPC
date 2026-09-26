@@ -157,7 +157,8 @@ uses
   aGalaxyEvent,
   aSaveLoad,
   aEFilm,
-  aShip;
+  aShip,
+  HotSeat;
 
 constructor TfPanelMain.Create;
 begin
@@ -504,6 +505,13 @@ begin
     TryAutoTurnSave;
     SoundManager.PlaySound('Sound.Turn');
     PruneMessages;
+    // CHANGE: ENHANCEMENT - The day starts only when every human has ended the turn
+    // (ROADMAP.md, Phase 4, item 2); in hot-seat the screen passes to the next human.
+    if not EndTurn(False) then
+    begin
+      PassTurn(Screen);
+      Exit;
+    end;
     CalculatePlayerStarTurnAndWait;
     if ExitScreenLoop then
       Exit;
@@ -526,6 +534,12 @@ begin
   end
   else
   begin
+    // CHANGE: ENHANCEMENT - Hot-seat: the next day starts with the first human in order.
+    if TurnPassesToAnother then
+    begin
+      PassTurn(Screen);
+      Exit;
+    end;
     PostMouseMoveMessage;
     if (LocalPlayer.PendingDockDialogue > 0) and (LocalPlayer.DockedTo <> nil) then
     begin

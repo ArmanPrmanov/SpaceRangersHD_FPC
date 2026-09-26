@@ -144,7 +144,8 @@ uses
   GR_Music,
   SE_Planet,
   ThreadCalc,
-  aCalc;
+  aCalc,
+  HotSeat;
 type
   PProbeMarkerPixel = ^TProbeMarkerPixel;
   TProbeMarkerPixel = record
@@ -347,6 +348,13 @@ begin
   SaveGameToFile(SaveManagerScreen.GetAutoSavePath, 'as');
   Takeoff(0);
   StarMapScreen.SetMapCenterManually(TruncatePointF(LocalPlayer.Position));
+  // CHANGE: ENHANCEMENT - The day starts only when every human has ended the turn
+  // (ROADMAP.md, Phase 4, item 2); in hot-seat the screen passes to the next human.
+  if not EndTurn(False) then
+  begin
+    PassTurn(Self);
+    Exit;
+  end;
   CalculatePlayerStarTurnAndWait;
   if not ExitScreenLoop then
     if LocalPlayer = nil then

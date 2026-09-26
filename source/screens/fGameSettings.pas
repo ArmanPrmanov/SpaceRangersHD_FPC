@@ -57,7 +57,8 @@ uses
   fIntroduction,
   ThreadCalc,
   aCalc,
-  aScript;
+  aScript,
+  HotSeat;
 // Source control for the native Extended temporaries and axis evaluation order.
 procedure CalculateSquaredEdgeDistance(Star: TStar; var Distance: Single); inline;
 var
@@ -910,6 +911,8 @@ begin
     LocalPlayer.RefreshStorageBubbles;
     RunGlobalScriptsForContext(LocalPlayer.CurrentStar, 0, LocalHuman);
     LegacyGenerationRandom := False;
+    // CHANGE: ENHANCEMENT - --hotseat=N: the other humans join the new game.
+    EnsureHotSeatHumans;
     NewGameGenerationStage := 8;
   except
     on E: Exception do

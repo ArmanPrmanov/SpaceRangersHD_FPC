@@ -98,6 +98,9 @@ type
     Gap181: array[0..2] of Byte;
     DeferredEndTurnTimer: PCallbackTimerGI;
     PathAsteroid: TAsteroid;
+    // CHANGE: ENHANCEMENT - Hot-seat: passes the screen to the next human outside the callback
+    // that found it is that human's turn.
+    PassTurnTimer: PCallbackTimerGI;
     FilmFrameTimer: PCallbackTimerGI;
     FilmStepIndex: PtrInt;
     NextFilmCommand: PEFilmCommand;
@@ -185,6 +188,7 @@ type
     procedure SaveSpaceImageState(SpaceImage: TSpaceImgGI);
     procedure SaveSpaceBackground;
     procedure DeferredEndTurn(Timer: PCallbackTimerGI; UserData: PtrInt);
+    procedure DeferredPassTurn(Timer: PCallbackTimerGI; UserData: PtrInt);
     procedure EndTurnClicked(Sender: TObjectGI);
     procedure MapKeyDown(Sender: TObjectGI; Key: Cardinal);
     procedure MapKeyUp(Sender: TObjectGI; Key: Cardinal);
@@ -371,6 +375,7 @@ uses
   fTalk,
   fGoodsShop2,
   aTranclucator,
+  HotSeat,
   ab_MainForm;
 
 // Cache only images. Rebuild names, ownership, relations and script-provided
@@ -1033,6 +1038,11 @@ begin
       CancelCallbackTimer(DeferredEndTurnTimer);
       DeferredEndTurnTimer := nil;
     end;
+    if PassTurnTimer <> nil then
+    begin
+      CancelCallbackTimer(PassTurnTimer);
+      PassTurnTimer := nil;
+    end;
     if PlayerPathTimer <> nil then
     begin
       CancelCallbackTimer(PlayerPathTimer);
@@ -1334,6 +1344,18 @@ begin
   end;
   EndTurnClicked(nil);
 end;
+procedure TfStarMap.DeferredPassTurn(Timer: PCallbackTimerGI; UserData: PtrInt);
+begin
+  if PassTurnTimer <> nil then
+  begin
+    CancelCallbackTimer(PassTurnTimer);
+    PassTurnTimer := nil;
+  end;
+  if TurnPassesToAnother then
+    PassTurn(Self)
+  else
+    StartOrderMode;
+end;
 procedure TfStarMap.EndTurnClicked(Sender: TObjectGI);
 var
   WaitResult: Cardinal;
@@ -1362,6 +1384,17 @@ begin
         AppendLogLineThreadSafe('Not calc NextDay header');
       // Prunes the messages, ends automatic control and runs the player's own day.
       BeginSpaceDay;
+      // CHANGE: ENHANCEMENT - The day starts only when every human has ended the turn
+      // (ROADMAP.md, Phase 4, item 2). In hot-seat the screen passes to the next human who
+      // has not; with one human the day starts at once, as before.
+      if not EndTurn(False) then
+      begin
+        if TurnPassesToAnother then
+          PassTurn(Self)
+        else
+          StartOrderMode;
+        Exit;
+      end;
       QueuePlayerStarTurnCalculation;
       Events[0] := Session.TurnCalculationThread.IdleEvent;
       Events[1] := Session.TalkRequestEvent;
@@ -2755,6 +2788,17 @@ procedure TfStarMap.StartOrderMode;
 var
   Index: Integer;
 begin
+  // CHANGE: ENHANCEMENT - Hot-seat: when another human is to end the turn before the local one,
+  // the screen passes to it instead (ROADMAP.md, Phase 4). A break in the film ends the local
+  // human's "continue until arrival", so it holds the day again.
+  if BreakRequested and not IsTurnCalculationRunningUI then
+    StopContinuing;
+  if TurnPassesToAnother then
+  begin
+    if PassTurnTimer = nil then
+      PassTurnTimer := ScheduleCallbackTimer(1, 1, DeferredPassTurn);
+    Exit;
+  end;
   ScrollLeftHeld := False;
   ScrollRightHeld := False;
   ScrollUpHeld := False;
@@ -7199,6 +7243,11 @@ begin
               and (FilmStepIndex > Round(AdaptiveBeginCalcNextTurn * 200.0)))) then
   begin
     ContinueTurnCalculation := ShouldContinuePlayerTravel;
+    // CHANGE: ENHANCEMENT - Travel that goes on ends the next day's turn by itself. With several
+    // humans the local one continues until arrival (THuman.ContinueUntilArrival), and the next
+    // day still waits for the others' end turns; the film then ends and the screen passes.
+    if ContinueTurnCalculation then
+      ContinueTurnCalculation := EndTurn(IsMultiplayer);
     if ContinueTurnCalculation and (TurnCalculationPhase = tcpGalaxyFinished) then
     begin
       MainPanel.TryAutoTurnSave;

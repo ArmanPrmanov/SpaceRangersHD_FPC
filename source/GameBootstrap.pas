@@ -65,6 +65,7 @@ uses
   ObserverHost,
   HeadlessSim,
   CommandLog,
+  HotSeat,
   SimEventHandlers,
   InterfaceOverrideViews;
 
@@ -81,6 +82,7 @@ var
   SimulationMode: Boolean;
   Simulation: TSimulationOptions;
   RecordCommandsPath: AnsiString;
+  StartupSave: AnsiString;
   Replay: TReplayOptions;
 
 procedure Log(const Text: AnsiString);
@@ -220,6 +222,13 @@ begin
       Simulation.HumansDump := True
     else if Argument = '--sim-pvp' then
       Simulation.Pvp := True
+    // CHANGE: ENHANCEMENT - Hot-seat (ROADMAP.md, Phase 4): N humans take turns at this
+    // machine; headless, every human plays DAYS days from its own commands.
+    else if Pos('--hotseat=', Argument) = 1 then
+      HotSeatHumans := StrToInt(Copy(Argument, 11, MaxInt))
+    // CHANGE: ENHANCEMENT - Open a save at startup, past the main menu.
+    else if Pos('--load-save=', Argument) = 1 then
+      StartupSave := ExpandFileName(Copy(Argument, 13, MaxInt))
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then
@@ -257,6 +266,8 @@ begin
       raise Exception.Create('--replay-commands cannot be combined with --sim-save');
     if (RecordCommandsPath <> '') and (Replay.LogPath <> '') then
       raise Exception.Create('--record-commands cannot be combined with --replay-commands');
+    if HotSeatHumans <> 0 then
+      raise Exception.Create('--hotseat is for the game; headless, use --sim-humans and --sim-hotseat');
     Replay.Seed := Simulation.Seed;
     GpuRendererRequested := False;
     sr_renderer_select(0);
@@ -356,9 +367,16 @@ var
 begin
   ScreenLoadMode := 0;
   PostLoadScreenId := screenMainMenu;
+  if StartupSave <> '' then
+  begin
+    PendingLoadFileName := StartupSave;
+    PostLoadScreenId := screenGameLoad;
+  end;
   RequestedScreenId := screenLoad;
   while not ExitScreenLoop and (RequestedScreenId <> screenNone) do
   begin
+    // CHANGE: ENHANCEMENT - Hot-seat: the next human's screen opens as that human's.
+    ApplyTurnPass;
     NextScreen := RequestedScreenId;
     if NextScreen = screenLoadRobot then
       raise Exception.Create('This port has robot battles disabled');

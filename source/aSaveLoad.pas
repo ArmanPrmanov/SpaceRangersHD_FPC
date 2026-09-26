@@ -108,7 +108,8 @@ uses
   fGoodsShop2,
   fRuinsTalk,
   fInfo,
-  fJump;
+  fJump,
+  HotSeat;
 
 var
   MemorySnapshotGalaxy: TGalaxy = nil;
@@ -563,6 +564,9 @@ begin
   end;
   if Result and Assigned(GameLoadedHook) then
     GameLoadedHook(FileName);
+  // CHANGE: ENHANCEMENT - --hotseat=N: the humans join after the load, as commands.
+  if Result then
+    EnsureHotSeatHumans;
 
 end;
 procedure SaveGameToMemorySnapshot;

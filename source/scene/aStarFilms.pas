@@ -21,6 +21,11 @@ procedure KeepStarFilms(Stars: TList);
 procedure FreeStarFilms;
 // A scene object is going away; no film may refer to it.
 procedure ReleaseStarFilmReferences(Obj: TObjectSE);
+// CHANGE: ENHANCEMENT - Hot-seat: the local human changed from one in OldStar to one in
+// NewStar. Local (PrimaryFilm) holds OldStar's film; NewStar's film becomes Local, and Local's
+// film becomes OldStar's, so that each star keeps the day prepared for it and the next day's
+// film of the local star is the new local human's.
+procedure ExchangeLocalStarFilm(var Local: TEFilm; OldStar, NewStar: TObject);
 implementation
 
 type
@@ -80,6 +85,39 @@ begin
   for I := 0 to Entries.Count - 1 do
     TStarFilmEntry(Entries[I]).Free;
   Entries.Clear;
+end;
+
+procedure ExchangeLocalStarFilm(var Local: TEFilm; OldStar, NewStar: TObject);
+var
+  I: Integer;
+  Entry, NewEntry: TStarFilmEntry;
+  Film: TEFilm;
+begin
+  if OldStar = NewStar then
+    Exit;
+  NewEntry := nil;
+  for I := Entries.Count - 1 downto 0 do
+  begin
+    Entry := TStarFilmEntry(Entries[I]);
+    if Entry.Star = NewStar then
+      NewEntry := Entry
+    else if Entry.Star = OldStar then
+    begin
+      // Only a star that is not the local one has an entry; drop a stale one.
+      Entries.Delete(I);
+      Entry.Free;
+    end;
+  end;
+  if NewEntry = nil then
+  begin
+    NewEntry := TStarFilmEntry.Create;
+    NewEntry.Film := TEFilm.Create;
+    Entries.Add(NewEntry);
+  end;
+  Film := NewEntry.Film;
+  NewEntry.Star := OldStar;
+  NewEntry.Film := Local;
+  Local := Film;
 end;
 
 procedure ReleaseStarFilmReferences(Obj: TObjectSE);
