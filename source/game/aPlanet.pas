@@ -5869,9 +5869,12 @@ begin
             );
       until (Attempts > 30)
           or (CountEquipmentShopItemsInBucket(ItemType) < LegacyPlanetShopQuota(RaceId, ItemType));
-      // HUMANS: The shared stock is generated for the one player's ship (its slots and hull).
-      // For whose ship, when there are several humans?
-      Item := GenerateEquipmentOffer(GetPlayer, ItemType);
+      // CHANGE: ENHANCEMENT - The shared stock is generated for the human opening the shop
+      // (ActingHuman) when there is one, otherwise the host human's (ROADMAP.md, Phase 6, item 7).
+      if ActingHuman <> nil then
+        Item := GenerateEquipmentOffer(ActingHuman.Player, ItemType)
+      else
+        Item := GenerateEquipmentOffer(HostHuman.Player, ItemType);
       if Item <> nil then
       begin
         EquipmentShop.Add(Item);

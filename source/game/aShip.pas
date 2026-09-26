@@ -4609,6 +4609,7 @@ var
   SceneObject: TObjectSE;
   StatusStrength: Single;
   Companion: TShip;
+  LootHuman: TPlayer;
 begin
   Attacker := nil;
   if Source <> nil then
@@ -4942,15 +4943,19 @@ begin
       begin
         Module := TMicroModule.Create;
         MinimumPriority := Round(RemapClamped(WealthInBestRanger, 0.5, 2, 10, 0));
-        // HUMANS: Whose rating and rank scale a dropped micro-module: the killer's (when it is
-        // a human), the best-placed human's, or the first human's?
+        // CHANGE: ENHANCEMENT - The loot scales with the killer's rating and rank when the
+        // killer is human, otherwise the host human's (ROADMAP.md, Phase 6, item 5).
+        if IsHuman(Attacker) then
+          LootHuman := TPlayer(Attacker)
+        else
+          LootHuman := HostHuman.Player;
         Inc(
             MinimumPriority,
-            Round(RemapClamped(GetPlayer.PlaceInRating, 1, Galaxy.Rangers.Count, 0, 10))
+            Round(RemapClamped(LootHuman.PlaceInRating, 1, Galaxy.Rangers.Count, 0, 10))
         );
         Inc(
             MinimumPriority,
-            Round(RemapClamped(ShortInt(GetPlayer.PirateRank + Byte(0)), 0, 7, 10, 0))
+            Round(RemapClamped(ShortInt(LootHuman.PirateRank + Byte(0)), 0, 7, 10, 0))
         );
         Inc(MinimumPriority, Galaxy.ScaleIntByTechLevel(20, 0));
         Inc(
@@ -4999,15 +5004,19 @@ begin
         begin
           Module := TMicroModule.Create;
           MinimumPriority := Round(RemapClamped(WealthInBestRanger, 0.5, 2, 10, 0));
-          // HUMANS: Whose rating and rank scale a dropped micro-module: the killer's (when it
-          // is a human), the best-placed human's, or the first human's?
+          // CHANGE: ENHANCEMENT - The loot scales with the killer's rating and rank when the
+          // killer is human, otherwise the host human's (ROADMAP.md, Phase 6, item 5).
+          if IsHuman(Attacker) then
+            LootHuman := TPlayer(Attacker)
+          else
+            LootHuman := HostHuman.Player;
           Inc(
               MinimumPriority,
-              Round(RemapClamped(GetPlayer.PlaceInRating, 1, Galaxy.Rangers.Count, 0, 10))
+              Round(RemapClamped(LootHuman.PlaceInRating, 1, Galaxy.Rangers.Count, 0, 10))
           );
           Inc(
               MinimumPriority,
-              Round(RemapClamped(ShortInt(GetPlayer.Rank + Byte(0)), 0, 7, 10, 0))
+              Round(RemapClamped(ShortInt(LootHuman.Rank + Byte(0)), 0, 7, 10, 0))
           );
           Inc(MinimumPriority, Galaxy.ScaleIntByTechLevel(20, 0));
           Inc(

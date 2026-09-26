@@ -1562,18 +1562,18 @@ begin
           Galaxy.Stars.Count - 1,
           Cardinal(Galaxy.CurrentTurn) + Galaxy.GenerationSeed
       );
-  // HUMANS: Which humans' stars do the dominators spare early in the game: every human's,
-  // or only the first's? Native spared the one player's star and its surroundings.
+  // CHANGE: ENHANCEMENT - Dominators spare only the host human's starting star, as in single
+  // player (ROADMAP.md, Phase 6, item 3).
   for I := 0 to Galaxy.Stars.Count - 1 do
   begin
     IncrementWrapped(Index, 0, Galaxy.Stars.Count - 1);
-    Star := TObject(GetPlayer.CurrentStar.StarDistances[Index].Star) as TStar;
+    Star := TObject(HostHuman.Player.CurrentStar.StarDistances[Index].Star) as TStar;
     if (Star.Constellation.Id <> 20)
         and ((BlazerShip = nil) or (BlazerShip.CurrentStar <> Star))
         and ((TerronShip = nil) or (TerronShip.CurrentStar <> Star))
         and ((Star.ControlFaction <> sfDominators) or (Star.Battle <> 0)) then
       if (Galaxy.CurrentTurn > 300)
-          or (PointDistanceSquared(Star.Position, GetPlayer.CurrentStar.Position)
+          or (PointDistanceSquared(Star.Position, HostHuman.Player.CurrentStar.Position)
               >= Sqr((1 - Galaxy.CurrentTurn / 300) * 70 + 35)) then
         if ((Star.Battle = 0)
                 or (Star.DominatorSeries <> dsKeller)
@@ -1596,7 +1596,7 @@ begin
                   Score * RemapClamped(Star.CountShipsByTypeMask(CoalitionShipMask), 1, 10, 2, 10)
               );
           Score := Round(Score * NextRandomFloatRange(1, 3, RandomState));
-          if (GetPlayer.HomePlanet.CurrentStar = Star)
+          if (HostHuman.Player.HomePlanet.CurrentStar = Star)
               and (Galaxy.CurrentTurn
                   < Galaxy.InterpolateDifficulty(-1, 1.2, 1, 0.7, 0.5) * 800 + 300) then
             Score := MaxInt - 1;
@@ -2082,9 +2082,9 @@ var
       end;
   end;
 begin
-  // HUMANS: Which humans' stars do the dominators spare early in the game: every human's,
-  // or only the first's? Native spared the one player's star and its surroundings.
-  if GetPlayer = nil then
+  // CHANGE: ENHANCEMENT - Dominators spare only the host human's starting star, as in single
+  // player (ROADMAP.md, Phase 6, item 3).
+  if HostHuman = nil then
     Exit;
   ControlPercent := Galaxy.GetFactionControlPercent(Ord(sfDominators));
   BaseChance :=
@@ -2139,8 +2139,10 @@ begin
                 and (TargetStar <> Origin)
                 and not IsStarProtectedByScript(TargetStar) then
               if (Galaxy.CurrentTurn > 300)
-                  or ((GetPlayer.CurrentStar <> TargetStar)
-                      and (PointDistanceSquared(TargetStar.Position, GetPlayer.CurrentStar.Position)
+                  or ((HostHuman.Player.CurrentStar <> TargetStar)
+                      and (PointDistanceSquared(
+                              TargetStar.Position,
+                              HostHuman.Player.CurrentStar.Position)
                           >= Sqr((1 - Galaxy.CurrentTurn / 300) * 70 + 35))) then
                 if (BlazerShip = nil)
                     or (Galaxy.BlazerLandingPlanetId = 0)

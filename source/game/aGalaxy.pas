@@ -5843,9 +5843,10 @@ begin
   for I := 0 to Constellations.Count - 1 do
   begin
     Constellation := TConstellation(Constellations[I]);
-    // HUMANS: Whose home sets the constellations' distance tiers when humans start apart: the
-    // first human's, or each constellation's nearest human's?
-    if Constellation.SharesOutlineSegment(GetPlayer.HomePlanet.CurrentStar.Constellation) then
+    // CHANGE: ENHANCEMENT - The host human's home sets the distance tiers (ROADMAP.md,
+    // Phase 6, item 4).
+    if Constellation.SharesOutlineSegment(HostHuman.Player.HomePlanet.CurrentStar.Constellation)
+    then
       Constellation.HomeDistanceTier := 0
     else
       Constellation.HomeDistanceTier := 3;
@@ -11320,8 +11321,8 @@ begin
       PiratesPresent := False
     else if CoalitionKills < PirateKills then
       CoalitionPresent := False
-    // HUMANS: Which side wins a tied star when humans of both sides are there? The first
-    // human's party found in the star decides, as the one player's did.
+    // A tied star is decided by whichever human's party (Party) the ships loop above found
+    // first, as the one player's did (ROADMAP.md, Phase 6, item 12: kept as converted).
     else if PlayerPartyPresent then
       if Party.OwnerId = Byte(oiPirate) then
         CoalitionPresent := False

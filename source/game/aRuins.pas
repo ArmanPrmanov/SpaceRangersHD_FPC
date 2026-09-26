@@ -916,9 +916,9 @@ begin
         if Galaxy.HasUnresolvedDominatorSeries([dsBlazer, dsKeller, dsTerron])
             and (Galaxy.CurrentTurn mod 60 = 0)
             and (DaysSincePlayerSeen > 30)
-            // HUMANS: The reserve's cap follows the one player's experience. Whose, when there
-            // are several humans: the most experienced, or the one who visits?
-            and (NodeReserve < Max(500, GetPlayer.TotalExperience div 10))
+            // CHANGE: ENHANCEMENT - The reserve's cap follows the host human's experience
+            // (ROADMAP.md, Phase 6, item 6).
+            and (NodeReserve < Max(500, HostHuman.Player.TotalExperience div 10))
             and (NodeReserve
                 < 200
                     / GalaxyDifficultyTuning[Galaxy.DifficultyLevels[7]]
@@ -1208,9 +1208,12 @@ begin
           );
     until (Attempts > 20)
         or (CountEquipmentShopItems(Kind) < TQuotas(StationEquipmentOfferQuotas[TypeId])[Kind]);
-    // HUMANS: The shared stock is generated for the one player's ship (its slots and hull).
-    // For whose ship, when there are several humans?
-    Item := GenerateEquipmentOffer(GetPlayer, Planet, Kind);
+    // CHANGE: ENHANCEMENT - The shared stock is generated for the human opening the shop
+    // (ActingHuman) when there is one, otherwise the host human's (ROADMAP.md, Phase 6, item 7).
+    if ActingHuman <> nil then
+      Item := GenerateEquipmentOffer(ActingHuman.Player, Planet, Kind)
+    else
+      Item := GenerateEquipmentOffer(HostHuman.Player, Planet, Kind);
     if Item <> nil then
     begin
       EquipmentShop.Add(Item);
