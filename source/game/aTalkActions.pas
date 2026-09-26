@@ -10,14 +10,16 @@ unit aTalkActions;
 // A conversation the UI starts (a click on a ship) begins with BeginTalk. One the turn thread
 // asks for (TShip.OpenPlayerConversation, TPlanet.RequestDialog) is set up by the turn thread,
 // and the commands the UI then submits are recorded in that wait. Either way the conversation
-// ends with EndTalk when the screen closes for good. The ship talked to is
-// LocalHuman.TalkShip. Script dialog code adds its answers to the open screen, as before;
+// ends with EndTalk when the screen closes for good. The ship talked to is the human's
+// TalkShip (THuman). Script dialog code adds its answers to the open screen, as before;
 // injected answers (ScriptDialogInjections) are named by their index in that list.
 interface
 uses
   aCommands,
   aGalaxyStruct,
+  aHuman,
   aItem,
+  aPlayer,
   aScript,
   aShip;
 const
@@ -181,9 +183,12 @@ procedure ApplyOrderToAllTranclucators;
 function RunDominatorProgram(ProgramIndex: Integer): Boolean;
 
 // Military support from a coalition flagship.
-function GetMilitaryHullRepairCost: Integer;
-function GetMilitaryEquipmentRepairCost: Integer;
-function IsMilitaryProtectedQuestItem(Item: TItem): Boolean;
+// What Player pays in nodes for a full hull repair.
+function GetMilitaryHullRepairCost(Player: TPlayer): Integer;
+// What Human pays in nodes to repair the equipment its talk ship can repair.
+function GetMilitaryEquipmentRepairCost(Human: THuman): Integer;
+// Whether Item is a letter one of Player's quests delivers.
+function IsMilitaryProtectedQuestItem(Player: TPlayer; Item: TItem): Boolean;
 procedure DonateMilitaryResearchMaterial(Series: TDominatorSeries; Amount: Integer);
 // Returns the hull points repaired.
 function MilitaryHullRepair(Nodes: Integer): Integer;
@@ -202,8 +207,6 @@ uses
   aConst,
   aGalaxy,
   aGalaxyEvent,
-  aHuman,
-  aPlayer,
   aSession,
   aKling,
   aNormalShip,
@@ -293,12 +296,15 @@ end;
 
 // Moved from the places in TfStarMap that start a conversation.
 procedure ExecuteBeginTalk(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
+  H := ActorHuman(Command);
   if IntArg(Command, 0) <> 0 then
     CurrentScript := nil;
   Session.ScriptDialogIndex := -1;
-  LocalHuman.TalkShip := ShipArg(Command, 0);
-  LocalHuman.TalkScripted := False;
+  H.TalkShip := ShipArg(Command, 0);
+  H.TalkScripted := False;
 end;
 
 procedure BeginTalk(Ship: TShip; ClearScript: Boolean);
@@ -357,28 +363,30 @@ end;
 // Moved from TfTalk.OnClose.
 procedure ExecuteEndTalk(const Command: TPlayerCommand);
 var
+  H: THuman;
   I, Count: Integer;
   Ship: TShip;
   Star: TStar;
   Player: TPlayer;
   SkipShipScriptAdvance: Boolean;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
   SkipShipScriptAdvance := IntArg(Command, 0) <> 0;
   Count := Player.ProgramCounts[prgIntercom];
-  if (LocalHuman.TalkShip <> nil)
-      and (LocalHuman.TalkShip.TypeId = stKling)
+  if (H.TalkShip <> nil)
+      and (H.TalkShip.TypeId = stKling)
       and (Count > 0)
-      and Player.CanResolveObjectWithScanner(LocalHuman.TalkShip) then
+      and Player.CanResolveObjectWithScanner(H.TalkShip) then
   begin
     Dec(Count);
     Player.ProgramCounts[prgIntercom] := Count;
   end;
-  if (Player <> nil) and (LocalHuman.TalkShip <> nil) and not LocalHuman.TalkScripted then
-    Player.ScriptItemsAct(satOnPlayerTalkedWithShip, LocalHuman.TalkShip, nil, 0);
-  LocalHuman.TalkShip := nil;
-  LocalHuman.TalkPlanet := nil;
-  if not LocalHuman.TalkScripted and not SkipShipScriptAdvance then
+  if (Player <> nil) and (H.TalkShip <> nil) and not H.TalkScripted then
+    Player.ScriptItemsAct(satOnPlayerTalkedWithShip, H.TalkShip, nil, 0);
+  H.TalkShip := nil;
+  H.TalkPlanet := nil;
+  if not H.TalkScripted and not SkipShipScriptAdvance then
   begin
     I := 0;
     Star := Player.CurrentStar;
@@ -406,8 +414,11 @@ end;
 
 // Moved from TfTalk.AcceptScriptedConversation.
 procedure ExecuteAcceptScriptedTalk(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
-  LocalHuman.TalkResponse := 1;
+  H := ActorHuman(Command);
+  H.TalkResponse := 1;
   Session.ScriptDialogIndex := -1;
 end;
 
@@ -432,12 +443,14 @@ end;
 // StartScriptMessage.
 procedure ExecuteTalkScriptMessage(const Command: TPlayerCommand);
 var
+  H: THuman;
   Script: TScript;
 begin
+  H := ActorHuman(Command);
   Script := ScriptArg(Command, 0);
   CurrentScript := Script;
   if IntArg(Command, 1) <> 0 then
-    Script.PublishCurrentShip(LocalHuman.TalkShip);
+    Script.PublishCurrentShip(H.TalkShip);
   Script.CallDialogMessage(Session.ScriptDialogIndex);
 end;
 
@@ -454,10 +467,12 @@ end;
 // Moved from TfTalk.BuildStandardChoices.
 procedure ExecuteTalkShipDialog(const Command: TPlayerCommand);
 var
+  H: THuman;
   Binding: TScriptShip;
 begin
+  H := ActorHuman(Command);
   TalkOutcome := 0;
-  Binding := TScriptShip(LocalHuman.TalkShip.ScriptShip);
+  Binding := TScriptShip(H.TalkShip.ScriptShip);
   Binding.Script.PublishShipContext(Binding);
   Binding.Script.CallDialog(Binding.Script.CurrentDialog);
   if Session.ScriptDialogIndex >= 0 then
@@ -476,10 +491,12 @@ end;
 // Moved from TfTalk.BuildStandardChoices.
 procedure ExecuteTalkDialogOverride(const Command: TPlayerCommand);
 var
+  H: THuman;
   Script: TScript;
   Text: WideString;
   I, Selected, Priority: Integer;
 begin
+  H := ActorHuman(Command);
   Selected := 0;
   Priority := PScriptDialogOverride(ScriptDialogOverrides[0]).Priority;
   for I := 0 to ScriptDialogOverrides.Count - 1 do
@@ -497,7 +514,7 @@ begin
   Text := PScriptDialogOverride(ScriptDialogOverrides[Selected]).DialogName;
   if Text <> '' then
   begin
-    Script.PublishCurrentShip(LocalHuman.TalkShip);
+    Script.PublishCurrentShip(H.TalkShip);
     Script.CallDialogByVariable(Text);
     if Session.ScriptDialogIndex < 0 then
       AppendLogLineThreadSafe(
@@ -542,8 +559,11 @@ end;
 
 // Moved from TfTalk.CodeMsgOut. The check marks the chameleon as detected when it fails.
 procedure ExecuteCheckTalkCamouflage(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
-  TalkOutcome := Ord((LocalHuman.TalkShip as TKling).IsPlayerCamouflageEffective(Actor(Command)));
+  H := ActorHuman(Command);
+  TalkOutcome := Ord((H.TalkShip as TKling).IsPlayerCamouflageEffective(Actor(Command)));
 end;
 
 function CheckTalkCamouflage: Boolean;
@@ -554,8 +574,11 @@ end;
 
 // Moved from TfTalk.CodeMsgOut.
 procedure ExecutePublishTalkShipContext(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
-  TScriptShip(LocalHuman.TalkShip.ScriptShip).Script.PublishShipContext(LocalHuman.TalkShip.ScriptShip as TScriptShip);
+  H := ActorHuman(Command);
+  TScriptShip(H.TalkShip.ScriptShip).Script.PublishShipContext(H.TalkShip.ScriptShip as TScriptShip);
 end;
 
 procedure PublishTalkShipContext;
@@ -566,9 +589,11 @@ end;
 // Moved from TfTalk.CodeMsgOut.
 procedure ExecuteTalkShipAuxiliaryCode(const Command: TPlayerCommand);
 var
+  H: THuman;
   Binding: TScriptShip;
 begin
-  Binding := TScriptShip(LocalHuman.TalkShip.ScriptShip);
+  H := ActorHuman(Command);
+  Binding := TScriptShip(H.TalkShip.ScriptShip);
   try
     Binding.State.AuxiliaryCode.Run(ScriptProcess);
   except
@@ -599,8 +624,11 @@ end;
 
 // Moved from TfTalk.BuildBuiltinChoices.
 procedure ExecuteTalkRecognizesPlayer(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
-  TalkOutcome := Ord(not LocalHuman.TalkShip.IsPlayerChameleonEffectiveAgainstSelf);
+  H := ActorHuman(Command);
+  TalkOutcome := Ord(not H.TalkShip.IsChameleonEffectiveAgainstSelf(Actor(Command)));
 end;
 
 function TalkRecognizesPlayer: Boolean;
@@ -634,10 +662,12 @@ end;
 // Moved from TfTalk.RunInjectedAnswer.
 procedure ExecuteCallInjectedDialog(const Command: TPlayerCommand);
 var
+  H: THuman;
   Injection: PScriptDialogInjection;
 begin
+  H := ActorHuman(Command);
   Injection := InjectionArg(Command, 0);
-  Injection.Script.PublishCurrentShip(LocalHuman.TalkShip);
+  Injection.Script.PublishCurrentShip(H.TalkShip);
   CurrentScript.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Injection.AnswerData);
   CurrentScript.CallDialogByVariable(Injection.DialogName);
 end;
@@ -656,19 +686,21 @@ end;
 // Moved from TfTalk.ShowMoneyDemand.
 procedure ExecuteShowMoneyDemand(const Command: TPlayerCommand);
 var
+  H: THuman;
   I: Integer;
   Partner: TShip;
   PartnerCanDemand: Boolean;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
   TalkText := '';
-  if (Player.TruceShip = LocalHuman.TalkShip)
-      or ((LocalHuman.TalkShip is TNormalShip)
-          and ((LocalHuman.TalkShip as TNormalShip).LastPlayerExtortionTurn + 30 > Galaxy.CurrentTurn)) then
+  if (Player.TruceShip = H.TalkShip)
+      or ((H.TalkShip is TNormalShip)
+          and ((H.TalkShip as TNormalShip).LastPlayerExtortionTurn + 30 > Galaxy.CurrentTurn)) then
   begin
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Money.WeAlreadyHavePact');
-    LocalHuman.TalkShip.ReactToExtortionDemand(Player);
+    TalkText := H.TalkShip.LookupTalkText('Talk.Money.WeAlreadyHavePact');
+    H.TalkShip.ReactToExtortionDemand(Player);
     TalkOutcome := moRefused;
   end
   else
@@ -677,28 +709,28 @@ begin
     for I := 0 to Player.PiratePartners.Count - 1 do
     begin
       Partner := Player.PiratePartners[I];
-      if LocalHuman.TalkShip.AcceptsRansomDemandFrom(Partner) then
+      if H.TalkShip.AcceptsRansomDemandFrom(Partner) then
       begin
         PartnerCanDemand := True;
         Break;
       end;
     end;
-    if not LocalHuman.TalkShip.AcceptsRansomDemandFrom(Player) and not PartnerCanDemand then
+    if not H.TalkShip.AcceptsRansomDemandFrom(Player) and not PartnerCanDemand then
     begin
-      TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Money.' + LocalHuman.TalkShip.GetTypeNameKey + 'No');
-      LocalHuman.TalkShip.ReactToExtortionDemand(Player);
+      TalkText := H.TalkShip.LookupTalkText('Talk.Money.' + H.TalkShip.GetTypeNameKey + 'No');
+      H.TalkShip.ReactToExtortionDemand(Player);
       TalkOutcome := moRefused;
     end
-    else if (LocalHuman.TalkShip.TypeId <> stWarrior) and LocalHuman.TalkShip.CanEscapePursuer(Player) then
+    else if (H.TalkShip.TypeId <> stWarrior) and H.TalkShip.CanEscapePursuer(Player) then
     begin
       TalkText :=
-          LocalHuman.TalkShip.LookupTalkText('Talk.Money.' + LocalHuman.TalkShip.GetTypeNameKey + 'LongDistance');
-      LocalHuman.TalkShip.ReactToExtortionDemand(Player);
+          H.TalkShip.LookupTalkText('Talk.Money.' + H.TalkShip.GetTypeNameKey + 'LongDistance');
+      H.TalkShip.ReactToExtortionDemand(Player);
       TalkOutcome := moRefused;
     end
     else
     begin
-      TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Money.ComputerAsk');
+      TalkText := H.TalkShip.LookupTalkText('Talk.Money.ComputerAsk');
       TalkOutcome := moAsk;
     end;
   end;
@@ -711,10 +743,13 @@ end;
 
 // Moved from TfTalk.DemandMoney.
 procedure ExecuteDemandMoney(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
+  H := ActorHuman(Command);
   TalkText := Command.Text;
   TalkOutcome :=
-      Ord(LocalHuman.TalkShip.BuildMoneyExtortionResponse(Actor(Command), TalkText, IntArg(Command, 0)));
+      Ord(H.TalkShip.BuildMoneyExtortionResponse(Actor(Command), TalkText, IntArg(Command, 0)));
 end;
 
 function DemandMoney(Amount: Integer; const Text: WideString): Boolean;
@@ -724,9 +759,12 @@ end;
 
 // Moved from TfTalk.DemandCargo.
 procedure ExecuteDemandCargo(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
+  H := ActorHuman(Command);
   TalkText := Command.Text;
-  TalkOutcome := Ord(LocalHuman.TalkShip.BuildCargoExtortionResponse(Actor(Command), TalkText));
+  TalkOutcome := Ord(H.TalkShip.BuildCargoExtortionResponse(Actor(Command), TalkText));
 end;
 
 function DemandCargo(const Text: WideString): Boolean;
@@ -737,26 +775,28 @@ end;
 // Moved from TfTalk.ShowTruceOffer. The refusal's text is the screen's, after its choices.
 procedure ExecuteShowTruceOffer(const Command: TPlayerCommand);
 var
+  H: THuman;
   Response: WideString;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
   TalkText := '';
-  if Player.TruceShip = LocalHuman.TalkShip then
+  if Player.TruceShip = H.TalkShip then
   begin
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Truce.WeAlreadyHavePact');
+    TalkText := H.TalkShip.LookupTalkText('Talk.Truce.WeAlreadyHavePact');
     TalkOutcome := toHavePact;
   end
-  else if LocalHuman.TalkShip.UnknownVirtualC0(Player) then
+  else if H.TalkShip.UnknownVirtualC0(Player) then
     TalkOutcome := toRefused
-  else if LocalHuman.TalkShip.BuildTrucePaymentResponse(Player, Response, 0) then
+  else if H.TalkShip.BuildTrucePaymentResponse(Player, Response, 0) then
   begin
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Truce.ComputerOkWithoutMoney');
+    TalkText := H.TalkShip.LookupTalkText('Talk.Truce.ComputerOkWithoutMoney');
     TalkOutcome := toAcceptedFree;
   end
   else
   begin
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Truce.ComputerAsk');
+    TalkText := H.TalkShip.LookupTalkText('Talk.Truce.ComputerAsk');
     TalkOutcome := toAsk;
   end;
 end;
@@ -768,10 +808,13 @@ end;
 
 // Moved from TfTalk.AcceptTruceOffer.
 procedure ExecuteAcceptTruceOffer(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
+  H := ActorHuman(Command);
   TalkText := Command.Text;
   TalkOutcome :=
-      Ord(LocalHuman.TalkShip.BuildTrucePaymentResponse(Actor(Command), TalkText, IntArg(Command, 0)));
+      Ord(H.TalkShip.BuildTrucePaymentResponse(Actor(Command), TalkText, IntArg(Command, 0)));
 end;
 
 function AcceptTruceOffer(Amount: Integer; const Text: WideString): Boolean;
@@ -784,45 +827,47 @@ end;
 // Moved from TfTalk.ShowAttackTargets; the choices stay in the screen.
 procedure ExecuteShowAttackTargets(const Command: TPlayerCommand);
 var
+  H: THuman;
   Ship: TShip;
   AllowTargets, ReadyAttack: Boolean;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
   TalkText := '';
   TalkTarget := nil;
   AllowTargets := True;
   ReadyAttack := False;
-  if LocalHuman.TalkShip.RecomputeFearState and (Player <> LocalHuman.TalkShip.PartnerShip) then
+  if H.TalkShip.RecomputeFearState and (Player <> H.TalkShip.PartnerShip) then
   begin
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Attack.ComputerInFear');
+    TalkText := H.TalkShip.LookupTalkText('Talk.Attack.ComputerInFear');
     AllowTargets := False;
   end
-  else if LocalHuman.TalkShip is TTranclucator then
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Tranclucator.Attack.Ask')
-  else if not LocalHuman.TalkShip.TrustsAttackRequester(Player) then
+  else if H.TalkShip is TTranclucator then
+    TalkText := H.TalkShip.LookupTalkText('Talk.Tranclucator.Attack.Ask')
+  else if not H.TalkShip.TrustsAttackRequester(Player) then
   begin
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Attack.' + LocalHuman.TalkShip.GetTypeNameKey + 'Suspect');
+    TalkText := H.TalkShip.LookupTalkText('Talk.Attack.' + H.TalkShip.GetTypeNameKey + 'Suspect');
     AllowTargets := False;
   end
-  else if LocalHuman.TalkShip.HasLockedOrFollowOrder
-      and (Player <> LocalHuman.TalkShip.PartnerShip)
-      and (LocalHuman.TalkShip.TypeId <> stWarrior) then
+  else if H.TalkShip.HasLockedOrFollowOrder
+      and (Player <> H.TalkShip.PartnerShip)
+      and (H.TalkShip.TypeId <> stWarrior) then
   begin
     TalkText :=
-        LocalHuman.TalkShip.LookupTalkText('Talk.Attack.' + LocalHuman.TalkShip.GetTypeNameKey + 'HaveBusiness');
+        H.TalkShip.LookupTalkText('Talk.Attack.' + H.TalkShip.GetTypeNameKey + 'HaveBusiness');
     AllowTargets := False;
   end
-  else if LocalHuman.TalkShip.OrderTarget is TShip then
+  else if H.TalkShip.OrderTarget is TShip then
   begin
-    Ship := LocalHuman.TalkShip.OrderTarget as TShip;
-    if (LocalHuman.TalkShip.GetRelationLevelToShip(Ship) = rlHostile)
+    Ship := H.TalkShip.OrderTarget as TShip;
+    if (H.TalkShip.GetRelationLevelToShip(Ship) = rlHostile)
         and Player.CanSelectShipTarget(Ship)
         and not (Ship.TargetingRestriction in [1, 2]) then
     begin
       TalkText :=
           FormatText1(
-              LocalHuman.TalkShip.LookupTalkText('Talk.Attack.ComputerReadyAttack'),
+              H.TalkShip.LookupTalkText('Talk.Attack.ComputerReadyAttack'),
               '<color=255,240,100>',
               '<Target>',
               Ship.GetFullName(' ') + GetLocalObjectLink(Ship, False)
@@ -834,12 +879,12 @@ begin
     else
     begin
       TalkText :=
-          LocalHuman.TalkShip.LookupTalkText('Talk.Attack.' + LocalHuman.TalkShip.GetTypeNameKey + 'HaveBusiness');
+          H.TalkShip.LookupTalkText('Talk.Attack.' + H.TalkShip.GetTypeNameKey + 'HaveBusiness');
       AllowTargets := False;
     end;
   end
   else
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Attack.ComputerAsk');
+    TalkText := H.TalkShip.LookupTalkText('Talk.Attack.ComputerAsk');
   TalkOutcome := 0;
   if AllowTargets then
     TalkOutcome := TalkOutcome or aoAllowTargets;
@@ -855,27 +900,29 @@ end;
 // Moved from TfTalk.RequestAttackTarget.
 procedure ExecuteRequestAttackTarget(const Command: TPlayerCommand);
 var
+  H: THuman;
   Target: TShip;
   Event: TGalaxyEvent;
   Accepted: Boolean;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
   Target := ShipArg(Command, 0);
-  if LocalHuman.TalkShip.RecomputeFearState
-      and (LocalHuman.TalkShip.OrderTarget <> Target)
-      and (Player <> LocalHuman.TalkShip.PartnerShip) then
+  if H.TalkShip.RecomputeFearState
+      and (H.TalkShip.OrderTarget <> Target)
+      and (Player <> H.TalkShip.PartnerShip) then
   begin
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Attack.ComputerInFear');
+    TalkText := H.TalkShip.LookupTalkText('Talk.Attack.ComputerInFear');
     TalkOutcome := raInFear;
     Exit;
   end;
   TalkText := Command.Text;
-  Accepted := LocalHuman.TalkShip.BuildAttackRequestResponse(Player, TalkText, Target);
+  Accepted := H.TalkShip.BuildAttackRequestResponse(Player, TalkText, Target);
   if Accepted then
   begin
     Event := AddGalaxyEvent('PlayerTalkedShipIntoAttacking');
-    Event.AddData(LocalHuman.TalkShip.Id);
+    Event.AddData(H.TalkShip.Id);
     Event.AddData(Target.Id);
     TalkOutcome := raAccepted;
   end
@@ -895,8 +942,11 @@ end;
 
 // Moved from TfTalk.AcceptJointAttack.
 procedure ExecuteAcceptJointAttack(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
-  LocalHuman.TalkShip.SetJointAttackTarget(Actor(Command), ShipArg(Command, 0));
+  H := ActorHuman(Command);
+  H.TalkShip.SetJointAttackTarget(Actor(Command), ShipArg(Command, 0));
 end;
 
 procedure AcceptJointAttack(Target: TShip);
@@ -907,29 +957,31 @@ end;
 // Moved from TfTalk.RequestProtection.
 procedure ExecuteRequestProtection(const Command: TPlayerCommand);
 var
+  H: THuman;
   Target: TShip;
   I, Reward: Integer;
   Weapon: TWeapon;
   CanEscape, FearsAttacker, RecognizesPlayer: Boolean;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
-  if (not LocalHuman.TalkShip.RecomputeFearState)
-      and (LocalHuman.TalkShip.GetRelationLevelToShip(Player) = rlHostile) then
+  if (not H.TalkShip.RecomputeFearState)
+      and (H.TalkShip.GetRelationLevelToShip(Player) = rlHostile) then
   begin
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Protect.ComputerNotFearAndWar');
+    TalkText := H.TalkShip.LookupTalkText('Talk.Protect.ComputerNotFearAndWar');
     TalkOutcome := rpNotFearAndWar;
     Exit;
   end;
-  Target := TShip(LocalHuman.TalkShip.OrderTarget);
-  if LocalHuman.TalkShip.UnknownVirtualC0(Target) then
+  Target := TShip(H.TalkShip.OrderTarget);
+  if H.TalkShip.UnknownVirtualC0(Target) then
   begin
-    if LocalHuman.TalkShip.GetRelationLevelToShip(Player) = rlHostile then
-      TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.Protect.ComputerNotFearAndWar')
+    if H.TalkShip.GetRelationLevelToShip(Player) = rlHostile then
+      TalkText := H.TalkShip.LookupTalkText('Talk.Protect.ComputerNotFearAndWar')
     else
       TalkText :=
           FormatText1(
-              LocalHuman.TalkShip.LookupTalkText('Talk.Protect.' + LocalHuman.TalkShip.GetTypeNameKey + 'No'),
+              H.TalkShip.LookupTalkText('Talk.Protect.' + H.TalkShip.GetTypeNameKey + 'No'),
               '<color=255,240,100>',
               '<Target>',
               Target.GetFullName(' ') + GetLocalObjectLink(Target, False)
@@ -937,65 +989,65 @@ begin
     TalkOutcome := rpRefusedTarget;
     Exit;
   end;
-  if LocalHuman.TalkShip.EvaluateAllyRelationAndStrength(Player) then
+  if H.TalkShip.EvaluateAllyRelationAndStrength(Player) then
   begin
-    CanEscape := Target.CanEscapePursuer(LocalHuman.TalkShip);
-    FearsAttacker := Target.AcceptsRansomDemandFrom(LocalHuman.TalkShip);
+    CanEscape := Target.CanEscapePursuer(H.TalkShip);
+    FearsAttacker := Target.AcceptsRansomDemandFrom(H.TalkShip);
     Reward :=
         Round(
             RemapClamped(
-                Target.ChanceToWin(LocalHuman.TalkShip),
+                Target.ChanceToWin(H.TalkShip),
                 0.1,
                 1,
                 Galaxy.ComputeScaledSmallMoney(Target.OwnerId) * 0.5,
                 Galaxy.ComputeScaledMiniMoney(Target.OwnerId) * 0.5
             )
         );
-    if LocalHuman.TalkShip.EnemyShip = Target then
-      LocalHuman.TalkShip.EnemyShip := nil;
-    if LocalHuman.TalkShip.TypeId = stRanger then
-      Target.ChangeRelationToRanger(LocalHuman.TalkShip, 15);
-    if LocalHuman.TalkShip = Target.EnemyShip then
+    if H.TalkShip.EnemyShip = Target then
+      H.TalkShip.EnemyShip := nil;
+    if H.TalkShip.TypeId = stRanger then
+      Target.ChangeRelationToRanger(H.TalkShip, 15);
+    if H.TalkShip = Target.EnemyShip then
       Target.EnemyShip := nil;
     if Target.TypeId = stRanger then
-      LocalHuman.TalkShip.ChangeRelationToRanger(Target, 15);
-    LocalHuman.TalkShip.TruceShip := Target;
-    LocalHuman.TalkShip.NextDay;
-    if LocalHuman.TalkShip.OrderTarget = Target then
-      LocalHuman.TalkShip.OrderNone(False);
-    if (LocalHuman.TalkShip.Order = soFollowShip)
-        and ((LocalHuman.TalkShip.OrderTarget as TShip).TypeId in [stRanger..stPirate]) then
+      H.TalkShip.ChangeRelationToRanger(Target, 15);
+    H.TalkShip.TruceShip := Target;
+    H.TalkShip.NextDay;
+    if H.TalkShip.OrderTarget = Target then
+      H.TalkShip.OrderNone(False);
+    if (H.TalkShip.Order = soFollowShip)
+        and ((H.TalkShip.OrderTarget as TShip).TypeId in [stRanger..stPirate]) then
     begin
-      LocalHuman.TalkShip.NavigateToQueuedPlanet(False);
-      if LocalHuman.TalkShip.Order = soFollowShip then
-        LocalHuman.TalkShip.OrderNone(False);
+      H.TalkShip.NavigateToQueuedPlanet(False);
+      if H.TalkShip.Order = soFollowShip then
+        H.TalkShip.OrderNone(False);
     end;
     for I := 1 to Target.WeaponCount do
     begin
       Weapon := Target.Weapons[I];
-      if LocalHuman.TalkShip = Weapon.Target then
+      if H.TalkShip = Weapon.Target then
         Weapon.Target := nil;
     end;
-    for I := 1 to LocalHuman.TalkShip.WeaponCount do
+    for I := 1 to H.TalkShip.WeaponCount do
     begin
-      Weapon := LocalHuman.TalkShip.Weapons[I];
+      Weapon := H.TalkShip.Weapons[I];
       if Weapon.Target = Target then
         Weapon.Target := nil;
     end;
-    LocalHuman.TalkShip.TruceWithShip(Target);
+    H.TalkShip.TruceWithShip(Target);
     Target.ChangeRelationToRanger(Player, 50);
-    if LocalHuman.TalkShip.TypeId = stPirate then
+    if H.TalkShip.TypeId = stPirate then
       Player.AddWarriorCareerActivity(4);
     if Target.TypeId = stPirate then
       Player.AddPirateCareerActivity(8);
     TalkText :=
         FormatText1(
-            LocalHuman.TalkShip.LookupTalkText('Talk.Protect.' + LocalHuman.TalkShip.GetTypeNameKey + 'Ok'),
+            H.TalkShip.LookupTalkText('Talk.Protect.' + H.TalkShip.GetTypeNameKey + 'Ok'),
             '<color=255,240,100>',
             '<Target>',
             Target.GetFullName(' ') + GetLocalObjectLink(Target, False)
         );
-    RecognizesPlayer := not Target.IsPlayerChameleonEffectiveAgainstSelf;
+    RecognizesPlayer := not Target.IsChameleonEffectiveAgainstSelf(Actor(Command));
     if RecognizesPlayer and (Target.TypeId in [stRanger..stPirate]) then
     begin
       if not FearsAttacker then
@@ -1030,7 +1082,7 @@ begin
   begin
     TalkText :=
         FormatText1(
-            LocalHuman.TalkShip.LookupTalkText('Talk.Protect.' + LocalHuman.TalkShip.GetTypeNameKey + 'No'),
+            H.TalkShip.LookupTalkText('Talk.Protect.' + H.TalkShip.GetTypeNameKey + 'No'),
             '<color=255,240,100>',
             '<Target>',
             Target.GetFullName(' ') + GetLocalObjectLink(Target, False)
@@ -1047,25 +1099,27 @@ end;
 // Moved from TfTalk.RequestPreserveItems.
 procedure ExecuteRequestPreserveItems(const Command: TPlayerCommand);
 var
+  H: THuman;
   I: Integer;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
-  if (LocalHuman.TalkShip.GetRelationLevelToShip(Player) = rlHostile)
-      and not LocalHuman.TalkShip.RecomputeFearState then
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.PreserveItems.ComputerNotFearAndWar')
-  else if (LocalHuman.TalkShip.GetRelationLevelToShip(Player) >= rlGood)
-      or LocalHuman.TalkShip.EvaluateAllyRelationAndStrength(Player) then
+  if (H.TalkShip.GetRelationLevelToShip(Player) = rlHostile)
+      and not H.TalkShip.RecomputeFearState then
+    TalkText := H.TalkShip.LookupTalkText('Talk.PreserveItems.ComputerNotFearAndWar')
+  else if (H.TalkShip.GetRelationLevelToShip(Player) >= rlGood)
+      or H.TalkShip.EvaluateAllyRelationAndStrength(Player) then
   begin
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.PreserveItems.' + LocalHuman.TalkShip.GetTypeNameKey + 'Ok');
+    TalkText := H.TalkShip.LookupTalkText('Talk.PreserveItems.' + H.TalkShip.GetTypeNameKey + 'Ok');
     if Player.PickupTargets <> nil then
-      for I := 1 to LocalHuman.TalkShip.WeaponCount do
-        if (LocalHuman.TalkShip.Weapons[I].Target <> nil)
-            and (Player.PickupTargets.IndexOf(LocalHuman.TalkShip.Weapons[I].Target) >= 0) then
-          LocalHuman.TalkShip.Weapons[I].Target := nil;
+      for I := 1 to H.TalkShip.WeaponCount do
+        if (H.TalkShip.Weapons[I].Target <> nil)
+            and (Player.PickupTargets.IndexOf(H.TalkShip.Weapons[I].Target) >= 0) then
+          H.TalkShip.Weapons[I].Target := nil;
   end
   else
-    TalkText := LocalHuman.TalkShip.LookupTalkText('Talk.PreserveItems.' + LocalHuman.TalkShip.GetTypeNameKey + 'No');
+    TalkText := H.TalkShip.LookupTalkText('Talk.PreserveItems.' + H.TalkShip.GetTypeNameKey + 'No');
 end;
 
 procedure RequestPreserveItems;
@@ -1077,10 +1131,13 @@ end;
 
 // Moved from TfTalk.AcceptPartnerOffer.
 procedure ExecuteAcceptPartnerOffer(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
+  H := ActorHuman(Command);
   TalkText := Command.Text;
   TalkOutcome :=
-      Ord(LocalHuman.TalkShip.AcceptPartnershipOffer(Actor(Command), TalkText, IntArg(Command, 0)));
+      Ord(H.TalkShip.AcceptPartnershipOffer(Actor(Command), TalkText, IntArg(Command, 0)));
 end;
 
 function AcceptPartnerOffer(Amount: Integer; const Text: WideString): Boolean;
@@ -1090,13 +1147,16 @@ end;
 
 // Moved from TfTalk.AcceptPiratePartnerOffer.
 procedure ExecuteAcceptPiratePartnerOffer(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
+  H := ActorHuman(Command);
   TalkText := Command.Text;
   TalkOutcome := 0;
-  if LocalHuman.TalkShip.AcceptPartnershipOffer(Actor(Command), TalkText, IntArg(Command, 0)) then
+  if H.TalkShip.AcceptPartnershipOffer(Actor(Command), TalkText, IntArg(Command, 0)) then
   begin
     TalkOutcome := 1;
-    Actor(Command).PiratePartners.Add(LocalHuman.TalkShip);
+    Actor(Command).PiratePartners.Add(H.TalkShip);
   end;
 end;
 
@@ -1107,8 +1167,11 @@ end;
 
 // Moved from TfTalk.OrderPartnerFollow and OrderPiratePartnerFollow.
 procedure ExecuteOrderTalkShipFollow(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
-  LocalHuman.TalkShip.OrderFollowShip(Actor(Command), 0, True);
+  H := ActorHuman(Command);
+  H.TalkShip.OrderFollowShip(Actor(Command), 0, True);
 end;
 
 procedure OrderTalkShipFollow;
@@ -1118,8 +1181,11 @@ end;
 
 // Moved from TfTalk.OrderPartnerLand and OrderPiratePartnerLand.
 procedure ExecuteOrderTalkShipLand(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
-  LocalHuman.TalkShip.OrderLanding(Actor(Command).OrderTarget, True);
+  H := ActorHuman(Command);
+  H.TalkShip.OrderLanding(Actor(Command).OrderTarget, True);
 end;
 
 procedure OrderTalkShipLand;
@@ -1129,8 +1195,11 @@ end;
 
 // Moved from TfTalk.OrderPartnerJump and OrderPiratePartnerJump.
 procedure ExecuteOrderTalkShipJump(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
-  LocalHuman.TalkShip.OrderJump(Actor(Command).OrderTarget as TStar, True);
+  H := ActorHuman(Command);
+  H.TalkShip.OrderJump(Actor(Command).OrderTarget as TStar, True);
 end;
 
 procedure OrderTalkShipJump;
@@ -1141,24 +1210,26 @@ end;
 // Moved from TfTalk.OrderPartnerDropCargo.
 procedure ExecuteOrderPartnerDropCargo(const Command: TPlayerCommand);
 var
+  H: THuman;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
-  LocalHuman.TalkShip.ChangeRelationToRanger(
+  H.TalkShip.ChangeRelationToRanger(
       Player,
       -Round(
-          LocalHuman.TalkShip.NextRandomInteger(5, 15)
-              / PlanetRaceMarket[LocalHuman.TalkShip.PilotRace].PirateRelationFactor
+          H.TalkShip.NextRandomInteger(5, 15)
+              / PlanetRaceMarket[H.TalkShip.PilotRace].PirateRelationFactor
       )
   );
-  if LocalHuman.TalkShip.GetRelationLevelToShip(Player) = rlHostile then
-    LocalHuman.TalkShip.ChangeRelationToRanger(Player, 10);
-  if not Player.CanResolveObjectWithScanner(LocalHuman.TalkShip) then
+  if H.TalkShip.GetRelationLevelToShip(Player) = rlHostile then
+    H.TalkShip.ChangeRelationToRanger(Player, 10);
+  if not Player.CanResolveObjectWithScanner(H.TalkShip) then
     TalkOutcome := 0
   else
   begin
     TalkOutcome := 1;
-    LocalHuman.TalkShip.DropUnequippedItemsAndGoods;
+    H.TalkShip.DropUnequippedItemsAndGoods;
   end;
 end;
 
@@ -1171,26 +1242,28 @@ end;
 // Moved from TfTalk.GivePartnerGift and PayPartnerGiftMoney.
 procedure ExecuteGivePartnerGift(const Command: TPlayerCommand);
 var
+  H: THuman;
   Change, Amount, Remaining, Payment: Integer;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
   Amount := IntArg(Command, 0);
   Change :=
       Round(
           (150 * Amount)
-              / Max(1, LocalHuman.TalkShip.Wealth + Player.Wealth)
-              * PlanetRaceMarket[LocalHuman.TalkShip.PilotRace].FriendlyRelationScale
+              / Max(1, H.TalkShip.Wealth + Player.Wealth)
+              * PlanetRaceMarket[H.TalkShip.PilotRace].FriendlyRelationScale
       );
   Change := Max(0, Min(100, Change));
-  LocalHuman.TalkShip.ChangeRelationToRanger(Player, Change);
+  H.TalkShip.ChangeRelationToRanger(Player, Change);
   Remaining := Player.Money - Amount;
   if Remaining < 0 then
     Payment := 0
   else
     Payment := Remaining;
   Player.SetMoney(Payment);
-  LocalHuman.TalkShip.SetMoney(LocalHuman.TalkShip.Money + Amount);
+  H.TalkShip.SetMoney(H.TalkShip.Money + Amount);
 end;
 
 procedure GivePartnerGift(Amount: Integer);
@@ -1201,29 +1274,31 @@ end;
 // Moved from TfTalk.GivePiratePartnerGift and PayPiratePartnerGiftMoney.
 procedure ExecuteGivePiratePartnerGift(const Command: TPlayerCommand);
 var
+  H: THuman;
   Change, Amount, Remaining, Payment: Integer;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
   Amount := IntArg(Command, 0);
-  if LocalHuman.TalkShip is TNormalShip then
+  if H.TalkShip is TNormalShip then
     Change :=
         Round(
             (150 * Amount)
-                / Max(1, LocalHuman.TalkShip.Wealth + Player.Wealth)
-                * PlanetRaceMarket[LocalHuman.TalkShip.PilotRace].FriendlyRelationScale
+                / Max(1, H.TalkShip.Wealth + Player.Wealth)
+                * PlanetRaceMarket[H.TalkShip.PilotRace].FriendlyRelationScale
         )
   else
-    Change := Round((150 * Amount) / Max(1, LocalHuman.TalkShip.Wealth + Player.Wealth));
+    Change := Round((150 * Amount) / Max(1, H.TalkShip.Wealth + Player.Wealth));
   Change := Max(0, Min(100, Change));
-  LocalHuman.TalkShip.ChangeRelationToRanger(Player, Change);
+  H.TalkShip.ChangeRelationToRanger(Player, Change);
   Remaining := Player.Money - Amount;
   if Remaining < 0 then
     Payment := 0
   else
     Payment := Remaining;
   Player.SetMoney(Payment);
-  LocalHuman.TalkShip.SetMoney(LocalHuman.TalkShip.Money + Amount);
+  H.TalkShip.SetMoney(H.TalkShip.Money + Amount);
 end;
 
 procedure GivePiratePartnerGift(Amount: Integer);
@@ -1234,10 +1309,12 @@ end;
 // Moved from TfTalk.ApplyOrderToAllPartners.
 procedure ExecuteApplyOrderToAllPartners(const Command: TPlayerCommand);
 var
+  H: THuman;
   I: Integer;
   Ship: TShip;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
   for I := 0 to Player.CurrentStar.Ships.Count - 1 do
   begin
@@ -1245,15 +1322,15 @@ begin
     if (Player = Ship.PartnerShip)
         and Ship.InNormalSpace
         and (Player <> Ship)
-        and (LocalHuman.TalkShip <> Ship) then
+        and (H.TalkShip <> Ship) then
     begin
-      if Player = LocalHuman.TalkShip.OrderTarget then
+      if Player = H.TalkShip.OrderTarget then
         Ship.OrderFollowShip(Player, 0, True)
-      else if LocalHuman.TalkShip.Order = soFollowShip then
-        Ship.SetJointAttackTarget(Ship, LocalHuman.TalkShip.OrderTarget as TShip)
-      else if LocalHuman.TalkShip.Order = soLand then
+      else if H.TalkShip.Order = soFollowShip then
+        Ship.SetJointAttackTarget(Ship, H.TalkShip.OrderTarget as TShip)
+      else if H.TalkShip.Order = soLand then
         Ship.OrderLanding(Player.OrderTarget, True)
-      else if LocalHuman.TalkShip.Order = soJump then
+      else if H.TalkShip.Order = soJump then
         Ship.OrderJump(Player.OrderTarget as TStar, True);
     end;
   end;
@@ -1266,8 +1343,11 @@ end;
 
 // Moved from TfTalk.OrderPiratePartnerAttack.
 procedure ExecuteOrderPiratePartnerAttack(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
-  LocalHuman.TalkShip.SetJointAttackTarget(LocalHuman.TalkShip, ShipArg(Command, 0));
+  H := ActorHuman(Command);
+  H.TalkShip.SetJointAttackTarget(H.TalkShip, ShipArg(Command, 0));
 end;
 
 procedure OrderPiratePartnerAttack(Target: TShip);
@@ -1278,23 +1358,25 @@ end;
 // Moved from TfTalk.ShipDismissAct.
 procedure ExecuteDismissPartner(const Command: TPlayerCommand);
 var
+  H: THuman;
   Action: Integer;
 begin
+  H := ActorHuman(Command);
   Action := IntArg(Command, 0);
   case Action of
     1: ;
     2:
     begin
-      if (LocalHuman.TalkShip.Order = soFollowShip) and (LocalHuman.TalkShip.OrderTarget = LocalHuman.TalkShip.PartnerShip) then
-        LocalHuman.TalkShip.OrderNone(False);
-      LocalHuman.TalkShip.PartnerShip := nil;
+      if (H.TalkShip.Order = soFollowShip) and (H.TalkShip.OrderTarget = H.TalkShip.PartnerShip) then
+        H.TalkShip.OrderNone(False);
+      H.TalkShip.PartnerShip := nil;
     end;
     3:
     begin
-      LocalHuman.TalkShip.PartnerShip := nil;
-      LocalHuman.TalkShip.ChangeRelationToRanger(Actor(Command), 10);
-      LocalHuman.TalkShip.EnemyShip := Actor(Command);
-      LocalHuman.TalkShip.EngageEnemyShip;
+      H.TalkShip.PartnerShip := nil;
+      H.TalkShip.ChangeRelationToRanger(Actor(Command), 10);
+      H.TalkShip.EnemyShip := Actor(Command);
+      H.TalkShip.EngageEnemyShip;
     end;
   else
     RaiseWideMessage(
@@ -1310,8 +1392,11 @@ end;
 
 // Moved from TfTalk.DiscussOldHull.
 procedure ExecuteOffendOverOldHull(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
-  LocalHuman.TalkShip.ChangeRelationToRanger(Actor(Command), -15);
+  H := ActorHuman(Command);
+  H.TalkShip.ChangeRelationToRanger(Actor(Command), -15);
 end;
 
 procedure OffendOverOldHull;
@@ -1324,9 +1409,11 @@ end;
 // Moved from TfTalk.OrderTranclucatorFollow.
 procedure ExecuteOrderTranclucatorFollow(const Command: TPlayerCommand);
 var
+  H: THuman;
   Ship: TTranclucator;
 begin
-  Ship := LocalHuman.TalkShip as TTranclucator;
+  H := ActorHuman(Command);
+  Ship := H.TalkShip as TTranclucator;
   Ship.OrderFollowShip(Actor(Command), 0, True);
   Ship.FollowOwner := False;
   Ship.SeekItems := False;
@@ -1340,9 +1427,11 @@ end;
 // Moved from TfTalk.OrderTranclucatorReturn.
 procedure ExecuteOrderTranclucatorReturn(const Command: TPlayerCommand);
 var
+  H: THuman;
   Ship: TTranclucator;
 begin
-  Ship := LocalHuman.TalkShip as TTranclucator;
+  H := ActorHuman(Command);
+  Ship := H.TalkShip as TTranclucator;
   Ship.OrderFollowShip(Ship.OwnerShip, 1, False);
   Ship.FollowOwner := True;
   Ship.SeekItems := False;
@@ -1356,9 +1445,11 @@ end;
 // Moved from TfTalk.OrderTranclucatorSeekItems.
 procedure ExecuteOrderTranclucatorSeekItems(const Command: TPlayerCommand);
 var
+  H: THuman;
   Ship: TTranclucator;
 begin
-  Ship := LocalHuman.TalkShip as TTranclucator;
+  H := ActorHuman(Command);
+  Ship := H.TalkShip as TTranclucator;
   Ship.FollowOwner := False;
   Ship.SeekItems := True;
   if Ship.CargoFreeSpace > 0 then
@@ -1373,9 +1464,11 @@ end;
 // Moved from TfTalk.CancelTranclucatorSeekItems.
 procedure ExecuteCancelTranclucatorSeekItems(const Command: TPlayerCommand);
 var
+  H: THuman;
   Ship: TTranclucator;
 begin
-  Ship := LocalHuman.TalkShip as TTranclucator;
+  H := ActorHuman(Command);
+  Ship := H.TalkShip as TTranclucator;
   Ship.FollowOwner := False;
   Ship.SeekItems := False;
   Ship.UpdateFreeFlightOrder;
@@ -1389,6 +1482,7 @@ end;
 // Moved from TfTalk.ShowTranclucatorOptions.
 procedure ExecuteSetTranclucatorOptions(const Command: TPlayerCommand);
 var
+  H: THuman;
   Ship: TTranclucator;
   Digit: Cardinal;
   Action: PtrInt;
@@ -1399,8 +1493,9 @@ var
     Action := Cardinal(Action) div 10;
   end;
 begin
+  H := ActorHuman(Command);
   Action := IntArg(Command, 0);
-  Ship := LocalHuman.TalkShip as TTranclucator;
+  Ship := H.TalkShip as TTranclucator;
   PopTranclucatorOptionDigit;
   Enabled := Digit = 1;
   PopTranclucatorOptionDigit;
@@ -1424,9 +1519,11 @@ end;
 // Moved from TfTalk.OrderTranclucatorDropCargo.
 procedure ExecuteOrderTranclucatorDropCargo(const Command: TPlayerCommand);
 var
+  H: THuman;
   Ship: TTranclucator;
 begin
-  Ship := LocalHuman.TalkShip as TTranclucator;
+  H := ActorHuman(Command);
+  Ship := H.TalkShip as TTranclucator;
   Ship.FollowOwner := False;
   Ship.SeekItems := False;
   Ship.DropUnequippedItemsAndGoods;
@@ -1441,9 +1538,11 @@ end;
 // Moved from TfTalk.OrderTranclucatorLand.
 procedure ExecuteOrderTranclucatorLand(const Command: TPlayerCommand);
 var
+  H: THuman;
   Ship: TTranclucator;
 begin
-  Ship := LocalHuman.TalkShip as TTranclucator;
+  H := ActorHuman(Command);
+  Ship := H.TalkShip as TTranclucator;
   Ship.FollowOwner := False;
   Ship.SeekItems := False;
   Ship.StoreOnLanding := False;
@@ -1458,9 +1557,11 @@ end;
 // Moved from TfTalk.OrderTranclucatorStoreCargo.
 procedure ExecuteOrderTranclucatorStoreCargo(const Command: TPlayerCommand);
 var
+  H: THuman;
   Ship: TTranclucator;
 begin
-  Ship := LocalHuman.TalkShip as TTranclucator;
+  H := ActorHuman(Command);
+  Ship := H.TalkShip as TTranclucator;
   Ship.FollowOwner := False;
   Ship.SeekItems := False;
   Ship.StoreOnLanding := True;
@@ -1475,11 +1576,13 @@ end;
 // Moved from TfTalk.ApplyOrderToAllTranclucators.
 procedure ExecuteApplyOrderToAllTranclucators(const Command: TPlayerCommand);
 var
+  H: THuman;
   Current, Target: TTranclucator;
   Ship: TShip;
   I: Integer;
 begin
-  Current := LocalHuman.TalkShip as TTranclucator;
+  H := ActorHuman(Command);
+  Current := H.TalkShip as TTranclucator;
   for I := 0 to Current.CurrentStar.Ships.Count - 1 do
   begin
     Ship := Current.CurrentStar.Ships[I];
@@ -1520,34 +1623,36 @@ end;
 // Moved from TfTalk.RunDominatorProgram.
 procedure ExecuteRunDominatorProgram(const Command: TPlayerCommand);
 var
+  H: THuman;
   ProgramIndex: Byte;
   Remaining: Integer;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
   ProgramIndex := IntArg(Command, 0);
   Remaining := Player.ProgramCounts[ProgramIndex] - 1;
   Player.ProgramCounts[ProgramIndex] := Remaining;
-  if (LocalHuman.TalkShip as TKling).KlingType in [ktBoss, ktBertor] then
+  if (H.TalkShip as TKling).KlingType in [ktBoss, ktBertor] then
   begin
-    (LocalHuman.TalkShip as TKling).DetectAttackingPlayer(Player);
+    (H.TalkShip as TKling).DetectAttackingPlayer(Player);
     TalkOutcome := 0;
     Exit;
   end;
-  (LocalHuman.TalkShip as TKling).ActiveProgramAppliedTurn := Galaxy.CurrentTurn;
-  (LocalHuman.TalkShip as TKling).ActiveProgramId := ProgramIndex;
+  (H.TalkShip as TKling).ActiveProgramAppliedTurn := Galaxy.CurrentTurn;
+  (H.TalkShip as TKling).ActiveProgramId := ProgramIndex;
   Inc(Player.AchievementStats.SuccessfulDominatorHacks);
-  case (LocalHuman.TalkShip as TKling).ActiveProgramId of
+  case (H.TalkShip as TKling).ActiveProgramId of
     prgShipwreck:
-      LocalHuman.TalkShip.DropItemsForDominatorProgram(SeededRandomIntRange(1, 3, Galaxy.CurrentTurn));
-    prgSelfDestruction: LocalHuman.TalkShip.DestroyQueued := True;
+      H.TalkShip.DropItemsForDominatorProgram(SeededRandomIntRange(1, 3, Galaxy.CurrentTurn));
+    prgSelfDestruction: H.TalkShip.DestroyQueued := True;
     prgDisconnection:
     begin
-      LocalHuman.TalkShip.OrderNone(False);
-      LocalHuman.TalkShip.ClearWeaponTargets(nil);
+      H.TalkShip.OrderNone(False);
+      H.TalkShip.ClearWeaponTargets(nil);
     end;
   end;
-  (LocalHuman.TalkShip as TKling).DetectAttackingPlayer(Player);
+  (H.TalkShip as TKling).DetectAttackingPlayer(Player);
   TalkOutcome := 1;
 end;
 
@@ -1559,12 +1664,12 @@ end;
 
 { Military support }
 
-function GetMilitaryHullRepairCost: Integer;
+function GetMilitaryHullRepairCost(Player: TPlayer): Integer;
 begin
   Result :=
       Ceil(
-          ((GetPlayer.GetHull.Weight - GetPlayer.GetHull.HullPoints) / 10)
-              * (GetPlayer.GetCombatStatusStrength(cseBWRepairDebuff) * 0.002 + 1)
+          ((Player.GetHull.Weight - Player.GetHull.HullPoints) / 10)
+              * (Player.GetCombatStatusStrength(cseBWRepairDebuff) * 0.002 + 1)
               * RemapClamped(Galaxy.TechLevel, 2, 8, 5, 1)
       );
 end;
@@ -1579,7 +1684,7 @@ begin
   Player := Actor(Command);
   Nodes := IntArg(Command, 0);
   Player.ConsumeAvailableNodes(Nodes, nil);
-  Fraction := Nodes / GetMilitaryHullRepairCost;
+  Fraction := Nodes / GetMilitaryHullRepairCost(Player);
   RepairAmount :=
       Ceil(
           RemapClamped(
@@ -1602,20 +1707,20 @@ begin
   Result := TalkOutcome;
 end;
 
-function GetMilitaryEquipmentRepairCost: Integer;
+function GetMilitaryEquipmentRepairCost(Human: THuman): Integer;
 var
   I: Integer;
   Item: TEquipment;
 begin
   Result := 0;
-  for I := 0 to GetPlayer.Inventory.Count - 1 do
+  for I := 0 to Human.Player.Inventory.Count - 1 do
   begin
-    Item := GetPlayer.Inventory[I];
+    Item := Human.Player.Inventory[I];
     if ((not (Item is TWeapon))
             or (TWeapon(Item).GetWeaponInfo.Availability <> waNotSoldAndNodeRepair))
         and (Item.ItemType <> t_Hull)
         and (Item.EquippedFlag <> 0)
-        and LocalHuman.TalkShip.CanRepairEquipmentTech(Item)
+        and Human.TalkShip.CanRepairEquipmentTech(Item)
         and (Item.ConditionPercent < 90) then
       Inc(Result, Round(Item.CalculateRepairCost));
   end;
@@ -1630,14 +1735,16 @@ end;
 // Moved from TfTalk.AcceptMilitaryEquipmentRepair.
 procedure ExecuteMilitaryEquipmentRepair(const Command: TPlayerCommand);
 var
+  H: THuman;
   Fraction: Single;
   I, Nodes: Integer;
   Item: TEquipment;
   Player: TPlayer;
 begin
+  H := ActorHuman(Command);
   Player := Actor(Command);
   Nodes := IntArg(Command, 0);
-  Fraction := Nodes / GetMilitaryEquipmentRepairCost;
+  Fraction := Nodes / GetMilitaryEquipmentRepairCost(H);
   Player.ConsumeAvailableNodes(Nodes, nil);
   for I := 0 to Player.Inventory.Count - 1 do
   begin
@@ -1646,7 +1753,7 @@ begin
             or (TWeapon(Item).GetWeaponInfo.Availability <> waNotSoldAndNodeRepair))
         and (Item.ItemType <> t_Hull)
         and (Item.EquippedFlag <> 0)
-        and LocalHuman.TalkShip.CanRepairEquipmentTech(Item)
+        and H.TalkShip.CanRepairEquipmentTech(Item)
         and (Item.ConditionPercent < 90) then
     begin
       Item.ConditionPercent := RemapClamped(Fraction, 0, 1, Item.ConditionPercent, 100);
@@ -1662,16 +1769,16 @@ begin
   SubmitInt(ckMilitaryEquipmentRepair, Nodes);
 end;
 
-function IsMilitaryProtectedQuestItem(Item: TItem): Boolean;
+function IsMilitaryProtectedQuestItem(Player: TPlayer; Item: TItem): Boolean;
 var
   I: Integer;
   Quest: PQuest;
 begin
   Result := False;
   if (Item is TUselessItem) and (Item.ScriptItem = nil) then
-    for I := 0 to GetPlayer.Quests.Count - 1 do
+    for I := 0 to Player.Quests.Count - 1 do
     begin
-      Quest := GetPlayer.Quests[I];
+      Quest := Player.Quests[I];
       if Quest.QuestType = qtSendLetter then
         if LocalizedColorText(
                 WideString('Quest.SendLetter.' + IntToStr(Quest.QuestNumber) + '.SysName'))
@@ -1717,7 +1824,7 @@ begin
     Item := Player.Inventory[I];
     if (Item.OwnerId = Byte(oiDominator))
         and (Item is TUselessItem)
-        and not IsMilitaryProtectedQuestItem(Item) then
+        and not IsMilitaryProtectedQuestItem(Player, Item) then
     begin
       Player.Inventory.Delete(I);
       if (Galaxy.DominatorResearch[Ord(Item.DominatorSeries)].Progress < 100)

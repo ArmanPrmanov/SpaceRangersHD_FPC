@@ -362,7 +362,6 @@ type
     function GetCaptainPortraitResourceBase: WideString;
     function HasPlayerChameleonCharges: Boolean;
     function SelectChameleonVisualType: Byte;
-    function IsPlayerChameleonEffectiveAgainstSelf: Boolean;
     // CHANGE: CLEANUP - Whether Player's chameleon fools this ship, for any human's ranger.
     function IsChameleonEffectiveAgainstSelf(Player: TShip): Boolean;
     procedure RefreshGraphic;
@@ -3390,12 +3389,6 @@ begin
       end;
     end;
   Result := BestKind;
-end;
-
-function TShip.IsPlayerChameleonEffectiveAgainstSelf: Boolean;
-begin
-  // Left for callers not yet converted; each should pass the human it means.
-  Result := IsChameleonEffectiveAgainstSelf(GetPlayer);
 end;
 
 function TShip.IsChameleonEffectiveAgainstSelf(Player: TShip): Boolean;

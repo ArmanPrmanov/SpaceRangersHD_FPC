@@ -3844,7 +3844,7 @@ var
   Cost, Available: Integer;
   Caption: WideString;
 begin
-  Cost := GetMilitaryHullRepairCost;
+  Cost := GetMilitaryHullRepairCost(LocalPlayer);
   if Cost <= 0 then
   begin
     DialogText := LocalHuman.TalkShip.LookupTalkText('Talk.MilitarySupport.AnswerNoNeedToRepairHull');
@@ -3901,7 +3901,7 @@ var
   Cost, Available: Integer;
   Caption: WideString;
 begin
-  Cost := GetMilitaryEquipmentRepairCost;
+  Cost := GetMilitaryEquipmentRepairCost(LocalHuman);
   if Cost <= 0 then
   begin
     DialogText := LocalHuman.TalkShip.LookupTalkText('Talk.MilitarySupport.AnswerNoNeedToRepairEq');
@@ -3956,7 +3956,7 @@ begin
     Item := LocalPlayer.Inventory[I];
     if (Item.OwnerId = Byte(oiDominator))
         and (Item is TUselessItem)
-        and not IsMilitaryProtectedQuestItem(Item) then
+        and not IsMilitaryProtectedQuestItem(LocalPlayer, Item) then
     begin
       Inc(Count);
       if (Galaxy.DominatorResearch[Ord(Item.DominatorSeries)].Progress < 100)
@@ -4029,7 +4029,7 @@ begin
     Item := LocalPlayer.Inventory[I];
     if (Item.OwnerId = Byte(oiDominator))
         and (Item is TUselessItem)
-        and not IsMilitaryProtectedQuestItem(Item) then
+        and not IsMilitaryProtectedQuestItem(LocalPlayer, Item) then
     begin
       Inc(Count);
       if (Galaxy.DominatorResearch[Ord(Item.DominatorSeries)].Progress < 100)
