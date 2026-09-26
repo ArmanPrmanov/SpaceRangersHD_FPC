@@ -674,7 +674,9 @@ type
     procedure PruneWeaponTargetsAfterTurn;
     procedure MarkConnectedCombatEvents(Events: TList; Target: TObject; Group: Integer);
     function DropMinerals(Quantity: Integer; Position: TPointF; Seed: Cardinal): Integer;
+    // CHANGE: CLEANUP - Killer is the human's ranger who destroyed the asteroid.
     procedure ProcessPlayerAsteroidKill(
+        Killer: TObject;
         MineralValue: Integer;
         Position: TPointF;
         AsteroidId: Cardinal
@@ -1293,6 +1295,7 @@ begin
     Buffer.AddDWord(KellerTargetStar.Id);
   Buffer.AddIntegerValue(KellerMissionState);
   Count := 0;
+  // HUMANS: per-human save block (item 5)
   if LocalHuman.TemporaryShopSlots <> nil then
     Count := LocalHuman.TemporaryShopSlots.Count;
   Buffer.AddWideChar(WideChar(Count));
@@ -1334,7 +1337,8 @@ begin
   Buffer.AddDWord(CurrentTurn);
   for Difficulty := 0 to 7 do
     Buffer.AddAnsiChar(AnsiChar(DifficultyLevels[Difficulty]));
-  Buffer.AddDWord(GetPlayer.Id);
+  // HUMANS: per-human save block (item 5)
+  Buffer.AddDWord(LocalPlayer.Id);
   if LocalHuman.PendingPlayerFollowTarget = nil then
     Buffer.AddDWord(0)
   else
@@ -1351,6 +1355,7 @@ begin
     Buffer.AddDWord(0)
   else
     Buffer.AddDWord(TerronShip.Id);
+  // HUMANS: per-human save block (item 5)
   Buffer.AddDWord(LocalHuman.PlayerStar.Id);
   Buffer.AddDWord(PieceCreatorTargetStarId);
   for Career := 0 to 2 do
@@ -1360,6 +1365,7 @@ begin
     else
       Buffer.AddDWord((EminentCareerShips[Career] as TShip).Id);
   end;
+  // HUMANS: per-human save block (item 5)
   Count := LocalHuman.PlayerOldQuests.Count;
   Buffer.AddWideChar(WideChar(Count));
   for I := 0 to Count - 1 do
@@ -1421,6 +1427,7 @@ begin
     Buffer.AddSingle(SpaceBackgroundEntries[I].OrbitStepDegrees);
     Buffer.AddIntegerValue(SpaceBackgroundEntries[I].FrameIndex);
   end;
+  // HUMANS: per-human save block (item 5)
   for I := 0 to 8 do
     if Assigned(SnapshotObjectIdentity) then
       Buffer.AddDWord(0)
@@ -1768,6 +1775,7 @@ begin
     Stage := 8;
     ClearTemporaryShopSlotGrid;
     Count := Buffer.GetWord;
+    // HUMANS: per-human save block (item 5)
     if Count > 0 then
     begin
       LocalHuman.TemporaryShopSlots := TList.Create;
@@ -1845,6 +1853,7 @@ begin
     CurrentTurn := Buffer.GetUInt32;
     for Difficulty := 0 to 7 do
       DifficultyLevels[Difficulty] := Buffer.GetByte;
+    // HUMANS: per-human save block (item 5)
     PlayerRangerIndex := Buffer.GetUInt32;
     LocalHuman.PendingPlayerFollowTarget := TShip(Buffer.GetUInt32);
     BlazerShip := TKling(Buffer.GetUInt32);
@@ -1876,12 +1885,13 @@ begin
       Star := TStar(Stars[I]);
       Star.ResolveLoadedReferences(Self);
     end;
+    // HUMANS: per-human save block (item 5)
     if LocalHuman.TemporaryShopSlots <> nil then
     begin
-      if GetPlayer.CurrentPlanet <> nil then
-        LocalHuman.TemporaryShopPlanet := GetPlayer.CurrentPlanet
-      else if (GetPlayer.DockedTo <> nil) and (GetPlayer.DockedTo is TRuins) then
-        LocalHuman.TemporaryShopStation := TRuins(GetPlayer.DockedTo)
+      if LocalPlayer.CurrentPlanet <> nil then
+        LocalHuman.TemporaryShopPlanet := LocalPlayer.CurrentPlanet
+      else if (LocalPlayer.DockedTo <> nil) and (LocalPlayer.DockedTo is TRuins) then
+        LocalHuman.TemporaryShopStation := TRuins(LocalPlayer.DockedTo)
       else
         ClearTemporaryShopSlotGrid;
     end;
@@ -1902,6 +1912,7 @@ begin
     if KellerTargetStar <> nil then
       KellerTargetStar := TObject(IdToStar(Cardinal(KellerTargetStar))) as TStar;
     Stage := 23;
+    // HUMANS: per-human save block (item 5)
     LocalHuman.PendingPlayerFollowTarget :=
         TObject(IdToShip(Cardinal(LocalHuman.PendingPlayerFollowTarget), True)) as TShip;
     BlazerShip := TObject(IdToShip(Cardinal(BlazerShip), True)) as TKling;
@@ -1913,6 +1924,7 @@ begin
       EminentCareerShips[Career] :=
           TObject(IdToShip(Cardinal(EminentCareerShips[Career]), True)) as TRanger;
     Stage := 25;
+    // HUMANS: per-human save block (item 5)
     if LocalHuman.PlayerOldQuests <> nil then
     begin
       LocalHuman.PlayerOldQuests.Free;
@@ -1997,6 +2009,7 @@ begin
       SpaceBackgroundEntries[I].FrameIndex := Buffer.GetInt32;
     end;
     Stage := 32;
+    // HUMANS: per-human save block (item 5)
     for I := 0 to 8 do
       LocalHuman.HangarShipIds[I] := Buffer.GetUInt32;
     Stage := 33;
@@ -2218,7 +2231,10 @@ begin
       );
     end;
     Stage := 48;
-    GetPlayer.CurrentStar.RefreshMovementStepParameters;
+    // CHANGE: CLEANUP - Every human's star moves in the finer steps.
+    for I := 0 to Session.Humans.Count - 1 do
+      if Session.Humans[I].Player <> nil then
+        Session.Humans[I].Player.CurrentStar.RefreshMovementStepParameters;
     // CHANGE: BUGFIX - Saves before version 51 hold no ruins proxy. Create it here, before the
     // random state is restored, instead of lazily in TPlayer.SaveToBuffer.
     for I := 0 to Rangers.Count - 1 do
@@ -2461,7 +2477,9 @@ begin
       Ship.UpdateAverageRangerRelativeStrength;
     end;
     LoadedShips.Clear;
-    GetPlayer.RefreshStorageBubbles;
+    // CHANGE: CLEANUP - The storage bubbles are the local human's: TPlayer.BuildStorageBubbles
+    // writes to the local human's bubbles whichever ranger it lists.
+    LocalPlayer.RefreshStorageBubbles;
     WaitForTurnCalculationUI;
   except
     on E: Exception do
@@ -2517,10 +2535,11 @@ begin
   Session
       .EditableSaveBlock
       .AddParam('NormalsDeltaWin', WideString(SysUtils.IntToStr(Self.WarDeltaWin[0])));
+  // HUMANS: per-human save block (item 5)
   Session
       .EditableSaveBlock
-      .AddParam('RejectPB', BoolToWideString(GetPlayer.DeclinePlanetBattleOffers));
-  GetPlayer.SaveToBlock(Session.EditableSaveBlock.AddBlockByPath('Player'));
+      .AddParam('RejectPB', BoolToWideString(LocalPlayer.DeclinePlanetBattleOffers));
+  LocalPlayer.SaveToBlock(Session.EditableSaveBlock.AddBlockByPath('Player'));
   HoleBlock := Session.EditableSaveBlock.AddBlockByPath('HoleList');
   for i := 0 to Self.Holes.Count - 1 do
   begin
@@ -2571,9 +2590,10 @@ begin
     WarDeltaWin[1] := StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('KlingsDeltaWin')));
     WarDeltaWin[2] := StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('PiratesDeltaWin')));
     WarDeltaWin[0] := StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('NormalsDeltaWin')));
-    GetPlayer.DeclinePlanetBattleOffers :=
+    // HUMANS: per-human save block (item 5)
+    LocalPlayer.DeclinePlanetBattleOffers :=
         LowerCase(AnsiString(Session.EditableSaveBlock.GetParam('RejectPB'))) = 'true';
-    GetPlayer.LoadFromBlock(Session.EditableSaveBlock.GetBlockByPath('Player'));
+    LocalPlayer.LoadFromBlock(Session.EditableSaveBlock.GetBlockByPath('Player'));
     HoleBlock := Session.EditableSaveBlock.GetBlockByPath('HoleList');
     for I := 0 to Holes.Count - 1 do
     begin
@@ -2586,8 +2606,10 @@ begin
       Hole := THole.Create;
       Hole.InitializeGraphic('');
       THoleSE(Hole.Graphic).SetState(1);
-      Hole.Star1 := GetPlayer.CurrentStar;
-      Hole.Star2 := GetPlayer.CurrentStar;
+      // HUMANS: per-human save block (item 5). The edited state is the local human's, and
+      // so is the star its new holes open in.
+      Hole.Star1 := LocalPlayer.CurrentStar;
+      Hole.Star2 := LocalPlayer.CurrentStar;
       Hole.ArcadeMapName := '';
       // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
       Angle := HeadingDegreesToRadians(GameRandomIntRange(0, 359));
@@ -2696,9 +2718,13 @@ var
   PreviousTechLevel: Integer;
   Text: WideString;
   Stage: Integer;
+  HumanIndex: Integer;
+  Human: THuman;
+  Player: TPlayer;
 begin
   Stage := 0;
-  if GetPlayer <> nil then
+  // CHANGE: CLEANUP - The day runs while there is a human, and goes on while any human lives.
+  if Session.Humans.Count > 0 then
     try
       Ratio :=
           GetCoalitionToPirateSystemRatio
@@ -2748,7 +2774,7 @@ begin
         if not StarHasHuman(Star) then
           Star.NextDay(False);
       end;
-      if (GetPlayer = nil) or (GetPlayer.GetHull.HullPoints <= 0) then
+      if not HasLivingHuman then
         Exit;
       Stage := 2;
       I := 0;
@@ -2763,11 +2789,16 @@ begin
           for J := 0 to Script.EtherIds.GetCount - 1 do
           begin
             Stage := 5;
-            Bubble := FindPlayerBubbleByKey(Script.EtherIds.GetTextAt(J), False);
-            if (Bubble <> nil) and (Bubble.Kind = 3) then
+            // CHANGE: CLEANUP - The ended script's ether messages close for every human.
+            for HumanIndex := 0 to Session.Humans.Count - 1 do
             begin
-              Bubble.Kind := 5;
-              Bubble.WasRead := False;
+              Bubble :=
+                  Session.Humans[HumanIndex].FindBubbleByKey(Script.EtherIds.GetTextAt(J), False);
+              if (Bubble <> nil) and (Bubble.Kind = 3) then
+              begin
+                Bubble.Kind := 5;
+                Bubble.WasRead := False;
+              end;
             end;
           end;
           Stage := 6;
@@ -2793,28 +2824,36 @@ begin
       Stage := 9;
       UpdateConstellationMilitaryStats;
       Stage := 10;
-      LocalHuman.PlayerDialogueRequestCount := 0;
+      for HumanIndex := 0 to Session.Humans.Count - 1 do
+        Session.Humans[HumanIndex].PlayerDialogueRequestCount := 0;
       Inc(ReservedMessageCounter);
       Inc(TurnsSinceLastShipMessage);
       if CurrentTurn mod 365 = 0 then
         ComputeGlobalGoodsPriceBands;
       Stage := 11;
-      if GetPlayer <> nil then
-        GetPlayer.RebuildEquipmentCache;
+      for HumanIndex := 0 to Session.Humans.Count - 1 do
+        if Session.Humans[HumanIndex].Player <> nil then
+          Session.Humans[HumanIndex].Player.RebuildEquipmentCache;
       Stage := 12;
       if (CurrentTurn + Integer(GenerationSeed)) mod 7 = 0 then
         ComputeRangerSpawnQuotas;
       Stage := 17;
-      if GetPlayer <> nil then
-        if GetPlayer.CurrentStar <> nil then
-          for I := GetPlayer.CurrentStar.Ships.Count - 1 downto 0 do
-          begin
-            Ship := TShip(GetPlayer.CurrentStar.Ships[I]);
-            if (Ship.PartnerShip <> nil)
-                and (Ship.PartnershipDaysRemaining > 0)
-                and (WingmenPendingLeadershipPenalty.IndexOf(Ship) < 0) then
-              WingmenPendingLeadershipPenalty.Add(Ship);
-          end;
+      // CHANGE: CLEANUP - The star loop above left out every star with a human, so each of
+      // them adds its partners here.
+      for HumanIndex := 0 to Session.Humans.Count - 1 do
+      begin
+        Player := Session.Humans[HumanIndex].Player;
+        if Player <> nil then
+          if Player.CurrentStar <> nil then
+            for I := Player.CurrentStar.Ships.Count - 1 downto 0 do
+            begin
+              Ship := TShip(Player.CurrentStar.Ships[I]);
+              if (Ship.PartnerShip <> nil)
+                  and (Ship.PartnershipDaysRemaining > 0)
+                  and (WingmenPendingLeadershipPenalty.IndexOf(Ship) < 0) then
+                WingmenPendingLeadershipPenalty.Add(Ship);
+            end;
+      end;
       Stage := 18;
       ApplyWingmanLeadershipPenalty;
       Stage := 19;
@@ -2822,17 +2861,22 @@ begin
       Stage := 20;
       PreviousTechLevel := TechLevel;
       RefreshTechLevel;
-      if GetPlayer <> nil then
-        if GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0 then
-        begin
-          Text := '';
-          if TechLevel > PreviousTechLevel then
-            Text := LocalizedText('Artefacts.ArtAnalyzer.TechLevelUp');
-          if TechLevel < PreviousTechLevel then
-            Text := LocalizedText('Artefacts.ArtAnalyzer.TechLevelDown');
-          if Text <> '' then
-            AddOrUpdatePlayerBubble(0, CurrentTurn, Text, '');
-        end;
+      // CHANGE: CLEANUP - Every human with the analyzer hears of the change.
+      for HumanIndex := 0 to Session.Humans.Count - 1 do
+      begin
+        Human := Session.Humans[HumanIndex];
+        if Human.Player <> nil then
+          if Human.Player.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0 then
+          begin
+            Text := '';
+            if TechLevel > PreviousTechLevel then
+              Text := LocalizedText('Artefacts.ArtAnalyzer.TechLevelUp');
+            if TechLevel < PreviousTechLevel then
+              Text := LocalizedText('Artefacts.ArtAnalyzer.TechLevelDown');
+            if Text <> '' then
+              Human.AddOrUpdateBubble(0, CurrentTurn, Text, '');
+          end;
+      end;
       Stage := 21;
       TryDispatchMilitaryBaseToEnemyStar;
       Stage := 22;
@@ -2862,6 +2906,24 @@ var
   Angle, Radius: Single;
   Star: TStar;
   Missile: TMissile;
+  Human: THuman;
+  Player: TPlayer;
+  procedure AddSeriesWinBubble(ResolvedTurn: Integer; const Key: WideString);
+  var
+    HumanIndex: Integer;
+    Text: WideString;
+  begin
+    // CHANGE: CLEANUP - Galaxy news: every human gets it.
+    Text :=
+        ReplaceColoredToken(
+            LocalizedColorText('FormRuinsRC.Win.AddNews'),
+            '<Date>',
+            FormatGameTurnDate(ResolvedTurn),
+            '<color=255,240,100>'
+        );
+    for HumanIndex := 0 to Session.Humans.Count - 1 do
+      Session.Humans[HumanIndex].AddOrUpdateBubble(3, ResolvedTurn, Text, Key);
+  end;
 begin
   if Self.SpecialSimulationMode <> 0 then
     Exit;
@@ -2870,17 +2932,23 @@ begin
   Self.ProcessDominatorResearchProgress;
   ProcessBankDebtAndDeposits;
   Self.ProcessRangerCenterNewYearEvent;
-  if (GetPlayer <> nil)
-      and GetPlayer.AfterburnerActive
-      and (GetPlayer.GetEngine <> nil)
-      and (GetPlayer.GetEngine.ConditionPercent <= GlobalsV.AfterburnerStopCondition)
-      and (Self.TechnicModEnabled = 0) then
+  // CHANGE: CLEANUP - Every human's worn engine stops its afterburner.
+  for i := 0 to Session.Humans.Count - 1 do
   begin
-    GetPlayer.AfterburnerActive := False;
-    GetPlayer.RefreshDerivedStats(True);
-    LocalHuman.PlayerStar.InterruptLongTravel := True;
+    Human := Session.Humans[i];
+    Player := Human.Player;
+    if (Player <> nil)
+        and Player.AfterburnerActive
+        and (Player.GetEngine <> nil)
+        and (Player.GetEngine.ConditionPercent <= GlobalsV.AfterburnerStopCondition)
+        and (Self.TechnicModEnabled = 0) then
+    begin
+      Player.AfterburnerActive := False;
+      Player.RefreshDerivedStats(True);
+      Human.PlayerStar.InterruptLongTravel := True;
+    end;
   end;
-  if GetPlayer <> nil then
+  if Session.Humans.Count > 0 then
   begin
     i := 0;
     while i < Self.Holes.Count do
@@ -2926,7 +2994,7 @@ begin
       Inc(i);
     end;
   end;
-  if (GetPlayer <> nil)
+  if (Session.Humans.Count > 0)
       and (NextRandomIntRange(
               0,
               aConst.GalaxyDifficultyTuning[Self.DifficultyLevels[6]].RandomHoleSpawnRollMaximum,
@@ -2948,7 +3016,7 @@ begin
       Hole.Star1 :=
           TStar(Self.Stars[NextRandomIntRange(0, Self.Stars.Count - 1, Self.RandomState)]);
       if (Hole.Star1.Constellation.Id <> 20)
-          and (GetPlayer.CurrentStar <> Hole.Star1)
+          and not StarHasHuman(Hole.Star1)
           and TStar(Hole.Star1).IsConstellationVisible
           and (Hole.Star1.DaysSincePlayerVisit >= 30)
           and (Hole.Star1.ControlFaction <> sfDominators)
@@ -2969,7 +3037,7 @@ begin
             TStar(Self.Stars[NextRandomIntRange(0, Self.Stars.Count - 1, Self.RandomState)]);
         if (Hole.Star1 <> Hole.Star2)
             and (Hole.Star2.Constellation.Id <> 20)
-            and (GetPlayer.CurrentStar <> Hole.Star2)
+            and not StarHasHuman(Hole.Star2)
             and TStar(Hole.Star2).IsConstellationVisible
             and (Hole.Star2.DaysSincePlayerVisit >= 30) then
           Break;
@@ -3033,30 +3101,21 @@ begin
     if aKling.TerronShip = nil then
     begin
       Self.TerronSeriesResolvedTurn := Self.CurrentTurn;
-      if (GetPlayer <> nil) and (Self.TerronLandingLockTurn <> 0) then
+      // Achievements belong to the human at this machine.
+      if (LocalPlayer <> nil) and (Self.TerronLandingLockTurn <> 0) then
         TryUnlockAchievement('TERRONBATTLE');
     end
     else if Self.TerronToStarTurn <> 0 then
     begin
       Self.TerronSeriesResolvedTurn := Self.CurrentTurn;
-      if GetPlayer <> nil then
+      if LocalPlayer <> nil then
         TryUnlockAchievement('TERRONSTAR');
     end;
     if Self.TerronSeriesResolvedTurn <> 0 then
     begin
       Self.DominatorResearch[2].Progress := 100;
       if Self.CoalitionDefeatedTurn = 0 then
-        AddOrUpdatePlayerBubble(
-            3,
-            Self.TerronSeriesResolvedTurn,
-            ReplaceColoredToken(
-                LocalizedColorText('FormRuinsRC.Win.AddNews'),
-                '<Date>',
-                FormatGameTurnDate(Self.TerronSeriesResolvedTurn),
-                '<color=255,240,100>'
-            ),
-            'TerronWin'
-        );
+        AddSeriesWinBubble(Self.TerronSeriesResolvedTurn, 'TerronWin');
     end;
   end;
   if Self.KellerSeriesResolvedTurn = 0 then
@@ -3064,13 +3123,13 @@ begin
     if aKling.KellerShip = nil then
     begin
       Self.KellerSeriesResolvedTurn := Self.CurrentTurn;
-      if GetPlayer <> nil then
+      if LocalPlayer <> nil then
         TryUnlockAchievement('KELLERDESTROY');
     end
     else if Self.KellerLeaveTurn <> 0 then
     begin
       Self.KellerSeriesResolvedTurn := Self.CurrentTurn;
-      if GetPlayer <> nil then
+      if LocalPlayer <> nil then
         TryUnlockAchievement('KELLERRESEARCH');
     end;
     if Self.KellerResearchTargetStarId <> 0 then
@@ -3079,17 +3138,7 @@ begin
     begin
       Self.DominatorResearch[1].Progress := 100;
       if Self.CoalitionDefeatedTurn = 0 then
-        AddOrUpdatePlayerBubble(
-            3,
-            Self.KellerSeriesResolvedTurn,
-            ReplaceColoredToken(
-                LocalizedColorText('FormRuinsRC.Win.AddNews'),
-                '<Date>',
-                FormatGameTurnDate(Self.KellerSeriesResolvedTurn),
-                '<color=255,240,100>'
-            ),
-            'KellerWin'
-        );
+        AddSeriesWinBubble(Self.KellerSeriesResolvedTurn, 'KellerWin');
     end;
   end;
   if Self.BlazerSeriesResolvedTurn = 0 then
@@ -3097,7 +3146,7 @@ begin
     if aKling.BlazerShip = nil then
     begin
       Self.BlazerSeriesResolvedTurn := Self.CurrentTurn;
-      if GetPlayer <> nil then
+      if LocalPlayer <> nil then
       begin
         if Self.BlazerSelfDestructTurn = 0 then
           TryUnlockAchievement('TERMINATOR')
@@ -3108,24 +3157,14 @@ begin
     else if Self.BlazerLandingPlanetId <> 0 then
     begin
       Self.BlazerSeriesResolvedTurn := Self.CurrentTurn;
-      if GetPlayer <> nil then
+      if LocalPlayer <> nil then
         TryUnlockAchievement('BLAZERPIECE');
     end;
     if Self.BlazerSeriesResolvedTurn <> 0 then
     begin
       Self.DominatorResearch[0].Progress := 100;
       if Self.CoalitionDefeatedTurn = 0 then
-        AddOrUpdatePlayerBubble(
-            3,
-            Self.BlazerSeriesResolvedTurn,
-            ReplaceColoredToken(
-                LocalizedColorText('FormRuinsRC.Win.AddNews'),
-                '<Date>',
-                FormatGameTurnDate(Self.BlazerSeriesResolvedTurn),
-                '<color=255,240,100>'
-            ),
-            'BlazerWin'
-        );
+        AddSeriesWinBubble(Self.BlazerSeriesResolvedTurn, 'BlazerWin');
       if (Self.BlazerLandingPlanetId <> 0)
           and (aKling.BlazerShip <> nil)
           and TShip(aKling.BlazerShip).InNormalSpace then
@@ -3165,7 +3204,9 @@ begin
     Ship := ShipsInTransit[I];
     if Ship.OrderTarget <> nil then
     begin
-      if Ship = GetPlayer then
+      // The hyperspace backdrop is shared; any human's arrival draws a new one, as the
+      // player's did, so every machine draws the same numbers.
+      if IsHuman(Ship) then
       begin
         repeat
           Effect := NextRandomIntRange(0, 2, RandomState)
@@ -3334,6 +3375,8 @@ var
   Item: TItem;
   Artefact: TArtefact;
   Storage: PStorageEntry;
+  HumanIndex: Integer;
+  Player: TPlayer;
 begin
   Result := nil;
   if Id = 0 then
@@ -3405,16 +3448,23 @@ begin
       end;
     end;
   end;
-  for I := 0 to GetPlayer.StorageEntries.Count - 1 do
+  // CHANGE: CLEANUP - Every human's storage holds tranclucators.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    Storage := GetPlayer.StorageEntries[I];
-    Item := Storage.Item;
-    if (Item is TArtefactTranclucator)
-        and (TArtefactTranclucator(Item).Ship <> nil)
-        and (Cardinal((TObject(TArtefactTranclucator(Item).Ship) as TTranclucator).Id) = Id) then
+    Player := Session.Humans[HumanIndex].Player;
+    if Player = nil then
+      Continue;
+    for I := 0 to Player.StorageEntries.Count - 1 do
     begin
-      Result := TArtefactTranclucator(Item).Ship;
-      Exit;
+      Storage := Player.StorageEntries[I];
+      Item := Storage.Item;
+      if (Item is TArtefactTranclucator)
+          and (TArtefactTranclucator(Item).Ship <> nil)
+          and (Cardinal((TObject(TArtefactTranclucator(Item).Ship) as TTranclucator).Id) = Id) then
+      begin
+        Result := TArtefactTranclucator(Item).Ship;
+        Exit;
+      end;
     end;
   end;
   if RaiseIfMissing then
@@ -3432,6 +3482,7 @@ var
   Stored: TStoredItem;
   Drop: PMovingDropItemEntry;
   i, StarCount, j, ListCount, k, SubCount: Integer;
+  Human: THuman;
 begin
   Result := nil;
   if Id = 0 then
@@ -3557,14 +3608,19 @@ begin
       end;
     end;
   end;
-  if LocalHuman.TemporaryShopSlots <> nil then
-    for i := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
-      if TShopStockSlot(LocalHuman.TemporaryShopSlots[i]).Item <> nil then
-        if Cardinal(TShopStockSlot(LocalHuman.TemporaryShopSlots[i]).Item.Id) = Id then
-        begin
-          Result := TShopStockSlot(LocalHuman.TemporaryShopSlots[i]).Item;
-          Exit;
-        end;
+  // CHANGE: CLEANUP - Every human's open shop holds items.
+  for k := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[k];
+    if Human.TemporaryShopSlots <> nil then
+      for i := 0 to Human.TemporaryShopSlots.Count - 1 do
+        if TShopStockSlot(Human.TemporaryShopSlots[i]).Item <> nil then
+          if Cardinal(TShopStockSlot(Human.TemporaryShopSlots[i]).Item.Id) = Id then
+          begin
+            Result := TShopStockSlot(Human.TemporaryShopSlots[i]).Item;
+            Exit;
+          end;
+  end;
   for k := 0 to Self.StoredItems.Count - 1 do
   begin
     Stored := TStoredItem(Self.StoredItems[k]);
@@ -4728,7 +4784,8 @@ begin
   begin
     Ship := TShip(Ships[I]);
     Key := 'ShipId' + IntToStr(Cardinal(Ship.Id));
-    if GetPlayer <> Ship then
+    // HUMANS: per-human save block (item 5). The local human's ranger has its own block.
+    if LocalPlayer <> Ship then
       Ship.SaveToBlock(ShipBlock.AddBlockByPath(Key));
   end;
   ShipBlock.AddParam('CreateNewRuins', '');
@@ -4812,7 +4869,8 @@ begin
     begin
       Ship := TShip(Ships[I]);
       Key := 'ShipId' + IntToStr(Cardinal(Ship.Id));
-      if GetPlayer <> Ship then
+      // HUMANS: per-human save block (item 5). The local human's ranger has its own block.
+      if LocalPlayer <> Ship then
         Ship.LoadFromBlock(GetBlockByPath(Key));
     end;
     Key := GetParam('CreateNewRuins');
@@ -5005,7 +5063,8 @@ begin
     begin
       Entry := MovingDropItems[MovingDropItems.Count - 1 - I];
       Radius := SeededRandomIntRange(50, 150, Seed);
-      if (LocalHuman.PlayerStar = Self) and (CurrentStepIndex > SimulationStepCount - 20) then
+      // CHANGE: CLEANUP - In every filmed star, not only the local human's.
+      if IsFilmedStar(Self) and (CurrentStepIndex > SimulationStepCount - 20) then
         Radius := 5;
       Seed := StepRandomSeed(Seed);
       Jitter := SeededRandomUnitFloat(Seed) * 0.3 - 0.15;
@@ -5030,6 +5089,7 @@ begin
   end;
 end;
 procedure TStar.ProcessPlayerAsteroidKill(
+    Killer: TObject;
     MineralValue: Integer;
     Position: TPointF;
     AsteroidId: Cardinal
@@ -5039,9 +5099,14 @@ var
   Planet, NearestPlanet: TPlanet;
   BestDistance, Distance: Extended;
   Text: WideString;
+  Player: TPlayer;
+  Human: THuman;
 begin
-  Inc(GetPlayer.AchievementStats.AsteroidsDestroyed);
-  TrySetAchievementProgress('ASTEROID', GetPlayer.AchievementStats.AsteroidsDestroyed);
+  Player := Killer as TPlayer;
+  Inc(Player.AchievementStats.AsteroidsDestroyed);
+  // CHANGE: CLEANUP - Achievements belong to the human at this machine.
+  if Player = LocalPlayer then
+    TrySetAchievementProgress('ASTEROID', Player.AchievementStats.AsteroidsDestroyed);
   if ControlFaction <> sfCoalition then
     Exit;
   if Status.CustomFaction <> '' then
@@ -5080,11 +5145,13 @@ begin
             3,
             Galaxy.GenerationSeed + NearestPlanet.GenerationSeed + Cardinal(Galaxy.CurrentTurn)
         );
-    SimEvents.PlaySound('Sound.Sell');
-    GetPlayer.SetMoney(GetPlayer.Money + MineralValue);
+    // CHANGE: CLEANUP - The sound is for the human at this machine.
+    if Player = LocalPlayer then
+      SimEvents.PlaySound('Sound.Sell');
+    Player.SetMoney(Player.Money + MineralValue);
     Text := LocalizedColorText('GalaxyNews.Star.Asteroid.Kill.' + IntToStr(MessageVariant));
     ReplaceTextToken(Text, '<Money>', IntToStr(MineralValue), '<color=255,240,100>');
-    NearestPlanet.ChangeRelationToRanger(GetPlayer, 5);
+    NearestPlanet.ChangeRelationToRanger(Player, 5);
   end
   else
   begin
@@ -5092,10 +5159,12 @@ begin
         LocalizedColorText(
             'GalaxyNews.Star.Asteroid.Kill.' + OwnerInfo[NearestPlanet.OwnerId].InternalName
         );
-    NearestPlanet.ChangeRelationToRanger(GetPlayer, -10);
+    NearestPlanet.ChangeRelationToRanger(Player, -10);
   end;
   ReplaceTextToken(Text, '<Planet>', NearestPlanet.GetFullName(' '), '<color=255,240,100>');
-  AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, Text, 'AsteroidKill');
+  Human := HumanOf(Player);
+  if Human <> nil then
+    Human.AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, 'AsteroidKill');
 end;
 procedure TStar.ClearTargetReferences(Target: TObject);
 var
@@ -5240,7 +5309,7 @@ var
   Ship: TShip;
   I: Integer;
 begin
-  if (GetPlayer <> nil) and (GetPlayer.CurrentStar = Self) then
+  if StarHasHuman(Self) then
   begin
     DaysSincePlayerVisit := 0;
     if PlayerPresenceLevel < 90 then
@@ -5317,12 +5386,12 @@ begin
                   or (((Ship as TKling).KlingType in [ktEquentor..ktUrgant])
                       and (I in [5, 6])
                       and (ShipTypeCounts[stKling] > 9)))
-              and (GetPlayer <> nil)
+              and (Session.Humans.Count > 0)
               and Target.InHyperspace
               and (Target.OrderTarget is TStar)
               and ((Target.OrderTarget as TStar).ControlFaction = sfCoalition)
               and not IsStarProtectedByScript(Target.OrderTarget as TStar)
-              and ((Galaxy.CurrentTurn > 300) or (GetPlayer.CurrentStar <> Target.OrderTarget))
+              and ((Galaxy.CurrentTurn > 300) or not StarHasHuman(TStar(Target.OrderTarget)))
               and (Galaxy.CurrentTurn mod 15 = 0) then
             Ship.OrderJump(Target.OrderTarget as TStar, True)
           else if (Ship.TypeId = stPirate)
@@ -5331,13 +5400,13 @@ begin
               and (Ship.GetHullIntegrityPercent > 90)
               and (Target.GetHullIntegrityPercent > 10)
               and (Ship.ChanceToWin(Target) > 1)
-              and (GetPlayer <> nil)
+              and (Session.Humans.Count > 0)
               and Target.InHyperspace
               and (Target.OrderTarget is TStar)
               and ((Target.OrderTarget as TStar).ControlFaction = sfCoalition)
               and ((Target.OrderTarget as TStar).Status.CustomFaction = '')
               and not IsStarProtectedByScript(Target.OrderTarget as TStar)
-              and ((Galaxy.CurrentTurn > 300) or (GetPlayer.CurrentStar <> Target.OrderTarget))
+              and ((Galaxy.CurrentTurn > 300) or not StarHasHuman(TStar(Target.OrderTarget)))
               and (Galaxy.CurrentTurn mod 7 = 0) then
             Ship.OrderJump(Target.OrderTarget as TStar, True)
           else
@@ -5560,7 +5629,7 @@ begin
       begin
         Ship := Ships[I];
         Stage := 1;
-        if not Ship.IsHullDestroyed and ((GetPlayer = Ship) or (Galaxy.StasisModEnabled <> 1)) then
+        if not Ship.IsHullDestroyed and (IsHuman(Ship) or (Galaxy.StasisModEnabled <> 1)) then
           Ship.ScriptItemsAct(satOnStep, nil, nil, TurnPhase);
         Stage := 2;
       end;
@@ -5618,7 +5687,8 @@ begin
 end;
 function ShouldContinuePlayerTravel: Boolean;
 begin
-  if GetPlayer = nil then
+  // Whether the star map ends the next turn by itself: the local human's screen.
+  if LocalPlayer = nil then
   begin
     Result := False;
     Exit;
@@ -5628,7 +5698,7 @@ begin
     Result := True;
     Exit;
   end;
-  if not HasShownPlayerTip(18) and (GetPlayer.Order = soJumpHole) then
+  if not HasShownPlayerTip(18) and (LocalPlayer.Order = soJumpHole) then
   begin
     ShowPlayerTipOnce(18);
     Result := False;
@@ -5639,7 +5709,7 @@ begin
     Result := False;
     Exit;
   end;
-  if (LocalHuman.PendingPlayerFollowTarget <> nil) and (GetPlayer.GetHullIntegrityPercent < 25) then
+  if (LocalHuman.PendingPlayerFollowTarget <> nil) and (LocalPlayer.GetHullIntegrityPercent < 25) then
   begin
     Result := False;
     Exit;
@@ -5649,16 +5719,16 @@ begin
     Result := True
   else
   begin
-    GetPlayer.BuildOrderMovementPath(200);
+    LocalPlayer.BuildOrderMovementPath(200);
     if not LocalHuman.PlayerStar.PlayerCombatOccurred
         and not LocalHuman.PlayerStar.InterruptLongTravel
-        and (GetPlayer.GetMovementPathTurnCount > 0)
-        and ((GetPlayer.Order <> soMove)
-            or (PointDistanceSquared(GetPlayer.Position, GetPlayer.OrderDestination) > 19600)) then
+        and (LocalPlayer.GetMovementPathTurnCount > 0)
+        and ((LocalPlayer.Order <> soMove)
+            or (PointDistanceSquared(LocalPlayer.Position, LocalPlayer.OrderDestination) > 19600)) then
     begin
-      if (GetPlayer.Order = soFollowShip)
-          and (PointDistanceSquared(GetPlayer.Position, (GetPlayer.OrderTarget as TShip).Position)
-              < Sqr(GetPlayer.Speed)) then
+      if (LocalPlayer.Order = soFollowShip)
+          and (PointDistanceSquared(LocalPlayer.Position, (LocalPlayer.OrderTarget as TShip).Position)
+              < Sqr(LocalPlayer.Speed)) then
       begin
         Result := False;
         Exit;
@@ -5673,6 +5743,8 @@ function EstimatePlayerTravelTurns: Single;
 var
   Destination: TPointF;
 begin
+  // HUMANS: Whose view does a star's one film follow when the star holds several humans?
+  // The film's pacing follows the player's travel; it is the local human's until then.
   Result := 0;
   if GetPlayer = nil then
     Exit;
@@ -5712,15 +5784,17 @@ begin
     Result := '';
     Exit;
   end;
+  // The link is for the conversation screen, which is the local human's (remote dialogue
+  // is Phase 5).
   Local := False;
   if not Local and (Obj is TShip) then
-    if (Obj as TShip).CurrentStar = GetPlayer.CurrentStar then
+    if (Obj as TShip).CurrentStar = LocalPlayer.CurrentStar then
       Local := True;
   if not Local and (Obj is TPlanet) then
-    if (Obj as TPlanet).CurrentStar = GetPlayer.CurrentStar then
+    if (Obj as TPlanet).CurrentStar = LocalPlayer.CurrentStar then
       Local := True;
   if not Local and (Obj is TItem) then
-    if GetPlayer.CurrentStar.Items.IndexOf(Obj) >= 0 then
+    if LocalPlayer.CurrentStar.Items.IndexOf(Obj) >= 0 then
       Local := True;
   if Local then
     // Native $7B28C9 formats the object address as an unsigned decimal value.
@@ -5754,6 +5828,8 @@ begin
   for I := 0 to Constellations.Count - 1 do
   begin
     Constellation := TConstellation(Constellations[I]);
+    // HUMANS: Whose home sets the constellations' distance tiers when humans start apart: the
+    // first human's, or each constellation's nearest human's?
     if Constellation.SharesOutlineSegment(GetPlayer.HomePlanet.CurrentStar.Constellation) then
       Constellation.HomeDistanceTier := 0
     else
@@ -13898,8 +13974,13 @@ begin
                       Asteroid.Position,
                       Self.GenerationSeed * Asteroid.Id
                   );
-              if GetPlayer = Missile.OwnerShip then
-                Self.ProcessPlayerAsteroidKill(MineralValue, Asteroid.Position, Asteroid.Id);
+              if IsHuman(Missile.OwnerShip) then
+                Self.ProcessPlayerAsteroidKill(
+                    Missile.OwnerShip,
+                    MineralValue,
+                    Asteroid.Position,
+                    Asteroid.Id
+                );
               Asteroid.Respawn;
               Point := Asteroid.Position;
             end;

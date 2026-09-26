@@ -139,6 +139,8 @@ function IsHuman(Ship: TObject): Boolean; inline;
 function StarHasHuman(Star: TStar; Excluded: TObject = nil): Boolean;
 // Whether a human's ranger is in Star in normal space, where it sees the star's fights.
 function StarHasHumanInSpace(Star: TStar): Boolean;
+// Whether some human's ranger still has hull points. The day stops when none does.
+function HasLivingHuman: Boolean;
 // Whether Star is some human's PlayerStar. Those stars run their day in the player-star
 // job, each with a film, and the galaxy job leaves them out (ROADMAP.md, Phase 4).
 function IsFilmedStar(Star: TStar): Boolean;
@@ -213,6 +215,20 @@ begin
   begin
     Player := Session.Humans[I].Player;
     if (Player <> nil) and (Player.CurrentStar = Star) and Player.InNormalSpace then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
+function HasLivingHuman: Boolean;
+var
+  I: Integer;
+  Player: TPlayer;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Player := Session.Humans[I].Player;
+    if (Player <> nil) and (Player.GetHull.HullPoints > 0) then
       Exit(True);
   end;
   Result := False;

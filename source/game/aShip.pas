@@ -6049,7 +6049,7 @@ begin
             Asteroid.Id * Star.GenerationSeed
         );
     if IsHuman(Self) then
-      Star.ProcessPlayerAsteroidKill(Minerals, Asteroid.Position, Asteroid.Id);
+      Star.ProcessPlayerAsteroidKill(Self, Minerals, Asteroid.Position, Asteroid.Id);
     Asteroid.Respawn;
     if Galaxy.StasisModEnabled = 1 then
       Asteroid.AdvanceOrbitStep(StepIndex, RecordFilm);
