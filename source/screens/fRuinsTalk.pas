@@ -569,7 +569,7 @@ begin
           TextPanel.VerticalScrollBar.ClientSize.Y + TextExtra
       )
   );
-  TextLabel := TextPanel.FindByNameRecursive('LocalHuman.TalkText');
+  TextLabel := TextPanel.FindByNameRecursive('TalkText');
   TextLabel.SetSize(Classes.Point(TextLabel.ClientSize.X, TextLabel.ClientSize.Y + TextExtra));
   ChoicePanel := TalkPanel.FindByNameRecursive('TalkPA') as TPanelScrollBarGI;
   ChoicePanel.SetPosition(
@@ -876,7 +876,7 @@ begin
                 and (LocalPlayer.PendingDockDialogue = 2))
     );
     Stage := 23;
-    TextLabel := GetByName('LocalHuman.TalkText') as TLabelGI;
+    TextLabel := GetByName('TalkText') as TLabelGI;
     if FontDialog = 0 then
       TextLabel.SetFontName(NormalFontName)
     else if FontDialog = 1 then
@@ -1406,7 +1406,7 @@ begin
   begin
     Choices := GetByName('TalkPA') as TPanelScrollBarGI;
     Choices.SetActive(True);
-    Choices.VerticalScrollBar.SetSmallChange((GetByName('LocalHuman.TalkText') as TLabelGI).GetLineHeight);
+    Choices.VerticalScrollBar.SetSmallChange((GetByName('TalkText') as TLabelGI).GetLineHeight);
     Choices.VerticalScrollBar.SetLargeChange(Choices.ClientSize.Y);
     Choices.VerticalScrollBar.SetPageSize(Choices.ClientSize.Y);
     Choices.SetScrollOffset(Point(0, 0));
@@ -1431,16 +1431,16 @@ begin
     DialogText := ReplaceAllWideString(DialogText, #13#10, #13#10 + LocalizedTextLinePrefix);
     PresentedTextLength := Length(DialogText);
     DialogText := ReplaceAllWideString(DialogText, '<color=255,240,100>', '<color=0,50,200>');
-    (GetByName('LocalHuman.TalkText') as TLabelGI).SetText(DialogText);
+    (GetByName('TalkText') as TLabelGI).SetText(DialogText);
     TextPanel := GetByName('TextScroll') as TPanelScrollBarGI;
     TextPanel.SetScrollOffset(Point(0, 0));
     TextPanel.UpdateScrollRanges;
     TextPanel.VerticalScrollBar.SetActive(
-        (TextPanel.FindByNameRecursive('LocalHuman.TalkText') as TLabelGI).ClientSize.Y
+        (TextPanel.FindByNameRecursive('TalkText') as TLabelGI).ClientSize.Y
             > TextPanel.ClientSize.Y
     );
     TextPanel.VerticalScrollBar.SetSmallChange(
-        (TextPanel.FindByNameRecursive('LocalHuman.TalkText') as TLabelGI).GetLineHeight
+        (TextPanel.FindByNameRecursive('TalkText') as TLabelGI).GetLineHeight
     );
     TextPanel.VerticalScrollBar.SetLargeChange(TextPanel.ClientSize.Y);
     TextPanel.VerticalScrollBar.SetPageSize(TextPanel.ClientSize.Y);
@@ -1592,7 +1592,7 @@ procedure TfRuinsTalk.AddMessageClicked(Sender: TObjectGI);
 var
   Text: WideString;
 begin
-  Text := (GetByName('LocalHuman.TalkText') as TLabelGI).GetText;
+  Text := (GetByName('TalkText') as TLabelGI).GetText;
   Text := ReplaceAllWideString(Text, '<color=0,50,200>', '<color=255,240,100>');
   (Sender as TGraphButtonGI).SetDisabled(True);
   SoundManager.PlaySound('Sound.UserMsgAdd');

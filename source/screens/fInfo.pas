@@ -590,7 +590,7 @@ begin
   InfoPanel.VerticalScrollBar.SetRange(0, InfoPanel.VerticalScrollBar.Maximum);
   InfoPanel.VerticalScrollBar.SetActive(InfoPanel.ClientSize.Y < InfoContentHeight);
   InfoPanel.VerticalScrollBar.SetSmallChange(
-      (GovernmentScreen.GetByName('LocalHuman.TalkText') as TLabelGI).GetLineHeight
+      (GovernmentScreen.GetByName('TalkText') as TLabelGI).GetLineHeight
   );
   InfoPanel.VerticalScrollBar.SetLargeChange(InfoPanel.ClientSize.Y);
   InfoPanel.VerticalScrollBar.SetPageSize(InfoPanel.ClientSize.Y);

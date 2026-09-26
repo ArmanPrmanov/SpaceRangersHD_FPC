@@ -301,7 +301,7 @@ begin
   MainPanel.RightButtonUpCallback := MainPanelMouseUp;
   DialogPanel := GetByName('PanelTalk') as TPanelGI;
   DialogPanelLeft := DialogPanel.LocalPosition.X;
-  LabelControl := GetByName('LocalHuman.TalkText') as TLabelGI;
+  LabelControl := GetByName('TalkText') as TLabelGI;
   LabelControl.CreateEmbeddedControl := CreateDialogObject;
   AddButton := GetByName('UserMsgAdd') as TGraphButtonGI;
   AddButton.UpCallback := AddMessageClicked;
@@ -413,9 +413,9 @@ begin
     CurrentMapCenter := nil;
     if not MusicInSpaceEnabled then
       MusicManager.RequestFadeOut;
-    (GetByName('LocalHuman.TalkText') as TLabelGI).SetText('');
+    (GetByName('TalkText') as TLabelGI).SetText('');
     if LocalHuman.TalkShip <> nil then
-      (GetByName('LocalHuman.TalkShip') as TLabelGI)
+      (GetByName('TalkShip') as TLabelGI)
           .SetText(
               FormatText1(
                   LocalizedText('Talk.ShipSay'),
@@ -424,7 +424,7 @@ begin
                   LocalHuman.TalkShip.GetFullName(#13#10)
               ))
     else if LocalHuman.TalkPlanet <> nil then
-      (GetByName('LocalHuman.TalkShip') as TLabelGI)
+      (GetByName('TalkShip') as TLabelGI)
           .SetText(
               FormatText1(
                   LocalizedText('Talk.PlanetSay'),
@@ -433,7 +433,7 @@ begin
                   LocalHuman.TalkPlanet.GetFullName(#13#10)
               ))
     else
-      (GetByName('LocalHuman.TalkShip') as TLabelGI).SetText('');
+      (GetByName('TalkShip') as TLabelGI).SetText('');
     if (LocalHuman.TalkShip <> nil) and (LocalHuman.TalkShip.TypeId = stRanger) then
       (GetByName('TalkShipChar') as TLabelGI).SetText((LocalHuman.TalkShip as TRanger).GetCharacterName)
     else if (LocalHuman.TalkShip <> nil) and (LocalHuman.TalkShip is TRuins) then
@@ -469,7 +469,7 @@ begin
     Animation.SetImageKindY(ikyCenter);
     Animation.SetActive(True);
     Animation.RestartPlayback;
-    TextLabel := GetByName('LocalHuman.TalkText') as TLabelGI;
+    TextLabel := GetByName('TalkText') as TLabelGI;
     if FontDialog = 0 then
       TextLabel.SetFontName(NormalFontName)
     else if FontDialog = 1 then
@@ -871,7 +871,7 @@ begin
   begin
     Choices := GetByName('TalkPA') as TPanelScrollBarGI;
     Choices.SetActive(True);
-    Choices.VerticalScrollBar.SetSmallChange((GetByName('LocalHuman.TalkText') as TLabelGI).GetLineHeight);
+    Choices.VerticalScrollBar.SetSmallChange((GetByName('TalkText') as TLabelGI).GetLineHeight);
     Choices.VerticalScrollBar.SetLargeChange(Choices.ClientSize.Y);
     Choices.VerticalScrollBar.SetPageSize(Choices.ClientSize.Y);
     Choices.SetScrollOffset(Point(0, 0));
@@ -893,16 +893,16 @@ begin
   begin
     PresentedTextLength := Length(DialogText);
     DialogText := ReplaceAllWideString(DialogText, '<color=255,240,100>', '<color=0,50,200>');
-    (GetByName('LocalHuman.TalkText') as TLabelGI).SetText(DialogText);
+    (GetByName('TalkText') as TLabelGI).SetText(DialogText);
     TextPanel := GetByName('TextScroll') as TPanelScrollBarGI;
     TextPanel.SetScrollOffset(Point(0, 0));
     TextPanel.UpdateScrollRanges;
     TextPanel.VerticalScrollBar.SetActive(
-        (TextPanel.FindByNameRecursive('LocalHuman.TalkText') as TLabelGI).ClientSize.Y
+        (TextPanel.FindByNameRecursive('TalkText') as TLabelGI).ClientSize.Y
             > TextPanel.ClientSize.Y
     );
     TextPanel.VerticalScrollBar.SetSmallChange(
-        (TextPanel.FindByNameRecursive('LocalHuman.TalkText') as TLabelGI).GetLineHeight
+        (TextPanel.FindByNameRecursive('TalkText') as TLabelGI).GetLineHeight
     );
     TextPanel.VerticalScrollBar.SetLargeChange(TextPanel.ClientSize.Y);
     TextPanel.VerticalScrollBar.SetPageSize(TextPanel.ClientSize.Y);
@@ -1029,7 +1029,7 @@ procedure TfTalk.AddMessageClicked(Sender: TObjectGI);
 var
   Text: WideString;
 begin
-  Text := (GetByName('LocalHuman.TalkText') as TLabelGI).GetText;
+  Text := (GetByName('TalkText') as TLabelGI).GetText;
   Text := ReplaceAllWideString(Text, '<color=0,50,200>', '<color=255,240,100>');
   Text := RemoveMatchingTextTagsW(Text, 'object', 'OBJECT');
   (GetByName('UserMsgAdd') as TGraphButtonGI).SetDisabled(True);
