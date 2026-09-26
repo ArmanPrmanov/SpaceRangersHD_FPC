@@ -106,6 +106,13 @@ type
     // the per-human save block (aHumanSave).
     UsedCheats: array of WideString;
     CheatPoints: Integer;
+    // CHANGE: ENHANCEMENT - Whether the human's game has ended while others play on: a quest
+    // script's EndGame ends it for the script's human only in multiplayer (ROADMAP.md, Phase 6;
+    // FinishHuman). FinishReason is the reason EndGame gave (Session.GameEndReason's values),
+    // or -1 when it gave none, which is the ending with the credits. Saved in the per-human
+    // save block (aHumanSave).
+    Finished: Boolean;
+    FinishReason: Integer;
     constructor Create;
     destructor Destroy; override;
     // The message bubbles, under PersistentPlayerMessageLock. SkipLock means the caller
@@ -214,6 +221,10 @@ procedure RemoveHuman(Player: TPlayer);
 // Rebuilds the list from the TPlayer instances in Galaxy.Rangers, keeping the local
 // human's state for Local.
 procedure RebuildHumans(Galaxy: TGalaxy; Local: TPlayer);
+// Ends the game for Human alone (THuman.Finished), as a quest script's EndGame does in
+// multiplayer. The human leaves play: its ranger holds position, it counts as having pressed
+// end turn, and aCommands.ExecuteCommand refuses its commands. It stays in Session.Humans.
+procedure FinishHuman(Human: THuman; Reason: Integer);
 // The human who issued Command, and its ranger; nil when the human is gone.
 function ActorHuman(const Command: TPlayerCommand): THuman;
 function Actor(const Command: TPlayerCommand): TPlayer;
@@ -830,10 +841,32 @@ begin
   CheatPoints := 0;
 end;
 
+procedure FinishHuman(Human: THuman; Reason: Integer);
+var
+  SavedAbsoluteOrder: Byte;
+begin
+  if (Human = nil) or Human.Finished then
+    Exit;
+  Human.Finished := True;
+  Human.FinishReason := Reason;
+  Human.EndedTurn := True;
+  Human.PlayerAutomaticControl := False;
+  Human.PendingPlayerFollowTarget := nil;
+  // In hyperspace it arrives first; there is no position to hold there.
+  if (Human.Player = nil) or Human.Player.InHyperspace then
+    Exit;
+  SavedAbsoluteOrder := Human.Player.AbsoluteScriptOrder;
+  Human.Player.AbsoluteScriptOrder := 0;
+  Human.Player.OrderNone(False);
+  Human.Player.AbsoluteScriptOrder := SavedAbsoluteOrder;
+  Human.Player.QueuedTravelTarget := nil;
+end;
+
 constructor THuman.Create;
 begin
   inherited Create;
   GovernmentDialogNames := TStringsEC.Create;
+  FinishReason := -1;
 end;
 
 destructor THuman.Destroy;

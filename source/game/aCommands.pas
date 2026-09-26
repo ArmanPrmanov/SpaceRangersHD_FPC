@@ -300,6 +300,10 @@ begin
     raise Exception.Create('No executor for ' + CommandKindName(Command.Kind));
   if Actor(Command) = nil then
     raise Exception.Create(CommandKindName(Command.Kind) + ' names no human');
+  // CHANGE: ENHANCEMENT - A human whose game has ended takes no more commands (THuman.Finished,
+  // ROADMAP.md, Phase 6). What the turn job submits is part of the job, not the human's act.
+  if ActorHuman(Command).Finished and not InTurnJob then
+    Exit;
   Previous := ActingHuman;
   ActingHuman := ActorHuman(Command);
   try

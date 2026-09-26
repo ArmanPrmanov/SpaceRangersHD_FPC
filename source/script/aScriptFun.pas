@@ -11974,7 +11974,27 @@ begin
     av[1].GetArray.AddItem(TVarEC.Create(vkEmpty));
 end;
 procedure SF_EndGame(av: array of TVarEC; code: TCodeEC);
+var
+  Human: THuman;
+  Reason: Integer;
 begin
+  // CHANGE: ENHANCEMENT - In multiplayer EndGame ends the game for the script's human only
+  // (ROADMAP.md, Phase 6). The human's result is recorded on it (FinishHuman) and the others
+  // play on. The ending shows only when that human is the one at this machine; with one
+  // human it always is, as native.
+  if IsMultiplayer then
+  begin
+    Human := ScriptHuman;
+    if Human = nil then
+      Human := DefaultScriptHuman;
+    if High(av) > 0 then
+      Reason := av[1].GetInt
+    else
+      Reason := -1;
+    FinishHuman(Human, Reason);
+    if Human <> LocalHuman then
+      Exit;
+  end;
   if High(av) > 0 then
   begin
     Session.GameEndReason := av[1].GetInt;
@@ -11983,9 +12003,9 @@ begin
   end
   else
   begin
-    // HUMANS: script game end. Does a script's EndGame end the game for every human, and
-    // whose result does it record? Native records whether the player is alive.
-    SimEvents.RecordPlayerResult(GetPlayer <> nil);
+    // The ending on this machine records whether the local human's ranger is alive, as
+    // native records the player's.
+    SimEvents.RecordPlayerResult(LocalPlayer <> nil);
     AboutScreen.ReturnToScores := True;
     RequestedScreenId := screenAbout;
     TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);

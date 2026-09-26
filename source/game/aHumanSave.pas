@@ -13,11 +13,12 @@ unit aHumanSave;
 //   every human but the local one, the THuman state the original layout writes for the
 //   local human only;
 // - the human each script is bound to (TScript.HumanId);
-// - the human each galaxy event is about (TGalaxyEvent.HumanId).
+// - the human each galaxy event is about (TGalaxyEvent.HumanId);
+// - since version 2, whether each human's game has ended (THuman.Finished, FinishReason).
 // It is written only when some of this differs from what a save without it loads as: more
 // than one human, a flag that is not its default, a cheat on record, or a script or event
 // bound to a human other than the first. A single-player save is therefore byte for byte as
-// before and loads by the original layout rules.
+// before and loads by the original layout rules. A human whose game has ended also needs it.
 //
 // Layout: 'SRHU', a version, the byte size of the rest, then the fields below. A later
 // version only appends fields; a reader reads the ones it knows and skips to the end.
@@ -55,12 +56,15 @@ uses
 
 const
   HumanBlockMagic = $55485253; // 'SRHU'
-  HumanBlockVersion = 1;
+  // 2: whether each human's game has ended.
+  HumanBlockVersion = 2;
 
 procedure ResetHumanSessionState;
 begin
   ResetSessionFlags;
   LocalHuman.ClearCheats;
+  LocalHuman.Finished := False;
+  LocalHuman.FinishReason := -1;
 end;
 
 function FirstHumanId: Integer;
@@ -88,7 +92,7 @@ begin
   if not SessionFlagsAreDefault then
     Exit;
   for I := 0 to Session.Humans.Count - 1 do
-    if Session.Humans[I].HasCheated then
+    if Session.Humans[I].HasCheated or Session.Humans[I].Finished then
       Exit;
   if Galaxy.Scripts <> nil then
     for I := 0 to Galaxy.Scripts.Count - 1 do
@@ -326,6 +330,15 @@ begin
       Buffer.AddIntegerValue(Event.HumanId);
     end;
   end;
+  // Version 2.
+  Buffer.AddIntegerValue(Session.Humans.Count);
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    Buffer.AddDWord(Cardinal(Human.Id));
+    Buffer.AddBoolean(Human.Finished);
+    Buffer.AddIntegerValue(Human.FinishReason);
+  end;
   Buffer.SetInt32At(SizeOffset, Buffer.Position - SizeOffset - 4);
 end;
 
@@ -338,6 +351,8 @@ var
   Cheats: array of WideString;
   Points: Integer;
   NextItemId: Cardinal;
+  Finished: Boolean;
+  Reason: Integer;
 begin
   Start := Buffer.Position;
   if (Buffer.DataSize - Start < 12) or (Buffer.GetUInt32 <> HumanBlockMagic) then
@@ -417,6 +432,23 @@ begin
     HumanId := Buffer.GetInt32;
     if (Index >= 0) and (Index < Galaxy.GalaxyEvents.Count) then
       TGalaxyEvent(Galaxy.GalaxyEvents[Index]).HumanId := HumanId;
+  end;
+  // Version 1 has no finished humans: every human plays.
+  if Version >= 2 then
+  begin
+    Count := Buffer.GetInt32;
+    for I := 0 to Count - 1 do
+    begin
+      Human := FindHuman(Integer(Buffer.GetUInt32));
+      Finished := Buffer.GetBoolean;
+      Reason := Buffer.GetInt32;
+      if Human <> nil then
+      begin
+        Human.Finished := Finished;
+        Human.FinishReason := Reason;
+        Human.EndedTurn := Human.EndedTurn or Finished;
+      end;
+    end;
   end;
   Buffer.SetPosition(Start + Size);
 end;
