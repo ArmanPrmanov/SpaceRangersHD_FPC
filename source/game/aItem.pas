@@ -7522,15 +7522,15 @@ begin
       MaxCost := 2500;
     end;
   end;
-  // HUMANS: An artefact's weight scales with the one player's hull. Whose hull when there
-  // are several humans, and for an artefact no human is looking at?
-  if GetPlayer <> nil then
+  // CHANGE: ENHANCEMENT - The weight scales with ContextHuman's hull: the acting human, else
+  // the script's, else the host human's (ROADMAP.md, Phase 6, item 8).
+  if ContextHuman <> nil then
     Inc(
         Weight,
         Round(
             SeededRandomIntRange(MinExtraWeight, MaxExtraWeight, Id * 317847)
                 * RemapClamped(
-                    GetPlayer.GetHull.Weight,
+                    ContextHuman.Player.GetHull.Weight,
                     HullBaseSize * EquipmentSizeFactors[5] * 1.5,
                     HullBaseSize * EquipmentSizeFactors[1],
                     MinWeightScale,
@@ -8021,9 +8021,9 @@ begin
   else if ItemType = t_Hull then
   begin
     Item := CreateItemByType(ItemType);
-    // HUMANS: A default hull (set-up blocks, scripts) takes the one player's race, and a
-    // default satellite its owner. Whose, when there are several humans?
-    THull(Item).Init(250, 1, RaceToOwner(GetPlayer.PilotRace), 0, -1, False);
+    // CHANGE: ENHANCEMENT - The default hull's race is ContextHuman's: the acting human, else
+    // the script's, else the host human's (ROADMAP.md, Phase 6, item 8).
+    THull(Item).Init(250, 1, RaceToOwner(ContextHuman.Player.PilotRace), 0, -1, False);
     Result := Item;
   end
   else if ItemType = t_CustomWeapon then
@@ -8041,11 +8041,12 @@ begin
         t_MicroModule: TMicroModule(Item).Init(1);
         t_Cistern: TCistern(Item).Init(10, 10, 6);
         t_Satellite:
-          // HUMANS: As the default hull above: whose owner, when there are several humans?
+          // CHANGE: ENHANCEMENT - As the default hull above: ContextHuman's owner
+          // (ROADMAP.md, Phase 6, item 8).
           TSatellite(Item)
               .InitGenerated(
                   1,
-                  GetPlayer.OwnerId,
+                  ContextHuman.Player.OwnerId,
                   NextRandomIntRange(1, 10000, Galaxy.RandomState));
       else
         if ItemType in [t_Food..t_Narcotics] then

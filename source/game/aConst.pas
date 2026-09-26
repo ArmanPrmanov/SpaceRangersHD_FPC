@@ -2077,7 +2077,8 @@ uses
   aTransport,
   aKling,
   aTranclucator,
-  aRuins;
+  aRuins,
+  aHuman;
 // @unit-initialization $8779C0
 // @unit-finalization $837D1C
 
@@ -2761,14 +2762,21 @@ begin
   begin
     Result := ReplaceAllWideString(Result, '<br>', #13#10);
     Result := ReplaceAllWideString(Result, '<ll>', #13#10' '#13#10);
-    // HUMANS: <Player> in text the simulation builds for a human who is not the local one:
-    // whose name, and how does the text learn which human it is for?
-    if GetPlayer <> nil then
+    // CHANGE: ENHANCEMENT - <Player> expands to ContextHuman's ranger name, and to the local
+    // player when there is no context (ROADMAP.md, Phase 6, item 9).
+    if ContextHuman <> nil then
       Result :=
           ReplaceAllWideString(
               Result,
               '<Player>',
-              '<color=255,240,100>' + GetPlayer.Name + '</color>'
+              '<color=255,240,100>' + ContextHuman.Player.Name + '</color>'
+          )
+    else if LocalPlayer <> nil then
+      Result :=
+          ReplaceAllWideString(
+              Result,
+              '<Player>',
+              '<color=255,240,100>' + LocalPlayer.Name + '</color>'
           );
   end;
 end;
@@ -2789,14 +2797,21 @@ begin
   begin
     Result := ReplaceAllWideString(Result, '<br>', #13#10);
     Result := ReplaceAllWideString(Result, '<ll>', #13#10' '#13#10);
-    // HUMANS: <Player> in text the simulation builds for a human who is not the local one:
-    // whose name, and how does the text learn which human it is for?
-    if GetPlayer <> nil then
+    // CHANGE: ENHANCEMENT - <Player> expands to ContextHuman's ranger name, and to the local
+    // player when there is no context (ROADMAP.md, Phase 6, item 9).
+    if ContextHuman <> nil then
       Result :=
           ReplaceAllWideString(
               Result,
               '<Player>',
-              '<color=255,240,100>' + GetPlayer.Name + '</color>'
+              '<color=255,240,100>' + ContextHuman.Player.Name + '</color>'
+          )
+    else if LocalPlayer <> nil then
+      Result :=
+          ReplaceAllWideString(
+              Result,
+              '<Player>',
+              '<color=255,240,100>' + LocalPlayer.Name + '</color>'
           );
     Result := ReplaceAllWideString(Result, '<clr>', '<color=255,240,100>');
     Result := ReplaceAllWideString(Result, '<clrEnd>', '</color>');
@@ -2809,14 +2824,21 @@ begin
   begin
     Text := ReplaceAllWideString(Text, '<br>', #13#10);
     Text := ReplaceAllWideString(Text, '<ll>', #13#10' '#13#10);
-    // HUMANS: <Player> in text the simulation builds for a human who is not the local one:
-    // whose name, and how does the text learn which human it is for?
-    if GetPlayer <> nil then
+    // CHANGE: ENHANCEMENT - <Player> expands to ContextHuman's ranger name, and to the local
+    // player when there is no context (ROADMAP.md, Phase 6, item 9).
+    if ContextHuman <> nil then
       Text :=
           ReplaceAllWideString(
               Text,
               '<Player>',
-              '<color=255,240,100>' + GetPlayer.Name + '</color>'
+              '<color=255,240,100>' + ContextHuman.Player.Name + '</color>'
+          )
+    else if LocalPlayer <> nil then
+      Text :=
+          ReplaceAllWideString(
+              Text,
+              '<Player>',
+              '<color=255,240,100>' + LocalPlayer.Name + '</color>'
           );
     Text := ReplaceAllWideString(Text, '<clr>', '<color=255,240,100>');
     Text := ReplaceAllWideString(Text, '<clrEnd>', '</color>');
@@ -2829,14 +2851,21 @@ begin
   begin
     Text := ReplaceAllWideString(Text, '<br>', #13#10);
     Text := ReplaceAllWideString(Text, '<ll>', #13#10' '#13#10);
-    // HUMANS: <Player> in text the simulation builds for a human who is not the local one:
-    // whose name, and how does the text learn which human it is for?
-    if GetPlayer <> nil then
+    // CHANGE: ENHANCEMENT - <Player> expands to ContextHuman's ranger name, and to the local
+    // player when there is no context (ROADMAP.md, Phase 6, item 9).
+    if ContextHuman <> nil then
       Text :=
           ReplaceAllWideString(
               Text,
               '<Player>',
-              '<color=255,240,100>' + GetPlayer.Name + '</color>'
+              '<color=255,240,100>' + ContextHuman.Player.Name + '</color>'
+          )
+    else if LocalPlayer <> nil then
+      Text :=
+          ReplaceAllWideString(
+              Text,
+              '<Player>',
+              '<color=255,240,100>' + LocalPlayer.Name + '</color>'
           );
     Text := ReplaceAllWideString(Text, '<clr>', '<color=255,240,100>');
     Text := ReplaceAllWideString(Text, '<clrEnd>', '</color>');
