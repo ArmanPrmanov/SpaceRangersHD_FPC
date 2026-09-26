@@ -146,6 +146,12 @@ function HasLivingHuman: Boolean;
 function IsFilmedStar(Star: TStar): Boolean;
 // The filmed stars, in galaxy order.
 procedure CollectFilmedStars(Stars: TList);
+// The human whose view the film of Star follows: the local human when it is in Star,
+// otherwise the first human in Session.Humans who is. A human is in Star when Star is its
+// PlayerStar or its ranger's current star. Nil when no human is in Star. All humans in a star
+// share its one film (ROADMAP.md, Phase 4, item 2); the film's radar range, the player's film
+// path and the camera follow this human.
+function FilmHuman(Star: TStar): THuman;
 // The human with this id, or nil.
 function FindHuman(Id: Integer): THuman;
 // Makes Player a human. The first human is the local one.
@@ -256,6 +262,24 @@ begin
     if IsFilmedStar(Star) then
       Stars.Add(Star);
   end;
+end;
+
+function FilmHuman(Star: TStar): THuman;
+  function IsIn(Human: THuman): Boolean;
+  begin
+    Result :=
+        (Human.Player <> nil)
+            and ((Human.PlayerStar = Star) or (Human.Player.CurrentStar = Star));
+  end;
+var
+  I: Integer;
+begin
+  if (Session.Humans.IndexOf(LocalHuman) >= 0) and IsIn(LocalHuman) then
+    Exit(LocalHuman);
+  for I := 0 to Session.Humans.Count - 1 do
+    if IsIn(Session.Humans[I]) then
+      Exit(Session.Humans[I]);
+  Result := nil;
 end;
 
 function FindHuman(Id: Integer): THuman;

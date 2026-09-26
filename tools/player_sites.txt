@@ -13,10 +13,10 @@ game/aArcadeActions.pas	simulation	1	3	7	0	0
 game/aAsteroid.pas	simulation	3	0	0	0	0
 game/aCommands.pas	simulation	0	2	5	0	0
 game/aConst.pas	simulation	8	0	0	0	0
-game/aGalaxy.pas	simulation	211	97	0	27	10
+game/aGalaxy.pas	simulation	29	109	0	72	66
 game/aHold.pas	simulation	4	73	0	0	0
 game/aHoldActions.pas	simulation	21	835	27	0	0
-game/aHuman.pas	simulation	0	10	6	22	11
+game/aHuman.pas	simulation	0	13	6	26	11
 game/aItem.pas	simulation	20	0	0	0	0
 game/aKling.pas	simulation	35	0	0	0	0
 game/aMissile.pas	simulation	4	0	0	0	0
@@ -84,5 +84,5 @@ screens/fTalk.pas	presentation	0	722	0	0	0
 screens/SimEventHandlers.pas	presentation	0	1	0	0	0
 script/aScript.pas	simulation	18	0	0	0	0
 script/aScriptFun.pas	simulation	326	62	0	0	3
-total	simulation	1132	1435	219	115	240
+total	simulation	950	1450	219	164	296
 total	presentation	0	4416	0	4	1

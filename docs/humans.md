@@ -33,6 +33,7 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
 | `StarHasHuman(Star)` | whether some human's ranger is in the star |
 | `StarHasHuman(Star, Ship)` | the same, not counting `Ship`, for example a human who is party to a talk others overhear |
 | `StarHasHumanInSpace(Star)` | whether some human's ranger is in the star in normal space, where it sees the fights |
+| `FilmHuman(Star)` | the human whose view the star's shared film follows (radar range, film path, camera): the local human when it is in the star, else the first human there; nil when none is |
 | `HasLivingHuman` | whether some human's ranger still has hull points; the day stops when none does |
 | `FindHuman(Id)` | the human with that id, or nil |
 | `Human.AddOrUpdateBubble(...)` etc. | that human's message bubbles; the `Globals` functions of the old names are the local human's |

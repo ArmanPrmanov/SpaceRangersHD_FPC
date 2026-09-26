@@ -365,7 +365,12 @@ type
     function GetDominatorSeriesControlShare(Series: TDominatorSeries): Single;
     function CountStarsInBattle: Integer;
     procedure AssignTextQuestsToPlanets;
-    function HasPlayerQuestHistory(QuestType: TQuestType; QuestNumber: Word): Boolean;
+    // CHANGE: CLEANUP - Ranger is the human's ranger whose finished quests are searched.
+    function HasPlayerQuestHistory(
+        Ranger: TObject;
+        QuestType: TQuestType;
+        QuestNumber: Word
+    ): Boolean;
     function TurnToDateTime(Turn: Integer): Double;
     function FormatTurnDate(Turn: Integer): WideString;
     procedure AddPlanetNewsWithPlayerBubble(NewsType: Byte; Text: WideString);
@@ -439,7 +444,8 @@ type
     function GetDominatorResearchRate(Series: TDominatorSeries): Single;
     function GetDominatorResearchEfficiency(Series: TDominatorSeries): Byte;
     function FindStationByTypeAndIndex(Index: Integer; StationType: TStationType): Pointer;
-    procedure TryAwardDepositPrize;
+    // CHANGE: CLEANUP - Depositor is the human's ranger whose deposit may win the prize.
+    procedure TryAwardDepositPrize(Depositor: TObject);
     procedure ProcessBankDebtAndDeposits;
     procedure ProcessRangerCenterNewYearEvent;
     function TryCreateLiberationGroup: Boolean;
@@ -694,12 +700,16 @@ type
     procedure ProcessItemScripts(TurnPhase: Integer);
     procedure RefreshDominatorSeries;
     procedure RefreshDerivedStats;
+    // CHANGE: CLEANUP - PlayerPartyPresent is whether some human's party counts toward the
+    // star's control. HumanParties, when given, receives the TPlayer of each such human, in
+    // the order of the star's ships.
     procedure GetControlPresence(
         out PlayerPartyPresent: Boolean;
         out CoalitionPresent: Boolean;
         out DominatorsPresent: Boolean;
         out PiratesPresent: Boolean;
-        out CustomPresent: Boolean
+        out CustomPresent: Boolean;
+        HumanParties: TList = nil
     );
     procedure UpdateControlFaction;
     procedure ResetControlFaction;
@@ -8407,8 +8417,9 @@ begin
     First := TRanger(Sorted[I]);
     First.PlaceInRating := I + 1;
   end;
-  if (GetPlayer <> nil) and (not Destroying) then
-    GetPlayer.AchievementStats.CheckFirstPlaceRatingAchievement;
+  // Achievements belong to the human at this machine.
+  if (LocalPlayer <> nil) and (not Destroying) then
+    LocalPlayer.AchievementStats.CheckFirstPlaceRatingAchievement;
 end;
 function TGalaxy.FindStrongestRanger: Pointer;
 var
@@ -8545,11 +8556,15 @@ begin
       begin
         IncrementWrapped(Index, 0, Planets.Count - 1);
         Planet := Planets[Index];
+        // CHANGE: CLEANUP - New-game setup runs this for the first human, the one it creates.
+        // Text quests are off in multiplayer (ROADMAP.md, Phase 6), so later humans need none.
         if (Planet.CurrentStar.Constellation.Id <> 20)
             and (Planet.TextQuestId <= -1)
             and Planet.Graphic.QuestEnabled
             and ((Planet.OwnerId <> Byte(oiDominator))
-                or (PointDistance(Planet.CurrentStar.Position, GetPlayer.CurrentStar.Position)
+                or (PointDistance(
+                        Planet.CurrentStar.Position,
+                        Session.Humans[0].Player.CurrentStar.Position)
                     <= 80))
             and ((Planet.LandTiles >= Planet.GetTotalSurfaceTileCount * 0.2)
                 or ((Planet.LandTiles >= Planet.GetTotalSurfaceTileCount * 0.1)
@@ -8595,14 +8610,25 @@ begin
       Quest.Free;
     end;
 end;
-function TGalaxy.HasPlayerQuestHistory(QuestType: TQuestType; QuestNumber: Word): Boolean;
+function TGalaxy.HasPlayerQuestHistory(
+    Ranger: TObject;
+    QuestType: TQuestType;
+    QuestNumber: Word
+): Boolean;
 var
   I: Integer;
   Quest: PPlayerOldQuest;
+  Human: THuman;
 begin
-  for I := LocalHuman.PlayerOldQuests.Count - 1 downto 0 do
+  // CHANGE: CLEANUP - The finished quests of Ranger's human, not the local human's. None when
+  // Ranger is not a human's or its human has no list (see OldQuestsOf in aRanger).
+  Result := False;
+  Human := HumanOf(Ranger);
+  if (Human = nil) or (Human.PlayerOldQuests = nil) then
+    Exit;
+  for I := Human.PlayerOldQuests.Count - 1 downto 0 do
   begin
-    Quest := LocalHuman.PlayerOldQuests[I];
+    Quest := Human.PlayerOldQuests[I];
     if (QuestType = Quest.QuestType) and (QuestNumber = Quest.QuestNumber) then
     begin
       Result := True;
@@ -9284,13 +9310,19 @@ var
   Wear: Double;
   Changed: Boolean;
   Amount: Integer;
+  HumanIndex: Integer;
+  Player: TPlayer;
 begin
-  if GetPlayer <> nil then
+  // CHANGE: CLEANUP - Every human's satellites explore, in join order.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
+    Player := Session.Humans[HumanIndex].Player;
+    if Player = nil then
+      Continue;
     Changed := False;
-    for I := 0 to GetPlayer.Satellites.Count - 1 do
+    for I := 0 to Player.Satellites.Count - 1 do
     begin
-      Satellite := TSatellite(GetPlayer.Satellites[I]);
+      Satellite := TSatellite(Player.Satellites[I]);
       if (Satellite.BrokenFlag = 0) and (Satellite.TargetPlanet <> nil) then
       begin
         with TObject(Satellite.TargetPlanet) as TPlanet do
@@ -9302,18 +9334,20 @@ begin
           LandExplored := Min(LandTiles, LandExplored + Satellite.LandExplorationRate);
           HillExplored := Min(HillTiles, HillExplored + Satellite.HillExplorationRate);
           Amount := (WaterExplored - Water) + (LandExplored - Land) + (HillExplored - Hill);
-          Inc(GetPlayer.SatelliteTilesExplored, Amount);
-          TryAddAchievementProgress('ARCHEOLOGY', Amount);
+          Inc(Player.SatelliteTilesExplored, Amount);
+          // Achievements belong to the human at this machine.
+          if Player = LocalPlayer then
+            TryAddAchievementProgress('ARCHEOLOGY', Amount);
           if (Water < WaterExplored) or (Land < LandExplored) or (Hill < HillExplored) then
           begin
             Wear := 1;
-            if GetPlayer.Satellites.Count > GetPlayer.GetSatelliteLimit then
-              Wear := Wear + (GetPlayer.Satellites.Count - GetPlayer.GetSatelliteLimit) * 1.0;
+            if Player.Satellites.Count > Player.GetSatelliteLimit then
+              Wear := Wear + (Player.Satellites.Count - Player.GetSatelliteLimit) * 1.0;
             Changed := True;
           end
           else
             Wear := 0.1;
-          GetPlayer.ApplyItemDegradation(
+          Player.ApplyItemDegradation(
               Satellite,
               idkUse,
               NextRandomUnitFloat(RandomState) * Satellite.WearPerTurn * Wear
@@ -9322,7 +9356,7 @@ begin
       end;
     end;
     if Changed then
-      GetPlayer.RefreshStorageBubbles;
+      Player.RefreshStorageBubbles;
   end;
 end;
 function TGalaxy.CountExistingSatellites: Integer;
@@ -9332,8 +9366,16 @@ var
   Ship: TShip;
   Item: TItem;
   Stored: TStoredItem;
+  Player: TPlayer;
 begin
-  Result := GetPlayer.CountStoredItemUnits(nil, 73) + GetPlayer.Satellites.Count;
+  // CHANGE: CLEANUP - The satellites in the galaxy: every human's stored and deployed ones.
+  Result := 0;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Player := Session.Humans[I].Player;
+    if Player <> nil then
+      Inc(Result, Player.CountStoredItemUnits(nil, 73) + Player.Satellites.Count);
+  end;
   for I := 0 to Galaxy.Stars.Count - 1 do
   begin
     Star := TStar(Galaxy.Stars[I]);
@@ -9605,7 +9647,8 @@ begin
         if (Star.Battle = 0)
             and (StationDefaultStandings[Ord(StationType)]
                 in TShipTypeMask(FactionStandingMasks[Ord(Star.ControlFaction)]))
-            and (GetPlayer.CurrentStar <> Star)
+            // CHANGE: CLEANUP - A station never appears in a star with a human.
+            and not StarHasHuman(Star)
             and (Star.DaysSincePlayerVisit >= 70)
             and (Star.CountShipsByTypeMask(StationMask) <= 1)
             and ((StationType <> rstPirateBase)
@@ -9667,6 +9710,8 @@ var
   Series: TDominatorSeries;
   Progress: Single;
   News: WideString;
+  HumanIndex: Integer;
+  Player: TPlayer;
 begin
   if ((DominatorResearch[0].Progress < 100)
           or (DominatorResearch[1].Progress < 100)
@@ -9698,8 +9743,17 @@ begin
               43,
               PickLocalizedTextVariant(News, GenerationSeed * (Galaxy.CurrentTurn div 10))
           );
-          Inc(GetPlayer.AchievementStats.CompletedResearchPrograms);
-          GetPlayer.AchievementStats.CheckScienceAchievement;
+          // CHANGE: CLEANUP - Galaxy news: every human counts the program; the achievement
+          // belongs to the human at this machine.
+          for HumanIndex := 0 to Session.Humans.Count - 1 do
+          begin
+            Player := Session.Humans[HumanIndex].Player;
+            if Player = nil then
+              Continue;
+            Inc(Player.AchievementStats.CompletedResearchPrograms);
+            if Player = LocalPlayer then
+              Player.AchievementStats.CheckScienceAchievement;
+          end;
         end;
         DominatorResearch[Ord(Series)].Progress := Min(100, Progress);
       end;
@@ -9761,16 +9815,18 @@ begin
       end;
     end;
 end;
-procedure TGalaxy.TryAwardDepositPrize;
+procedure TGalaxy.TryAwardDepositPrize(Depositor: TObject);
 var
   Deposit, Chance, Roll: Integer;
   Station: TRuins;
   Item: TItem;
   Text: WideString;
+  Player: TPlayer;
 begin
-  if (GetPlayer.DepositAmount <> 0)
-      and (GetPlayer.DepositDayCount <> 0)
-      and (GetPlayer.DepositDayCount mod 365 = 0) then
+  Player := Depositor as TPlayer;
+  if (Player.DepositAmount <> 0)
+      and (Player.DepositDayCount <> 0)
+      and (Player.DepositDayCount mod 365 = 0) then
   begin
     Station :=
         TObject(
@@ -9790,17 +9846,17 @@ begin
               'GalaxyNews.BK.DepositPrizeLose',
               Station.Seed * (Galaxy.CurrentTurn div 10)
           );
-      Chance := 30 + (GetPlayer.DepositDayCount div 365) * 10;
+      Chance := 30 + (Player.DepositDayCount div 365) * 10;
       Roll := SeededRandomIntRange(1, 100, Station.Seed + Galaxy.CurrentTurn div 7);
       if Roll < Chance then
       begin
-        Deposit := GetPlayer.ComputeDepositAccruedValue;
+        Deposit := Player.ComputeDepositAccruedValue;
         Item := Station.FindMostExpensiveShopItem(Round(Deposit * 0.1), Round(Deposit * 1.0));
         if Item <> nil then
         begin
           Station.EquipmentShop.Delete(Station.EquipmentShop.IndexOf(Item));
-          GetPlayer.AddItemToPlayerStorage(Item, Station, -1);
-          GetPlayer.RefreshStorageBubbles;
+          Player.AddItemToPlayerStorage(Item, Station, -1);
+          Player.RefreshStorageBubbles;
           Text :=
               PickLocalizedTextVariant(
                   'GalaxyNews.BK.DepositPrizeWin',
@@ -9811,7 +9867,7 @@ begin
       end;
       ReplaceTextToken(Text, '<BKName>', Station.GetFullName(' '), '<color=255,240,100>');
       ReplaceTextToken(Text, '<Star>', Station.CurrentStar.Name, '<color=255,240,100>');
-      AddOrUpdatePlayerBubble(0, CurrentTurn, Text, '');
+      HumanOf(Player).AddOrUpdateBubble(0, CurrentTurn, Text, '');
     end;
   end;
 end;
@@ -9823,117 +9879,127 @@ var
   News: WideString;
   OldDebt, Penalty: Integer;
   Event: TGalaxyEvent;
+  HumanIndex: Integer;
+  Human: THuman;
+  Player: TPlayer;
 begin
-  if GetPlayer = nil then
-    Exit;
-  if Self.ShipTypeCounts[Ord(rstBusinessCenter)] > 0 then
+  // CHANGE: CLEANUP - Every human's deposit and debt, in join order.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    if (GetPlayer.DepositAmount > 0) and (GetPlayer.DebtAmount = 0) then
+    Human := Session.Humans[HumanIndex];
+    Player := Human.Player;
+    if Player = nil then
+      Continue;
+    if Self.ShipTypeCounts[Ord(rstBusinessCenter)] > 0 then
     begin
-      Inc(GetPlayer.DepositDayCount);
-      Self.TryAwardDepositPrize;
-    end;
-    if (GetPlayer.DebtAmount > 0) and (GetPlayer.DebtDueTurn <= Galaxy.CurrentTurn) then
+      if (Player.DepositAmount > 0) and (Player.DebtAmount = 0) then
+      begin
+        Inc(Player.DepositDayCount);
+        Self.TryAwardDepositPrize(Player);
+      end;
+      if (Player.DebtAmount > 0) and (Player.DebtDueTurn <= Galaxy.CurrentTurn) then
+      begin
+        Inc(Player.DebtDefaultCount);
+        // Achievements belong to the human at this machine.
+        if (Player.DebtDefaultCount = 1) and (Player = LocalPlayer) then
+          TryAddAchievementProgress('CREDITOR', 1);
+        OldDebt := Player.DebtAmount;
+        Penalty :=
+            RoundAndTruncateToTens(
+                Min(Player.DebtAmount * 0.5 * Player.DebtDefaultCount, Player.Wealth div 8)
+            );
+        Player.DebtAmount := Min(100000000, Player.DebtAmount + Penalty);
+        Player.DebtDueTurn :=
+            Galaxy.CurrentTurn
+                + System.Round(
+                    RemapClamped(SeededRandomUnitFloat(Galaxy.CurrentTurn div 80), 0, 1, 0.7, 1.5)
+                        * 300);
+        if Player.DebtDefaultCount < 3 then
+          News :=
+              PickLocalizedTextVariant(
+                  'GalaxyNews.BK.DebtInfo',
+                  (Galaxy.CurrentTurn div 10) * Self.GenerationSeed
+              )
+        else
+        begin
+          News :=
+              PickLocalizedTextVariant(
+                  'GalaxyNews.BK.DebtInfoContinue',
+                  (Galaxy.CurrentTurn div 10) * Self.GenerationSeed
+              );
+          Player.ChangeGlobalRelations(nil, rcmDecrease, 50, AffectedShipTypes, AffectedOwners);
+        end;
+        ReplaceTextToken(
+            News,
+            '<OldMoney>',
+            WideString(SysUtils.IntToStr(OldDebt)),
+            '<color=255,240,100>'
+        );
+        ReplaceTextToken(
+            News,
+            '<Penalty>',
+            WideString(SysUtils.IntToStr(Penalty)),
+            '<color=255,240,100>'
+        );
+        ReplaceTextToken(
+            News,
+            '<NewMoney>',
+            WideString(SysUtils.IntToStr(Player.DebtAmount)),
+            '<color=255,240,100>'
+        );
+        ReplaceTextToken(
+            News,
+            '<NewDate>',
+            Galaxy.FormatTurnDate(Player.DebtDueTurn),
+            '<color=255,240,100>'
+        );
+        Human.AddOrUpdateBubble(0, Self.CurrentTurn, News, '');
+      end;
+    end
+    else if (Player.DebtAmount > 0) or (Player.DepositAmount > 0) then
     begin
-      Inc(GetPlayer.DebtDefaultCount);
-      if GetPlayer.DebtDefaultCount = 1 then
-        TryAddAchievementProgress('CREDITOR', 1);
-      OldDebt := GetPlayer.DebtAmount;
-      Penalty :=
-          RoundAndTruncateToTens(
-              Min(GetPlayer.DebtAmount * 0.5 * GetPlayer.DebtDefaultCount, GetPlayer.Wealth div 8)
+      News :=
+          PickLocalizedTextVariant(
+              'GalaxyNews.BK.DeadAllBKStart',
+              (Galaxy.CurrentTurn div 10) * Self.GenerationSeed
           );
-      GetPlayer.DebtAmount := Min(100000000, GetPlayer.DebtAmount + Penalty);
-      GetPlayer.DebtDueTurn :=
-          Galaxy.CurrentTurn
-              + System.Round(
-                  RemapClamped(SeededRandomUnitFloat(Galaxy.CurrentTurn div 80), 0, 1, 0.7, 1.5)
-                      * 300);
-      if GetPlayer.DebtDefaultCount < 3 then
-        News :=
-            PickLocalizedTextVariant(
-                'GalaxyNews.BK.DebtInfo',
-                (Galaxy.CurrentTurn div 10) * Self.GenerationSeed
-            )
-      else
+      if Player.DebtAmount > 0 then
       begin
         News :=
-            PickLocalizedTextVariant(
-                'GalaxyNews.BK.DebtInfoContinue',
-                (Galaxy.CurrentTurn div 10) * Self.GenerationSeed
-            );
-        GetPlayer.ChangeGlobalRelations(nil, rcmDecrease, 50, AffectedShipTypes, AffectedOwners);
+            News
+                + #13#10
+                + FormatText1(
+                    PickLocalizedTextVariant(
+                        'GalaxyNews.BK.DeadAllBKDebt',
+                        (Galaxy.CurrentTurn div 10) * Self.GenerationSeed
+                    ),
+                    '<color=255,240,100>',
+                    '<Money>',
+                    WideString(SysUtils.IntToStr(Player.DebtAmount)));
+        Event := AddGalaxyEvent('PlayerDebtNullified');
+        Event.AddData(Player.DebtAmount);
       end;
-      ReplaceTextToken(
-          News,
-          '<OldMoney>',
-          WideString(SysUtils.IntToStr(OldDebt)),
-          '<color=255,240,100>'
-      );
-      ReplaceTextToken(
-          News,
-          '<Penalty>',
-          WideString(SysUtils.IntToStr(Penalty)),
-          '<color=255,240,100>'
-      );
-      ReplaceTextToken(
-          News,
-          '<NewMoney>',
-          WideString(SysUtils.IntToStr(GetPlayer.DebtAmount)),
-          '<color=255,240,100>'
-      );
-      ReplaceTextToken(
-          News,
-          '<NewDate>',
-          Galaxy.FormatTurnDate(GetPlayer.DebtDueTurn),
-          '<color=255,240,100>'
-      );
-      AddOrUpdatePlayerBubble(0, Self.CurrentTurn, News, '');
+      Player.DebtAmount := 0;
+      Player.DebtDueTurn := 0;
+      Player.DebtDefaultCount := 0;
+      if Player.DepositAmount > 0 then
+        News :=
+            News
+                + #13#10
+                + FormatText1(
+                    PickLocalizedTextVariant(
+                        'GalaxyNews.BK.DeadAllBKDeposit',
+                        (Galaxy.CurrentTurn div 10) * Self.GenerationSeed
+                    ),
+                    '<color=255,240,100>',
+                    '<Money>',
+                    WideString(SysUtils.IntToStr(Player.DepositAmount)));
+      Player.DepositAmount := 0;
+      Player.DepositStartTurn := 0;
+      Player.DepositDayCount := 0;
+      Player.DepositInterestRate := 0;
+      Human.AddOrUpdateBubble(0, Self.CurrentTurn, News, '');
     end;
-  end
-  else if (GetPlayer.DebtAmount > 0) or (GetPlayer.DepositAmount > 0) then
-  begin
-    News :=
-        PickLocalizedTextVariant(
-            'GalaxyNews.BK.DeadAllBKStart',
-            (Galaxy.CurrentTurn div 10) * Self.GenerationSeed
-        );
-    if GetPlayer.DebtAmount > 0 then
-    begin
-      News :=
-          News
-              + #13#10
-              + FormatText1(
-                  PickLocalizedTextVariant(
-                      'GalaxyNews.BK.DeadAllBKDebt',
-                      (Galaxy.CurrentTurn div 10) * Self.GenerationSeed
-                  ),
-                  '<color=255,240,100>',
-                  '<Money>',
-                  WideString(SysUtils.IntToStr(GetPlayer.DebtAmount)));
-      Event := AddGalaxyEvent('PlayerDebtNullified');
-      Event.AddData(GetPlayer.DebtAmount);
-    end;
-    GetPlayer.DebtAmount := 0;
-    GetPlayer.DebtDueTurn := 0;
-    GetPlayer.DebtDefaultCount := 0;
-    if GetPlayer.DepositAmount > 0 then
-      News :=
-          News
-              + #13#10
-              + FormatText1(
-                  PickLocalizedTextVariant(
-                      'GalaxyNews.BK.DeadAllBKDeposit',
-                      (Galaxy.CurrentTurn div 10) * Self.GenerationSeed
-                  ),
-                  '<color=255,240,100>',
-                  '<Money>',
-                  WideString(SysUtils.IntToStr(GetPlayer.DepositAmount)));
-    GetPlayer.DepositAmount := 0;
-    GetPlayer.DepositStartTurn := 0;
-    GetPlayer.DepositDayCount := 0;
-    GetPlayer.DepositInterestRate := 0;
-    AddOrUpdatePlayerBubble(0, Self.CurrentTurn, News, '');
   end;
 end;
 procedure TGalaxy.ProcessRangerCenterNewYearEvent;
@@ -9944,85 +10010,95 @@ var
   Item: TMicroModule;
   Minimum, Maximum: Integer;
   Event: TGalaxyEvent;
+  HumanIndex: Integer;
+  Human: THuman;
+  Player: TPlayer;
 begin
-  if GetPlayer <> nil then
-    if ShipTypeCounts[Ord(rstRangerCenter)] > 0 then
-    begin
-      if Galaxy.CurrentTurn > 300 then
+  // CHANGE: CLEANUP - Every human gets the new-year gift, and loses the base nodes when the
+  // last ranger center is gone, in join order.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[HumanIndex];
+    Player := Human.Player;
+    if Player <> nil then
+      if ShipTypeCounts[Ord(rstRangerCenter)] > 0 then
       begin
-        DecodeDate(GameTurnToDateTime(Galaxy.CurrentTurn - 300), Year, Month, Day);
-        if (Day = 31) and (Month = 12) then
+        if Galaxy.CurrentTurn > 300 then
         begin
-          Station :=
-              TObject(
-                      FindStationByTypeAndIndex(
-                          SeededRandomIntRange(
-                              1,
-                              ShipTypeCounts[Ord(rstRangerCenter)],
-                              Galaxy.GenerationSeed + Galaxy.CurrentTurn
-                          ),
-                          rstRangerCenter
-                      ))
-                  as TRuins;
-          if Station <> nil then
+          DecodeDate(GameTurnToDateTime(Galaxy.CurrentTurn - 300), Year, Month, Day);
+          if (Day = 31) and (Month = 12) then
           begin
-            Item := TMicroModule.Create;
-            Minimum := 70;
-            Dec(Minimum, Round(RemapClamped(Year, 3301, 3311, 0, 10)));
-            Dec(
-                Minimum,
-                Round(RemapClamped(GetPlayer.PlaceInRating, 1, Galaxy.Rangers.Count, 10, 0))
-            );
-            Dec(Minimum, Round(RemapClamped(ShortInt(Ord(GetPlayer.Rank)), 0, 7, 0, 10)));
-            Dec(Minimum, Galaxy.ScaleIntByTechLevel(0, 20));
-            Inc(Minimum, SeededRandomIntRange(-10, 10, Galaxy.GenerationSeed + Station.Seed));
-            Minimum := Max(1, Min(Minimum, 100));
-            Maximum := 100;
-            Item.Init(
-                SelectMicroModule(
-                    Minimum,
-                    Maximum,
-                    Galaxy.GenerationSeed + Station.Seed + Galaxy.CurrentTurn,
-                    Station
-                )
-            );
-            Item.OwnerId := RaceToOwner(GetPlayer.PilotRace);
-            Event := AddGalaxyEvent('PlayerReceivesMMOnNewYear');
-            Event.AddData(Item.Id);
-            Event.AddData(Item.MicroModuleIndex - 1);
-            GetPlayer.AddItemToPlayerStorage(Item, Station, -1);
-            GetPlayer.RefreshStorageBubbles;
-            Text :=
-                PickLocalizedTextVariant(
-                    'GalaxyNews.RC.NewYear',
-                    GenerationSeed * (Galaxy.CurrentTurn div 10)
-                );
-            ReplaceTextToken(Text, '<RCName>', Station.GetFullName(' '), '<color=255,240,100>');
-            ReplaceTextToken(Text, '<Star>', Station.CurrentStar.Name, '<color=255,240,100>');
-            ReplaceTextToken(Text, '<Year>', IntToStr(Year + 1), '<color=255,240,100>');
-            ReplaceTextToken(Text, '<Item>', Item.GetDisplayName, '<color=255,240,100>');
-            AddOrUpdatePlayerBubble(0, CurrentTurn, Text, '');
+            Station :=
+                TObject(
+                        FindStationByTypeAndIndex(
+                            SeededRandomIntRange(
+                                1,
+                                ShipTypeCounts[Ord(rstRangerCenter)],
+                                Galaxy.GenerationSeed + Galaxy.CurrentTurn
+                            ),
+                            rstRangerCenter
+                        ))
+                    as TRuins;
+            if Station <> nil then
+            begin
+              Item := TMicroModule.Create;
+              Minimum := 70;
+              Dec(Minimum, Round(RemapClamped(Year, 3301, 3311, 0, 10)));
+              Dec(
+                  Minimum,
+                  Round(RemapClamped(Player.PlaceInRating, 1, Galaxy.Rangers.Count, 10, 0))
+              );
+              Dec(Minimum, Round(RemapClamped(ShortInt(Ord(Player.Rank)), 0, 7, 0, 10)));
+              Dec(Minimum, Galaxy.ScaleIntByTechLevel(0, 20));
+              Inc(Minimum, SeededRandomIntRange(-10, 10, Galaxy.GenerationSeed + Station.Seed));
+              Minimum := Max(1, Min(Minimum, 100));
+              Maximum := 100;
+              Item.Init(
+                  SelectMicroModule(
+                      Minimum,
+                      Maximum,
+                      Galaxy.GenerationSeed + Station.Seed + Galaxy.CurrentTurn,
+                      Station
+                  )
+              );
+              Item.OwnerId := RaceToOwner(Player.PilotRace);
+              Event := AddGalaxyEvent('PlayerReceivesMMOnNewYear');
+              Event.AddData(Item.Id);
+              Event.AddData(Item.MicroModuleIndex - 1);
+              Player.AddItemToPlayerStorage(Item, Station, -1);
+              Player.RefreshStorageBubbles;
+              Text :=
+                  PickLocalizedTextVariant(
+                      'GalaxyNews.RC.NewYear',
+                      GenerationSeed * (Galaxy.CurrentTurn div 10)
+                  );
+              ReplaceTextToken(Text, '<RCName>', Station.GetFullName(' '), '<color=255,240,100>');
+              ReplaceTextToken(Text, '<Star>', Station.CurrentStar.Name, '<color=255,240,100>');
+              ReplaceTextToken(Text, '<Year>', IntToStr(Year + 1), '<color=255,240,100>');
+              ReplaceTextToken(Text, '<Item>', Item.GetDisplayName, '<color=255,240,100>');
+              Human.AddOrUpdateBubble(0, CurrentTurn, Text, '');
+            end;
           end;
         end;
+      end
+      else if Player.BaseNodes > 0 then
+      begin
+        Text :=
+            FormatText1(
+                PickLocalizedTextVariant(
+                    'GalaxyNews.RC.DeadBaseNod',
+                    GenerationSeed * (Galaxy.CurrentTurn div 10)
+                ),
+                '<color=255,240,100>',
+                '<Nod>',
+                IntToStr(Player.BaseNodes)
+            );
+        Event := AddGalaxyEvent('PlayerNodesNullified');
+        Event.AddData(Player.BaseNodes);
+        Player.BaseNodes := 0;
+        Human.AddOrUpdateBubble(0, CurrentTurn, Text, '');
       end;
-    end
-    else if GetPlayer.BaseNodes > 0 then
-    begin
-      Text :=
-          FormatText1(
-              PickLocalizedTextVariant(
-                  'GalaxyNews.RC.DeadBaseNod',
-                  GenerationSeed * (Galaxy.CurrentTurn div 10)
-              ),
-              '<color=255,240,100>',
-              '<Nod>',
-              IntToStr(GetPlayer.BaseNodes)
-          );
-      Event := AddGalaxyEvent('PlayerNodesNullified');
-      Event.AddData(GetPlayer.BaseNodes);
-      GetPlayer.BaseNodes := 0;
-      AddOrUpdatePlayerBubble(0, CurrentTurn, Text, '');
-    end;
+  end;
 end;
 function TGalaxy.TryCreateLiberationGroup: Boolean;
 var
@@ -10035,6 +10111,7 @@ var
   GroupStrength, EnemyStrength: Double;
   HasSubtypeOne: Boolean;
   EmergencyControlPercent: Byte;
+  Player, Strongest: TPlayer;
 begin
   Result := False;
   EmergencyControlPercent := 5;
@@ -10172,8 +10249,18 @@ begin
     if (ShipCount >= 1)
         and (Galaxy.GetFactionControlPercent(Ord(sfCoalition)) <= EmergencyControlPercent) then
     begin
-      if GetPlayer <> nil then
-        GroupStrength := GetPlayer.Strength * 2 + GroupStrength;
+      // CHANGE: CLEANUP - An emergency group counts on the strongest human's help, as it
+      // counted on the one player's; it does not grow with the number of humans (ROADMAP.md,
+      // Phase 6: no scaling with player count).
+      Strongest := nil;
+      for i := 0 to Session.Humans.Count - 1 do
+      begin
+        Player := Session.Humans[i].Player;
+        if (Player <> nil) and ((Strongest = nil) or (Player.Strength > Strongest.Strength)) then
+          Strongest := Player;
+      end;
+      if Strongest <> nil then
+        GroupStrength := Strongest.Strength * 2 + GroupStrength;
       if (10 * GroupStrength >= NextRandomIntRange(3, 10, Self.RandomState) * EnemyStrength)
           or (NextRandomIntRange(0, 700, Self.RandomState) = 0) then
       begin
@@ -10379,12 +10466,14 @@ var
 begin
   if Self.CurrentTurn and 15 <> 0 then
     Exit;
+  // CHANGE: CLEANUP - The player's id only seeds the schedule: the first human's, whose id
+  // outlives its ranger.
   if Self.NextSpecialStationServiceTurn = 0 then
     Self.NextSpecialStationServiceTurn :=
-        SeededRandomIntRange(0, 365, GetPlayer.Id xor Self.GenerationSeed) + 2125;
+        SeededRandomIntRange(0, 365, Session.Humans[0].Id xor Self.GenerationSeed) + 2125;
   if Self.CurrentTurn < Self.NextSpecialStationServiceTurn then
     Exit;
-  Seed := GetPlayer.Id xor Self.GenerationSeed xor Galaxy.CurrentTurn;
+  Seed := Session.Humans[0].Id xor Self.GenerationSeed xor Galaxy.CurrentTurn;
   Self.NextSpecialStationServiceTurn :=
       NextRandomIntRange(0, 365, Seed) + (Self.NextSpecialStationServiceTurn + 365);
   PirateActive := nil;
@@ -10518,13 +10607,30 @@ var
   Bubble: TMessagePlayer;
   Contested: Boolean;
   CoalitionStrength, PirateStrength: Single;
+  Human: THuman;
+  // CHANGE: CLEANUP - Whether some human is a pirate away from the main pirate planet's star.
+  function HasPirateHumanAwayFromMainPirateStar: Boolean;
+  var
+    HumanIndex: Integer;
+    Player: TPlayer;
+  begin
+    for HumanIndex := 0 to Session.Humans.Count - 1 do
+    begin
+      Player := Session.Humans[HumanIndex].Player;
+      if (Player <> nil)
+          and (Player.OwnerId = Byte(oiPirate))
+          and ((MainPiratePlanet = nil)
+              or (Player.CurrentStar <> MainPiratePlanet.CurrentStar)) then
+        Exit(True);
+    end;
+    Result := False;
+  end;
 begin
-  if (GetPlayer <> nil)
+  if (Session.Humans.Count > 0)
       and (CountFactionStars(Ord(sfCoalition)) <= 0)
-      and (GetPlayer.OwnerId = Byte(oiPirate))
       and (PirateWinType <> 3)
       and (CoalitionDefeatedTurn = 0)
-      and ((MainPiratePlanet = nil) or (GetPlayer.CurrentStar <> MainPiratePlanet.CurrentStar)) then
+      and HasPirateHumanAwayFromMainPirateStar then
   begin
     for I := 0 to Galaxy.Stars.Count - 1 do
     begin
@@ -10564,23 +10670,28 @@ begin
           Exit;
       end;
     end;
-    Bubble := FindPlayerBubbleByKey('BlazerWin', False);
-    if (Bubble <> nil) and (Bubble.Kind = 3) then
+    // CHANGE: CLEANUP - Galaxy news: every human's series-win news closes.
+    for I := 0 to Session.Humans.Count - 1 do
     begin
-      Bubble.Kind := 4;
-      Bubble.WasRead := False;
-    end;
-    Bubble := FindPlayerBubbleByKey('TerronWin', False);
-    if (Bubble <> nil) and (Bubble.Kind = 3) then
-    begin
-      Bubble.Kind := 4;
-      Bubble.WasRead := False;
-    end;
-    Bubble := FindPlayerBubbleByKey('KellerWin', False);
-    if (Bubble <> nil) and (Bubble.Kind = 3) then
-    begin
-      Bubble.Kind := 4;
-      Bubble.WasRead := False;
+      Human := Session.Humans[I];
+      Bubble := Human.FindBubbleByKey('BlazerWin', False);
+      if (Bubble <> nil) and (Bubble.Kind = 3) then
+      begin
+        Bubble.Kind := 4;
+        Bubble.WasRead := False;
+      end;
+      Bubble := Human.FindBubbleByKey('TerronWin', False);
+      if (Bubble <> nil) and (Bubble.Kind = 3) then
+      begin
+        Bubble.Kind := 4;
+        Bubble.WasRead := False;
+      end;
+      Bubble := Human.FindBubbleByKey('KellerWin', False);
+      if (Bubble <> nil) and (Bubble.Kind = 3) then
+      begin
+        Bubble.Kind := 4;
+        Bubble.WasRead := False;
+      end;
     end;
     EminentCareerShips[Ord(rcTrader)] := nil;
     EminentCareerShips[Ord(rcPirate)] := nil;
@@ -10588,10 +10699,13 @@ begin
     CoalitionDefeatedTurn := CurrentTurn;
     Galaxy.PirateWinTurn := Galaxy.CurrentTurn;
     Galaxy.PirateWinType := 5;
-    TryUnlockAchievement('PIRATEWIN');
+    // Achievements belong to the human at this machine, when it is one of the pirates.
+    if (LocalPlayer <> nil) and (LocalPlayer.OwnerId = Byte(oiPirate)) then
+      TryUnlockAchievement('PIRATEWIN');
     Text :=
         PickLocalizedTextVariant('GalaxyNews.Globals.CoalitionDefeated', Galaxy.CurrentTurn div 23);
-    AddOrUpdatePlayerBubble(0, CurrentTurn, Text, '').NotificationSoundKind := 1;
+    for I := 0 to Session.Humans.Count - 1 do
+      Session.Humans[I].AddOrUpdateBubble(0, CurrentTurn, Text, '').NotificationSoundKind := 1;
     AddPlanetNews(35, Text);
   end;
 end;
@@ -11002,15 +11116,31 @@ begin
   RefreshShipTypeCounts;
   RefreshDominatorSeries;
 end;
+// CHANGE: CLEANUP - Whether Ship counts toward its star's control. A docked or landed ship
+// does not, except a human's ranger in its first two days docked or landed, or the local
+// human's while its text quest is open (HumanScreen is the screen at this machine).
+function CountsTowardStarControl(Ship: TShip): Boolean;
+begin
+  Result :=
+      not Ship.InHyperspace
+          and ((Ship.CurrentPlanet = nil) or (Ship.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
+          and ((Ship.DockedTo = nil) or IsHuman(Ship))
+          and (not IsHuman(Ship)
+              or ((Ship.CurrentPlanet = nil) and (Ship.DockedTo = nil))
+              or (Ship.ConsecutiveDockedDays <= 2)
+              or ((Ship = LocalPlayer) and (HumanScreen = screenPlanetQuest)));
+end;
 procedure TStar.GetControlPresence(
     out PlayerPartyPresent,
     CoalitionPresent,
     DominatorsPresent,
     PiratesPresent,
-    CustomPresent: Boolean
+    CustomPresent: Boolean;
+    HumanParties: TList
 );
 var
   Ship: TShip;
+  Party: TPlayer;
   CoalitionLeaning, NeutralPresent, PirateLeaning: Boolean;
   Index, DefenderIndex: Integer;
   Planet: TPlanet;
@@ -11038,20 +11168,32 @@ begin
   PirateLeaning := False;
   NeutralPresent := False;
   CoalitionLeaning := False;
+  Party := nil;
   for Index := 0 to Ships.Count - 1 do
   begin
     Ship := Ships[Index];
-    if not Ship.InHyperspace
-        and ((Ship.CurrentPlanet = nil) or (Ship.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
-        and ((Ship.DockedTo = nil) or (GetPlayer = Ship))
-        and ((GetPlayer <> Ship)
-            or ((Ship.CurrentPlanet = nil) and (Ship.DockedTo = nil))
-            or (Ship.ConsecutiveDockedDays <= 2)
-            or (HumanScreen = screenPlanetQuest)) then
+    if CountsTowardStarControl(Ship) then
     begin
       AccumulateControlPresence;
-      if (GetPlayer = Ship) or (GetPlayer = Ship.PartnerShip) then
+      // CHANGE: CLEANUP - A human's party: its ranger, or a ship partnered with it.
+      if IsHuman(Ship) or IsHuman(Ship.PartnerShip) then
+      begin
         PlayerPartyPresent := True;
+        if IsHuman(Ship) then
+        begin
+          if Party = nil then
+            Party := TPlayer(Ship);
+          if (HumanParties <> nil) and (HumanParties.IndexOf(Ship) < 0) then
+            HumanParties.Add(Ship);
+        end;
+        if IsHuman(Ship.PartnerShip) then
+        begin
+          if Party = nil then
+            Party := TPlayer(Ship.PartnerShip);
+          if (HumanParties <> nil) and (HumanParties.IndexOf(Ship.PartnerShip) < 0) then
+            HumanParties.Add(Ship.PartnerShip);
+        end;
+      end;
     end;
   end;
   if not CoalitionPresent and (ControlFaction = sfCoalition) then
@@ -11128,7 +11270,7 @@ begin
       Ship := Ships[Index];
       if not Ship.InHyperspace
           and (Ship is TNormalShip)
-          and ((GetPlayer <> Ship)
+          and (not IsHuman(Ship)
               or ((Ship.CurrentPlanet = nil) and (Ship.DockedTo = nil))
               or (Ship.ConsecutiveDockedDays <= 2)) then
         if Ship.CurrentStanding = ssCoalitionMilitary then
@@ -11173,8 +11315,10 @@ begin
       PiratesPresent := False
     else if CoalitionKills < PirateKills then
       CoalitionPresent := False
+    // HUMANS: Which side wins a tied star when humans of both sides are there? The first
+    // human's party found in the star decides, as the one player's did.
     else if PlayerPartyPresent then
-      if GetPlayer.OwnerId = Byte(oiPirate) then
+      if Party.OwnerId = Byte(oiPirate) then
         CoalitionPresent := False
       else
         PiratesPresent := False
@@ -11194,6 +11338,25 @@ var
   PiratesCaptured,
   CustomPresent,
   PlayerPartyPresent: Boolean;
+  HumanParties: TList;
+  // CHANGE: CLEANUP - Every human whose party ends the battle on its side counts a defended
+  // system; the achievement belongs to the human at this machine.
+  procedure CountSystemDefended(Pirates: Boolean);
+  var
+    I: Integer;
+    Player: TPlayer;
+  begin
+    for I := 0 to HumanParties.Count - 1 do
+    begin
+      Player := TPlayer(HumanParties[I]);
+      if (Player.OwnerId = Byte(oiPirate)) = Pirates then
+      begin
+        Inc(Player.AchievementStats.SystemsDefended);
+        if Player = LocalPlayer then
+          TrySetAchievementProgress('DEFENDER', Player.AchievementStats.SystemsDefended);
+      end;
+    end;
+  end;
   procedure RecordFactionVictory(
       Faction: TStarFaction
   ); // @addr 0x7C2B70 @ida "void __usercall $name(unsigned __int8 Faction@<al>, void *ParentFrame@<^0>);" @note "Nested in UpdateControlFaction with unused caller-popped static link. Updates active Galaxy.WarDeltaWin; a losing streak below -1 is halved rather than incremented."
@@ -11213,89 +11376,47 @@ var
       Galaxy.WarDeltaWin[Ord(Faction)] := Galaxy.WarDeltaWin[Ord(Faction)] div 2;
   end;
 begin
-  if GetPlayer = nil then
+  if Session.Humans.Count = 0 then
     Exit;
-  PlayerPartyPresent := False;
-  DominatorsPresent := False;
-  DominatorsCaptured := False;
-  CoalitionPresent := False;
-  CoalitionCaptured := False;
-  PiratesPresent := False;
-  PiratesCaptured := False;
-  if ((Constellation.Id = 20) and (Galaxy.PirateWinType <> 3))
-      or (Galaxy.KellerResearchTargetStarId = Id)
-      or NoComeKling
-      or IsStarProtectedByScript(Self) then
-  begin
-    Battle := 0;
-    Exit;
-  end;
-  GetControlPresence(
-      PlayerPartyPresent,
-      CoalitionPresent,
-      DominatorsPresent,
-      PiratesPresent,
-      CustomPresent
-  );
-  if Boolean(Battle)
-      and CoalitionPresent
-      and not DominatorsPresent
-      and (ControlFaction = sfCoalition)
-      and (Status.CustomFaction = '')
-      and (Galaxy.CurrentTurn - 1 <= LastDominatorPresenceTurn)
-      and IsConstellationVisible
-      and (Galaxy.CountPlanetNewsByType(25) < 2)
-      and (Galaxy.CoalitionDefeatedTurn = 0) then
-    Galaxy.AddPlanetNews(
-        25,
-        FormatText1(
-            PickLocalizedTextVariant(
-                'GalaxyNews.Star.Kling.Lost',
-                (Galaxy.CurrentTurn div 10) * GenerationSeed
-            ),
-            '<color=255,240,100>',
-            '<Star>',
-            Name
-        )
+  HumanParties := TList.Create;
+  try
+    PlayerPartyPresent := False;
+    DominatorsPresent := False;
+    DominatorsCaptured := False;
+    CoalitionPresent := False;
+    CoalitionCaptured := False;
+    PiratesPresent := False;
+    PiratesCaptured := False;
+    if ((Constellation.Id = 20) and (Galaxy.PirateWinType <> 3))
+        or (Galaxy.KellerResearchTargetStarId = Id)
+        or NoComeKling
+        or IsStarProtectedByScript(Self) then
+    begin
+      Battle := 0;
+      Exit;
+    end;
+    GetControlPresence(
+        PlayerPartyPresent,
+        CoalitionPresent,
+        DominatorsPresent,
+        PiratesPresent,
+        CustomPresent,
+        HumanParties
     );
-  if Boolean(Battle)
-      and CoalitionPresent
-      and not PiratesPresent
-      and (ControlFaction = sfCoalition)
-      and (Status.CustomFaction = '')
-      and (Galaxy.CurrentTurn - 1 <= LastPiratePresenceTurn)
-      and IsConstellationVisible
-      and (Galaxy.CountPlanetNewsByType(28) < 2)
-      and (Galaxy.CoalitionDefeatedTurn = 0) then
-    Galaxy.AddPlanetNews(
-        28,
-        FormatText1(
-            PickLocalizedTextVariant(
-                'GalaxyNews.Star.Pirates.Lost',
-                (Galaxy.CurrentTurn div 10) * GenerationSeed
-            ),
-            '<color=255,240,100>',
-            '<Star>',
-            Name
-        )
-    );
-  if DominatorsPresent then
-    LastDominatorPresenceTurn := Galaxy.CurrentTurn;
-  if PiratesPresent then
-    LastPiratePresenceTurn := Galaxy.CurrentTurn;
-  if DominatorsPresent and CoalitionPresent then
-  begin
-    if IsConstellationVisible
-        and (Galaxy.CountPlanetNewsByType(24) < 2)
-        and (Battle = 0)
+    if Boolean(Battle)
+        and CoalitionPresent
+        and not DominatorsPresent
         and (ControlFaction = sfCoalition)
         and (Status.CustomFaction = '')
+        and (Galaxy.CurrentTurn - 1 <= LastDominatorPresenceTurn)
+        and IsConstellationVisible
+        and (Galaxy.CountPlanetNewsByType(25) < 2)
         and (Galaxy.CoalitionDefeatedTurn = 0) then
       Galaxy.AddPlanetNews(
-          24,
+          25,
           FormatText1(
               PickLocalizedTextVariant(
-                  'GalaxyNews.Star.Kling.Attack',
+                  'GalaxyNews.Star.Kling.Lost',
                   (Galaxy.CurrentTurn div 10) * GenerationSeed
               ),
               '<color=255,240,100>',
@@ -11303,22 +11424,20 @@ begin
               Name
           )
       );
-    Battle := 1;
-    Exit;
-  end;
-  if PiratesPresent and CoalitionPresent then
-  begin
-    if IsConstellationVisible
-        and (Galaxy.CountPlanetNewsByType(27) < 2)
-        and (Battle = 0)
+    if Boolean(Battle)
+        and CoalitionPresent
+        and not PiratesPresent
         and (ControlFaction = sfCoalition)
         and (Status.CustomFaction = '')
+        and (Galaxy.CurrentTurn - 1 <= LastPiratePresenceTurn)
+        and IsConstellationVisible
+        and (Galaxy.CountPlanetNewsByType(28) < 2)
         and (Galaxy.CoalitionDefeatedTurn = 0) then
       Galaxy.AddPlanetNews(
-          27,
+          28,
           FormatText1(
               PickLocalizedTextVariant(
-                  'GalaxyNews.Star.Pirates.Attack',
+                  'GalaxyNews.Star.Pirates.Lost',
                   (Galaxy.CurrentTurn div 10) * GenerationSeed
               ),
               '<color=255,240,100>',
@@ -11326,217 +11445,261 @@ begin
               Name
           )
       );
-    Battle := 1;
-    Exit;
-  end;
-  if DominatorsPresent and PiratesPresent then
-  begin
-    Battle := 1;
-    Exit;
-  end;
-  if CustomPresent and (Status.CustomFaction = '') then
-  begin
-    Battle := 1;
-    Exit;
-  end;
-  if Status.CustomFaction <> '' then
-  begin
-    Battle := Byte(CoalitionPresent or PiratesPresent or DominatorsPresent);
-    Exit;
-  end;
-  if not DominatorsPresent
-      and not PiratesPresent
-      and (ControlFaction = sfCoalition)
-      and (Battle <> 0) then
-  begin
-    if PlayerPartyPresent and (GetPlayer.OwnerId <> Byte(oiPirate)) then
+    if DominatorsPresent then
+      LastDominatorPresenceTurn := Galaxy.CurrentTurn;
+    if PiratesPresent then
+      LastPiratePresenceTurn := Galaxy.CurrentTurn;
+    if DominatorsPresent and CoalitionPresent then
     begin
-      Inc(GetPlayer.AchievementStats.SystemsDefended);
-      TrySetAchievementProgress('DEFENDER', GetPlayer.AchievementStats.SystemsDefended);
+      if IsConstellationVisible
+          and (Galaxy.CountPlanetNewsByType(24) < 2)
+          and (Battle = 0)
+          and (ControlFaction = sfCoalition)
+          and (Status.CustomFaction = '')
+          and (Galaxy.CoalitionDefeatedTurn = 0) then
+        Galaxy.AddPlanetNews(
+            24,
+            FormatText1(
+                PickLocalizedTextVariant(
+                    'GalaxyNews.Star.Kling.Attack',
+                    (Galaxy.CurrentTurn div 10) * GenerationSeed
+                ),
+                '<color=255,240,100>',
+                '<Star>',
+                Name
+            )
+        );
+      Battle := 1;
+      Exit;
     end;
-    Battle := 0;
-    Exit;
-  end;
-  if not CoalitionPresent
-      and not PiratesPresent
-      and (ControlFaction = sfDominators)
-      and (Battle <> 0) then
-  begin
-    Battle := 0;
-    Exit;
-  end;
-  if not CoalitionPresent
-      and not DominatorsPresent
-      and (ControlFaction = sfPirates)
-      and (Battle <> 0) then
-  begin
-    if PlayerPartyPresent and (GetPlayer.OwnerId = Byte(oiPirate)) then
+    if PiratesPresent and CoalitionPresent then
     begin
-      Inc(GetPlayer.AchievementStats.SystemsDefended);
-      TrySetAchievementProgress('DEFENDER', GetPlayer.AchievementStats.SystemsDefended);
+      if IsConstellationVisible
+          and (Galaxy.CountPlanetNewsByType(27) < 2)
+          and (Battle = 0)
+          and (ControlFaction = sfCoalition)
+          and (Status.CustomFaction = '')
+          and (Galaxy.CoalitionDefeatedTurn = 0) then
+        Galaxy.AddPlanetNews(
+            27,
+            FormatText1(
+                PickLocalizedTextVariant(
+                    'GalaxyNews.Star.Pirates.Attack',
+                    (Galaxy.CurrentTurn div 10) * GenerationSeed
+                ),
+                '<color=255,240,100>',
+                '<Star>',
+                Name
+            )
+        );
+      Battle := 1;
+      Exit;
     end;
-    Battle := 0;
-    Exit;
-  end;
-  if (DominatorsPresent or PiratesPresent) and (ControlFaction = sfCoalition) then
-    for Index := 0 to Planets.Count - 1 do
+    if DominatorsPresent and PiratesPresent then
     begin
-      Planet := Planets[Index];
-      if Planet.IsCoalitionOwned
-          and (SeededRandomIntRange(0, 100, Galaxy.CurrentTurn * Planet.GenerationSeed * 2311)
-              < 20) then
-      begin
-        // Native tests the quotient, not the remainder: preserve the early-turn behavior.
-        if Galaxy.CurrentTurn div 5 = 0 then
-          Planet.ForceGoodsScarcity(True, [6]);
-        if Galaxy.CurrentTurn div 7 = 0 then
-          Planet.ForceGoodsScarcity(True, [1]);
-        if Galaxy.CurrentTurn div 3 = 0 then
-          Planet.ForceGoodsScarcity(True, [0]);
-        if Galaxy.CurrentTurn div 5 = 0 then
-          Planet.ForceGoodsSurplus(True, [3]);
-        if Galaxy.CurrentTurn div 3 = 0 then
-          Planet.ForceGoodsSurplus(True, [5]);
-        if Galaxy.CurrentTurn div 11 = 0 then
-          Planet.ForceGoodsSurplus(True, [7]);
-      end;
+      Battle := 1;
+      Exit;
     end;
-  if DominatorsPresent and (ControlFaction <> sfDominators) then
-  begin
-    for Index := 0 to Planets.Count - 1 do
+    if CustomPresent and (Status.CustomFaction = '') then
     begin
-      Planet := Planets[Index];
-      if Planet.OwnerId <> Byte(oiUninhabited) then
-      begin
-        Planet.OwnerId := Byte(oiDominator);
-        Planet.UpdateOwnerFlags;
-        DominatorsCaptured := True;
-      end;
+      Battle := 1;
+      Exit;
     end;
-    if DominatorsCaptured then
+    if Status.CustomFaction <> '' then
     begin
-      if Galaxy.CoalitionDefeatedTurn = 0 then
-        if ControlFaction = sfCoalition then
-          Galaxy.AddPlanetNewsWithPlayerBubble(
-              33,
-              FormatText2(
-                  PickLocalizedTextVariant(
-                      'GalaxyNews.Globals.KlingTakeSystemFromNormals',
-                      (Galaxy.CurrentTurn div 10) * GenerationSeed
-                  ),
-                  '<color=255,240,100>',
-                  '<Star>',
-                  Name,
-                  '<Sector>',
-                  Constellation.GetName
-              )
-          )
-        else if Galaxy.CoalitionDefeatedTurn = 0 then
-          Galaxy.AddPlanetNewsWithPlayerBubble(
-              34,
-              FormatText2(
-                  PickLocalizedTextVariant(
-                      'GalaxyNews.Globals.KlingTakeSystemFromPirateClan',
-                      (Galaxy.CurrentTurn div 10) * GenerationSeed
-                  ),
-                  '<color=255,240,100>',
-                  '<Star>',
-                  Name,
-                  '<Sector>',
-                  Constellation.GetName
-              )
-          )
-        else
-          // Retained native branch, despite the outer zero test.
-          AddOrUpdatePlayerBubble(
-              0,
-              Galaxy.CurrentTurn,
-              FormatText2(
-                  PickLocalizedTextVariant(
-                      'GalaxyNews.Globals.KlingTakeSystemFromPirateClanAlt',
-                      (Galaxy.CurrentTurn div 10) * GenerationSeed
-                  ),
-                  '<color=255,240,100>',
-                  '<Star>',
-                  Name,
-                  '<Sector>',
-                  Constellation.GetName
-              ),
-              ''
-          );
-      RecordFactionDefeat(ControlFaction);
-      PreviousControlFaction := ControlFaction;
-      ControlFaction := sfDominators;
+      Battle := Byte(CoalitionPresent or PiratesPresent or DominatorsPresent);
+      Exit;
+    end;
+    if not DominatorsPresent
+        and not PiratesPresent
+        and (ControlFaction = sfCoalition)
+        and (Battle <> 0) then
+    begin
+      CountSystemDefended(False);
       Battle := 0;
-      RecordFactionVictory(sfDominators);
+      Exit;
     end;
-  end
-  else if PiratesPresent and (Galaxy.PirateWinType <> 3) and (ControlFaction <> sfPirates) then
-  begin
-    for Index := 0 to Planets.Count - 1 do
+    if not CoalitionPresent
+        and not PiratesPresent
+        and (ControlFaction = sfDominators)
+        and (Battle <> 0) then
     begin
-      Planet := Planets[Index];
-      if Planet.OwnerId <> Byte(oiUninhabited) then
+      Battle := 0;
+      Exit;
+    end;
+    if not CoalitionPresent
+        and not DominatorsPresent
+        and (ControlFaction = sfPirates)
+        and (Battle <> 0) then
+    begin
+      CountSystemDefended(True);
+      Battle := 0;
+      Exit;
+    end;
+    if (DominatorsPresent or PiratesPresent) and (ControlFaction = sfCoalition) then
+      for Index := 0 to Planets.Count - 1 do
       begin
-        Planet.Warriors.Clear;
-        Planet.OwnerId := Byte(oiPirate);
-        Planet.Government := pgAnarchy;
-        Planet.UpdateOwnerFlags;
-        PiratesCaptured := True;
+        Planet := Planets[Index];
+        if Planet.IsCoalitionOwned
+            and (SeededRandomIntRange(0, 100, Galaxy.CurrentTurn * Planet.GenerationSeed * 2311)
+                < 20) then
+        begin
+          // Native tests the quotient, not the remainder: preserve the early-turn behavior.
+          if Galaxy.CurrentTurn div 5 = 0 then
+            Planet.ForceGoodsScarcity(True, [6]);
+          if Galaxy.CurrentTurn div 7 = 0 then
+            Planet.ForceGoodsScarcity(True, [1]);
+          if Galaxy.CurrentTurn div 3 = 0 then
+            Planet.ForceGoodsScarcity(True, [0]);
+          if Galaxy.CurrentTurn div 5 = 0 then
+            Planet.ForceGoodsSurplus(True, [3]);
+          if Galaxy.CurrentTurn div 3 = 0 then
+            Planet.ForceGoodsSurplus(True, [5]);
+          if Galaxy.CurrentTurn div 11 = 0 then
+            Planet.ForceGoodsSurplus(True, [7]);
+        end;
+      end;
+    if DominatorsPresent and (ControlFaction <> sfDominators) then
+    begin
+      for Index := 0 to Planets.Count - 1 do
+      begin
+        Planet := Planets[Index];
+        if Planet.OwnerId <> Byte(oiUninhabited) then
+        begin
+          Planet.OwnerId := Byte(oiDominator);
+          Planet.UpdateOwnerFlags;
+          DominatorsCaptured := True;
+        end;
+      end;
+      if DominatorsCaptured then
+      begin
+        if Galaxy.CoalitionDefeatedTurn = 0 then
+          if ControlFaction = sfCoalition then
+            Galaxy.AddPlanetNewsWithPlayerBubble(
+                33,
+                FormatText2(
+                    PickLocalizedTextVariant(
+                        'GalaxyNews.Globals.KlingTakeSystemFromNormals',
+                        (Galaxy.CurrentTurn div 10) * GenerationSeed
+                    ),
+                    '<color=255,240,100>',
+                    '<Star>',
+                    Name,
+                    '<Sector>',
+                    Constellation.GetName
+                )
+            )
+          else if Galaxy.CoalitionDefeatedTurn = 0 then
+            Galaxy.AddPlanetNewsWithPlayerBubble(
+                34,
+                FormatText2(
+                    PickLocalizedTextVariant(
+                        'GalaxyNews.Globals.KlingTakeSystemFromPirateClan',
+                        (Galaxy.CurrentTurn div 10) * GenerationSeed
+                    ),
+                    '<color=255,240,100>',
+                    '<Star>',
+                    Name,
+                    '<Sector>',
+                    Constellation.GetName
+                )
+            )
+          else
+            // Retained native branch, despite the outer zero test.
+            AddOrUpdatePlayerBubble(
+                0,
+                Galaxy.CurrentTurn,
+                FormatText2(
+                    PickLocalizedTextVariant(
+                        'GalaxyNews.Globals.KlingTakeSystemFromPirateClanAlt',
+                        (Galaxy.CurrentTurn div 10) * GenerationSeed
+                    ),
+                    '<color=255,240,100>',
+                    '<Star>',
+                    Name,
+                    '<Sector>',
+                    Constellation.GetName
+                ),
+                ''
+            );
+        RecordFactionDefeat(ControlFaction);
+        PreviousControlFaction := ControlFaction;
+        ControlFaction := sfDominators;
+        Battle := 0;
+        RecordFactionVictory(sfDominators);
+      end;
+    end
+    else if PiratesPresent and (Galaxy.PirateWinType <> 3) and (ControlFaction <> sfPirates) then
+    begin
+      for Index := 0 to Planets.Count - 1 do
+      begin
+        Planet := Planets[Index];
+        if Planet.OwnerId <> Byte(oiUninhabited) then
+        begin
+          Planet.Warriors.Clear;
+          Planet.OwnerId := Byte(oiPirate);
+          Planet.Government := pgAnarchy;
+          Planet.UpdateOwnerFlags;
+          PiratesCaptured := True;
+        end;
+      end;
+      if PiratesCaptured then
+      begin
+        RecordFactionDefeat(ControlFaction);
+        PreviousControlFaction := ControlFaction;
+        ControlFaction := sfPirates;
+        Battle := 0;
+        if (MainPiratePlanet = nil) or (MainPiratePlanet.CurrentStar <> Self) then
+          LiberationRewardsPending := True;
+        RecordFactionVictory(sfPirates);
+        for Index := 0 to Ships.Count - 1 do
+          if (TObject(Ships[Index]) is TPirate) and not TShip(Ships[Index]).HasScriptControl then
+            TPirate(Ships[Index]).PrisonTermRemaining := 0;
+        // Achievements belong to the human at this machine.
+        if LocalPlayer <> nil then
+          LocalPlayer.AchievementStats.CheckAllPirateSystemsAchievement;
+        if (PieceCreatorTargetStarId = Id) and (LocalPlayer <> nil) then
+          TryUnlockAchievement('PIECECREATOR');
+      end;
+    end
+    else if CoalitionPresent
+        and (Galaxy.CoalitionDefeatedTurn = 0)
+        and (ControlFaction <> sfCoalition) then
+    begin
+      for Index := 0 to Planets.Count - 1 do
+      begin
+        Planet := Planets[Index];
+        if Planet.OwnerId <> Byte(oiUninhabited) then
+        begin
+          if Planet.OwnerId = Byte(oiPirate) then
+            Planet.Government := TPlanetGovernment(SeededRandomIntRange(0, 4, Planet.RandomState));
+          Planet.OwnerId := RaceToOwner(Planet.RaceId);
+          Planet.UpdateOwnerFlags;
+          Planet.InventionLevels[7] :=
+              Max(Integer(Planet.InventionLevels[7]), Galaxy.TechLevel - 2);
+          CoalitionCaptured := True;
+        end;
+      end;
+      if CoalitionCaptured then
+      begin
+        RecordFactionDefeat(ControlFaction);
+        PreviousControlFaction := ControlFaction;
+        ControlFaction := sfCoalition;
+        Battle := 0;
+        if (MainPiratePlanet = nil) or (MainPiratePlanet.CurrentStar <> Self) then
+          LiberationRewardsPending := True;
+        RecordFactionVictory(sfCoalition);
+        for Index := 0 to Ships.Count - 1 do
+          if (TObject(Ships[Index]) is TRanger)
+              and not TShip(Ships[Index]).HasScriptControl
+              and not IsHuman(TShip(Ships[Index])) then
+            TRanger(Ships[Index]).PrisonTermRemaining := 0;
+        if (PieceCreatorTargetStarId = Id) and (LocalPlayer <> nil) then
+          TryUnlockAchievement('PIECECREATOR');
       end;
     end;
-    if PiratesCaptured then
-    begin
-      RecordFactionDefeat(ControlFaction);
-      PreviousControlFaction := ControlFaction;
-      ControlFaction := sfPirates;
-      Battle := 0;
-      if (MainPiratePlanet = nil) or (MainPiratePlanet.CurrentStar <> Self) then
-        LiberationRewardsPending := True;
-      RecordFactionVictory(sfPirates);
-      for Index := 0 to Ships.Count - 1 do
-        if (TObject(Ships[Index]) is TPirate) and not TShip(Ships[Index]).HasScriptControl then
-          TPirate(Ships[Index]).PrisonTermRemaining := 0;
-      if GetPlayer <> nil then
-        GetPlayer.AchievementStats.CheckAllPirateSystemsAchievement;
-      if (PieceCreatorTargetStarId = Id) and (GetPlayer <> nil) then
-        TryUnlockAchievement('PIECECREATOR');
-    end;
-  end
-  else if CoalitionPresent
-      and (Galaxy.CoalitionDefeatedTurn = 0)
-      and (ControlFaction <> sfCoalition) then
-  begin
-    for Index := 0 to Planets.Count - 1 do
-    begin
-      Planet := Planets[Index];
-      if Planet.OwnerId <> Byte(oiUninhabited) then
-      begin
-        if Planet.OwnerId = Byte(oiPirate) then
-          Planet.Government := TPlanetGovernment(SeededRandomIntRange(0, 4, Planet.RandomState));
-        Planet.OwnerId := RaceToOwner(Planet.RaceId);
-        Planet.UpdateOwnerFlags;
-        Planet.InventionLevels[7] := Max(Integer(Planet.InventionLevels[7]), Galaxy.TechLevel - 2);
-        CoalitionCaptured := True;
-      end;
-    end;
-    if CoalitionCaptured then
-    begin
-      RecordFactionDefeat(ControlFaction);
-      PreviousControlFaction := ControlFaction;
-      ControlFaction := sfCoalition;
-      Battle := 0;
-      if (MainPiratePlanet = nil) or (MainPiratePlanet.CurrentStar <> Self) then
-        LiberationRewardsPending := True;
-      RecordFactionVictory(sfCoalition);
-      for Index := 0 to Ships.Count - 1 do
-        if (TObject(Ships[Index]) is TRanger)
-            and not TShip(Ships[Index]).HasScriptControl
-            and (TShip(Ships[Index]) <> GetPlayer) then
-          TRanger(Ships[Index]).PrisonTermRemaining := 0;
-      if (PieceCreatorTargetStarId = Id) and (GetPlayer <> nil) then
-        TryUnlockAchievement('PIECECREATOR');
-    end;
+  finally
+    HumanParties.Free;
   end;
 end;
 procedure TStar.ResetControlFaction;
@@ -11581,7 +11744,7 @@ var
     for J := 0 to Ships.Count - 1 do
     begin
       Ship := TShip(Ships[J]);
-      if (Ship is TRanger) and not Ship.HasScriptControl and (GetPlayer <> Ship) then
+      if (Ship is TRanger) and not Ship.HasScriptControl and not IsHuman(Ship) then
         TRanger(Ship).PrisonTermRemaining := 0;
     end;
   end;
@@ -11609,7 +11772,7 @@ var
     end;
   end;
 begin
-  if GetPlayer = nil then
+  if Session.Humans.Count = 0 then
     Exit;
   DominatorCount := 0;
   CoalitionCount := 0;
@@ -11623,13 +11786,7 @@ begin
   for I := 0 to Ships.Count - 1 do
   begin
     Ship := TShip(Ships[I]);
-    if not Ship.InHyperspace
-        and ((Ship.CurrentPlanet = nil) or (Ship.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
-        and ((Ship.DockedTo = nil) or (GetPlayer = Ship))
-        and ((GetPlayer <> Ship)
-            or ((Ship.CurrentPlanet = nil) and (Ship.DockedTo = nil))
-            or (Ship.ConsecutiveDockedDays <= 2)
-            or (HumanScreen = screenPlanetQuest)) then
+    if CountsTowardStarControl(Ship) then
     begin
       CountShipStanding;
       if (Ship is TKling) and (Ship.CurrentStanding = ssDominator) then
@@ -11715,7 +11872,8 @@ begin
 end;
 procedure TStar.RefreshMovementStepParameters;
 begin
-  if (GetPlayer <> nil) and (GetPlayer.CurrentStar = Self) then
+  // CHANGE: CLEANUP - Every star with a human moves in the finer steps.
+  if StarHasHuman(Self) then
   begin
     MovementStepCount := 200;
     MovementStepScale := 1 / 200;
@@ -11959,7 +12117,7 @@ begin
       Inc(Count);
       Strength := Strength + Ship.Strength;
     end;
-    if (GetPlayer = Ship) and (GetPlayer.OwnerId = Byte(oiPirate)) and IncludeIndependent then
+    if IsHuman(Ship) and (Ship.OwnerId = Byte(oiPirate)) and IncludeIndependent then
     begin
       Inc(Count);
       Strength := Strength + Ship.Strength;
@@ -12051,7 +12209,7 @@ begin
     begin
       if (Ship is TPirate) and (Ship.OwnerId = Byte(oiPirate)) then
         Inc(Count);
-      if (Ship = GetPlayer) and (GetPlayer.OwnerId = Byte(oiPirate)) then
+      if IsHuman(Ship) and (Ship.OwnerId = Byte(oiPirate)) then
         Inc(Count);
     end;
   end;
@@ -12088,7 +12246,7 @@ var
         Exit;
       if not IncludePirates and (Ship.OwnerId in TOwnerMask(PlanetOwnerMasks.PirateClan)) then
         Exit;
-      if (GetPlayer = Ship) and GetPlayer.IsOutsideStarSpace then
+      if IsHuman(Ship) and Ship.IsOutsideStarSpace then
         Exit;
       Strength := Strength + Ship.Strength;
       Inc(Count);
@@ -12634,6 +12792,31 @@ begin
   Effect := TWeaponSE.Create(GraphKey, Classes.Point(0, 0), ShotVisual, -1);
   EffectFilm := CurrentFilm.AddObject(0, Effect);
 end;
+// CHANGE: CLEANUP - Whether Ship's items are equipped automatically: a human's ranger while
+// its human is on automatic control. Any other ship asks whether some human is, as the one
+// player's flag was asked of every ship.
+function IsAutomaticallyControlled(Ship: TShip): Boolean;
+var
+  I: Integer;
+begin
+  if IsHuman(Ship) then
+    Exit(HumanOf(Ship).PlayerAutomaticControl);
+  for I := 0 to Session.Humans.Count - 1 do
+    if Session.Humans[I].PlayerAutomaticControl then
+      Exit(True);
+  Result := False;
+end;
+// CHANGE: CLEANUP - The ranger of the human whose view Star's film follows (FilmHuman), or nil.
+function FilmPlayer(Star: TStar): TPlayer;
+var
+  Human: THuman;
+begin
+  Human := FilmHuman(Star);
+  if Human = nil then
+    Result := nil
+  else
+    Result := Human.Player;
+end;
 procedure TStar.NextDay(RecordFilm: Boolean);
 var
   { Local order and unused Reserved slots preserve the native DCC32 frame. }
@@ -12847,7 +13030,7 @@ var
           Ship.Inventory.Delete(Index);
       end;
     end;
-    if (Ship.CargoFreeSpace < 0) and (GetPlayer <> Ship) then
+    if (Ship.CargoFreeSpace < 0) and not IsHuman(Ship) then
     begin
       Ship.AutoEquipInventory;
       Ship.ClearUnequippedWeaponTargets;
@@ -12859,14 +13042,14 @@ var
       Ship.RefreshDerivedStats(True);
     end
     else if (Item.ItemType in [t_FuelTanks..t_CustomWeapon])
-        and (LocalHuman.PlayerAutomaticControl
-            or ((GetPlayer <> Ship) and (Ship.TypeId <> stTranclucator))) then
+        and (IsAutomaticallyControlled(Ship)
+            or (not IsHuman(Ship) and (Ship.TypeId <> stTranclucator))) then
     begin
       Ship.AutoEquipInventory;
       Ship.ClearUnequippedWeaponTargets;
       Ship.RefreshDerivedStats(True);
     end;
-    if GetPlayer = Ship then
+    if IsHuman(Ship) then
       InterruptLongTravel := True;
     if RecordFilm then
     begin
@@ -12901,10 +13084,14 @@ begin
     // CHANGE: ENHANCEMENT - Capture simulation steps for observer playback.
     if Assigned(ObserverStep) then
       ObserverStep(Self, 0, Self.MovementStepCount);
-    if (GetPlayer <> nil) and (GetPlayer.CurrentStar = Self) then
+    // CHANGE: CLEANUP - The visit counters are the star's: they count while any human is here.
+    if StarHasHuman(Self) then
     begin
       Self.DaysSincePlayerVisit := 0;
-      GetPlayer.BombKillsThisTurn := 0;
+      for Index := 0 to Session.Humans.Count - 1 do
+        if (Session.Humans[Index].Player <> nil)
+            and (Session.Humans[Index].Player.CurrentStar = Self) then
+          Session.Humans[Index].Player.BombKillsThisTurn := 0;
       if Self.PlayerPresenceLevel < 90 then
         Inc(Self.PlayerPresenceLevel);
     end
@@ -12945,7 +13132,7 @@ begin
       for Index := (Self.Ships.Count - 1) downto 0 do
       begin
         Ship := Self.Ships[Index];
-        if (Galaxy.StasisModEnabled <> 1) or (GetPlayer = Ship) then
+        if (Galaxy.StasisModEnabled <> 1) or IsHuman(Ship) then
           Ship.NextDay;
         if (Ship.PartnerShip <> nil)
             and ((Ship.PartnershipDaysRemaining > 0)
@@ -12986,8 +13173,10 @@ begin
       CurrentFilm.Turn := Galaxy.CurrentTurn;
       CurrentFilm.RadarRange := 0;
       Stage := 60;
-      if GetPlayer.IsEquipmentUsable(GetPlayer.GetRadar) then
-        CurrentFilm.RadarRange := GetPlayer.GetRadarRange;
+      // HUMANS: film viewpoint. The film is shared by the humans in the star but shows the
+      // radar range of one of them (FilmHuman).
+      if FilmPlayer(Self).IsEquipmentUsable(FilmPlayer(Self).GetRadar) then
+        CurrentFilm.RadarRange := FilmPlayer(Self).GetRadarRange;
       Stage := 61;
       ObjectFilm := CurrentFilm.AddObject(Integer(Self.Id), Self.Graphic);
       CurrentFilm.SetObjectPosition(StepIndex, ObjectFilm, MakePointF(0.0, 0.0));
@@ -13024,7 +13213,7 @@ begin
     begin
       Ship := Self.Ships[Index];
       if not Ship.IsOutsideStarSpace
-          and ((Galaxy.StasisModEnabled <> 1) or (GetPlayer = Ship))
+          and ((Galaxy.StasisModEnabled <> 1) or IsHuman(Ship))
           and ((Ship.TypeId <> stKling)
               or (((Ship as TKling).ActiveProgramAppliedTurn <= 0)
                   or not (Byte((Ship as TKling).ActiveProgramId) in [7, 11]))) then
@@ -13057,7 +13246,7 @@ begin
                             Weapon.GetShotDelayFactor * (Self.MovementStepCount - ShotEndMargin)
                         )
                     );
-                if (GetPlayer = Ship) or (GetPlayer = CombatEvent^.Target) then
+                if IsHuman(Ship) or IsHuman(TObject(CombatEvent^.Target)) then
                   Self.PlayerCombatOccurred := True;
                 Quantity := Self.CombatEvents.Count;
                 i := 0;
@@ -13108,7 +13297,7 @@ begin
                 end;
                 if Ship.TypeId <> stKling then
                 begin
-                  if (GetPlayer = Ship) and Ship.IsHealthEffectActive(10) then
+                  if IsHuman(Ship) and Ship.IsHealthEffectActive(10) then
                     WearMultiplier := 3.0
                   else
                     WearMultiplier := 1.0;
@@ -13211,7 +13400,7 @@ begin
         begin
           OwnerShip := TObject(Ship.OrderTarget) as TShip;
           PickupWeight := 0;
-          if (GetPlayer = OwnerShip)
+          if IsHuman(OwnerShip)
               and ((OwnerShip.PickupTargets <> nil) and OwnerShip.InNormalSpace) then
             for PickupIndex := 0 to (OwnerShip.PickupTargets.Count - 1) do
             begin
@@ -13245,7 +13434,7 @@ begin
           end
           else
             Point := OwnerShip.OrderDestination;
-          if (Galaxy.StasisModEnabled = 1) and (GetPlayer = Ship) then
+          if (Galaxy.StasisModEnabled = 1) and IsHuman(Ship) then
             Point := OwnerShip.Position;
           if (Ship.GetEffectiveFollowMode = 0)
               and ((Ship is TTranclucator)
@@ -13344,7 +13533,7 @@ begin
                           or ((Ship as TKling).DominatorSeries <> dsTerron)))) then
           begin
             WorkScale := Ship.MovementSpeed;
-            if (Galaxy.StasisModEnabled = 1) and (GetPlayer <> Ship) then
+            if (Galaxy.StasisModEnabled = 1) and not IsHuman(Ship) then
               WorkScale := 0.0;
             Distance := PointDistanceSquared(Ship.RepulsionPosition, Ship.OrderDestination);
             if Distance <> 0.0 then
@@ -13460,7 +13649,7 @@ begin
                         OwnerShip.ClearMovementPath;
                         if (Angle < 175.0)
                             and ((OwnerShip.Speed >= 200)
-                                and (OwnerShip.CurrentStar = LocalHuman.PlayerStar)) then
+                                and IsFilmedStar(OwnerShip.CurrentStar)) then
                         begin
                           Distance :=
                               1.0
@@ -13487,7 +13676,8 @@ begin
       end;
     end;
     Stage := 16;
-    if LocalHuman.PlayerStar = Self then
+    // CHANGE: CLEANUP - In every filmed star, not only the local human's.
+    if IsFilmedStar(Self) then
       Self.AvoidShipPathCollisions;
     Stage := 17;
     if RecordFilm then
@@ -13563,7 +13753,7 @@ begin
     for Index := 0 to (Self.Ships.Count - 1) do
     begin
       Ship := Self.Ships[Index];
-      if (Galaxy.StasisModEnabled <> 1) or (GetPlayer = Ship) then
+      if (Galaxy.StasisModEnabled <> 1) or IsHuman(Ship) then
       begin
         if Ship.GetHull.InterceptorsEnabled then
           Ship.LaunchInterceptors;
@@ -13608,18 +13798,19 @@ begin
     Stage := 26;
     if RecordFilm then
     begin
+      // CHANGE: CLEANUP - The film's player path follows the human the film follows.
       if not Self.PlayerCombatOccurred
-          or (GetPlayer.MovementPath.ActiveTail <> nil)
-              and not (GetPlayer.Speed * GetPlayer.Speed + 100
+          or (FilmPlayer(Self).MovementPath.ActiveTail <> nil)
+              and not (FilmPlayer(Self).Speed * FilmPlayer(Self).Speed + 100
                   >= PointDistanceSquared(
-                      GetPlayer.Position,
-                      GetPlayer.MovementPath.ActiveTail^.Position))
-          or (GetPlayer.Order = soLand) and (GetPlayer.FilmAlphaStep <> 0.0) then
+                      FilmPlayer(Self).Position,
+                      FilmPlayer(Self).MovementPath.ActiveTail^.Position))
+          or (FilmPlayer(Self).Order = soLand) and (FilmPlayer(Self).FilmAlphaStep <> 0.0) then
         Self.PlayerFilmPath := nil
       else
       begin
         Self.PlayerFilmPath := TSPath.Create;
-        TSPath(Self.PlayerFilmPath).AppendWaypoint(GetPlayer.Position, StepIndex);
+        TSPath(Self.PlayerFilmPath).AppendWaypoint(FilmPlayer(Self).Position, StepIndex);
       end;
     end;
     Stage := 27;
@@ -13694,12 +13885,13 @@ begin
           end;
           HitShip := nil;
           Stage := 2902;
-          if (GetPlayer = Missile.OwnerShip)
+          if IsHuman(Missile.OwnerShip)
               and ((TObject(Target) is TGoods)
                   and (Ord((TObject(Target) as TGoods).NaturalFlag) <> 0)) then
           begin
             Item := TObject(Target) as TItem;
-            if GetPlayer.ScriptItemsAct(satOnMissileHittingObject, Item, Missile, 1) = 0 then
+            if Missile.OwnerShip.ScriptItemsAct(satOnMissileHittingObject, Item, Missile, 1)
+                = 0 then
             begin
               Inc(EntryIndex);
               Continue;
@@ -13839,7 +14031,7 @@ begin
                     Ship := Self.Ships[CandidateIndex];
                     if Ship.InNormalSpace
                         and (not Ship.IsHullDestroyed
-                            and ((GetPlayer <> Ship)
+                            and (not IsHuman(Ship)
                                 or (Galaxy.GodModEnabled <> 1)
                                     and (Galaxy.SpecialSimulationMode = 0))) then
                     begin
@@ -13856,10 +14048,9 @@ begin
                                 )
                             );
                         if Ship.IsHullDestroyed
-                            and ((GetPlayer <> nil)
-                                and ((Item.ItemType = t_ArtefactBomb)
-                                    and (GetPlayer = Missile.OwnerShip))) then
-                          Inc(GetPlayer.BombKillsThisTurn);
+                            and ((Item.ItemType = t_ArtefactBomb)
+                                and IsHuman(Missile.OwnerShip)) then
+                          Inc(TPlayer(Missile.OwnerShip).BombKillsThisTurn);
                         DamageColor := GR_Main.CurrentPixelFormat.PackRgbBytes(255, 0, 0);
                         if RecordFilm then
                         begin
@@ -13993,7 +14184,7 @@ begin
               begin
                 Stage := 29090;
                 HitShip := TObject(Target) as TShip;
-                if GetPlayer = HitShip then
+                if IsHuman(HitShip) then
                   Self.PlayerCombatOccurred := True;
                 Stage := 29091;
                 DrainedDamage := 0;
@@ -14088,7 +14279,7 @@ begin
                       Missile.OwnerShip.FilmObject,
                       Missile.OwnerShip.FilmObject
                   );
-                  if GetPlayer <> Missile.OwnerShip then
+                  if not IsHuman(Missile.OwnerShip) then
                     CurrentFilm.SetWeaponHit(
                         StepIndex,
                         EffectFilm,
@@ -14199,7 +14390,8 @@ begin
                         150,
                         Self.GenerationSeed * Cardinal(Galaxy.CurrentTurn) * Cardinal(Item.Id)
                     );
-                if (LocalHuman.PlayerStar = Self) and (Count - 20 < PathStep) then
+                // CHANGE: CLEANUP - In every filmed star, not only the local human's.
+                if IsFilmedStar(Self) and (Count - 20 < PathStep) then
                   Distance := 5.0;
                 Angle :=
                     SeededRandomUnitFloat(
@@ -14229,7 +14421,7 @@ begin
                 if Ship.InNormalSpace
                     and (not Ship.IsHullDestroyed
                         and ((PointDistanceSquared(Asteroid.Position, Ship.Position) <= 2500.0)
-                            and ((GetPlayer = Ship)
+                            and (IsHuman(Ship)
                                 or ((Ship.ScriptShip = nil) or Ship.HasScriptStateText)))) then
                   Break;
                 Inc(i);
@@ -14305,7 +14497,8 @@ begin
                         Cardinal((TObject(MovingDrop^.Payload) as TItem).Id)
                             * (Self.GenerationSeed * Cardinal(Galaxy.CurrentTurn))
                     );
-                if (LocalHuman.PlayerStar = Self) and (Count - 20 < PathStep) then
+                // CHANGE: CLEANUP - In every filmed star, not only the local human's.
+                if IsFilmedStar(Self) and (Count - 20 < PathStep) then
                   Distance := 5.0;
                 WorkScale :=
                     SeededRandomUnitFloat(
@@ -14424,7 +14617,8 @@ begin
                   AttackCount := Max(1, TWeapon(CombatEvent^.Weapon).Ammo);
                 Quantity := Quantity * AttackCount;
                 if (TShip(CombatEvent^.Attacker).TypeId <> stKling)
-                    and ((GetPlayer <> CombatEvent^.Attacker) or (Galaxy.AmmoModEnabled <> 1)) then
+                    and (not IsHuman(TObject(CombatEvent^.Attacker))
+                        or (Galaxy.AmmoModEnabled <> 1)) then
                 begin
                   RemainingAmmo := TWeapon(CombatEvent^.Weapon).Ammo - AttackCount;
                   TWeapon(CombatEvent^.Weapon).Ammo := RemainingAmmo;
@@ -14680,7 +14874,8 @@ begin
         begin
           Ship := Self.Ships[Index];
           if Ship.InNormalSpace
-              and ((GetPlayer <> Ship) or (HumanScreen = screenStarMap)) then
+              // HumanScreen is the screen at this machine; it holds back the local human.
+              and ((Ship <> LocalPlayer) or (HumanScreen = screenStarMap)) then
             for i := 0 to (Ship.Inventory.Count - 1) do
             begin
               Item := Ship.Inventory[i];
@@ -14726,7 +14921,7 @@ begin
               begin
                 Distance := PointDistanceSquared(Ship.Position, Item.Position);
                 if (Sqr(aConst.BombDamageRadius) >= Distance)
-                    and ((GetPlayer <> Ship)
+                    and (not IsHuman(Ship)
                         or (Galaxy.GodModEnabled <> 1) and (Galaxy.SpecialSimulationMode = 0)) then
                 begin
                   Damage := Cardinal(Ship.ApplyExplosionDamage(nil, Item, 0, nil));
@@ -14797,10 +14992,14 @@ begin
         Stage := 2971;
         if Ship.DestroyQueued
             and ((Cardinal(Cardinal(Count) shr 2) = Cardinal(PathStep))
-                and ((GetPlayer <> Ship) or (HumanScreen = screenStarMap))) then
+                // HumanScreen is the screen at this machine; it holds back the local human.
+                and ((Ship <> LocalPlayer) or (HumanScreen = screenStarMap))) then
         begin
           Ship.ScriptItemsAct(satOnDeath, nil, nil, 0);
           Ship.GetHull.HullPoints := 0;
+          // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs on the
+          // player, and native code also updates that ranger's relations and archives its quests:
+          // which human runs it?
           if GetPlayer <> nil then
             GetPlayer.ProcessShipDestructionQuests(Ship);
           Ship.RefreshDerivedStats(True);
@@ -14827,14 +15026,14 @@ begin
           if (StepIndex div (Count div 5) <= 3)
               and (not Ship.IsHullDestroyed
                   and (Ship.InNormalSpace
-                      and ((GetPlayer <> Ship)
+                      and (not IsHuman(Ship)
                           or (Galaxy.GodModEnabled <> 1) and (Galaxy.SpecialSimulationMode = 0)))
-                  and ((GetPlayer = Ship) or (Galaxy.StasisModEnabled <> 1))) then
+                  and (IsHuman(Ship) or (Galaxy.StasisModEnabled <> 1))) then
           begin
             Distance := Sqr(Ship.Position.X) + Sqr(Ship.Position.Y);
             if Self.DamageRadius * Self.DamageRadius > Distance then
             begin
-              if GetPlayer = Ship then
+              if IsHuman(Ship) then
                 Self.PlayerCombatOccurred := True;
               Damage := Cardinal(Ship.ApplyStarHeatDamage);
               if RecordFilm and (Integer(Damage) > 0) then
@@ -14867,20 +15066,21 @@ begin
           if (StepIndex div (Count div 5) <= 3)
               and (not Ship.IsHullDestroyed
                   and (Ship.InNormalSpace
-                      and ((GetPlayer <> Ship)
+                      and (not IsHuman(Ship)
                           or (Galaxy.GodModEnabled <> 1) and (Galaxy.SpecialSimulationMode = 0)))
-                  and (((GetPlayer = Ship) or (Galaxy.StasisModEnabled <> 1))
+                  and ((IsHuman(Ship) or (Galaxy.StasisModEnabled <> 1))
                       and (Ship.InterceptorPassesRemaining > 0))) then
           begin
-            if (GetPlayer = Ship) or (GetPlayer = Ship.InterceptorSourceShip) then
+            if IsHuman(Ship) or IsHuman(Ship.InterceptorSourceShip) then
             begin
               Self.PlayerCombatOccurred := True;
-              if GetPlayer = Ship.InterceptorSourceShip then
-                CurrentFilm.AddCameraEvent(StepIndex, GetPlayer.Position, Ship.Position, 1);
-              if (GetPlayer = Ship) and (Ship.InterceptorSourceShip <> nil) then
+              // CHANGE: CLEANUP - The camera follows the human the film follows.
+              if (FilmPlayer(Self) <> nil) and (FilmPlayer(Self) = Ship.InterceptorSourceShip) then
+                CurrentFilm.AddCameraEvent(StepIndex, FilmPlayer(Self).Position, Ship.Position, 1);
+              if (FilmPlayer(Self) = Ship) and (Ship.InterceptorSourceShip <> nil) then
                 CurrentFilm.AddCameraEvent(
                     StepIndex,
-                    GetPlayer.Position,
+                    FilmPlayer(Self).Position,
                     Ship.InterceptorSourceShip.Position,
                     1
                 );
@@ -14934,9 +15134,9 @@ begin
           if (System.Round(Ship.GetCombatStatusStrength(cseShock)) >= 1)
               and (not Ship.IsHullDestroyed
                   and (Ship.InNormalSpace
-                      and ((GetPlayer <> Ship)
+                      and (not IsHuman(Ship)
                           or (Galaxy.GodModEnabled <> 1) and (Galaxy.SpecialSimulationMode = 0)))
-                  and ((GetPlayer = Ship) or (Galaxy.StasisModEnabled <> 1))) then
+                  and (IsHuman(Ship) or (Galaxy.StasisModEnabled <> 1))) then
           begin
             Damage := Cardinal(Ship.ApplyShockStatusDamage(DamageColor));
             if RecordFilm then
@@ -14976,6 +15176,9 @@ begin
                       Ship.GetHull.HullPoints := 0;
                       Self.ClearShipReferences(Ship);
                       Ship.ScriptItemsAct(satOnDeath, Ship, Ship, 0);
+                      // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs
+                      // on the player, and native code also updates that ranger's relations and
+                      // archives its quests: which human runs it?
                       if GetPlayer <> nil then
                         GetPlayer.ProcessShipDestructionQuests(Ship);
                       for CandidateIndex := 0 to (Self.Ships.Count - 1) do
@@ -14985,7 +15188,7 @@ begin
                             and (OwnerShip.InNormalSpace
                                 and ((PointDistanceSquared(Ship.Position, OwnerShip.Position)
                                         <= 22500.0)
-                                    and ((GetPlayer <> OwnerShip)
+                                    and (not IsHuman(OwnerShip)
                                         or (Galaxy.GodModEnabled <> 1)
                                             and (Galaxy.SpecialSimulationMode = 0)))) then
                         begin
@@ -15135,7 +15338,7 @@ begin
                 and (not Ship.IsHullDestroyed
                     and (Ship.InNormalSpace
                         and ((Ship.CountActiveArtefacts(Ord(t_ArtPDTurret)) > 0)
-                            and ((GetPlayer = Ship) or (Galaxy.StasisModEnabled <> 1))))) then
+                            and (IsHuman(Ship) or (Galaxy.StasisModEnabled <> 1))))) then
             begin
               for ArtefactIndex := 1 to Ship.CountActiveArtefacts(Ord(t_ArtPDTurret)) do
               begin
@@ -15227,7 +15430,7 @@ begin
         end;
         Stage := 2974;
         CanPull := 1;
-        if (GetPlayer = Ship)
+        if IsHuman(Ship)
             and (Ship.PickupTargets <> nil)
             and (Ship.GetCargoHook <> nil)
             and (Ship.MovementPath.NodeCount <> 0) then
@@ -15271,7 +15474,7 @@ begin
           end;
         end;
         Stage := 2975;
-        if not ((Galaxy.StasisModEnabled = 1) and (GetPlayer <> Ship)
+        if not ((Galaxy.StasisModEnabled = 1) and not IsHuman(Ship)
             or ((Ship.PickupTargets = nil) or ((Ship.GetCargoHook = nil) or (CanPull = 0)))) then
         begin
           CanPull := 0;
@@ -15354,7 +15557,7 @@ begin
           end;
         end;
         Stage := 2976;
-        if (Galaxy.StasisModEnabled <> 1) and (Ship.CargoFreeSpace < 0) and (GetPlayer <> Ship) then
+        if (Galaxy.StasisModEnabled <> 1) and (Ship.CargoFreeSpace < 0) and not IsHuman(Ship) then
         begin
           Ship.AutoEquipInventory;
           Ship.DropCargoUntilNotOverloaded;
@@ -15363,7 +15566,7 @@ begin
             Ship.ClearPickupTargets;
         end;
         Stage := 2977;
-        if (Galaxy.StasisModEnabled <> 1) or (GetPlayer = Ship) then
+        if (Galaxy.StasisModEnabled <> 1) or IsHuman(Ship) then
         begin
           if not Ship.ProcessMovementStep(StepIndex, RecordFilm) then
             Inc(Index);
@@ -15474,10 +15677,14 @@ begin
       Ship := Self.Ships[Index];
       if Ship.DestroyQueued
           and (not Ship.IsHullDestroyed
-              and ((GetPlayer <> Ship) or (HumanScreen = screenStarMap))) then
+              // HumanScreen is the screen at this machine; it holds back the local human.
+              and ((Ship <> LocalPlayer) or (HumanScreen = screenStarMap))) then
       begin
         Ship.ScriptItemsAct(satOnDeath, nil, nil, 0);
         Ship.GetHull.HullPoints := 0;
+        // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs on the player,
+        // and native code also updates that ranger's relations and archives its quests: which human
+        // runs it?
         if Ship.IsHullDestroyed and (GetPlayer <> nil) then
           GetPlayer.ProcessShipDestructionQuests(Ship);
         Ship.RefreshDerivedStats(True);
@@ -15497,7 +15704,7 @@ begin
     if RecordFilm and (Self.PlayerFilmPath <> nil) then
     begin
       WorkCount := 0;
-      TSPath(Self.PlayerFilmPath).AppendWaypoint(GetPlayer.Position, StepIndex);
+      TSPath(Self.PlayerFilmPath).AppendWaypoint(FilmPlayer(Self).Position, StepIndex);
       Node := Self.PlayerFilmPath.ActiveHead;
       Point := Node^.Position;
       PathStep := Integer(System.Round(Node^.Heading));
@@ -15555,8 +15762,9 @@ begin
         Ship.InterceptorPassesRemaining := 0;
       end;
     end;
-    if GetPlayer <> nil then
-      GetPlayer.AchievementStats.CheckTranclucatorFleetAchievement;
+    // Achievements belong to the human at this machine.
+    if LocalPlayer <> nil then
+      LocalPlayer.AchievementStats.CheckTranclucatorFleetAchievement;
     Stage := 32;
     EntryCount := Self.MovingDropItems.Count;
     for EntryIndex := 0 to (EntryCount - 1) do
@@ -15621,7 +15829,9 @@ begin
     end;
     Self.CombatEvents.Clear;
     Stage := 35;
-    if not RecordFilm and ((GetPlayer <> nil) and (GetPlayer.CurrentStar <> Self)) then
+    // CHANGE: CLEANUP - Rangers destroyed where no human sees them (ROADMAP.md, Phase 4,
+    // item 9).
+    if not RecordFilm and ((Session.Humans.Count > 0) and not StarHasHuman(Self)) then
     begin
       Index := 0;
       while Self.Ships.Count > Index do
@@ -15645,6 +15855,10 @@ begin
         Ship.GetHull.HullPoints := 0;
         if Ship.IsHullDestroyed then
         begin
+          // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs on the
+          // player, and native code also updates that ranger's relations and archives its quests:
+          // which human runs it? And what records a human's death once humans respawn (Phase 4,
+          // item 9)? Native records the game over: the game result and the PlayerDeath event.
           if GetPlayer <> nil then
           begin
             GetPlayer.ProcessShipDestructionQuests(Ship);
@@ -15714,6 +15928,10 @@ begin
         end;
         if Ship is TRuins then
           StationDestroyed := 1;
+        // HUMANS: What happens to a destroyed human's ranger once humans respawn (Phase 4,
+        // item 9)? Native ends the game here for the one player: the game result, the ranger
+        // released from the screens and the score screen. Another human's ranger is freed like
+        // any ship until then.
         if GetPlayer = Ship then
         begin
           SimEvents.RecordPlayerResult(False);
@@ -15739,8 +15957,11 @@ begin
         Inc(Index);
       end;
     end;
-    if (StationDestroyed <> 0) and (GetPlayer <> nil) then
-      GetPlayer.RefreshStorageBubbles;
+    // CHANGE: CLEANUP - Every human's storage may have been at the station.
+    if StationDestroyed <> 0 then
+      for Index := 0 to Session.Humans.Count - 1 do
+        if Session.Humans[Index].Player <> nil then
+          Session.Humans[Index].Player.RefreshStorageBubbles;
     Stage := 38;
     Index := 0;
     while Self.Ships.Count > Index do
@@ -15848,16 +16069,23 @@ begin
       Ship := Self.Ships[Index];
       Ship.RefreshCurrentStanding;
     end;
-    if (Self.LiberationRewardsPending) and (GetPlayer <> nil) then
+    if (Self.LiberationRewardsPending) and (Session.Humans.Count > 0) then
     begin
-      ProcessSystemLiberationRewards(GetPlayer, Self);
+      // CHANGE: CLEANUP - The rewards go to every ship in the star; the ranger passed only
+      // seeds their texts: the first human's, as the one player's did.
+      ProcessSystemLiberationRewards(Session.Humans[0].Player, Self);
       Self.LastLiberationRewardsTurn := Cardinal(Galaxy.CurrentTurn);
       Self.LiberationRewardsPending := False;
     end;
     Stage := 42;
     if RecordFilm then
     begin
-      if Self.PlayerCombatOccurred then
+      // CHANGE: CLEANUP - The pacing below follows the local human's travel
+      // (EstimatePlayerTravelTurns, PreviousFilmActivity), so it applies to the film that
+      // follows the local human; another star's film plays at the normal pace.
+      // HUMANS: film viewpoint. Pacing for the film of a star without the local human (Phase 5
+      // sends each client its star's film).
+      if Self.PlayerCombatOccurred or (FilmHuman(Self) <> LocalHuman) then
       begin
         CurrentFilm.InitialActivity := 0;
         CurrentFilm.FinalActivity := 0;
@@ -15904,9 +16132,10 @@ begin
             Self.Graphic.LoadTemplate(
                 GR_Main.GameDataConfig.GetBlockByPath('SE.' + WideString(Self.Graphic.GraphKey))
             );
-            if GetPlayer <> nil then
+            // CHANGE: CLEANUP - Terron jumps in unseen when no human is in the star.
+            if Session.Humans.Count > 0 then
             begin
-              if GetPlayer.CurrentStar <> Self then
+              if not StarHasHuman(Self) then
               begin
                 aKling.TerronShip.Order := soJump;
                 aKling.TerronShip.OrderTarget := Self;
@@ -15920,18 +16149,21 @@ begin
       end;
     end;
     Stage := 44;
-    if (GetPlayer <> nil)
-        and ((GetPlayer.CurrentStar = Self)
-            and ((LocalHuman.PendingPlayerFollowTarget <> nil)
-                and ((LocalHuman.PendingPlayerFollowTarget.CurrentStar <> Self)
-                    or not LocalHuman.PendingPlayerFollowTarget.InNormalSpace))) then
-    begin
-      LocalHuman.PendingPlayerFollowTarget := nil;
-      GetPlayer.OrderNone(False);
-    end;
+    // CHANGE: CLEANUP - Every human in the star whose follow target left it stops.
+    for Index := 0 to Session.Humans.Count - 1 do
+      if (Session.Humans[Index].Player <> nil)
+          and ((Session.Humans[Index].Player.CurrentStar = Self)
+              and ((Session.Humans[Index].PendingPlayerFollowTarget <> nil)
+                  and ((Session.Humans[Index].PendingPlayerFollowTarget.CurrentStar <> Self)
+                      or not Session.Humans[Index].PendingPlayerFollowTarget.InNormalSpace))) then
+      begin
+        Session.Humans[Index].PendingPlayerFollowTarget := nil;
+        Session.Humans[Index].Player.OrderNone(False);
+      end;
     Self.RecordingTurnFilm := False;
-    if (GetPlayer <> nil) and (GetPlayer.CurrentStar = Self) then
-      GetPlayer.AchievementStats.CheckBomberAchievement(GetPlayer.BombKillsThisTurn);
+    // Achievements belong to the human at this machine.
+    if (LocalPlayer <> nil) and (LocalPlayer.CurrentStar = Self) then
+      LocalPlayer.AchievementStats.CheckBomberAchievement(LocalPlayer.BombKillsThisTurn);
     aShip.SimulationContext := 0;
   except
     on E: Exception do

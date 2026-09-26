@@ -5764,7 +5764,7 @@ begin
                                       'Quest.SendLetter.' + IntToStr(QuestNumber) + '.PlayerRace'
                                   ))
                               > 0))
-                      and (not Galaxy.HasPlayerQuestHistory(qtSendLetter, QuestNumber))
+                      and (not Galaxy.HasPlayerQuestHistory(Self, qtSendLetter, QuestNumber))
                       and MatchesCareerName(
                           Ord(GetDominantCareer),
                           LookupLocalizedTextByKey(
@@ -5940,7 +5940,7 @@ begin
                                       'Quest.KillShip.' + IntToStr(QuestNumber) + '.PlayerRace'
                                   ))
                               > 0))
-                      and (not Galaxy.HasPlayerQuestHistory(qtKillShip, QuestNumber))
+                      and (not Galaxy.HasPlayerQuestHistory(Self, qtKillShip, QuestNumber))
                       and MatchesCareerName(
                           Ord(GetDominantCareer),
                           LookupLocalizedTextByKey(
@@ -6137,7 +6137,11 @@ begin
                                 and (Planet.OwnerId = Byte(oiGaal)))
                             or ((TOwnerMask(TextQuest.TargetOwnerMask) = [])
                                 and (CurrentPlanet.OwnerId = Planet.OwnerId)))
-                        and not Galaxy.HasPlayerQuestHistory(qtPlanetQuest, Planet.TextQuestId)
+                        and not Galaxy.HasPlayerQuestHistory(
+                            Self,
+                            qtPlanetQuest,
+                            Planet.TextQuestId
+                        )
                         and ((((TextQuest.PlayerCareerMask and 1) <> 0)
                                 and (GetDominantCareer = rcTrader))
                             or (((TextQuest.PlayerCareerMask and 2) <> 0)
@@ -6267,7 +6271,7 @@ begin
                                   'Quest.DefSystem.' + IntToStr(QuestNumber) + '.PlayerRace'
                               ))
                           > 0))
-                  and (not Galaxy.HasPlayerQuestHistory(qtDefendSystem, QuestNumber))
+                  and (not Galaxy.HasPlayerQuestHistory(Self, qtDefendSystem, QuestNumber))
                   and MatchesCareerName(
                       Ord(GetDominantCareer),
                       LookupLocalizedTextByKey(
@@ -6392,7 +6396,7 @@ begin
                               or (Pos('OnlyPirate', FromFactions) <= 0))
                           and ((CurrentPlanet.OwnerId <> Byte(oiPirate))
                               or (Pos('OnlyNonPirate', FromFactions) <= 0))
-                          and (not Galaxy.HasPlayerQuestHistory(qtDefendShip, QuestNumber))
+                          and (not Galaxy.HasPlayerQuestHistory(Self, qtDefendShip, QuestNumber))
                           and ((LanguageDataConfig.CountParamsByPath(
                                       'Quest.DefShip.' + IntToStr(QuestNumber) + '.PlayerRace')
                                   = 0)
