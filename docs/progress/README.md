@@ -12,12 +12,12 @@ has got.
 ## Status
 
 - Phase: 0-2 done. Phase 3 done except the arcade checkpoint (needs the
-  owner's go-ahead) and the recorded-session exit test. Phase 4 in
-  progress: the foundation, the turn structure, scripts bound to humans,
-  and the classification of `GetPlayer` sites (1,773 -> 118, the rest
-  are `HUMANS:` markers) are done.
-- Next: per-human save block and session flags, PvP, respawn, the day
-  waiting for every human, hot-seat, then the `HUMANS:` decisions.
+  owner's go-ahead) and the recorded-session exit test. Phase 4 done in
+  code and headless tests (Milestone 3, hot-seat, `--hotseat=N`); the
+  hot-seat UI still needs a hand check (see the Phase 4 entry).
+- Next: the hot-seat hand check, then Phase 5 (networking). The 49
+  `// HUMANS:` markers left are Phase 5 or presentation: film viewpoint,
+  remote dialogue, event human id in scripts, probe orbits, shared shop.
 - Open issues: chaotic mode is seeded from the clock (Phase 1 entry); a
   loaded game drifts from the live one (Phase 3 entry); no converted
   screen has been exercised in the UI yet.
