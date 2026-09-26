@@ -2182,7 +2182,7 @@ begin
         Item.SaveToBlock(AddBlockByPath(Text));
       end;
     end
-    else if GetPlayer.CurrentPlanet = Self then
+    else if LocalPlayer.CurrentPlanet = Self then
       if LocalHuman.TemporaryShopSlots <> nil then
         for i := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
         begin
@@ -2227,12 +2227,14 @@ begin
   Block.AddParam('HillSpace', SysUtils.IntToStr(HillTiles));
   Block.AddParam('HillComplate', SysUtils.IntToStr(HillExplored));
   Block.AddParam('OrbitCnt', SysUtils.IntToStr(ProbeOrbitCount));
+  // HUMANS: per-human save block (item 5). The editable save block holds the local human's
+  // shop and storage, as it holds the local player.
   with Block.AddBlockByPath('Storage') do
   begin
-    for i := 0 to GetPlayer.StorageEntries.Count - 1 do
-      if PStorageEntry(GetPlayer.StorageEntries[i]).LocationOwner = Self then
+    for i := 0 to LocalPlayer.StorageEntries.Count - 1 do
+      if PStorageEntry(LocalPlayer.StorageEntries[i]).LocationOwner = Self then
       begin
-        Item := PStorageEntry(GetPlayer.StorageEntries[i]).Item;
+        Item := PStorageEntry(LocalPlayer.StorageEntries[i]).Item;
         Text := 'ItemId' + SysUtils.IntToStr(Int64(Cardinal(Item.Id)));
         Item.SaveToBlock(AddBlockByPath(Text));
       end;
@@ -2316,7 +2318,7 @@ begin
         Item.LoadFromBlock(GetBlockByPath(Text));
       end;
     end
-    else if GetPlayer.CurrentPlanet = Self then
+    else if LocalPlayer.CurrentPlanet = Self then
       if LocalHuman.TemporaryShopSlots <> nil then
         for i := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
         begin
@@ -2355,12 +2357,14 @@ begin
         end;
     end;
   end;
+  // HUMANS: per-human save block (item 5). The editable save block holds the local human's
+  // shop and storage, as it holds the local player.
   with Block.GetBlockByPath('Storage') do
   begin
-    for i := 0 to GetPlayer.StorageEntries.Count - 1 do
-      if PStorageEntry(GetPlayer.StorageEntries[i]).LocationOwner = Self then
+    for i := 0 to LocalPlayer.StorageEntries.Count - 1 do
+      if PStorageEntry(LocalPlayer.StorageEntries[i]).LocationOwner = Self then
       begin
-        Item := PStorageEntry(GetPlayer.StorageEntries[i]).Item;
+        Item := PStorageEntry(LocalPlayer.StorageEntries[i]).Item;
         Text := 'ItemId' + SysUtils.IntToStr(Int64(Cardinal(Item.Id)));
         Item.LoadFromBlock(GetBlockByPath(Text));
       end;
@@ -2381,10 +2385,10 @@ begin
             begin
               System.GetMem(Storage, SizeOf(TStorageEntry));
               Storage.LocationOwner := Self;
-              Storage.SlotIndex := GetPlayer.FindNextStorageSlot(Self);
+              Storage.SlotIndex := LocalPlayer.FindNextStorageSlot(Self);
               Storage.Item := Item;
-              GetPlayer.StorageEntries.Add(Storage);
-              GetPlayer.RefreshStorageBubbles;
+              LocalPlayer.StorageEntries.Add(Storage);
+              LocalPlayer.RefreshStorageBubbles;
             end;
           end;
           Break;
@@ -2649,7 +2653,7 @@ var
   PirateKills, ClanShips, IndependentShips: Integer;
   NearbyStar: TStar;
 begin
-  if GetPlayer = nil then
+  if Session.Humans.Count = 0 then
     Exit;
   I := 4; // Native diagnostic-era assignment, overwritten by the later loops.
   Orbit.AngleDegrees := WrapHeadingDegrees(Orbit.AngleDegrees);
@@ -2959,7 +2963,7 @@ begin
           GarrisonLimitFactor := GarrisonLimitFactor * RemapClamped(N, -10, 20, 0.8, 1.2);
           Budget := RemapClamped(N, -10, 20, 50, 200);
         end;
-        if (CurrentStar.Constellation.Id <> 20) or (GetPlayer.CurrentStar = CurrentStar) then
+        if (CurrentStar.Constellation.Id <> 20) or StarHasHuman(CurrentStar) then
         begin
           PirateKills := 0;
           for I := 0 to CurrentStar.Ships.Count - 1 do
@@ -3080,6 +3084,54 @@ begin
   end;
 end;
 
+// CHANGE: CLEANUP - Whether some human's ranger is in Star or in a star closer to it than the
+// square root of RadiusSquared. Early pirate attacks spare the stars near every human; native
+// spared those near the one player.
+function IsStarNearHuman(Star: TStar; RadiusSquared: Double): Boolean;
+var
+  I: Integer;
+  Player: TPlayer;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Player := Session.Humans[I].Player;
+    if Player = nil then
+      Continue;
+    if Player.CurrentStar = Star then
+      Exit(True);
+    if RadiusSquared > PointDistanceSquared(Star.Position, Player.CurrentStar.Position) then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
+// CHANGE: CLEANUP - Every human with an active analyzer learns that pirates attack
+// TargetStar. Native told the one player.
+procedure AddPirateAttackAnalyzerBubbles(TargetStar: TStar);
+var
+  I: Integer;
+  Human: THuman;
+  Text: WideString;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if (Human.Player <> nil)
+        and (Human.Player.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0) then
+    begin
+      Text :=
+          FormatText1(
+              LocalizedText('Artefacts.ArtAnalyzer.AttackPirates'),
+              '<color=255,240,100>',
+              '<Star>',
+              TargetStar.Name
+          );
+      if Text <> '' then
+        Human.AddOrUpdateBubble(0, aGalaxy.Galaxy.CurrentTurn, Text, '');
+    end;
+  end;
+end;
+
 procedure TPlanet.TryDispatchPirateAttacks;
 var
   TargetStar: TStar;
@@ -3174,7 +3226,6 @@ var
   var
     Quarter: Integer;
     Dominion: TRuins;
-    Text: WideString;
   begin
     if (Action = 4)
         and (SourceStar.Dominion <> nil)
@@ -3190,20 +3241,8 @@ var
       begin
         Dominion.FlyToStar := TargetStar;
         Dominion.FlyDate := aGalaxy.Galaxy.CurrentTurn + 10;
-        if (GetPlayer <> nil)
-            and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
-            and (TargetStar.Status.CustomFaction = '') then
-        begin
-          Text :=
-              FormatText1(
-                  LocalizedText('Artefacts.ArtAnalyzer.AttackPirates'),
-                  '<color=255,240,100>',
-                  '<Star>',
-                  TargetStar.Name
-              );
-          if Text <> '' then
-            AddOrUpdatePlayerBubble(0, aGalaxy.Galaxy.CurrentTurn, Text, '');
-        end;
+        if TargetStar.Status.CustomFaction = '' then
+          AddPirateAttackAnalyzerBubbles(TargetStar);
         Exit;
       end;
     end;
@@ -3227,23 +3266,11 @@ var
       Inc(Dispatched);
     end;
     if (Action = 4) and (Dispatched > 0) and (TargetStar.ControlFaction = sfCoalition) then
-      if (GetPlayer <> nil)
-          and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
-          and (TargetStar.Status.CustomFaction = '') then
-      begin
-        Text :=
-            FormatText1(
-                LocalizedText('Artefacts.ArtAnalyzer.AttackPirates'),
-                '<color=255,240,100>',
-                '<Star>',
-                TargetStar.Name
-            );
-        if Text <> '' then
-          AddOrUpdatePlayerBubble(0, aGalaxy.Galaxy.CurrentTurn, Text, '');
-      end;
+      if TargetStar.Status.CustomFaction = '' then
+        AddPirateAttackAnalyzerBubbles(TargetStar);
   end;
 begin
-  if GetPlayer = nil then
+  if Session.Humans.Count = 0 then
     Exit;
   ControlPercent := aGalaxy.Galaxy.GetFactionControlPercent(Ord(sfPirates));
   BaseChance :=
@@ -3327,13 +3354,8 @@ begin
           or IsStarProtectedByScript(TargetStar) then
         Continue;
       if aGalaxy.Galaxy.CurrentTurn <= 300 then
-      begin
-        if GetPlayer.CurrentStar = TargetStar then
+        if IsStarNearHuman(TargetStar, Sqr((1 - aGalaxy.Galaxy.CurrentTurn / 300) * 70 + 30)) then
           Continue;
-        if Sqr((1 - aGalaxy.Galaxy.CurrentTurn / 300) * 70 + 30)
-            > PointDistanceSquared(TargetStar.Position, GetPlayer.CurrentStar.Position) then
-          Continue;
-      end;
       TargetPirates := TargetStar.CountPirateForces(False, TargetPirateStrength, True, True);
       TargetOpposition :=
           TargetStar.CountForcesByOwnerGroups(TargetOppositionStrength, True, True, False, False);
@@ -3360,7 +3382,6 @@ var
   Score, BestScore: Single;
   SpawnPlanet: TPlanet;
   OldOwner: Byte;
-  MessageText: WideString;
   function CalculatePirateBaseRaidNeighborhoodThreshold(
       Star: TStar
   ): Single; // @addr 0x78BEBC @ida "float __usercall $name@<st0>(TStar *Star@<eax>, void *ParentFrame@<^0>);" @note "Nested in TrySpawnPirateBaseRaid; unused static link is caller-popped. Scores up to ten nearby stars and maps the score to 5..20."
@@ -3380,7 +3401,7 @@ var
     Result := RemapClamped(Score, -20, 20, 5, 20);
   end;
 begin
-  if GetPlayer = nil then
+  if Session.Humans.Count = 0 then
     Exit;
   if aGalaxy.Galaxy.PirateWinType in [3, 5] then
     Exit;
@@ -3409,13 +3430,8 @@ begin
         or IsStarProtectedByScript(Star) then
       Continue;
     if aGalaxy.Galaxy.CurrentTurn <= 300 then
-    begin
-      if GetPlayer.CurrentStar = Star then
+      if IsStarNearHuman(Star, Sqr((1 - aGalaxy.Galaxy.CurrentTurn / 300) * 70 + 25)) then
         Continue;
-      if Sqr((1 - aGalaxy.Galaxy.CurrentTurn / 300) * 70 + 25)
-          > PointDistanceSquared(Star.Position, GetPlayer.CurrentStar.Position) then
-        Continue;
-    end;
     PirateCount := 0;
     CoalitionCount := 0;
     CivilCount := 0;
@@ -3463,18 +3479,7 @@ begin
     TNormalShip(Ship).TrainSkillsAutomatically;
     SpawnPlanet.OwnerId := OldOwner;
   end;
-  if (GetPlayer <> nil) and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0) then
-  begin
-    MessageText :=
-        FormatText1(
-            LocalizedText('Artefacts.ArtAnalyzer.AttackPirates'),
-            '<color=255,240,100>',
-            '<Star>',
-            TargetStar.Name
-        );
-    if MessageText <> '' then
-      AddOrUpdatePlayerBubble(0, aGalaxy.Galaxy.CurrentTurn, MessageText, '');
-  end;
+  AddPirateAttackAnalyzerBubbles(TargetStar);
 end;
 
 procedure TPlanet.InitializeFilmState(StepIndex: Integer; RecordFilm: Boolean);
@@ -3582,7 +3587,9 @@ function TPlanet.RequestDialog: Boolean;
 var
   WaitResult: Cardinal;
 begin
-  if ExitScreenLoop or not GetPlayer.InNormalSpace then
+  // CHANGE: CLEANUP - The conversation screen is this machine's, so it opens for the local
+  // human only, as TShip.OpenPlayerConversation does.
+  if ExitScreenLoop or not LocalPlayer.InNormalSpace then
   begin
     Result := False;
     Exit;
@@ -3624,8 +3631,10 @@ var
   ItemType: Byte;
   TargetPrice, PriceStep, EconomyFactor: Single;
   TargetStock, StockStep, StoredUnits: Integer;
+  I: Integer;
+  Player: TPlayer;
 begin
-  if GetPlayer = nil then
+  if Session.Humans.Count = 0 then
     Exit;
   if ShopUpdateMode in [1, 2] then
     Exit;
@@ -3635,9 +3644,18 @@ begin
       ForceGoodsScarcity(False, [ItemType]);
     if GoodsSurplusTicks[ItemType] > 0 then
       ForceGoodsSurplus(False, [ItemType]);
-    StoredUnits := GetPlayer.CountStoredItemUnits(Self, ItemType);
-    if (GetPlayer.CurrentPlanet = Self) and (GetPlayer.ConsecutiveDockedDays > 1) then
-      Inc(StoredUnits, GetPlayer.CargoGoods[ItemType].Count);
+    // CHANGE: CLEANUP - The goods every human stores here, and carries while landed here for
+    // more than a day, count as supply. Native counted the one player's.
+    StoredUnits := 0;
+    for I := 0 to Session.Humans.Count - 1 do
+    begin
+      Player := Session.Humans[I].Player;
+      if Player = nil then
+        Continue;
+      Inc(StoredUnits, Player.CountStoredItemUnits(Self, ItemType));
+      if (Player.CurrentPlanet = Self) and (Player.ConsecutiveDockedDays > 1) then
+        Inc(StoredUnits, Player.CargoGoods[ItemType].Count);
+    end;
     EconomyFactor := aConst.GoodsMarket[ItemType].EconomyFactors[Ord(Economy)];
     if OwnerId in TOwnerMask(aConst.PlanetOwnerMasks.PirateClan) then
       EconomyFactor := EconomyFactor * aConst.GoodsMarket[ItemType].PirateEconomyFactor;
@@ -4292,7 +4310,8 @@ begin
     if FindTextOffsetW(Block.GetParamValue(Index), 'L') >= 0 then
     begin
       Faces[FaceCount] := ExtractDigitsToIntW(Block.GetParamName(Index));
-      if (GetPlayer = nil) or (GetPlayer.PortraitFaceId <> Faces[FaceCount]) then
+      // CHANGE: CLEANUP - The portrait is for the screen: it differs from the local player's.
+      if (LocalPlayer = nil) or (LocalPlayer.PortraitFaceId <> Faces[FaceCount]) then
         Inc(FaceCount);
     end;
   // Native selection deliberately excludes the last candidate and assumes at least two.
@@ -4339,8 +4358,9 @@ begin
       Ord(oiDominator): Text := LocalizedText('Planet.Kling.Info.TextAboutPlanet');
       Ord(oiUninhabited): Text := LocalizedText('Planet.NotCivil.Info.TextAboutPlanet');
     end;
-  if GetPlayer <> nil then
-    if (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
+  // CHANGE: CLEANUP - Info text for the screen: what the human at this machine sees.
+  if LocalPlayer <> nil then
+    if (LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
         and (OwnerId = Byte(oiUninhabited))
         and not ForMap then
       Text := Text + #13#10 + BuildNonCivilTreasureHintText;
@@ -4400,7 +4420,7 @@ begin
   ReplaceTextToken(
       Text,
       '<Relation>',
-      GetRelationLevelTextToShip(GetPlayer),
+      GetRelationLevelTextToShip(LocalPlayer),
       '<color=255,240,100>'
   );
   Result := Text;
@@ -4666,10 +4686,32 @@ begin
   Result := True;
 end;
 
+// CHANGE: CLEANUP - A satellite of any human keeps the loot as it is, and an item returns
+// when some human can reach it. Native asked the one player.
 function TPlanet.TryResetSurfaceLootAfterLongAbsence: Boolean;
 var
   i: Integer;
   Entry: PPlanetSurfaceLootEntry;
+  function HumanHasSatellite: Boolean;
+  var
+    I: Integer;
+  begin
+    for I := 0 to Session.Humans.Count - 1 do
+      if (Session.Humans[I].Player <> nil)
+          and Session.Humans[I].Player.HasSatelliteOnPlanet(Self) then
+        Exit(True);
+    Result := False;
+  end;
+  function HumanCanAccess(Item: TItem): Boolean;
+  var
+    I: Integer;
+  begin
+    for I := 0 to Session.Humans.Count - 1 do
+      if (Session.Humans[I].Player <> nil)
+          and Session.Humans[I].Player.CanAccessSurfaceLootItem(Item) then
+        Exit(True);
+    Result := False;
+  end;
 begin
   Result := False;
   if CurrentStar.DaysSincePlayerVisit < 720 then
@@ -4678,14 +4720,14 @@ begin
     Exit;
   if GetUnexploredSurfaceTileCount > GetTotalSurfaceTileCount * 0.4 then
     Exit;
-  if GetPlayer.HasSatelliteOnPlanet(Self) then
+  if HumanHasSatellite then
     Exit;
   if SurfaceLootEntries = nil then
     Exit;
   for i := 0 to SurfaceLootEntries.Count - 1 do
   begin
     Entry := SurfaceLootEntries[i];
-    if Entry.Unavailable and GetPlayer.CanAccessSurfaceLootItem(Entry.Item) then
+    if Entry.Unavailable and HumanCanAccess(Entry.Item) then
     begin
       Entry.Unavailable := False;
       Result := True;
@@ -5383,15 +5425,15 @@ begin
   else
     Relation := 0;
   RangerRelations[Index] := Pointer(Relation);
-  if (GetPlayer = Ranger) and (GetRelationLevelToShip(Ranger) <= rlHostile) then
-    GetPlayer.AchievementStats.CheckHaterAchievement;
+  // CHANGE: CLEANUP - Achievements belong to the human at this machine.
+  if (LocalPlayer = Ranger) and (GetRelationLevelToShip(Ranger) <= rlHostile) then
+    LocalPlayer.AchievementStats.CheckHaterAchievement;
 end;
 
 function TPlanet.RelationToShip(Ship: Pointer): Byte;
 begin
-  if (GetPlayer <> nil)
-      and (GetPlayer = Ship)
-      and (GetPlayer.PirateRank = 7)
+  if IsHuman(TObject(Ship))
+      and (TPlayer(Ship).PirateRank = 7)
       and (CurrentStar.Constellation.Id = 20)
       and not IsMainPiratePlanet
       and (OwnerId = Byte(oiPirate)) then
@@ -5415,7 +5457,7 @@ begin
   if OwnerId in [Ord(oiMaloc)..Ord(oiGaal), Ord(oiPirate)] then
   begin
     if ((TObject(Ship) as TShip).CurrentStar = CurrentStar)
-        and (not IsMainPiratePlanet or (GetPlayer <> Ship)) then
+        and (not IsMainPiratePlanet or not IsHuman(TObject(Ship))) then
     begin
       if (OwnerId in TOwnerMask(aConst.PlanetOwnerMasks.PirateClan))
           and ((TObject(Ship) as TShip).CurrentStanding
@@ -5498,8 +5540,8 @@ begin
     Result := rlNormal;
   end;
   if IsMainPiratePlanet
-      and (GetPlayer = Ship)
-      and (GetPlayer.CurrentPlanet = Self)
+      and IsHuman(TObject(Ship))
+      and (TPlayer(Ship).CurrentPlanet = Self)
       and (Result = rlHostile) then
     Result := rlBad;
 end;
@@ -5509,6 +5551,7 @@ begin
   Result := aConst.RelationInfo[Integer(GetRelationLevelToShip(Ship)) and 127].DisplayName;
 end;
 
+// CHANGE: CLEANUP - Info text for the screen: the relation is the local player's.
 function TPlanet.GetCivilInfoText: WideString;
 var
   Text: WideString;
@@ -5536,10 +5579,10 @@ begin
   ReplaceTextToken(
       Text,
       '<Relation>',
-      GetRelationLevelTextToShip(GetPlayer),
+      GetRelationLevelTextToShip(LocalPlayer),
       '<color=255,240,100>'
   );
-  if (GetRelationLevelToShip(GetPlayer) <= rlBad) and not IsMainPiratePlanet then
+  if (GetRelationLevelToShip(LocalPlayer) <= rlBad) and not IsMainPiratePlanet then
     Text := Text + #13#10 + LocalizedText('Planet.Civil.Info.BadDopInfo');
   Result := Text;
 end;
@@ -5826,6 +5869,8 @@ begin
             );
       until (Attempts > 30)
           or (CountEquipmentShopItemsInBucket(ItemType) < LegacyPlanetShopQuota(RaceId, ItemType));
+      // HUMANS: The shared stock is generated for the one player's ship (its slots and hull).
+      // For whose ship, when there are several humans?
       Item := GenerateEquipmentOffer(GetPlayer, ItemType);
       if Item <> nil then
       begin
@@ -5874,7 +5919,7 @@ begin
   Flagship := (Target is TWarrior) and ((Target as TWarrior).WarriorType = wtFlagship);
   if Flagship then
     HullType := htFlagship;
-  if (GetPlayer <> Target)
+  if not IsHuman(Target)
       and (Target.GetHull.HullType <> htSpecial)
       and (Target.GetHull.HullType <> HullType) then
     Exit;
@@ -5941,9 +5986,9 @@ begin
   Owner := RaceToOwner(RaceId);
   if (NextRandomUnitFloat(RandomState) < 0.1) or IsMainPiratePlanet then
     Owner := NextRandomIntRange(0, 4, RandomState);
-  if (GetPlayer <> Target) and IsMainPiratePlanet then
+  if not IsHuman(Target) and IsMainPiratePlanet then
     Owner := Target.GetHull.OwnerId;
-  if (Target.GetHull.OwnerId <> Owner) and (GetPlayer <> Target) then
+  if (Target.GetHull.OwnerId <> Owner) and not IsHuman(Target) then
     Exit;
   Result := THull.Create;
   Series := -1;
@@ -5976,7 +6021,7 @@ begin
         Series,
         OwnerId = Byte(oiPirate)
     );
-  if (Target.GetHull.SpecialModuleIndex > 0) and (GetPlayer <> Target) and (ModuleIndex < 0) then
+  if (Target.GetHull.SpecialModuleIndex > 0) and not IsHuman(Target) and (ModuleIndex < 0) then
     ModuleIndex := Target.GetHull.SpecialModuleIndex - 1;
   if ModuleIndex >= 0 then
     ApplySpecialMicroModule(ModuleIndex, Result);
@@ -6066,7 +6111,7 @@ begin
   begin
     if not (ItemType in [Ord(t_FuelTanks)..Ord(t_Engine)])
         and (Target.GetSlotCountForItemType(ItemType) = 0)
-        and (GetPlayer <> Target) then
+        and not IsHuman(Target) then
       Exit;
     MinLevel := 1;
     MaxLevel := InventionLevels[aConst.EquipmentInventionIndices[ItemType]];
@@ -6303,6 +6348,7 @@ begin
   end;
 end;
 
+// CHANGE: CLEANUP - For the screen: the city of the planet the local player is on.
 function TPlanet.GetGovernmentBackgroundGraph: WideString;
 begin
   Result := 'GI,Bm.';
@@ -6314,7 +6360,7 @@ begin
         Result
             + 'City.'
             + aConst
-                .OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and 127]
+                .OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and 127]
                 .InternalName;
     if OwnerId = Byte(oiPirate) then
       Result := Result + 'Pirate';
@@ -6388,6 +6434,7 @@ begin
     Result := LocalizedText('Planet.NotCivil.Treasure.Few');
 end;
 
+// CHANGE: CLEANUP - The greeting is for the government screen, so it greets the local player.
 function TPlanet.BuildGovernmentGreeting: WideString;
 { UnusedText is explicitly initialized/finalized by the native routine.
   PirateClanInCurStar, PirateClanInToStar and ToStarControlByPirates are loaded
@@ -6457,19 +6504,19 @@ begin
         Continue;
     end;
     if (Rules[RuleIndex].PlayerRace <> [])
-        and not (GetPlayer.PilotRace in Rules[RuleIndex].PlayerRace) then
+        and not (LocalPlayer.PilotRace in Rules[RuleIndex].PlayerRace) then
       Continue;
     if (Rules[RuleIndex].PlayerStatus <> [])
-        and not (Byte(GetPlayer.GetDominantCareer) in Rules[RuleIndex].PlayerStatus) then
+        and not (Byte(LocalPlayer.GetDominantCareer) in Rules[RuleIndex].PlayerStatus) then
       Continue;
     if (Rules[RuleIndex].PlayerRating <> [])
-        and not (GetPlayer.GetRangerRatingBand in Rules[RuleIndex].PlayerRating) then
+        and not (LocalPlayer.GetRangerRatingBand in Rules[RuleIndex].PlayerRating) then
       Continue;
     if (Rules[RuleIndex].PlayerRank <> [])
-        and not (GetPlayer.Rank in Rules[RuleIndex].PlayerRank) then
+        and not (LocalPlayer.Rank in Rules[RuleIndex].PlayerRank) then
       Continue;
     if (Rules[RuleIndex].PlayerPirateRank <> [])
-        and not (GetPlayer.PirateRank in Rules[RuleIndex].PlayerPirateRank) then
+        and not (LocalPlayer.PirateRank in Rules[RuleIndex].PlayerPirateRank) then
       Continue;
     Good := 50;
     if Rules[RuleIndex].Goods <> 42 then
@@ -6487,13 +6534,13 @@ begin
     end;
     if Rules[RuleIndex].CurPlanetRaceIsPlayerRace <> 2 then
     begin
-      if (Rules[RuleIndex].CurPlanetRaceIsPlayerRace = 0) and (GetPlayer.PilotRace <> RaceId) then
+      if (Rules[RuleIndex].CurPlanetRaceIsPlayerRace = 0) and (LocalPlayer.PilotRace <> RaceId) then
         Continue;
-      if (Rules[RuleIndex].CurPlanetRaceIsPlayerRace = 1) and (GetPlayer.PilotRace = RaceId) then
+      if (Rules[RuleIndex].CurPlanetRaceIsPlayerRace = 1) and (LocalPlayer.PilotRace = RaceId) then
         Continue;
     end;
     if (Rules[RuleIndex].CurPlanetRelations <> [])
-        and not (Byte(GetRelationLevelToShip(GetPlayer))
+        and not (Byte(GetRelationLevelToShip(LocalPlayer))
             in Rules[RuleIndex].CurPlanetRelations) then
       Continue;
     if Good <> 50 then
@@ -6513,12 +6560,12 @@ begin
         Continue;
       if (Rules[RuleIndex].CurPlanetGoodsSale <> [])
           and not (aGalaxy.Galaxy.ClassifyGoodsPrice(
-                  GetPlayer.ShopGoodsPurchasePrice(Good, nil),
+                  LocalPlayer.ShopGoodsPurchasePrice(Good, nil),
                   Good)
               in Rules[RuleIndex].CurPlanetGoodsSale) then
         Continue;
       if (Rules[RuleIndex].CurPlanetGoodsBuy <> [])
-          and not (aGalaxy.Galaxy.ClassifyGoodsPrice(GetPlayer.ShopGoodsSellPrice(Good, nil), Good)
+          and not (aGalaxy.Galaxy.ClassifyGoodsPrice(LocalPlayer.ShopGoodsSellPrice(Good, nil), Good)
               in Rules[RuleIndex].CurPlanetGoodsBuy) then
         Continue;
     end;
@@ -6677,10 +6724,10 @@ begin
           if Rules[RuleIndex].ToPlanetRaceIsPlayerRace <> 2 then
           begin
             if (Rules[RuleIndex].ToPlanetRaceIsPlayerRace = 0)
-                and (GetPlayer.PilotRace <> Planet.RaceId) then
+                and (LocalPlayer.PilotRace <> Planet.RaceId) then
               Continue;
             if (Rules[RuleIndex].ToPlanetRaceIsPlayerRace = 1)
-                and (GetPlayer.PilotRace = Planet.RaceId) then
+                and (LocalPlayer.PilotRace = Planet.RaceId) then
               Continue;
           end;
           if Rules[RuleIndex].ToPlanetRaceIsCurPlanetRace <> 2 then
@@ -6692,7 +6739,7 @@ begin
           end;
           if Rules[RuleIndex].ToPlanetRelations <> [] then
           begin
-            if not (Byte(Planet.GetRelationLevelToShip(GetPlayer))
+            if not (Byte(Planet.GetRelationLevelToShip(LocalPlayer))
                     in Rules[RuleIndex].ToPlanetRelations)
                 or (Planet.OwnerId = Byte(oiPirate)) then
               Continue;
@@ -6714,13 +6761,13 @@ begin
               Continue;
             if (Rules[RuleIndex].ToPlanetGoodsSale <> [])
                 and not (aGalaxy.Galaxy.ClassifyGoodsPrice(
-                        GetPlayer.ShopGoodsPurchasePrice(Good, Planet),
+                        LocalPlayer.ShopGoodsPurchasePrice(Good, Planet),
                         Good)
                     in Rules[RuleIndex].ToPlanetGoodsSale) then
               Continue;
             if (Rules[RuleIndex].ToPlanetGoodsBuy <> [])
                 and not (aGalaxy.Galaxy.ClassifyGoodsPrice(
-                        GetPlayer.ShopGoodsSellPrice(Good, Planet),
+                        LocalPlayer.ShopGoodsSellPrice(Good, Planet),
                         Good)
                     in Rules[RuleIndex].ToPlanetGoodsBuy) then
               Continue;
@@ -6753,14 +6800,14 @@ begin
                 ReplaceColoredToken(
                     Greeting,
                     '<ToPlanetGoodsSale>',
-                    WideString(IntToStr(GetPlayer.ShopGoodsPurchasePrice(Good, Planet))),
+                    WideString(IntToStr(LocalPlayer.ShopGoodsPurchasePrice(Good, Planet))),
                     '<color=255,240,100>'
                 );
             Greeting :=
                 ReplaceColoredToken(
                     Greeting,
                     '<ToPlanetGoodsBuy>',
-                    WideString(IntToStr(GetPlayer.ShopGoodsSellPrice(Good, Planet))),
+                    WideString(IntToStr(LocalPlayer.ShopGoodsSellPrice(Good, Planet))),
                     '<color=255,240,100>'
                 );
           end;
@@ -6777,7 +6824,7 @@ begin
     begin
       Result := Greeting;
       Result :=
-          ReplaceColoredToken(Result, '<PlayerRank>', GetPlayer.GetRankName, '<color=255,240,100>');
+          ReplaceColoredToken(Result, '<PlayerRank>', LocalPlayer.GetRankName, '<color=255,240,100>');
       Result := ReplaceColoredToken(Result, '<CurPlanet>', Name, '<color=255,240,100>');
       Result := ReplaceColoredToken(Result, '<CurStar>', CurrentStar.Name, '<color=255,240,100>');
       if Good <> 50 then
@@ -6793,14 +6840,14 @@ begin
             ReplaceColoredToken(
                 Result,
                 '<CurPlanetGoodsSale>',
-                WideString(IntToStr(GetPlayer.ShopGoodsPurchasePrice(Good, nil))),
+                WideString(IntToStr(LocalPlayer.ShopGoodsPurchasePrice(Good, nil))),
                 '<color=255,240,100>'
             );
         Result :=
             ReplaceColoredToken(
                 Result,
                 '<CurPlanetGoodsBuy>',
-                WideString(IntToStr(GetPlayer.ShopGoodsSellPrice(Good, nil))),
+                WideString(IntToStr(LocalPlayer.ShopGoodsSellPrice(Good, nil))),
                 '<color=255,240,100>'
             );
       end;
