@@ -28,6 +28,13 @@ HUMAN_TURNS = 20
 # respawn (ROADMAP.md, Phase 4, item 9).
 HUMAN_KILL_TURN = 5
 REPLAYS = ROOT / "tests" / "replays"
+# Hot-seat (ROADMAP.md, Phase 4, test plan): days each human plays from its own command log.
+HOTSEAT_DAYS = 10
+# The command kind of EndTurn (source/game/aPlayerActions.pas).
+END_TURN_KIND = 43
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import split_commands  # noqa: E402
 
 
 def target_name() -> str:
@@ -130,6 +137,68 @@ def check_session(args, binary: Path, save: Path) -> tuple[bool, str]:
     if code != 0 or not roundtrip or any("=ok" not in line for line in roundtrip) or not flags:
         return False, "session flags failed:" + output_tail(output)
     return True, "session flags and cheats survive a save"
+
+
+def drop_end_turns(log: Path) -> None:
+    """Removes the EndTurn commands from one human's log, so its human never ends a turn."""
+    header, records = split_commands.read_records(log)
+    parts = [header]
+    for record_type, payload in records:
+        if record_type == split_commands.COMMAND and int.from_bytes(payload[:2], "little") == END_TURN_KIND:
+            continue
+        parts.append(record_type.to_bytes(1, "little") + len(payload).to_bytes(4, "little", signed=True))
+        parts.append(payload)
+    log.write_bytes(b"".join(parts))
+
+
+def check_hotseat(args, binary: Path, save: Path, count: int) -> tuple[bool, str]:
+    """Hot-seat driven by one command log per human (ROADMAP.md, Phase 4, test plan).
+
+    A headless session (--sim-hotseat) where every human, in Session.Humans order, takes off,
+    flies, lands or buys each day and then ends its turn; each day starts only when every human
+    has ended it ("hotseat barrier ok"). The recording splits into one log per human
+    (tools/split_commands.py), and the replay merges them, given in reverse order, by day and
+    Session.Humans order: it must reach the recording's final hash without a divergence or a
+    day that started before every end turn. With two humans, a log whose human never ends its
+    turn must make the replay report the barrier.
+    """
+    with tempfile.TemporaryDirectory(prefix="rangers-hotseat-") as directory:
+        log = Path(directory) / "session.srcl"
+        code, output = simulate(binary, args.game_dir, save, [
+            f"--sim-humans={count}", f"--sim-hotseat={HOTSEAT_DAYS}", f"--sim-seed={args.seed}",
+            f"--record-commands={log}",
+        ])  # fmt: skip
+        done = last_line(output, "done hotseat ")
+        if code != 0 or "hotseat barrier ok" not in output or f" humans={count} " not in done:
+            return False, f"{count} humans hot-seat failed:" + output_tail(output)
+        expected = done.split("hash=")[-1].split()[0]
+        logs = split_commands.split(log, Path(directory) / "humans")
+        if len(logs) != count:
+            return False, f"{count} humans hot-seat: {len(logs)} per-human logs"
+        replay_logs = ",".join(str(path) for path in reversed(logs))
+        code, output = run_game(
+            binary, args.game_dir, [f"--replay-commands={replay_logs}", f"--sim-seed={args.seed}"]
+        )
+        summary = last_line(output, "done ")
+        if (
+            code != 0
+            or f"hash={expected}" not in summary
+            or " diverged=0 " not in summary
+            or " barrier-waits=0 " not in summary
+            or f" logs={count} " not in summary
+        ):
+            return False, f"{count} humans hot-seat replay failed:" + output_tail(output)
+        if count == 2:
+            drop_end_turns(logs[-1])
+            code, output = run_game(
+                binary, args.game_dir, [f"--replay-commands={replay_logs}", f"--sim-seed={args.seed}"]
+            )
+            if code == 0 or " barrier-waits=0 " in last_line(output, "done ") + " ":
+                return False, f"{count} humans hot-seat: a day started without an end turn:" + output_tail(output)
+    return True, (
+        f"{count} humans hot-seat: {HOTSEAT_DAYS} days, one log per human replays to the same hash"
+        + (", a missing end turn holds the day" if count == 2 else "")
+    )
 
 
 def check_respawns(output: str) -> str:
@@ -293,6 +362,9 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
         passed_pvp, note = check_pvp(args, binary, save, count)
         notes.append(note)
         passed = passed and passed_pvp
+        passed_hotseat, note = check_hotseat(args, binary, save, count)
+        notes.append(note)
+        passed = passed and passed_hotseat
 
     golden = GOLDEN / target_name() / f"{save_digest(save)}.txt"
     header = f"# {save.name}: {args.turns} turns, seed {args.seed}"

@@ -229,6 +229,8 @@ begin
     // CHANGE: ENHANCEMENT - Open a save at startup, past the main menu.
     else if Pos('--load-save=', Argument) = 1 then
       StartupSave := ExpandFileName(Copy(Argument, 13, MaxInt))
+    else if Pos('--sim-hotseat=', Argument) = 1 then
+      Simulation.HotSeatDays := StrToInt(Copy(Argument, 15, MaxInt))
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then

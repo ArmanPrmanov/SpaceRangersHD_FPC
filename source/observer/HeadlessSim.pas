@@ -30,6 +30,9 @@ type
     KillHumansAt: Integer;
     // Two humans in one star fight, with friendly fire on and then off (RunPvp).
     Pvp: Boolean;
+    // Hot-seat: every human plays this many days from its own commands, and each day waits
+    // for every human's end turn (RunHotSeat; 0: no).
+    HotSeatDays: Integer;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 implementation
@@ -47,6 +50,8 @@ uses
   aHold,
   aHuman,
   aCommands,
+  aShopActions,
+  EC_Struct,
   aItem,
   aPlanet,
   aPlayer,
@@ -516,27 +521,21 @@ begin
 end;
 
 // Adds humans until there are Total, each landed at an inhabited coalition planet in a star
-// that holds no other human. The choice depends only on the galaxy, so runs repeat.
+// that holds no other human (FindJoinPlanet). The choice depends only on the galaxy, so runs
+// repeat. Each joins by command, so a command log replays it.
 procedure JoinHumans(Total: Integer);
 var
-  I: Integer;
   Planet: TPlanet;
   Human: THuman;
 begin
-  I := 0;
   while Session.Humans.Count < Total do
   begin
-    if I >= Galaxy.Planets.Count then
+    Planet := FindJoinPlanet;
+    if Planet = nil then
       raise Exception.Create('Not enough coalition planets for the humans');
-    Planet := TPlanet(Galaxy.Planets[I]);
-    Inc(I);
-    if (Planet.OwnerId > Byte(oiGaal))
-        or (Planet.CurrentStar.ControlFaction <> sfCoalition)
-        or StarHasHuman(Planet.CurrentStar) then
-      Continue;
-    Human := JoinHuman(
+    Human := JoinHumanAt(
         Planet,
-        'Human' + IntToStr(Session.Humans.Count + 1),
+        'Human' + WideString(IntToStr(Session.Humans.Count + 1)),
         1 + Session.Humans.Count mod 5
     );
     Emit(Format('human id=%d star=%d planet=%d', [Human.Id, Planet.CurrentStar.Id, Planet.Id]));
@@ -870,6 +869,234 @@ begin
   end;
 end;
 
+// A human's command, sent as that human.
+procedure SubmitFor(Human: THuman; var Command: TPlayerCommand);
+begin
+  Command.Actor := Cardinal(Human.Id);
+  SubmitCommand(Command);
+end;
+
+procedure SubmitKindFor(Human: THuman; Kind: TCommandKind);
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(Kind);
+  SubmitFor(Human, Command);
+end;
+
+// Buys one unit of the first good the planet sells that the ranger can pay and carry. The
+// goods screen checks the same before it sends the command.
+function BuyOneGood(Human: THuman): Boolean;
+var
+  P: TPlayer;
+  Good: Byte;
+  Command: TPlayerCommand;
+begin
+  Result := False;
+  P := Human.Player;
+  if (P.CurrentPlanet = nil) or (P.CurrentPlanet.OwnerId > Byte(oiGaal)) then
+    Exit;
+  if P.GetCargoFreeSpace < 1 then
+    Exit;
+  for Good := 0 to 7 do
+    if (P.GetLocationGoodsEntry(Good).Count >= 1)
+        and (P.ShopGoodsPurchasePrice(Good, nil) <= P.Money) then
+    begin
+      Command := NewCommand(ckTradeGoods);
+      AddRef(Command, nil);
+      AddInt(Command, Good);
+      AddInt(Command, 1);
+      AddInt(Command, 0);
+      SubmitFor(Human, Command);
+      Exit(True);
+    end;
+end;
+
+// The inhabited planet of the human's star to head for on Day, or nil.
+function TargetPlanet(Human: THuman; Day: Integer): TPlanet;
+var
+  I, Count, Pick: Integer;
+  Star: TStar;
+begin
+  Result := nil;
+  Star := Human.Player.CurrentStar;
+  Count := 0;
+  for I := 0 to Star.Planets.Count - 1 do
+    if TPlanet(Star.Planets[I]).OwnerId <= Byte(oiGaal) then
+      Inc(Count);
+  if Count = 0 then
+    Exit;
+  Pick := (Day + Human.Id) mod Count;
+  for I := 0 to Star.Planets.Count - 1 do
+    if TPlanet(Star.Planets[I]).OwnerId <= Byte(oiGaal) then
+    begin
+      if Pick = 0 then
+        Exit(TPlanet(Star.Planets[I]));
+      Dec(Pick);
+    end;
+end;
+
+// One human's turn on Day, as its screens would send it: landed, it buys a good on some days
+// and takes off on others; docked at a station it takes off; in space, idle, it flies toward
+// a planet or lands on one; then it ends its turn. What it did goes into Plan.
+procedure PlayHumanTurn(Human: THuman; Day, Index: Integer; var Plan: AnsiString);
+var
+  P: TPlayer;
+  Planet: TPlanet;
+  Command: TPlayerCommand;
+  Target: TPointF;
+begin
+  P := Human.Player;
+  if P.CurrentPlanet <> nil then
+  begin
+    if BuyOneGood(Human) then
+      Plan := Plan + 'b';
+    if (Day + Index) mod 3 <> 0 then
+    begin
+      Command := NewCommand(ckTakeoff);
+      AddInt(Command, tfEndAutomaticControl);
+      SubmitFor(Human, Command);
+      Plan := Plan + 't';
+    end
+    else
+    begin
+      SubmitKindFor(Human, ckPruneMessages);
+      Plan := Plan + 'w';
+    end;
+  end
+  else if P.DockedTo <> nil then
+  begin
+    Command := NewCommand(ckTakeoff);
+    AddInt(Command, tfEndAutomaticControl);
+    SubmitFor(Human, Command);
+    Plan := Plan + 't';
+  end
+  else if P.InNormalSpace then
+  begin
+    if P.Order = soNone then
+    begin
+      Planet := TargetPlanet(Human, Day);
+      if Planet = nil then
+      begin
+        Target := MakePointF(P.Position.X / 2, P.Position.Y / 2);
+        Command := NewCommand(ckOrderMove);
+        AddPoint(Command, Target);
+        AddInt(Command, mfClearPending);
+        SubmitFor(Human, Command);
+        Plan := Plan + 'f';
+      end
+      else if (Day + Index) mod 2 = 0 then
+      begin
+        // Halfway to the planet.
+        Target := Planet.GetPosition;
+        Target := MakePointF((P.Position.X + Target.X) / 2, (P.Position.Y + Target.Y) / 2);
+        Command := NewCommand(ckOrderMove);
+        AddPoint(Command, Target);
+        AddInt(Command, mfClearPending);
+        SubmitFor(Human, Command);
+        Plan := Plan + 'f';
+      end
+      else
+      begin
+        Command := NewCommand(ckOrderLand);
+        AddRef(Command, Planet);
+        AddPoint(Command, MakePointF(0, 0));
+        SubmitFor(Human, Command);
+        Plan := Plan + 'l';
+      end;
+    end
+    else
+      Plan := Plan + '-';
+    SubmitKindFor(Human, ckApplyPendingOrders);
+    SubmitKindFor(Human, ckBeginSpaceDay);
+  end
+  else
+    Plan := Plan + 'h';
+  Command := NewCommand(ckEndTurn);
+  AddInt(Command, 0);
+  SubmitFor(Human, Command);
+end;
+
+// Hot-seat without a window (ROADMAP.md, Phase 4, test plan): every day each human who holds
+// the day plays its turn in Session.Humans order, each from its own commands; the day starts
+// only when none holds it. With --record-commands the log splits into one log per human
+// (tools/split_commands.py), and the merged replay of those must reach the same hash.
+function RunHotSeat(const Options: TSimulationOptions): Integer;
+var
+  Day, I, Waits, Early, Holders: Integer;
+  Human: THuman;
+  Plan: AnsiString;
+begin
+  Result := 0;
+  Waits := 0;
+  Early := 0;
+  CurrentScreenId := screenPlanet;
+  RequestedScreenId := screenNone;
+  for Day := 1 to Options.HotSeatDays do
+  begin
+    Plan := '';
+    Holders := 0;
+    for I := 0 to Session.Humans.Count - 1 do
+      if HumanHoldsDay(Session.Humans[I]) then
+        Inc(Holders);
+    I := 0;
+    while I < Session.Humans.Count do
+    begin
+      Human := Session.Humans[I];
+      Inc(I);
+      if not HumanHoldsDay(Human) then
+      begin
+        Plan := Plan + '.';
+        Continue;
+      end;
+      PlayHumanTurn(Human, Day, I, Plan);
+      Dec(Holders);
+      // Its end turn counts, and the day still waits for every human after it.
+      if HumanHoldsDay(Human) then
+        Inc(Waits);
+      if (Holders > 0) and AllHumansEndedTurn then
+        Inc(Early);
+    end;
+    if not AllHumansEndedTurn then
+    begin
+      Emit(Format('hotseat failed: day %d cannot start after every human ended the turn', [Day]));
+      Exit(1);
+    end;
+    StartPlayerStarTurnCalculation;
+    WaitForTurnCalculation;
+    RaisePendingWorkerError;
+    if (LocalPlayer <> nil) and not LocalPlayer.InHyperspace then
+    begin
+      StartGalaxyTurnCalculation;
+      WaitForTurnCalculation;
+      RaisePendingWorkerError;
+    end;
+    if AllHumansEndedTurn and (Session.Humans.Count > 0) then
+      Inc(Early);
+    if Options.Hash then
+      Emit(
+          Format(
+              'hotseat day=%d plan=%s hash=%s',
+              [Galaxy.CurrentTurn, Plan, IntToHex(GalaxyStateHash, 16)]
+          )
+      );
+  end;
+  if (Waits > 0) or (Early > 0) then
+  begin
+    Emit(Format('hotseat failed: barrier held=%d released-early=%d', [Waits, Early]));
+    Result := 1;
+  end
+  else
+    Emit('hotseat barrier ok');
+  Emit(
+      Format(
+          'done hotseat days=%d humans=%d day=%d hash=%s',
+          [Options.HotSeatDays, Session.Humans.Count, Galaxy.CurrentTurn,
+              IntToHex(GalaxyStateHash, 16)]
+      )
+  );
+end;
+
 procedure EmitHumans(const Options: TSimulationOptions);
 var
   Lines: TStringList;
@@ -914,6 +1141,11 @@ begin
       LoadSave(Options.SavePath, Options.Seed);
       JoinHumans(Options.Humans);
     end;
+  end;
+  if Options.HotSeatDays > 0 then
+  begin
+    Result := RunHotSeat(Options);
+    Exit;
   end;
   if Options.Turns <= 0 then
   begin
