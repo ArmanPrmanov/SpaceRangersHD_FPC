@@ -1160,7 +1160,7 @@ begin
       RefuelAtLocation;
       RefreshDerivedStats(True);
     end
-    else if GetPlayer.CurrentStar <> CurrentStar then
+    else if not StarHasHuman(CurrentStar) then
     begin
       Stage := 2;
       RepairBrokenEquipmentAtLocation;
@@ -1193,7 +1193,7 @@ begin
         end;
         Stage := 7;
         AssignWeaponTargetsInStar;
-        if not RetreatIfHullCritical and (GetPlayer.CurrentStar = CurrentStar) then
+        if not RetreatIfHullCritical and StarHasHuman(CurrentStar) then
         begin
           SelectEnemyShipInStar;
           EngageEnemyShip;
@@ -1218,12 +1218,46 @@ var
   IntervalBonus: Integer;
   Hole: THole;
   Stage: Integer;
+  // CHANGE: CLEANUP - Whether there are humans' rangers and none is in this star's space.
+  // Native asked this of the one player.
+  function AreHumansAway: Boolean;
+  var
+    I: Integer;
+    Player: TPlayer;
+  begin
+    Result := False;
+    for I := 0 to Session.Humans.Count - 1 do
+    begin
+      Player := Session.Humans[I].Player;
+      if Player = nil then
+        Continue;
+      if not Player.IsOutsideStarSpace and (Player.CurrentStar = CurrentStar) then
+        Exit(False);
+      Result := True;
+    end;
+  end;
+  // CHANGE: CLEANUP - Whether some human's ranger is in this star or bound for it. Native
+  // asked this of the one player.
+  function HasHumanHereOrComing: Boolean;
+  var
+    I: Integer;
+    Player: TPlayer;
+  begin
+    for I := 0 to Session.Humans.Count - 1 do
+    begin
+      Player := Session.Humans[I].Player;
+      if (Player <> nil)
+          and ((Player.CurrentStar = CurrentStar) or (Player.OrderTarget = CurrentStar)) then
+        Exit(True);
+    end;
+    Result := False;
+  end;
 begin
   Stage := 0;
   try
     RepairBrokenEquipmentAtLocation;
     RefuelAtLocation;
-    if GetPlayer.CurrentStar <> CurrentStar then
+    if not StarHasHuman(CurrentStar) then
       GetHull.HullPoints := Max(GetHull.HullPoints, GetHull.Weight div 2);
     Stage := 1;
     SelectKellerMission;
@@ -1232,8 +1266,7 @@ begin
     begin
       CoordinateSeriesInvasions(dsKeller);
       if (Galaxy.CountFactionStars(Ord(sfDominators)) < 2)
-          and (GetPlayer <> nil)
-          and (GetPlayer.IsOutsideStarSpace or (GetPlayer.CurrentStar <> CurrentStar)) then
+          and AreHumansAway then
         IntervalBonus := 30
       else
         IntervalBonus := 1;
@@ -1241,8 +1274,7 @@ begin
               and (Galaxy.KellerResearchTargetStarId <> CurrentStar.Id))
           or (Galaxy.CurrentTurn mod Galaxy.ScaleIntByTechLevel(5, IntervalBonus + 30) = 0)
           or (GetHull.HullPoints < 1300)
-          or ((GetPlayer <> nil)
-              and ((GetPlayer.CurrentStar = CurrentStar) or (GetPlayer.OrderTarget = CurrentStar))
+          or (HasHumanHereOrComing
               and (Galaxy.TechLevel < 7)
               and (Galaxy.GetFactionControlPercent(Ord(sfCoalition)) < 70)) then
       begin
@@ -1284,7 +1316,7 @@ begin
   try
     RepairBrokenEquipmentAtLocation;
     RefuelAtLocation;
-    if GetPlayer.CurrentStar <> CurrentStar then
+    if not StarHasHuman(CurrentStar) then
       GetHull.HullPoints := Max(GetHull.HullPoints, GetHull.Weight div 4);
     if InNormalSpace then
     begin
@@ -1298,7 +1330,7 @@ begin
         Stage := 2;
         if Galaxy.TerronWeaponLockTurn = 0 then
           AssignWeaponTargetsInStar;
-        if GetPlayer.CurrentStar = CurrentStar then
+        if StarHasHuman(CurrentStar) then
           SelectEnemyShipInStar;
       end;
     end;
@@ -1320,52 +1352,33 @@ var
   Ship: TShip;
   I: Integer;
   Count: Cardinal;
-  PlayerIsBertor: Boolean;
+  Player: TPlayer;
+  Bertors: TList;
 begin
   Result := nil;
   Count := 0;
-  PlayerIsBertor :=
-      (GetPlayer.CurrentStar = CurrentStar)
-          and GetPlayer.InNormalSpace
-          and IsPlayerCamouflageEffective(GetPlayer)
-          and GetPlayer.ChameleonActive
-          and (GetPlayer.ChameleonVisualType in [6]);
-  if PlayerIsBertor then
-  begin
-    Result := GetPlayer;
-    Inc(Count);
-  end;
-  for I := 0 to CurrentStar.Ships.Count - 1 do
-  begin
-    Ship := CurrentStar.Ships[I];
-    if Ship.InNormalSpace
-        and (Ship is TKling)
-        and ((Ship as TKling).KlingType in [ktBertor])
-        and ((Ship as TKling).DominatorSeries = DominatorSeries) then
+  // CHANGE: CLEANUP - Every human's ranger here that passes for a Bertor is a candidate,
+  // before the ships, in Session.Humans order. Native counted the one player. The
+  // camouflage check can mark a human detected, so each is asked once.
+  Bertors := TList.Create;
+  try
+    for I := 0 to Session.Humans.Count - 1 do
     begin
-      if Ship = PartnerShip then
+      Player := Session.Humans[I].Player;
+      if (Player <> nil)
+          and (Player.CurrentStar = CurrentStar)
+          and Player.InNormalSpace
+          and IsPlayerCamouflageEffective(Player)
+          and Player.ChameleonActive
+          and (Player.ChameleonVisualType in [6]) then
       begin
-        Result := Ship;
-        Exit;
+        Bertors.Add(Player);
+        if Count = 0 then
+          Result := Player
+        else
+          Result := nil;
+        Inc(Count);
       end;
-      if Count = 0 then
-        Result := Ship
-      else
-        Result := nil;
-      Inc(Count);
-    end;
-  end;
-  if Count > 1 then
-  begin
-    Count := (Seed + CurrentStar.GenerationSeed) mod Count;
-    if PlayerIsBertor then
-    begin
-      if Count = 0 then
-      begin
-        Result := GetPlayer;
-        Exit;
-      end;
-      Dec(Count);
     end;
     for I := 0 to CurrentStar.Ships.Count - 1 do
     begin
@@ -1375,14 +1388,46 @@ begin
           and ((Ship as TKling).KlingType in [ktBertor])
           and ((Ship as TKling).DominatorSeries = DominatorSeries) then
       begin
-        if Count = 0 then
+        if Ship = PartnerShip then
         begin
           Result := Ship;
           Exit;
         end;
-        Dec(Count);
+        if Count = 0 then
+          Result := Ship
+        else
+          Result := nil;
+        Inc(Count);
       end;
     end;
+    if Count > 1 then
+    begin
+      Count := (Seed + CurrentStar.GenerationSeed) mod Count;
+      if Count < Cardinal(Bertors.Count) then
+      begin
+        Result := TShip(Bertors[Count]);
+        Exit;
+      end;
+      Dec(Count, Bertors.Count);
+      for I := 0 to CurrentStar.Ships.Count - 1 do
+      begin
+        Ship := CurrentStar.Ships[I];
+        if Ship.InNormalSpace
+            and (Ship is TKling)
+            and ((Ship as TKling).KlingType in [ktBertor])
+            and ((Ship as TKling).DominatorSeries = DominatorSeries) then
+        begin
+          if Count = 0 then
+          begin
+            Result := Ship;
+            Exit;
+          end;
+          Dec(Count);
+        end;
+      end;
+    end;
+  finally
+    Bertors.Free;
   end;
 end;
 
@@ -1517,6 +1562,8 @@ begin
           Galaxy.Stars.Count - 1,
           Cardinal(Galaxy.CurrentTurn) + Galaxy.GenerationSeed
       );
+  // HUMANS: Which humans' stars do the dominators spare early in the game: every human's,
+  // or only the first's? Native spared the one player's star and its surroundings.
   for I := 0 to Galaxy.Stars.Count - 1 do
   begin
     IncrementWrapped(Index, 0, Galaxy.Stars.Count - 1);
@@ -1611,6 +1658,8 @@ end;
 procedure TKling.SelectKellerMission;
 var
   Text: WideString;
+  I: Integer;
+  Player: TPlayer;
 begin
   if (Galaxy.KellerMissionState = 0) and (Galaxy.KellerLeaveTurn = 0) then
     if (Galaxy.CurrentTurn
@@ -1628,17 +1677,23 @@ begin
       if Galaxy.KellerTargetStar <> nil then
       begin
         Galaxy.KellerMissionState := 1;
-        if (GetPlayer <> nil) and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0) then
+        // CHANGE: CLEANUP - Every human with an active analyzer is told. Native told the one
+        // player.
+        for I := 0 to Session.Humans.Count - 1 do
         begin
-          Text :=
-              FormatText1(
-                  LocalizedColorText('Artefacts.ArtAnalyzer.KellerHole'),
-                  '<color=255,240,100>',
-                  '<Star>',
-                  Galaxy.KellerTargetStar.Name
-              );
-          if Text <> '' then
-            AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, Text, '');
+          Player := Session.Humans[I].Player;
+          if (Player <> nil) and (Player.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0) then
+          begin
+            Text :=
+                FormatText1(
+                    LocalizedColorText('Artefacts.ArtAnalyzer.KellerHole'),
+                    '<color=255,240,100>',
+                    '<Star>',
+                    Galaxy.KellerTargetStar.Name
+                );
+            if Text <> '' then
+              Session.Humans[I].AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
+          end;
         end;
       end;
     end;
@@ -1973,6 +2028,8 @@ var
   procedure SendShips; // @addr $5EDBC4 @ida "void __usercall $name(void *ParentFrame@<^0>);"
   var
     Text: WideString;
+    HumanIndex: Integer;
+    Player: TPlayer;
   begin
     if Action = 2 then
       SendCount := OriginCount div 4
@@ -2005,20 +2062,28 @@ var
         and (Sent > 0)
         and (TargetStar.ControlFaction <> sfDominators)
         and (TargetStar.Status.CustomFaction = '') then
-      if (GetPlayer <> nil) and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0) then
+      // CHANGE: CLEANUP - Every human with an active analyzer is told. Native told the one
+      // player.
+      for HumanIndex := 0 to Session.Humans.Count - 1 do
       begin
-        Text :=
-            FormatText1(
-                LocalizedText('Artefacts.ArtAnalyzer.AttackDomik'),
-                '<color=255,240,100>',
-                '<Star>',
-                TargetStar.Name
-            );
-        if Text <> '' then
-          AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, Text, '');
+        Player := Session.Humans[HumanIndex].Player;
+        if (Player <> nil) and (Player.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0) then
+        begin
+          Text :=
+              FormatText1(
+                  LocalizedText('Artefacts.ArtAnalyzer.AttackDomik'),
+                  '<color=255,240,100>',
+                  '<Star>',
+                  TargetStar.Name
+              );
+          if Text <> '' then
+            Session.Humans[HumanIndex].AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
+        end;
       end;
   end;
 begin
+  // HUMANS: Which humans' stars do the dominators spare early in the game: every human's,
+  // or only the first's? Native spared the one player's star and its surroundings.
   if GetPlayer = nil then
     Exit;
   ControlPercent := Galaxy.GetFactionControlPercent(Ord(sfDominators));
@@ -2420,7 +2485,7 @@ begin
           end;
       end;
   end;
-  if GetPlayer.CurrentStar = CurrentStar then
+  if StarHasHuman(CurrentStar) then
     for I := 0 to CurrentStar.Asteroids.Count - 1 do
     begin
       Asteroid := CurrentStar.Asteroids[I];
@@ -2444,18 +2509,20 @@ begin
     end;
 end;
 
+// CHANGE: CLEANUP - Attacker, when it is a human's ranger, is the human whose chameleon this
+// ship sees through, and gets the bubble. Native asked whether it was the one player.
 procedure TKling.DetectAttackingPlayer(Attacker: TShip);
 begin
-  if (GetPlayer = Attacker)
+  if IsHuman(Attacker)
       and (Attacker.CurrentStar = CurrentStar)
       and not TPlayer(Attacker).ChameleonDetected[Ord(DominatorSeries)]
-      and (GetPlayer.ChameleonLogic[Ord(DominatorSeries)] < 2)
+      and (TPlayer(Attacker).ChameleonLogic[Ord(DominatorSeries)] < 2)
       and not HasIndependentScriptFaction then
   begin
     TPlayer(Attacker).ChameleonDetected[Ord(DominatorSeries)] := True;
     if TPlayer(Attacker).ChameleonActive
         and (TPlayer(Attacker).ChameleonSeries = DominatorSeries) then
-      AddOrUpdatePlayerBubble(
+      HumanOf(Attacker).AddOrUpdateBubble(
           0,
           Galaxy.CurrentTurn,
           LocalizedText('ShipInfo.AddInfo.Chameleon.Detect'),
@@ -2464,18 +2531,19 @@ begin
   end;
 end;
 
+// CHANGE: CLEANUP - Ship, when it is a human's ranger, is the human whose camouflage this is
+// about. Native asked whether it was the one player.
 function TKling.IsPlayerCamouflageEffective(Ship: TShip): Boolean;
 begin
   Result := False;
-  if (GetPlayer <> nil)
-      and (GetPlayer = Ship)
+  if IsHuman(Ship)
       and not HasIndependentScriptFaction
       and not Ship.IsOutsideStarSpace
       and (not TPlayer(Ship).ChameleonDetected[Ord(DominatorSeries)]
-          or (GetPlayer.ChameleonLogic[Ord(DominatorSeries)] >= 2)) then
+          or (TPlayer(Ship).ChameleonLogic[Ord(DominatorSeries)] >= 2)) then
   begin
     if (not TPlayer(Ship).ChameleonActive or (TPlayer(Ship).ChameleonSeries <> DominatorSeries))
-        and (GetPlayer.ChameleonLogic[Ord(DominatorSeries)] = 0) then
+        and (TPlayer(Ship).ChameleonLogic[Ord(DominatorSeries)] = 0) then
       TPlayer(Ship).ChameleonDetected[Ord(DominatorSeries)] := True
     else
       Result := True;

@@ -18,7 +18,7 @@ game/aHold.pas	simulation	4	73	0	0	0
 game/aHoldActions.pas	simulation	21	835	27	0	0
 game/aHuman.pas	simulation	0	13	6	26	11
 game/aItem.pas	simulation	20	0	0	0	0
-game/aKling.pas	simulation	35	0	0	0	0
+game/aKling.pas	simulation	6	0	0	12	9
 game/aMissile.pas	simulation	4	0	0	0	0
 game/aNormalShip.pas	simulation	0	6	0	9	45
 game/aPirate.pas	simulation	64	0	0	0	0
@@ -84,5 +84,5 @@ screens/fTalk.pas	presentation	0	722	0	0	0
 screens/SimEventHandlers.pas	presentation	0	1	0	0	0
 script/aScript.pas	simulation	18	0	0	0	0
 script/aScriptFun.pas	simulation	326	62	0	0	3
-total	simulation	745	1453	219	173	368
+total	simulation	716	1453	219	185	377
 total	presentation	0	4416	0	4	1
