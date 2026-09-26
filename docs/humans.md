@@ -26,6 +26,7 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
 | --- | --- |
 | `LocalPlayer`, `LocalHuman` | the human at this machine (UI only) |
 | `Actor(Command)`, `ActorHuman(Command)` | the human who issued the command |
+| `ActingHuman` | the human whose command is executing; nil outside a command |
 | `Session.Humans` | every human |
 | `IsHuman(Ship)` | whether a ranger is a human's |
 | `HumanOf(Ship)` | the `THuman` of a human's ranger, or nil |
@@ -45,8 +46,10 @@ code means, not from what is shortest.
   simulation. If a site feeds game state, it is not local.
 - **actor**: the human doing this. Inside a `TPlayer` method that is `Self`.
   Inside a `TShip`/`TRanger` method after `IsHuman(Self)`, it is
-  `TPlayer(Self)`. In an executor it is `Actor(Command)`. Elsewhere, pass the
-  human in as a parameter from the caller that knows it.
+  `TPlayer(Self)`. In an executor it is `Actor(Command)`. In code an executor
+  calls (the actions units' helpers, shop stock, the hold order) it is
+  `ActingHuman`. Elsewhere, pass the human in as a parameter from the caller
+  that knows it.
 - **each**: every human. Day ticks, galaxy news, victory and defeat checks,
   and messages that every human gets.
   `for I := 0 to Session.Humans.Count - 1 do ... Session.Humans[I] ...`.

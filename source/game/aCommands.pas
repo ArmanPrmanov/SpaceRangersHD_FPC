@@ -293,12 +293,20 @@ begin
 end;
 
 procedure ExecuteCommand(const Command: TPlayerCommand);
+var
+  Previous: THuman;
 begin
   if (Command.Kind > MaximumCommandKind) or not Assigned(Executors[Command.Kind]) then
     raise Exception.Create('No executor for ' + CommandKindName(Command.Kind));
   if Actor(Command) = nil then
     raise Exception.Create(CommandKindName(Command.Kind) + ' names no human');
-  Executors[Command.Kind](Command);
+  Previous := ActingHuman;
+  ActingHuman := ActorHuman(Command);
+  try
+    Executors[Command.Kind](Command);
+  finally
+    ActingHuman := Previous;
+  end;
 end;
 
 procedure SubmitCommand(const Command: TPlayerCommand);

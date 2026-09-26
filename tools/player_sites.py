@@ -6,7 +6,7 @@ site means. The class of a site is the name it uses:
 
     unclassified  GetPlayer
     local         LocalPlayer, LocalHuman: whose screen this is
-    actor         Actor(...), ActorHuman(...), Script human bindings: who did this
+    actor         Actor(...), ActorHuman(...), ActingHuman, script bindings: who did this
     each          Session.Humans, ForEachHuman: every human
     any           IsHuman, StarHasHuman, HumanOf, FindHuman: some human qualifies
 
@@ -29,7 +29,7 @@ SIMULATION = ("game", "core", "script")
 CLASSES = {
     "unclassified": r"\bGetPlayer\b",
     "local": r"\bLocal(?:Player|Human)\b",
-    "actor": r"\bActor(?:Human)?\(|\bScriptHuman\b|\bBoundHuman\b",
+    "actor": r"\bActor(?:Human)?\(|\bActingHuman\b|\bScriptHuman\b|\bBoundHuman\b",
     "each": r"\bSession\.Humans\b|\bForEachHuman\b",
     "any": r"\b(?:IsHuman|StarHasHuman|HumanOf|FindHuman|NearestHuman)\(",
 }

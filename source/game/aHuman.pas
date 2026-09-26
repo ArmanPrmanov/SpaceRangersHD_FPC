@@ -125,6 +125,9 @@ type
 var
   // Guards every human's message bubbles; Globals creates and frees it.
   PersistentPlayerMessageLock: TCriticalSection;
+  // The human whose command is executing (aCommands.ExecuteCommand), nil outside a command.
+  // Code an executor calls uses it where it means "the human doing this".
+  ActingHuman: THuman;
   // The human at this machine: whose screen this is. LocalPlayer is its ranger.
   LocalHuman: THuman;
 // The human whose ranger is Ship, or nil when Ship is not a human's ranger.
