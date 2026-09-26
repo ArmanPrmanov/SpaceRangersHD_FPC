@@ -31,7 +31,7 @@ CLASSES = {
     "local": r"\bLocal(?:Player|Human)\b",
     "actor": r"\bActor(?:Human)?\(|\bActingHuman\b|\bScriptHuman\b|\bScriptPlayer\b|\bBoundHuman\b|\bDefaultScriptHuman\b",
     "each": r"\bSession\.Humans\b|\bForEachHuman\b",
-    "any": r"\b(?:IsHuman|StarHasHuman|StarHasHumanInSpace|HumanOf|FindHuman|NearestHuman|IsRuinsProxy|HasLivingHuman|IsFilmedStar|FilmHuman)\(",
+    "any": r"\b(?:IsHuman|StarHasHuman|StarHasHumanInSpace|HumanOf|FindHuman|NearestHuman|IsRuinsProxy|RuinsProxyOwner|HasLivingHuman|IsFilmedStar|FilmHuman)\(",
 }
 COMMENT = re.compile(r"//[^\n]*|\{[^}]*\}|\(\*.*?\*\)", re.S)
 STRING = re.compile(r"'[^'\n]*'")

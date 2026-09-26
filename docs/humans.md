@@ -74,6 +74,36 @@ its code runs for that human.
 - With one human every script is bound to it and `ScriptPlayer` is
   `GetPlayer`.
 
+Converting the script functions (`aScriptFun`):
+
+- "The player" is the script's player, `ScriptPlayer` (`ScriptHuman.Player`):
+  `Player()`, the journal, the storage, programs, equipment sets, the
+  `<Player>` text, the player's star in `Ether`. Messages and ether bubbles go
+  to the script's human (`ScriptHuman.AddOrUpdateBubble`), as other bubbles go
+  to their human. The open shop a script reads or changes is the script's
+  human's.
+- "Is this ship the player", `Ship = GetPlayer`, is decided per function:
+  - The script asks whether a ship is its own player, as in `IsPlayer(ship)`
+    or a star requirement of the player: `Ship = ScriptPlayer`. Most scripts
+    are single-player content asking about their own player, so this is the
+    default when the script logic means "my player".
+  - The test only guards reading or writing `TPlayer` state of the ship it
+    was given (kill counts, experience by type, pirate clan, ruins mode, a
+    human's script bindings in `ScriptShipBindings`): `IsHuman(Ship)` and
+    `TPlayer(Ship)`. Per-human state of that ship's human (the pending
+    follow target, the open shop) is `HumanOf(Ship)`'s.
+  - The test keeps human rangers out of NPC handling (group candidates, the
+    NPC branch of a drop): `IsHuman(Ship)`.
+- `GetPlayer.RuinsProxy = Ship` is `IsRuinsProxy(Ship)`; where the proxy's
+  ranger is needed, `RuinsProxyOwner(Ship)`.
+- UI builtins (dialogues, dialogue text and answers, screens, the star map's
+  path overlay, sounds, the arcade ship, Steam achievements) stay on the local
+  human (`LocalPlayer`, `LocalHuman`). A builtin that opens a dialogue or a
+  screen does so only when `ScriptHuman` is the local human, and is marked
+  `// HUMANS: remote dialogue (Phase 5)`; so are the queued battles. Text
+  quests are off in multiplayer (ROADMAP.md, Phase 6), so they follow the
+  local human.
+
 ## Classifying a site
 
 Each `GetPlayer` or `LocalHuman` use in the simulation (`source/game`,

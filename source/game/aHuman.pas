@@ -167,6 +167,8 @@ function HasLivingHuman: Boolean;
 // Galaxy.Rangers, not Session.Humans, because a joining human creates its proxy before it is
 // added to the list.
 function IsRuinsProxy(Station: TObject): Boolean;
+// The human's ranger whose ruins proxy Station is, or nil; found as IsRuinsProxy finds it.
+function RuinsProxyOwner(Station: TObject): TPlayer;
 // Whether Star is some human's PlayerStar. Those stars run their day in the player-star
 // job, each with a film, and the galaxy job leaves them out (ROADMAP.md, Phase 4).
 function IsFilmedStar(Star: TStar): Boolean;
@@ -274,6 +276,11 @@ begin
 end;
 
 function IsRuinsProxy(Station: TObject): Boolean;
+begin
+  Result := RuinsProxyOwner(Station) <> nil;
+end;
+
+function RuinsProxyOwner(Station: TObject): TPlayer;
 var
   I: Integer;
   Ranger: TObject;
@@ -283,9 +290,9 @@ begin
     begin
       Ranger := TObject(Galaxy.Rangers[I]);
       if (Ranger is TPlayer) and (TPlayer(Ranger).RuinsProxy = Station) then
-        Exit(True);
+        Exit(TPlayer(Ranger));
     end;
-  Result := False;
+  Result := nil;
 end;
 
 function IsFilmedStar(Star: TStar): Boolean;

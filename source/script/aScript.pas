@@ -729,7 +729,7 @@ begin
     ArcadeBattleScreen.SelectedMapName := Request.MapName;
     case CurrentScreenId of
       screenEquipmentShop, screenGovernment, screenInfo, screenGoodsShop:
-        if GetPlayer.CurrentPlanet <> nil then
+        if LocalPlayer.CurrentPlanet <> nil then
           ScriptArcadeReturnScreenId := Ord(screenPlanet)
         else
           ScriptArcadeReturnScreenId := Ord(screenRuinsTalk);
@@ -750,7 +750,7 @@ begin
     StandaloneQuestMode := False;
     case CurrentScreenId of
       screenEquipmentShop, screenGovernment, screenInfo, screenGoodsShop:
-        if GetPlayer.CurrentPlanet <> nil then
+        if LocalPlayer.CurrentPlanet <> nil then
           QuestReturnScreenId := screenPlanet
         else
           QuestReturnScreenId := screenRuinsTalk;
@@ -876,7 +876,7 @@ begin
     if OrderScriptTakeoff then
     begin
       aCalc.WaitForTurnCalculationUI;
-      if GetPlayer.Order = soTakeoff then
+      if LocalPlayer.Order = soTakeoff then
       begin
         HangarScreen.TryTakeOff;
         ClearScriptEndTurn;
@@ -1045,11 +1045,11 @@ begin
       TfShip2(TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)])).CloseClicked(nil);
       Exit;
     end;
-    if GetPlayer.DockedTo <> nil then
+    if LocalPlayer.DockedTo <> nil then
       RequestedScreenId := screenRuinsTalk
-    else if GetPlayer.CurrentPlanet <> nil then
+    else if LocalPlayer.CurrentPlanet <> nil then
     begin
-      if GetPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited) then
+      if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited) then
         RequestedScreenId := screenPlanetNO
       else
         RequestedScreenId := screenPlanet;
@@ -1123,7 +1123,7 @@ procedure CompleteQueuedVideo(Status: Integer);
 var
   Request: PScriptVDRequest;
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     Exit;
   Request := PScriptVDRequest(QueuedVideos[0]);
   QueuedVideos.Delete(0);
@@ -1480,8 +1480,9 @@ begin
     Result := Result + [6];
   if ScriptDefinitionBit(Value, 8) then
     Result := Result + [7];
-  if ScriptDefinitionBit(Value, 9) and (GetPlayer <> nil) then
-    Result := Result + [GetPlayer.OwnerId];
+  // Bit 9 is the race of the script's player; scripts decode masks while they load.
+  if ScriptDefinitionBit(Value, 9) and (ScriptPlayer <> nil) then
+    Result := Result + [ScriptPlayer.OwnerId];
 end;
 
 function DecodeScriptEconomyMask(Value: Cardinal): TScriptEconomyMask;
@@ -1732,7 +1733,7 @@ begin
     if Ship.LiberationGroup <> nil then
       Continue;
     Strict :=
-        (GetPlayer <> Ship) and (not (Ship is TKling) or ((Ship as TKling).KlingType <> ktBoss));
+        not IsHuman(Ship) and (not (Ship is TKling) or ((Ship as TKling).KlingType <> ktBoss));
     if Ship.ScriptShip <> nil then
       Continue;
     if Ship.AbsoluteScriptOrder > 0 then
@@ -1817,7 +1818,7 @@ begin
         Group.StationNames,
         Group.DominatorMasks) then
       Continue;
-    if GetPlayer = Ship then
+    if IsHuman(Ship) then
       Continue;
     if (BlazerShip <> Ship) and (KellerShip <> Ship) and (TerronShip <> Ship) then
     begin
@@ -2773,22 +2774,28 @@ end;
 
 procedure TScript.ClearShipBindings;
 var
-  I, Index: Integer;
+  I, Index, HumanIndex: Integer;
   Binding: TScriptShip;
   Ship: TShip;
+  Player: TPlayer;
 begin
-  if GetPlayer <> nil then
-    for I := GetPlayer.ScriptShipBindings.Count - 1 downto 0 do
-    begin
-      Index := Ships.IndexOf(GetPlayer.ScriptShipBindings[I]);
-      if Index >= 0 then
+  // CHANGE: CLEANUP - Any human's ranger can be bound, not only the local one's.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
+  begin
+    Player := Session.Humans[HumanIndex].Player;
+    if Player <> nil then
+      for I := Player.ScriptShipBindings.Count - 1 downto 0 do
       begin
-        Binding := TScriptShip(Ships[Index]);
-        Binding.Free;
-        Ships.Delete(Index);
-        GetPlayer.ScriptShipBindings.Delete(I);
+        Index := Ships.IndexOf(Player.ScriptShipBindings[I]);
+        if Index >= 0 then
+        begin
+          Binding := TScriptShip(Ships[Index]);
+          Binding.Free;
+          Ships.Delete(Index);
+          Player.ScriptShipBindings.Delete(I);
+        end;
       end;
-    end;
+  end;
   for I := Ships.Count - 1 downto 0 do
   begin
     Binding := TScriptShip(Ships[I]);
@@ -2985,7 +2992,7 @@ begin
         begin
           Ship := TShip(Candidates[I]);
           Inc(I);
-          if Requirement.PlayerOnly and (GetPlayer <> Ship) then
+          if Requirement.PlayerOnly and (ScriptPlayer <> Ship) then
             Continue;
           if Ship.LiberationGroup <> nil then
             Continue;
@@ -3012,7 +3019,7 @@ begin
             if Ship.GetCargoHook.GetLevel < Requirement.MinCargoHookLevel then
               Continue;
           end;
-          if (Ship.CargoFreeSpace < Requirement.MinFreeCargoSpace) and (GetPlayer <> Ship) then
+          if (Ship.CargoFreeSpace < Requirement.MinFreeCargoSpace) and (ScriptPlayer <> Ship) then
             Continue;
           if (Ship.CargoFreeSpace < Requirement.MinFreeCargoSpace)
               and (Requirement.MinFreeCargoSpace > 0) then
@@ -3553,7 +3560,7 @@ begin
           Candidates.Delete(Candidates.IndexOf(Ship));
       end;
       if Group.IncludePlayer then
-        BindShip(I, GetPlayer);
+        BindShip(I, ScriptPlayer);
       Candidates.Free;
     end;
     while True do
