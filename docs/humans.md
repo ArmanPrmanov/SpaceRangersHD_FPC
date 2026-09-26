@@ -43,7 +43,9 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
 | `FindHuman(Id)` | the human with that id, or nil |
 | `IsRuinsProxy(Station)` | whether a station is some human's ruins proxy, the storage station that is not part of the galaxy |
 | `Human.AddOrUpdateBubble(...)` etc. | that human's message bubbles; the `Globals` functions of the old names are the local human's |
-| `JoinHuman(Planet, Name, Preset)` | adds a human landed at a planet |
+| `JoinHuman(Planet, Name, Preset)` | adds a human landed at a planet; the `JoinHuman` command (`JoinHumanAt`) does it so that a log replays it |
+| `HumanHoldsDay(Human)`, `AllHumansEndedTurn`, `NextHumanToEndTurn` | the end-turn barrier (see End turn and hot-seat) |
+| `SetLocalHuman(Human)` | hot-seat: another human becomes the local one; `Session.Humans` stays |
 
 ## Scripts
 
@@ -210,6 +212,94 @@ already applied it to whichever ranger was hit.
 relation to it and its relation to every ranger is the default between their races
 (`OwnerRelations`). Attacks and kills change them as between NPC rangers.
 
+## End turn and hot-seat
+
+A day runs only when every human who plays has pressed end turn (ROADMAP.md, Phase 4,
+item 2, and Phase 6). There is no turn timer; a human in a shop or a dialogue holds the day
+like everyone else.
+
+**The barrier.** `HumanHoldsDay(Human)` (`aHuman`) is true while the human's ranger plays and
+the human has not ended its turn (`THuman.EndedTurn`). A finished human never holds the day,
+nor does one whose ranger is in hyperspace: a jump is travel that goes on until arrival.
+Phase 5 adds a disconnected human here; the function has the hook.
+`AllHumansEndedTurn` is true when no human holds the day, and `NextHumanToEndTurn` is the
+first human in `Session.Humans` order who does.
+
+- Ending the turn is the `EndTurn` command (kind 43). The UI sends it through
+  `aPlayerActions.EndTurn`, which sends it only when the local human holds the day and
+  returns whether the day may start. Every place where a human's end turn starts the day
+  asks it first, right before the player-star job: the star map's end turn and its automatic
+  continue, the planet and station panel's end turn, the takeoffs from the planet, hangar and
+  station screens, and the jump screen. The day is committed when the player-star job
+  starts; the preparation job before it only prepares the local star's day and does not
+  count.
+- The player-star job starts the next round when it ends (`StartDayRound`): every human who
+  plays holds the day again.
+- With one human `EndTurn` always returns true, so the day starts at once, as before. The
+  command changes nothing the state hash covers, and a log without it replays as before.
+
+**Continue until arrival.** In single player the star map runs day after day while the
+player's travel goes on, until something interrupts it. With several humans the same
+automatic continue sends `EndTurn` with `ContinueUntilArrival`: the human counts as having
+ended every day while its travel goes on. `StartDayRound` decides that for every such human
+with `HumanTravelContinues`, the star map's test without the parts that only the local screen
+has: in hyperspace, a travel order not yet reached, no fight and no interruption in its star
+that day, the equipment not broken. When it stops, the human holds the next day. A break in
+the film (the star map's break button) ends it at once (`StopContinuing`, kind 45). The flag
+is not saved; after a load the human ends its turns again. Other humans' days still need
+their end turns, so a continuing human's travel waits for them.
+
+**Hyperspace.** The jump screen runs the local human's hyperspace step after each
+player-star job (`HyperspaceStep`). A human whose jump screen is not shown still needs it,
+so the player-star job marks it due (`THuman.HyperspaceStepPending`) and the galaxy job's
+start (`aCalc.QueueGalaxyTurnCalculation`, `CalculateGalaxyTurnAndWait`) runs it as that
+human (`StepHumansInHyperspace`). Only in multiplayer.
+
+**Hot-seat.** `--hotseat=N` adds humans after a save loads or a new game starts, by the
+`JoinHuman` command (kind 44), until there are N; each lands at the first coalition planet in
+a coalition star that holds no human (`FindJoinPlanet`). A hot-seat save keeps its humans.
+Then, on one screen:
+
+- When the local human ends its turn and another human still holds the day, a notice says
+  whose turn it is (`Multiplayer.Turn` in the language data, English when missing) and the
+  screen passes to the first human in `Session.Humans` order who holds the day
+  (`HotSeat.SwitchToNextHuman`). The switch happens between screens (`ApplyTurnPass`), so the
+  old screen closes as the old human's: `SetLocalHuman` changes `LocalHuman` and
+  `LocalPlayer` without touching `Session.Humans` (unlike `SetPlayer`, which rebuilds it,
+  or `ClearLocalPlayer`, which forgets the local ranger). The new human's screen opens: the
+  planet (`screenPlanet`, or `screenPlanetNO` when uninhabited), the station
+  (`screenRuinsTalk`) or the star map, centred on its ship.
+- The day runs on the screen of the human who ends the turn last, with that human's film.
+- After the day, the first human in `Session.Humans` order who holds the next day has the
+  turn: the star map passes the screen when it would enter order mode, the planet panel when
+  the day has run. So every day starts with the first human, and the commands of a day are in
+  `Session.Humans` order, as the merged replay (below) applies them.
+- **Films.** Every human's star records its own film (`aStarFilms`); the local star records
+  into `PrimaryFilm`. On a switch, `ExchangeLocalStarFilm` gives `PrimaryFilm` the film of
+  the new local star and moves the old one to the old star, so each star keeps the day
+  prepared for it, and the next day's film is the new local human's. The humans who were not
+  local while a day ran do not see its film; replaying each human's film of the last day is
+  not done.
+- The space background of the new star is generated when the star changes, as after a jump.
+- A switch changes which human the save writes first, so the state hash changes with it. The
+  command log records the switch (a Local record) and the replay repeats it.
+
+**One log per human.** `tools/split_commands.py LOG DIR` splits a recorded log into
+`human-<id>.srcl`, one per actor. Each holds its human's commands and a copy of every other
+record (loads, jobs, checkpoints, Local records), where the logs meet. `--replay-commands`
+with several logs (a comma-separated list or a directory) merges them
+(`CommandLog.RunMergedReplay`): between two shared records it applies each human's commands
+in `Session.Humans` order, then the shared record. The order of the files does not matter.
+The merged replay reaches the recording's hashes when the recording was made in that order,
+which the headless hot-seat and the hot-seat UI both follow. Before each player-star job it
+checks that no human holds the day (`barrier-waits`).
+
+**Not covered.** Days that other screens start without an end turn: the old hyperspace
+arcade battle, the planet battles (Terron), text quests (off in multiplayer), and the new
+game's opening days. The film-end steps of a day (landing wear, the black-hole scripts) run
+for the human whose film it was. A human who is not local while its ship lands or docks does
+not see the landing; the next turn opens the planet or station screen.
+
 ## Saving
 
 Every `TPlayer` is saved as a ship, so every human's ranger survives a save.
@@ -336,6 +426,12 @@ note in the progress entry.
   last one among planets made hostile to it) and check that they respawn
   landed, repaired and with the same money and items, that no human is lost,
   and that a finished human's command is refused.
+- The same counts play hot-seat headless (`--sim-hotseat=DAYS`): each day every human, in
+  `Session.Humans` order, takes off, flies, lands or buys, and ends its turn; the day must
+  wait until the last one has (`hotseat barrier ok`). The recording is split into one log per
+  human and replayed from those, given in reverse order; it must reach the same final hash
+  with no divergence and no day started early. With two humans, a log stripped of its
+  human's end turns must make the replay report the barrier.
 - The same counts run `--sim-pvp` on each save: a second human joins in the
   local human's star and the local one attacks it. With friendly fire on its
   hits must do damage; after the `SetSessionFlag` command turns it off, the

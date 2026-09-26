@@ -175,6 +175,27 @@ in the local human's star, and the local one attacks it with friendly fire on an
 then off (`pvp ...` lines, ending in `pvp ok` or `pvp failed: ...`). With
 `--sim-humans=N` the other humans join elsewhere.
 
+`--sim-hotseat=DAYS` plays hot-seat instead of running turns (docs/humans.md, End turn
+and hot-seat): with `--sim-humans=N`, each day every human in turn sends its own commands
+(take off, fly, land, buy) and ends its turn, and the day runs when the last one has. It prints
+`hotseat day=D plan=... hash=H` per day with `--sim-hash`, `hotseat barrier ok`, and
+`done hotseat ... hash=H`.
+
+The game records play with `--record-commands=LOG` and replays it headlessly with
+`--replay-commands=LOG`. For hot-seat, `python tools/split_commands.py LOG DIR` splits a log
+into one log per human (`human-<id>.srcl`), and `--replay-commands=DIR`, or a comma-separated
+list of logs, replays them merged: between two shared records (loads, jobs), each human's
+commands in the game's human order. The summary adds `logs=`, `humans=` and `barrier-waits=`,
+the days that started before every human had ended its turn.
+
+`--hotseat=N` starts the game for hot-seat: after a save loads or a new game starts, humans
+join until there are N, and they take turns at this screen. It cannot be combined with the
+headless options. `--load-save=PATH` opens a save at startup, past the main menu.
+
+```sh
+./tools/run.py --hotseat=2 --load-save=/path/to/save.sav
+```
+
 `python tools/check_layers.py` fails when a unit under `source/game`, `source/core` or
 `source/script` uses a unit under `source/screens`, `source/ui` or `source/arcade`
 (minigames), or a root global (`Globals`, `GlobalsV`, `GR_Main`) that
