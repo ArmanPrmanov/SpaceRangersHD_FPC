@@ -153,6 +153,63 @@ ranger holds position, the human counts as having ended its turn, and
 shows only when that human is the local one. With one human `EndGame` is as
 native.
 
+## PvP
+
+Humans may fight each other (ROADMAP.md, Phase 6). The host's friendly-fire switch,
+`Session.FriendlyFireEnabled`, turns it off and on at any time. One rule decides:
+`CanHumanAttack(Attacker, Target)` (`aHuman`) is false when both are humans' rangers,
+different humans, and friendly fire is off; true otherwise. A missile or a tranclucator
+attacks for its owner ship. NPCs attack humans as always, and a human attacks NPCs as always:
+the switch is about one human against another. With one human the rule is always true, so
+single player does not change.
+
+Where it applies, with friendly fire off:
+
+- **Orders.** `OrderAutoBattle`, `SetPendingFollowTarget`, `SetWeaponTargets` and
+  `SetInterceptorTarget` on another human are refused (the command changes nothing).
+  `OrderFollow` at weapon range (mode 1) becomes a plain follow (mode 0).
+  `TPlayer.CanSelectShipTarget` is false for another human, so the star map offers a follow,
+  not an attack, and a ship in a talk does not offer a joint attack on it.
+- **The auto-battle target.** `ProcessPendingPlayerFollowTargeting` drops a target the rule
+  refuses before it aims.
+- **Automatic control and AI.** A human's ranger on automatic control flies the NPC ranger
+  logic; it does not pick another human as its enemy (`SelectEnemyShipInStar`, the partner's
+  enemy), aim at one (`TRanger.AssignWeaponTargetsInStar`, including the chameleon pass) or
+  go after one (`EngageEnemyShip`). NPCs do not ask a human to join an attack on another human
+  (`RequestAlliesAttackShip`), and a joint attack (`SetJointAttackTarget`) leaves out the
+  human side that may not attack. Interceptors do not pick another human
+  (`SelectInterceptorTarget`) or keep one set by hand (`LaunchInterceptors`).
+- **Firing.** A weapon aimed at another human does not fire, whatever aimed it: the star's
+  combat step drops the target (`TStar.NextDay`, where weapon targets become combat events).
+- **Damage.** A hit does nothing, not even a reaction, when the rule refuses it:
+  `ApplyWeaponHit`, `ApplyMissileHit`, `ApplyDamage` (interceptors, script damage) and
+  `ApplyExplosionDamage`. Area damage follows the same rule: splash around another target, a
+  bomb, cistern or mine a human's shot or missile set off, return no damage to another human.
+  An explosion nobody set off hurts everyone as before.
+
+**The switch.** `SetSessionFlag` is a command, so every machine sees the change at the same
+point. When friendly fire turns off, its executor drops at once every attack the rule now
+refuses (`DropRefusedHumanAttacks`): each human's weapon and interceptor targets, auto-battle
+target and enemy on another human, and a follow at weapon range becomes a plain follow. Missiles
+already in flight stay, but their hits do nothing. When it turns on again, nothing is restored;
+humans give new orders.
+
+**Consequences.** With friendly fire on, a human is a ranger like any other to the one who
+attacks it. Each hit makes the target react (`ReactToAttack`: its enemy, and its relation to
+the attacker and the attacker's partner). While the attack goes on, nearby NPC ships, military
+ones included, judge the attacker by their relation to the target
+(`UpdateRelationsForNearbyCombat`). A kill changes
+the attacker's standing across the galaxy (`ApplyAttackReputationChanges`: ships and coalition
+planets, the pirates' main planet, the target's home planet) and counts as a ranger kill
+(`ProcessShipKill`: `RangerKillCount`, awards, the `PlayerKillsShip` event). The dead human
+respawns as any destroyed human does (see Respawn). None of this needed a change: the code
+already applied it to whichever ranger was hit.
+
+**Relations between humans** are ranger relations (`RangerRelations`). A joining human
+(`JoinHuman`) starts from `TRanger.InitializeAtPlanet`, as an NPC ranger does: every ranger's
+relation to it and its relation to every ranger is the default between their races
+(`OwnerRelations`). Attacks and kills change them as between NPC rangers.
+
 ## Saving
 
 Every `TPlayer` is saved as a ship, so every human's ranger survives a save.
@@ -188,7 +245,7 @@ change only through the `SetSessionFlag` command (`SetSessionFlagValue`):
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `TextQuestsDisabled` | off | no text quest is offered at a government (`TRanger.GenerateQuestOffer`) |
-| `FriendlyFireEnabled` | on | stored only; targeting reads it in item 8 |
+| `FriendlyFireEnabled` | on | whether a human may attack another human (see PvP) |
 
 **Cheats.** `Human.RecordCheat(Name, Points)` records that a human used a
 cheat. A cheat command's executor calls it for the command's actor. Nothing
@@ -279,3 +336,8 @@ note in the progress entry.
   last one among planets made hostile to it) and check that they respawn
   landed, repaired and with the same money and items, that no human is lost,
   and that a finished human's command is refused.
+- The same counts run `--sim-pvp` on each save: a second human joins in the
+  local human's star and the local one attacks it. With friendly fire on its
+  hits must do damage; after the `SetSessionFlag` command turns it off, the
+  attack order must be gone, new attack orders refused, and neither hits nor a
+  direct `ApplyWeaponHit` may do damage while the attacker is in range.
