@@ -38,8 +38,16 @@ type
     // The ship id of the human's ranger. It is never reused within a game, so commands,
     // saves and logs can refer to a human who has left.
     Id: Integer;
-    // Whether the human has pressed end turn for the coming day.
+    // Whether the human has pressed end turn for the coming day. The day runs only when no
+    // human holds it (HumanHoldsDay); the player-star job clears it (StartDayRound).
     EndedTurn: Boolean;
+    // CHANGE: ENHANCEMENT - The human ended its turn with "continue until arrival": it counts
+    // as having ended every day while its travel goes on (HumanTravelContinues). Set by the
+    // EndTurn command; not saved, so a load makes the human end its turns again.
+    ContinueUntilArrival: Boolean;
+    // A day passed while the human's ranger jumps: the jump screen's hyperspace step is due
+    // (NeedsHyperspaceStep). The HyperspaceStep command clears it.
+    HyperspaceStepPending: Boolean;
     // The star the human is in; its day is simulated with the film.
     PlayerStar: TStar;
     PlayerDialogueRequestCount: Byte;
@@ -241,12 +249,46 @@ function CanHumanAttack(Attacker, Target: TObject): Boolean;
 // targets, its auto-battle target, its enemy and its follow-to-attack order (follow mode 1)
 // on another human. SetSessionFlag calls it when friendly fire turns off.
 procedure DropRefusedHumanAttacks;
+// CHANGE: ENHANCEMENT - The end-turn barrier (ROADMAP.md, Phase 4, item 2, and Phase 6): a day
+// runs only when every human who plays has pressed end turn.
+// Whether Human holds the day: its ranger plays and it has not ended its turn. A finished
+// human never holds it, nor does one whose ranger is in hyperspace, since a jump is travel
+// that goes on until arrival. Phase 5: a disconnected human will not hold it either.
+function HumanHoldsDay(Human: THuman): Boolean;
+// Whether the day may start: no human holds it.
+function AllHumansEndedTurn: Boolean;
+// The first human, in Session.Humans order, who holds the day; nil when none does. This is
+// the hot-seat order.
+function NextHumanToEndTurn: THuman;
+// Whether Human's travel goes on by itself for another day, as the star map continues the
+// local human's travel (aGalaxy.ShouldContinuePlayerTravel): in hyperspace, or with a travel
+// order it has not reached, without a fight or an interruption in its star this day.
+function HumanTravelContinues(Human: THuman): Boolean;
+// Whether Player's day in hyperspace needs the jump screen's step (aPlayerActions.HyperspaceStep).
+function NeedsHyperspaceStep(Player: TPlayer): Boolean;
+// A day has run (the player-star job): every human who plays holds the next one, except a
+// human who continues until arrival while its travel goes on. Also marks the hyperspace
+// steps that are due.
+procedure StartDayRound;
+type
+  // Told before and after the local human changes (SetLocalHuman); the command log records it.
+  TLocalHumanHook = procedure(Human: THuman; Before: Boolean);
+var
+  LocalHumanHook: TLocalHumanHook;
+// CHANGE: ENHANCEMENT - Hot-seat: the screen passes to another human, who becomes the local
+// one. The humans stay as they are; only whose screen this is changes.
+procedure SetLocalHuman(Human: THuman);
+// A planet where a joining human can start: an inhabited coalition planet in a coalition star
+// that holds no human, the first in galaxy order; nil when there is none. The choice depends
+// only on the galaxy, so runs repeat.
+function FindJoinPlanet: TPlanet;
 implementation
 uses
   aConst,
   aMyFunction,
   aMissile,
   aTranclucator,
+  aGalaxyStruct,
   aSession;
 
 function THumanList.GetHuman(Index: Integer): THuman;
@@ -978,6 +1020,121 @@ begin
         and not CanHumanAttack(Player, Player.OrderTarget) then
       Player.OrderStateData := 0;
   end;
+end;
+
+function HumanHoldsDay(Human: THuman): Boolean;
+begin
+  Result :=
+      not Human.EndedTurn
+          and not Human.Finished
+          and (Human.Player <> nil)
+          and not Human.Player.InHyperspace;
+  // Phase 5: "and not Human.Disconnected". A disconnected human counts as having ended its
+  // turn; its ranger holds position.
+end;
+
+function AllHumansEndedTurn: Boolean;
+begin
+  Result := NextHumanToEndTurn = nil;
+end;
+
+function NextHumanToEndTurn: THuman;
+var
+  I: Integer;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+    if HumanHoldsDay(Session.Humans[I]) then
+      Exit(Session.Humans[I]);
+  Result := nil;
+end;
+
+// The star map's test, for any human and without the tip it shows or the path it builds:
+// travel goes on unless something in the day asks the human to look.
+function HumanTravelContinues(Human: THuman): Boolean;
+var
+  P: TPlayer;
+  Star: TStar;
+begin
+  P := Human.Player;
+  if (P = nil) or Human.Finished then
+    Exit(False);
+  if P.InHyperspace then
+    Exit(True);
+  if not P.InNormalSpace then
+    Exit(False);
+  Star := Human.PlayerStar;
+  if Star = nil then
+    Exit(False);
+  if Star.KeepFilmRunning then
+    Exit(True);
+  if Human.PlayerEquipmentBrokenThisTurn or Star.PlayerCombatOccurred or Star.InterruptLongTravel then
+    Exit(False);
+  if Human.PendingPlayerFollowTarget <> nil then
+    Exit(P.GetHullIntegrityPercent >= 25);
+  if Human.PlayerAutomaticControl then
+    Exit(True);
+  case P.Order of
+    soMove: Result := PointDistanceSquared(P.Position, P.OrderDestination) > 19600;
+    soLand, soJump, soJumpHole, soTeleport: Result := True;
+    soFollowShip:
+      Result :=
+          (P.OrderTarget is TShip)
+              and (PointDistanceSquared(P.Position, TShip(P.OrderTarget).Position) >= Sqr(P.Speed));
+  else
+    Result := False;
+  end;
+end;
+
+function NeedsHyperspaceStep(Player: TPlayer): Boolean;
+begin
+  Result :=
+      (Player <> nil)
+          and Player.InHyperspace
+          and (Player.Order in [soJump, soJumpHole, soTeleport])
+          and not ((Player.Order = soJumpHole) and (Player.OrderStateData = -65536));
+end;
+
+procedure StartDayRound;
+var
+  I: Integer;
+  Human: THuman;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    Human.HyperspaceStepPending := NeedsHyperspaceStep(Human.Player);
+    if Human.ContinueUntilArrival and not HumanTravelContinues(Human) then
+      Human.ContinueUntilArrival := False;
+    Human.EndedTurn := Human.Finished or Human.ContinueUntilArrival;
+  end;
+end;
+
+procedure SetLocalHuman(Human: THuman);
+begin
+  if (Human = nil) or (Human = LocalHuman) then
+    Exit;
+  if Assigned(LocalHumanHook) then
+    LocalHumanHook(Human, True);
+  LocalHuman := Human;
+  SetLocalRanger(Human.Player, Galaxy);
+  if Assigned(LocalHumanHook) then
+    LocalHumanHook(Human, False);
+end;
+
+function FindJoinPlanet: TPlanet;
+var
+  I: Integer;
+  Planet: TPlanet;
+begin
+  for I := 0 to Galaxy.Planets.Count - 1 do
+  begin
+    Planet := TPlanet(Galaxy.Planets[I]);
+    if (Planet.OwnerId <= Byte(oiGaal))
+        and (Planet.CurrentStar.ControlFaction = sfCoalition)
+        and not StarHasHuman(Planet.CurrentStar) then
+      Exit(Planet);
+  end;
+  Result := nil;
 end;
 
 initialization

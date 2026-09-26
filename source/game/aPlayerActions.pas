@@ -9,6 +9,7 @@ interface
 uses
   Types,
   aCommands,
+  aHuman,
   aShip;
 const
   // Command kinds 0-99 (see TCommandKind).
@@ -51,6 +52,9 @@ const
   ckFinishTerronTransformation = 40;
   ckDismissScoreScreen = 41;
   ckSetSessionFlag = 42;
+  ckEndTurn = 43;
+  ckJoinHuman = 44;
+  ckStopContinuing = 45;
 type
   TSlotList = array of Integer;
 procedure AddWeaponSlot(var Slots: TSlotList; Slot: Integer);
@@ -155,6 +159,22 @@ procedure FinishTerronTransformation;
 procedure DismissScoreScreen;
 // Sets a session flag (aSession: SessionFlagTextQuestsDisabled, SessionFlagFriendlyFire).
 procedure SetSessionFlagValue(Flag: Integer; Value: Boolean);
+// CHANGE: ENHANCEMENT - The end-turn barrier (ROADMAP.md, Phase 4, item 2; docs/humans.md, End
+// turn). The local human ends its turn when it holds the day (the EndTurn command); with
+// ContinueUntilArrival it also counts as ending every later day while its travel goes on.
+// Returns whether the day may start: no human holds it. Every place that starts the day for
+// a human's end turn asks this first; with one human it is always true.
+function EndTurn(ContinueUntilArrival: Boolean): Boolean;
+// The local human stops continuing until arrival, and holds the day again if it continued.
+procedure StopContinuing;
+// Adds a human whose ranger starts landed at Planet (aHuman.JoinHuman), as a command so that a
+// command log replays it. Returns the new human.
+function JoinHumanAt(Planet: TObject; const Name: WideString; CharacterPreset: Integer): THuman;
+// Runs the hyperspace step (HyperspaceStep) for every human whose step is due
+// (THuman.HyperspaceStepPending), as that human. The jump screen runs the local human's own step
+// after the player-star job; this does it for the humans whose jump screen is not shown, before
+// the galaxy job. Only in multiplayer.
+procedure StepHumansInHyperspace;
 var
   // The days to land that the last PreparePlayerPath found, for the star map.
   PreparedLandingTurns: Integer;
@@ -168,7 +188,6 @@ uses
   aPlanet,
   aPlayer,
   aSession,
-  aHuman,
   aItem,
   aPath,
   aShopStock,
@@ -917,6 +936,7 @@ var
   PreviousStar: TStar;
 begin
   P := Actor(Command);
+  ActorHuman(Command).HyperspaceStepPending := False;
   Galaxy.ClearJumpGates;
   PreviousStar := ActorHuman(Command).PlayerStar;
   ActorHuman(Command).PlayerStar := P.CurrentStar;
@@ -1095,6 +1115,94 @@ begin
   SubmitCommand(Command);
 end;
 
+// CHANGE: ENHANCEMENT - A human ends its turn (ROADMAP.md, Phase 4, item 2). The day waits
+// for every human (aHuman.HumanHoldsDay); the player-star job starts the next round.
+procedure ExecuteEndTurn(const Command: TPlayerCommand);
+var
+  H: THuman;
+begin
+  H := ActorHuman(Command);
+  H.EndedTurn := True;
+  if (Length(Command.Ints) > 0) and (IntArg(Command, 0) <> 0) then
+    H.ContinueUntilArrival := True;
+end;
+
+function EndTurn(ContinueUntilArrival: Boolean): Boolean;
+var
+  Command: TPlayerCommand;
+begin
+  if (LocalHuman.Player <> nil) and HumanHoldsDay(LocalHuman) then
+  begin
+    Command := NewCommand(ckEndTurn);
+    AddInt(Command, Ord(ContinueUntilArrival));
+    SubmitCommand(Command);
+  end;
+  Result := AllHumansEndedTurn;
+end;
+
+procedure ExecuteStopContinuing(const Command: TPlayerCommand);
+var
+  H: THuman;
+begin
+  H := ActorHuman(Command);
+  if not H.ContinueUntilArrival then
+    Exit;
+  H.ContinueUntilArrival := False;
+  H.EndedTurn := H.Finished;
+end;
+
+procedure StopContinuing;
+begin
+  if LocalHuman.ContinueUntilArrival then
+    SubmitCommand(NewCommand(ckStopContinuing));
+end;
+
+var
+  JoinedHuman: THuman;
+
+// CHANGE: ENHANCEMENT - A human joins as a command, so every machine and a log's replay add it
+// at the same point (ROADMAP.md, Phase 4, item 6). The command's actor is the human who adds
+// it (the host).
+procedure ExecuteJoinHuman(const Command: TPlayerCommand);
+begin
+  JoinedHuman := JoinHuman(TPlanet(RefObject(Command, 0)), Command.Text, IntArg(Command, 0));
+end;
+
+function JoinHumanAt(Planet: TObject; const Name: WideString; CharacterPreset: Integer): THuman;
+var
+  Command: TPlayerCommand;
+begin
+  JoinedHuman := nil;
+  Command := NewCommand(ckJoinHuman);
+  AddRef(Command, Planet);
+  AddInt(Command, CharacterPreset);
+  Command.Text := Name;
+  SubmitCommand(Command);
+  Result := JoinedHuman;
+end;
+
+procedure StepHumansInHyperspace;
+var
+  I: Integer;
+  Human: THuman;
+  Command: TPlayerCommand;
+begin
+  if not IsMultiplayer then
+    Exit;
+  I := 0;
+  while I < Session.Humans.Count do
+  begin
+    Human := Session.Humans[I];
+    Inc(I);
+    if not Human.HyperspaceStepPending or (Human.Player = nil) then
+      Continue;
+    Command := NewCommand(ckHyperspaceStep);
+    Command.Actor := Cardinal(Human.Id);
+    AddInt(Command, 0);
+    SubmitCommand(Command);
+  end;
+end;
+
 initialization
   RegisterCommand(ckParkPlayer, 'ParkPlayer', @ExecuteParkPlayer);
   RegisterCommand(ckPruneMessages, 'PruneMessages', @ExecutePruneMessages);
@@ -1143,4 +1251,7 @@ initialization
   );
   RegisterCommand(ckDismissScoreScreen, 'DismissScoreScreen', @ExecuteDismissScoreScreen);
   RegisterCommand(ckSetSessionFlag, 'SetSessionFlag', @ExecuteSetSessionFlag);
+  RegisterCommand(ckEndTurn, 'EndTurn', @ExecuteEndTurn);
+  RegisterCommand(ckJoinHuman, 'JoinHuman', @ExecuteJoinHuman);
+  RegisterCommand(ckStopContinuing, 'StopContinuing', @ExecuteStopContinuing);
 end.

@@ -162,6 +162,9 @@ begin
     Galaxy.TransferShipsInTransit;
     Stage := 4;
     Session.PlayerStarDayPrepared := False;
+    // CHANGE: ENHANCEMENT - The day has run: every human holds the next one again (the end-turn
+    // barrier, ROADMAP.md, Phase 4, item 2).
+    StartDayRound;
   except
     on E: Exception do
     begin

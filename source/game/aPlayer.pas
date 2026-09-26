@@ -253,6 +253,8 @@ procedure SetPlayer(Player: TPlayer; Galaxy: TGalaxy);
 // Forgets the local player only, whose ranger is leaving the galaxy (aHuman.RemoveHuman).
 // The other humans stay.
 procedure ClearLocalPlayer(Galaxy: TGalaxy);
+// Makes Player the local ranger without rebuilding Session.Humans (aHuman.SetLocalHuman).
+procedure SetLocalRanger(Player: TPlayer; Galaxy: TGalaxy);
 procedure LinkRecoveredTypes;
 implementation
 uses
@@ -331,6 +333,14 @@ begin
   PlayerInstance := nil;
   if Galaxy <> nil then
     Galaxy.PlayerRangerIndex := -1;
+end;
+
+// CHANGE: ENHANCEMENT - Hot-seat passes the screen to another human (ROADMAP.md, Phase 4).
+procedure SetLocalRanger(Player: TPlayer; Galaxy: TGalaxy);
+begin
+  PlayerInstance := Player;
+  if (Galaxy <> nil) and (Player <> nil) and (Galaxy.Rangers <> nil) then
+    Galaxy.PlayerRangerIndex := Galaxy.Rangers.IndexOf(Player);
 end;
 
 constructor TPlayer.Create;
