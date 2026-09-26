@@ -345,7 +345,11 @@ begin
   if Galaxy.PlayerRangerIndex = RangerIndex then
   begin
     Galaxy.PlayerRangerIndex := -1;
-    SetPlayer(nil, Galaxy);
+    // CHANGE: CLEANUP - Only the local human leaves; SetPlayer(nil, ...) forgot every human.
+    if IsHuman(Self) then
+      RemoveHuman(TPlayer(Self))
+    else
+      ClearLocalPlayer(Galaxy);
   end
   else if Galaxy.PlayerRangerIndex > RangerIndex then
     Dec(Galaxy.PlayerRangerIndex);

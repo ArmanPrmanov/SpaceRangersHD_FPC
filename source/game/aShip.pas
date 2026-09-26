@@ -1257,12 +1257,9 @@ begin
     CustomShipInfos := nil;
   end;
   MovementPath.Free;
-  // The local player is the one SetPlayer names. Clearing it rebuilds the humans from nil,
-  // which forgets the other humans too; respawn (ROADMAP.md, Phase 4, item 9) replaces this.
-  if Self = LocalPlayer then
-    SetPlayer(nil, Galaxy)
-  // CHANGE: CLEANUP - Another human's ranger leaves the humans too.
-  else if IsHuman(Self) then
+  // CHANGE: CLEANUP - A freed human's ranger leaves the humans, and the others stay. For the
+  // local ranger this also clears LocalPlayer, as SetPlayer(nil, ...) did.
+  if IsHuman(Self) then
     RemoveHuman(TPlayer(Self));
   if BlazerShip = Self then
     BlazerShip := nil;

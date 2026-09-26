@@ -247,7 +247,12 @@ var
 function GetPlayer: TPlayer;
 // The local human's ranger: whose screen this is (aHuman, docs/humans.md).
 function LocalPlayer: TPlayer; inline;
+// Sets the local player and rebuilds Session.Humans from the TPlayer instances in Galaxy.
+// SetPlayer(nil, ...) forgets every human, as clearing the galaxy does.
 procedure SetPlayer(Player: TPlayer; Galaxy: TGalaxy);
+// Forgets the local player only, whose ranger is leaving the galaxy (aHuman.RemoveHuman).
+// The other humans stay.
+procedure ClearLocalPlayer(Galaxy: TGalaxy);
 procedure LinkRecoveredTypes;
 implementation
 uses
@@ -317,6 +322,15 @@ begin
     else
       Galaxy.PlayerRangerIndex := Galaxy.Rangers.IndexOf(Player);
   end;
+end;
+
+// CHANGE: ENHANCEMENT - The local ranger can leave while other humans play on (ROADMAP.md,
+// Phase 4, item 9). SetPlayer(nil, ...) would forget them too.
+procedure ClearLocalPlayer(Galaxy: TGalaxy);
+begin
+  PlayerInstance := nil;
+  if Galaxy <> nil then
+    Galaxy.PlayerRangerIndex := -1;
 end;
 
 constructor TPlayer.Create;

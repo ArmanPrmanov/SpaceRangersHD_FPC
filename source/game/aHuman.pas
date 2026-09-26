@@ -203,7 +203,8 @@ function ScriptPlayer: TPlayer; inline;
 function DefaultScriptHuman: THuman;
 // Makes Player a human. The first human is the local one.
 function AddHuman(Player: TPlayer): THuman;
-// Forgets Player's human, as when its ranger is destroyed. The local human's state is kept.
+// Forgets Player's human, as when its ranger is freed. The other humans stay. When Player is
+// the local ranger, LocalPlayer becomes nil and the local human's state is kept.
 procedure RemoveHuman(Player: TPlayer);
 // Rebuilds the list from the TPlayer instances in Galaxy.Rangers, keeping the local
 // human's state for Local.
@@ -412,6 +413,10 @@ procedure RemoveHuman(Player: TPlayer);
 var
   Human: THuman;
 begin
+  // CHANGE: ENHANCEMENT - The local ranger leaves alone (ROADMAP.md, Phase 4, item 9);
+  // SetPlayer(nil, ...) would forget every human.
+  if (Player <> nil) and (LocalPlayer = Player) then
+    ClearLocalPlayer(Galaxy);
   Human := HumanOf(Player);
   if Human = nil then
     Exit;
