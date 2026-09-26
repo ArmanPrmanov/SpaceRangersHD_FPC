@@ -3355,7 +3355,12 @@ var
   Text, Heading, ConditionText, Divider: WideString;
   Entry: PStorageEntry;
   PreviousLocation: TObject;
+  Human: THuman;
 begin
+  // CHANGE: CLEANUP - The storage bubbles are this ranger's human's, not the local human's.
+  Human := HumanOf(Self);
+  if Human = nil then
+    Exit;
   SortStorageEntries;
   Divider := GetStorageDividerText;
   Page := 1;
@@ -3368,10 +3373,10 @@ begin
           WrapTextInColor(LocalizedText('FormShip.StorageInfo.Main'), '<color=0,255,0>') + #13#10;
       Text := Text + BuildDeployedSatelliteSummary(AddedLines);
       Text := Text + Heading;
-      AddOrUpdatePlayerBubble(9, Galaxy.CurrentTurn, Text, 'sys_storage1');
+      Human.AddOrUpdateBubble(9, Galaxy.CurrentTurn, Text, 'sys_storage1');
     end
     else
-      RemovePlayerBubblePages('sys_storage', 0);
+      Human.RemoveBubblePages('sys_storage', 0);
   end
   else
   begin
@@ -3400,7 +3405,7 @@ begin
                     + ')',
                 ''
             );
-          AddOrUpdatePlayerBubble(9, Galaxy.CurrentTurn, Text, 'sys_storage' + IntToStr(Page));
+          Human.AddOrUpdateBubble(9, Galaxy.CurrentTurn, Text, 'sys_storage' + IntToStr(Page));
           Inc(Page);
           Text :=
               WrapTextInColor(
@@ -3512,7 +3517,7 @@ begin
                   + ')',
               ''
           );
-        AddOrUpdatePlayerBubble(9, Galaxy.CurrentTurn, Text, 'sys_storage' + IntToStr(Page));
+        Human.AddOrUpdateBubble(9, Galaxy.CurrentTurn, Text, 'sys_storage' + IntToStr(Page));
         Inc(Page);
         Text :=
             WrapTextInColor(
@@ -3544,7 +3549,7 @@ begin
                   + ')',
               ''
           );
-        AddOrUpdatePlayerBubble(9, Galaxy.CurrentTurn, Text, 'sys_storage' + IntToStr(Page));
+        Human.AddOrUpdateBubble(9, Galaxy.CurrentTurn, Text, 'sys_storage' + IntToStr(Page));
         Inc(Page);
         Text :=
             WrapTextInColor(
@@ -3561,10 +3566,10 @@ begin
     end;
     if Page = 1 then
       ReplaceTextToken(Text, 'onepage', '', '');
-    AddOrUpdatePlayerBubble(9, Galaxy.CurrentTurn, Text, 'sys_storage' + IntToStr(Page));
+    Human.AddOrUpdateBubble(9, Galaxy.CurrentTurn, Text, 'sys_storage' + IntToStr(Page));
   end;
-  RemovePlayerBubblePages('sys_storage', Page + 1);
-  RemovePlayerBubbleByKey('sys_storage');
+  Human.RemoveBubblePages('sys_storage', Page + 1);
+  Human.RemoveBubbleByKey('sys_storage');
 end;
 
 // CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.
