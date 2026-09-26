@@ -231,10 +231,22 @@ function Actor(const Command: TPlayerCommand): TPlayer;
 // Adds a new human whose ranger starts landed at Planet, as new-game setup starts the first
 // one. CharacterPreset is the setup screen's choice (1-5).
 function JoinHuman(Planet: TPlanet; const Name: WideString; CharacterPreset: Integer): THuman;
+// CHANGE: ENHANCEMENT - The one friendly-fire rule (ROADMAP.md, Phase 4, item 8, and Phase 6).
+// Whether Attacker may attack or damage Target: false when both are humans' rangers, they are
+// different humans and friendly fire is off (Session.FriendlyFireEnabled); true otherwise. A
+// missile or a tranclucator attacks for its owner ship. NPCs attack humans as always; the rule
+// is about one human against another. With one human it is always true.
+function CanHumanAttack(Attacker, Target: TObject): Boolean;
+// Drops every attack that CanHumanAttack now refuses: each human's weapon and interceptor
+// targets, its auto-battle target, its enemy and its follow-to-attack order (follow mode 1)
+// on another human. SetSessionFlag calls it when friendly fire turns off.
+procedure DropRefusedHumanAttacks;
 implementation
 uses
   aConst,
   aMyFunction,
+  aMissile,
+  aTranclucator,
   aSession;
 
 function THumanList.GetHuman(Index: Integer): THuman;
@@ -915,6 +927,57 @@ begin
   Result.PlayerStar := Planet.CurrentStar;
   if Result.PlayerOldQuests = nil then
     Result.PlayerOldQuests := aMyFunction.TObjectList.Create;
+end;
+
+// The ship an attack comes from: a missile's or a tranclucator's owner, else Source.
+function AttackingShip(Source: TObject): TObject;
+begin
+  Result := Source;
+  if Result is TMissile then
+    Result := TMissile(Result).OwnerShip
+  else if Result is TTranclucator then
+    Result := TTranclucator(Result).OwnerShip;
+end;
+
+function CanHumanAttack(Attacker, Target: TObject): Boolean;
+begin
+  if Session.FriendlyFireEnabled or not IsHuman(Target) then
+    Exit(True);
+  Attacker := AttackingShip(Attacker);
+  Result := not IsHuman(Attacker) or (Attacker = Target);
+end;
+
+procedure DropRefusedHumanAttacks;
+var
+  I, J: Integer;
+  Human: THuman;
+  Player: TPlayer;
+  Weapon: TWeapon;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    Player := Human.Player;
+    if Player = nil then
+      Continue;
+    for J := 1 to Player.WeaponCount do
+    begin
+      Weapon := Player.Weapons[J];
+      if (Weapon <> nil) and not CanHumanAttack(Player, TObject(Weapon.Target)) then
+        Weapon.Target := nil;
+    end;
+    if (Player.GetHull <> nil)
+        and not CanHumanAttack(Player, TObject(Player.GetHull.InterceptorTarget)) then
+      Player.GetHull.InterceptorTarget := nil;
+    if not CanHumanAttack(Player, Human.PendingPlayerFollowTarget) then
+      Human.PendingPlayerFollowTarget := nil;
+    if not CanHumanAttack(Player, Player.EnemyShip) then
+      Player.EnemyShip := nil;
+    if (Player.Order = soFollowShip)
+        and (Byte(Player.OrderStateData) = 1)
+        and not CanHumanAttack(Player, Player.OrderTarget) then
+      Player.OrderStateData := 0;
+  end;
 end;
 
 initialization

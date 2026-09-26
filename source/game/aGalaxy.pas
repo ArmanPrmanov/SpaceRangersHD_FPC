@@ -13228,6 +13228,10 @@ begin
           for EntryIndex := 1 to Ship.WeaponCount do
           begin
             Weapon := Ship.Weapons[EntryIndex];
+            // CHANGE: ENHANCEMENT - A weapon does not fire at another human with friendly
+            // fire off, whatever aimed it (CanHumanAttack).
+            if not CanHumanAttack(Ship, TObject(Weapon.Target)) then
+              Weapon.Target := nil;
             if Weapon.Target <> nil then
             begin
               if (TObject(Weapon.Target) is TItem)

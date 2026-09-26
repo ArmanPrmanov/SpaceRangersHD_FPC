@@ -4618,6 +4618,14 @@ begin
     else if Source is TMissile then
       Attacker := TMissile(Source).OwnerShip;
   end;
+  // CHANGE: ENHANCEMENT - With friendly fire off a human does no damage to another human
+  // (CanHumanAttack), and the target does not take it as an attack.
+  if not CanHumanAttack(Source, Self) then
+  begin
+    DamageColor := 0;
+    Result := 0;
+    Exit;
+  end;
   if (HitRange = -1) and (Attacker <> nil) then
     ReactToAttack(Attacker);
   DamageColor := 0;
@@ -5215,6 +5223,14 @@ var
   Film: TEFilmObj;
   Effect: TObjectSE;
 begin
+  // CHANGE: ENHANCEMENT - Friendly fire off: no hit, no weapon scripts (CanHumanAttack).
+  if not CanHumanAttack(Source, Self) then
+  begin
+    DamageColor := 0;
+    DamageFlags := 0;
+    Result := 0;
+    Exit;
+  end;
   Flags := Weapon.GetDamageFlags;
   if (FixedDamage > 0) and not (dkUndefendable in Flags) then
   begin
@@ -5351,6 +5367,14 @@ var
   HitRange: Single;
 begin
   Shot := Missile as TMissile;
+  // CHANGE: ENHANCEMENT - Friendly fire off: no hit, no missile scripts (CanHumanAttack).
+  if not CanHumanAttack(Shot, Self) then
+  begin
+    DamageColor := 0;
+    DamageFlags := 0;
+    Result := 0;
+    Exit;
+  end;
   Flags := TDamageFlagSet(Shot.GetWeaponInfo.DamageFlags);
   if Shot.MicroModuleIndex <> 0 then
     Flags :=
@@ -6352,6 +6376,13 @@ begin
   Damage := ExtraDamage;
   Item := nil;
   Result := 0;
+  // CHANGE: ENHANCEMENT - Area damage follows the friendly-fire rule too: an explosion a
+  // human set off (its shot at a bomb, a cistern or a mine, or its missile) does not hurt
+  // another human with friendly fire off (CanHumanAttack).
+  if (SourceShip <> nil) and not CanHumanAttack(SourceShip, Self) then
+    Exit;
+  if (ExplodingObject is TShip) and not CanHumanAttack(ExplodingObject, Self) then
+    Exit;
   if ExplodingObject is TItem then
   begin
     Item := TItem(ExplodingObject);
@@ -6853,6 +6884,16 @@ var
   I: Integer;
   Weapon: TWeapon;
 begin
+  // CHANGE: ENHANCEMENT - A human does not join an attack on another human with friendly
+  // fire off (CanHumanAttack); the other side still attacks.
+  if not CanHumanAttack(Self, Target) then
+  begin
+    if CanHumanAttack(Ally, Target) then
+      Ally.SetJointAttackTarget(Ally, Target);
+    Exit;
+  end;
+  if not CanHumanAttack(Ally, Target) then
+    Ally := Self;
   EnemyShip := Target;
   for I := 1 to WeaponCount do
   begin
@@ -7143,6 +7184,9 @@ begin
             and ((Other.EnemyShip = nil) or (Other.EnemyShip.CurrentStar <> CurrentStar))
             and (Other.GetRelationLevelToShip(Self) >= rlGood)
             and (not IsHuman(Other) or (GetRelationLevelToShip(Other) >= rlGood))
+            // CHANGE: ENHANCEMENT - A human is not asked to attack another human with
+            // friendly fire off (CanHumanAttack).
+            and CanHumanAttack(Other, Target)
             and ((Other.GetRelationLevelToShip(Target) <= rlNormal)
                 or ((Other is TPirate) and (Self is TPirate)))
             and not (Other.TargetingRestriction in [1, 2])
@@ -18154,8 +18198,10 @@ begin
   for I := 0 to CurrentStar.Ships.Count - 1 do
   begin
     Ship := TShip(CurrentStar.Ships[I]);
+    // CHANGE: ENHANCEMENT - Not at another human with friendly fire off (CanHumanAttack).
     if (Ship <> Self)
         and Ship.InNormalSpace
+        and CanHumanAttack(Self, Ship)
         and (IsHuman(Self) or (GetRelationLevelToShip(Ship) <= rlHostile))
         and (not IsHuman(Self)
             or (Ship.GetRelationLevelToShip(Self) <= rlHostile)
@@ -18182,6 +18228,9 @@ begin
   if Target = nil then
     Exit;
   GetHull.InterceptorTarget := nil;
+  // CHANGE: ENHANCEMENT - A target set before friendly fire went off (CanHumanAttack).
+  if not CanHumanAttack(Self, Target) then
+    Exit;
   if GetHull.Energy < GetInterceptorEnergyCost then
     Exit;
   Dec(GetHull.Energy, GetInterceptorEnergyCost);

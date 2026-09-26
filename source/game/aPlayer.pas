@@ -4345,6 +4345,9 @@ var
   Faction: Byte;
 begin
   Result := False;
+  // CHANGE: ENHANCEMENT - Another human is no target with friendly fire off (CanHumanAttack).
+  if not CanHumanAttack(Self, Ship) then
+    Exit;
   if (Ship.TargetingRestriction = 1) and (Ship.EnemyShip <> Self) and (EnemyShip <> Ship) then
     Exit;
   if (Ship is TKling)

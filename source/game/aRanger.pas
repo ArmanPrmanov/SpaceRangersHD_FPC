@@ -1130,6 +1130,10 @@ begin
   end;
   if (EnemyShip <> nil) and (EnemyShip.CurrentStar <> CurrentStar) then
     EnemyShip := nil;
+  // CHANGE: ENHANCEMENT - Only an attack friendly fire allows (CanHumanAttack); the executor
+  // of SetSessionFlag drops the others, this catches one set in between.
+  if not CanHumanAttack(Self, Human.PendingPlayerFollowTarget) then
+    Human.PendingPlayerFollowTarget := nil;
   if Human.PendingPlayerFollowTarget <> nil then
   begin
     if Human.PendingPlayerFollowTarget.InNormalSpace
@@ -3287,7 +3291,12 @@ begin
         end;
       end;
     end;
-  if (EnemyShip <> nil) and (EnemyShip.CurrentStar = CurrentStar) and EnemyShip.InNormalSpace then
+  // CHANGE: ENHANCEMENT - A human on automatic control does not aim at another human with
+  // friendly fire off (CanHumanAttack), here and in the passes below.
+  if (EnemyShip <> nil)
+      and (EnemyShip.CurrentStar = CurrentStar)
+      and EnemyShip.InNormalSpace
+      and CanHumanAttack(Self, EnemyShip) then
   begin
     for J := 1 to WeaponCount do
     begin
@@ -3313,7 +3322,8 @@ begin
         and ((RelationToShip(Ship) < 10) or (Ship = EnemyShip) or (Ship.EnemyShip = Self))
         and (Ship.LiberationGroup = nil)
         and (TruceShip <> Ship)
-        and (not IsHuman(Ship) or (Ship.TruceShip <> Self)) then
+        and (not IsHuman(Ship) or (Ship.TruceShip <> Self))
+        and CanHumanAttack(Self, Ship) then
     begin
       { Native can replace an existing weapon target in this pass. }
       for J := 1 to WeaponCount do
@@ -3388,7 +3398,8 @@ begin
         and (Player.CurrentStar = CurrentStar)
         and Player.InNormalSpace
         and Player.ChameleonActive
-        and IsChameleonEffectiveAgainstSelf(Player) then
+        and IsChameleonEffectiveAgainstSelf(Player)
+        and CanHumanAttack(Self, Player) then
     begin
       for J := 1 to WeaponCount do
       begin
@@ -3421,11 +3432,14 @@ begin
     Exit;
   if UsableWeaponCount = 0 then
     Exit;
+  // CHANGE: ENHANCEMENT - A human on automatic control picks no other human as its enemy
+  // with friendly fire off (CanHumanAttack), here and in the search below.
   if (PartnerShip <> nil)
       and (PartnerShip.EnemyShip <> nil)
       and ((PartnerShip.OrderTarget = PartnerShip.EnemyShip)
           or (PartnerShip.EnemyShip.OrderTarget = PartnerShip))
-      and (not IsFemaleHumanPilot or not PartnerShip.EnemyShip.IsFemaleHumanPilot) then
+      and (not IsFemaleHumanPilot or not PartnerShip.EnemyShip.IsFemaleHumanPilot)
+      and CanHumanAttack(Self, PartnerShip.EnemyShip) then
   begin
     EnemyShip := PartnerShip.EnemyShip;
     Exit;
@@ -3464,7 +3478,8 @@ begin
         or (Ship.TargetingRestriction in [1..4])
         or (IsFemaleHumanPilot and Ship.IsFemaleHumanPilot)
         or ((Ship.PartnerShip <> nil) and (Ship.PartnerShip.CurrentStar = CurrentStar))
-        or (Ship.LiberationGroup <> nil) then
+        or (Ship.LiberationGroup <> nil)
+        or not CanHumanAttack(Self, Ship) then
       Continue;
     Chance := ChanceToWin(Ship);
     if (Ship.TargetingRestriction = 6)
@@ -3523,6 +3538,13 @@ procedure TRanger.EngageEnemyShip;
 begin
   if Order = soFollowShip then
     OrderNone(False);
+  // CHANGE: ENHANCEMENT - A human on automatic control does not go after another human with
+  // friendly fire off (CanHumanAttack).
+  if not CanHumanAttack(Self, EnemyShip) then
+  begin
+    EnemyShip := nil;
+    Exit;
+  end;
   if (EnemyShip <> nil) and (EnemyShip.CurrentStar = CurrentStar) then
     if EnemyShip.InNormalSpace then
     begin

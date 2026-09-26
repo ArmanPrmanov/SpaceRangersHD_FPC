@@ -469,9 +469,18 @@ begin
 end;
 
 procedure ExecuteOrderFollow(const Command: TPlayerCommand);
+var
+  Target: TShip;
+  Mode: Integer;
 begin
   ActorHuman(Command).PendingPlayerFollowTarget := nil;
-  Actor(Command).OrderFollowShip(RefObject(Command, 0) as TShip, IntArg(Command, 0), False);
+  Target := RefObject(Command, 0) as TShip;
+  Mode := IntArg(Command, 0);
+  // CHANGE: ENHANCEMENT - Following another human at weapon range is an attack; with friendly
+  // fire off it becomes a plain follow (CanHumanAttack).
+  if (Mode = 1) and not CanHumanAttack(Actor(Command), Target) then
+    Mode := 0;
+  Actor(Command).OrderFollowShip(Target, Mode, False);
 end;
 
 procedure OrderFollow(Ship: TShip; Mode: Integer);
@@ -490,7 +499,8 @@ var
 begin
   Actor(Command).OrderNone(False);
   Target := RefObject(Command, 0);
-  if Target <> nil then
+  // CHANGE: ENHANCEMENT - No auto battle against another human with friendly fire off.
+  if (Target <> nil) and CanHumanAttack(Actor(Command), Target) then
     ActorHuman(Command).PendingPlayerFollowTarget := Target as TShip;
 end;
 
@@ -511,6 +521,9 @@ var
 begin
   P := Actor(Command);
   Target := RefObject(Command, 0);
+  // CHANGE: ENHANCEMENT - A weapon is not aimed at another human with friendly fire off.
+  if not CanHumanAttack(P, Target) then
+    Exit;
   for I := 0 to High(Command.Ints) do
     (P.FindEquippedItemInSlot(Ord(t_Weapon1), Command.Ints[I]) as TWeapon).Target := Target;
 end;
@@ -531,7 +544,9 @@ end;
 
 procedure ExecuteSetInterceptorTarget(const Command: TPlayerCommand);
 begin
-  Actor(Command).GetHull.InterceptorTarget := RefObject(Command, 0);
+  // CHANGE: ENHANCEMENT - Interceptors do not go for another human with friendly fire off.
+  if CanHumanAttack(Actor(Command), RefObject(Command, 0)) then
+    Actor(Command).GetHull.InterceptorTarget := RefObject(Command, 0);
 end;
 
 procedure SetInterceptorTarget(Target: TShip);
@@ -598,7 +613,9 @@ end;
 
 procedure ExecuteSetPendingFollow(const Command: TPlayerCommand);
 begin
-  ActorHuman(Command).PendingPlayerFollowTarget := RefObject(Command, 0) as TShip;
+  // CHANGE: ENHANCEMENT - The auto-battle target is an attack (CanHumanAttack).
+  if CanHumanAttack(Actor(Command), RefObject(Command, 0)) then
+    ActorHuman(Command).PendingPlayerFollowTarget := RefObject(Command, 0) as TShip;
 end;
 
 procedure SetPendingFollowTarget(Ship: TShip);
@@ -1062,6 +1079,10 @@ end;
 procedure ExecuteSetSessionFlag(const Command: TPlayerCommand);
 begin
   SetSessionFlag(IntArg(Command, 0), IntArg(Command, 1) <> 0);
+  // CHANGE: ENHANCEMENT - With friendly fire off, the attacks humans have ordered on each
+  // other end at once, at the same point on every machine (ROADMAP.md, Phase 4, item 8).
+  if not Session.FriendlyFireEnabled then
+    DropRefusedHumanAttacks;
 end;
 
 procedure SetSessionFlagValue(Flag: Integer; Value: Boolean);
