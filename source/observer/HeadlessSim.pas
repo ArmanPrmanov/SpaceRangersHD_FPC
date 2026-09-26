@@ -18,6 +18,8 @@ type
     DumpDirectory: AnsiString;
     // Write a checkpoint after this turn and continue from it (0: never).
     ReloadAt: Integer;
+    // The number of humans; the save's human is the first and the others join (0: as saved).
+    Humans: Integer;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 implementation
@@ -31,8 +33,13 @@ uses
   aMyFunction,
   aGalaxy,
   aGalaxyEvent,
+  aGalaxyStruct,
+  aHuman,
+  aPlanet,
+  aPlayer,
   aObjectRefs,
   aSaveLoad,
+  aSession,
   SaveTrace,
   ThreadCalc,
   ObserverSimulation;
@@ -259,6 +266,34 @@ begin
   end;
 end;
 
+// Adds humans until there are Total, each landed at an inhabited coalition planet in a star
+// that holds no other human. The choice depends only on the galaxy, so runs repeat.
+procedure JoinHumans(Total: Integer);
+var
+  I: Integer;
+  Planet: TPlanet;
+  Human: THuman;
+begin
+  I := 0;
+  while Session.Humans.Count < Total do
+  begin
+    if I >= Galaxy.Planets.Count then
+      raise Exception.Create('Not enough coalition planets for the humans');
+    Planet := TPlanet(Galaxy.Planets[I]);
+    Inc(I);
+    if (Planet.OwnerId > Byte(oiGaal))
+        or (Planet.CurrentStar.ControlFaction <> sfCoalition)
+        or StarHasHuman(Planet.CurrentStar) then
+      Continue;
+    Human := JoinHuman(
+        Planet,
+        'Human' + IntToStr(Session.Humans.Count + 1),
+        1 + Session.Humans.Count mod 5
+    );
+    Emit(Format('human id=%d star=%d planet=%d', [Human.Id, Planet.CurrentStar.Id, Planet.Id]));
+  end;
+end;
+
 // A checkpoint must give back a game that plays on as the one it was written from.
 procedure ReloadFromCheckpoint;
 var
@@ -281,6 +316,7 @@ var
 begin
   Result := 0;
   LoadSave(Options.SavePath, Options.Seed);
+  JoinHumans(Options.Humans);
   Emit(Format('sim save=%s seed=%d day=%d', [Options.SavePath, Options.Seed, Galaxy.CurrentTurn]));
   if Options.RoundTrip then
   begin
@@ -288,7 +324,10 @@ begin
       Result := 1;
     // Simulate from the save itself, not from its round-tripped copy.
     if Options.Turns > 0 then
+    begin
       LoadSave(Options.SavePath, Options.Seed);
+      JoinHumans(Options.Humans);
+    end;
   end;
   if Options.Turns <= 0 then
     Exit;
@@ -309,7 +348,12 @@ begin
   // a round trip from the save alone does not exercise.
   if Options.RoundTrip and not CheckRoundTrip(Options.DumpDirectory, Options.Seed) then
     Result := 1;
-  Emit(Format('done turns=%d day=%d', [Options.Turns, Galaxy.CurrentTurn]));
+  Emit(
+      Format(
+          'done turns=%d day=%d humans=%d',
+          [Options.Turns, Galaxy.CurrentTurn, Session.Humans.Count]
+      )
+  );
 end;
 
 end.

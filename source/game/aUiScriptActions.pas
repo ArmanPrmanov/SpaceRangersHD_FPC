@@ -68,12 +68,8 @@ implementation
 uses
   Contnrs,
   aGalaxyStruct,
+  aHuman,
   aPlayer;
-
-function Actor(const Command: TPlayerCommand): TPlayer;
-begin
-  Result := GetPlayer;
-end;
 
 // Runs the command, or with no player to act, the executor directly.
 procedure SubmitOrRun(const Command: TPlayerCommand; Executor: TCommandExecutor);

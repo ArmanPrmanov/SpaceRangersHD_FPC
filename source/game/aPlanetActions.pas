@@ -200,11 +200,6 @@ uses
   aSession,
   aTranclucator;
 
-function Actor(const Command: TPlayerCommand): TPlayer;
-begin
-  Result := GetPlayer;
-end;
-
 procedure AddScript(var Command: TPlayerCommand; Script: TScript);
 begin
   if Script = nil then

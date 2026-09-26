@@ -76,11 +76,6 @@ uses
   aShip,
   GR_Main;
 
-function Actor(const Command: TPlayerCommand): TPlayer;
-begin
-  Result := GetPlayer;
-end;
-
 // Moved from TfAB.ToggleWeaponGroup.
 procedure ExecuteArcadeSetWeaponSlotData(const Command: TPlayerCommand);
 begin

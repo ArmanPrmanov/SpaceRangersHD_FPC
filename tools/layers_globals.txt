@@ -31,6 +31,7 @@ data     ModRuinNameConfig
 data     ModShipNameConfig
 data     PlanetAdvertDefinitions
 data     PlanetSpaceTemplates
+data     PlayerMessagePresentations
 data     RobotMapDefinitions
 data     ShipGreetingCount
 data     ShipGreetingDefinitions

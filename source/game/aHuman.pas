@@ -12,6 +12,7 @@ unit aHuman;
 interface
 uses
   Classes,
+  SyncObjs,
   Globals,
   aGalaxy,
   aHold,
@@ -19,7 +20,8 @@ uses
   aPlanet,
   aPlayer,
   aRuins,
-  aShip;
+  aShip,
+  aCommands;
 type
   // Read back as TGoodsTradePriceEntry, so the layout must match it.
   TGoodsShopTradeRow = record
@@ -84,6 +86,33 @@ type
     TalkResponse: Byte;
     TalkText: WideString;
     TalkAmount: Integer;
+    // The message bubbles, under PersistentPlayerMessageLock. SkipLock means the caller
+    // holds it. Globals has the same functions for the local human.
+    procedure ClearBubbles;
+    function CountBubbles: Integer;
+    function IsBubbleQueued(MessageEntry: TMessagePlayer; SkipLock: Boolean): Boolean;
+    procedure RemoveBubble(MessageEntry: TMessagePlayer; SkipLock: Boolean);
+    function RemoveBubblesExceptKinds(
+        Key: WideString;
+        ExcludedKinds: TPlayerMessageKindSet;
+        SkipLock: Boolean
+    ): Boolean;
+    function FindBubbleByText(const Text: WideString; SkipLock: Boolean): TMessagePlayer;
+    function FindBubbleByKey(const Key: WideString; SkipLock: Boolean): TMessagePlayer;
+    procedure RemoveBubbleByKey(const Key: WideString);
+    procedure RemoveBubblePages(const Prefix: WideString; FirstPage: Integer);
+    function FindBubbleExceptKinds(
+        const Key: WideString;
+        ExcludedKinds: TPlayerMessageKindSet;
+        SkipLock: Boolean
+    ): TMessagePlayer;
+    function CreateBubble: TMessagePlayer;
+    function AddOrUpdateBubble(
+        Kind: Byte;
+        Turn: Integer;
+        const Text, Key: WideString
+    ): TMessagePlayer;
+    procedure PruneExpiredBubbles;
   end;
   // The humans in join order. Every TPlayer in the galaxy is in it, and nothing else is.
   THumanList = class(TList)
@@ -93,6 +122,8 @@ type
     property Items[Index: Integer]: THuman read GetHuman; default;
   end;
 var
+  // Guards every human's message bubbles; Globals creates and frees it.
+  PersistentPlayerMessageLock: TCriticalSection;
   // The human at this machine: whose screen this is. LocalPlayer is its ranger.
   LocalHuman: THuman;
 // The human whose ranger is Ship, or nil when Ship is not a human's ranger.
@@ -110,9 +141,18 @@ procedure RemoveHuman(Player: TPlayer);
 // Rebuilds the list from the TPlayer instances in Galaxy.Rangers, keeping the local
 // human's state for Local.
 procedure RebuildHumans(Galaxy: TGalaxy; Local: TPlayer);
+// The human who issued Command, and its ranger; nil when the human is gone.
+function ActorHuman(const Command: TPlayerCommand): THuman;
+function Actor(const Command: TPlayerCommand): TPlayer;
+// Adds a new human whose ranger starts landed at Planet, as new-game setup starts the first
+// one. CharacterPreset is the setup screen's choice (1-5).
+function JoinHuman(Planet: TPlanet; const Name: WideString; CharacterPreset: Integer): THuman;
 implementation
 uses
-  aSession;
+  aConst,
+  aMyFunction,
+  aSession,
+  EC_Str;
 
 function THumanList.GetHuman(Index: Integer): THuman;
 begin
@@ -214,6 +254,384 @@ begin
       if Ranger is TPlayer then
         AddHuman(TPlayer(Ranger));
     end;
+end;
+
+procedure THuman.ClearBubbles;
+var
+  Next, Entry: TMessagePlayer;
+begin
+  PersistentPlayerMessageLock.Enter;
+  try
+    Next := FirstPersistentPlayerMessage;
+    while Next <> nil do
+    begin
+      Entry := Next;
+      Next := Next.Next;
+      Entry.Free;
+    end;
+    FirstPersistentPlayerMessage := nil;
+    LastPersistentPlayerMessage := nil;
+  finally
+    PersistentPlayerMessageLock.Leave;
+  end;
+end;
+function THuman.CountBubbles: Integer;
+var
+  Entry: TMessagePlayer;
+  Count: Integer;
+begin
+  PersistentPlayerMessageLock.Enter;
+  try
+    Count := 0;
+    Entry := FirstPersistentPlayerMessage;
+    while Entry <> nil do
+    begin
+      Inc(Count);
+      Entry := Entry.Next;
+    end;
+    Result := Count;
+  finally
+    PersistentPlayerMessageLock.Leave;
+  end;
+end;
+function THuman.IsBubbleQueued(MessageEntry: TMessagePlayer; SkipLock: Boolean): Boolean;
+var
+  Entry: TMessagePlayer;
+begin
+  if not SkipLock then
+    PersistentPlayerMessageLock.Enter;
+  try
+    Entry := FirstPersistentPlayerMessage;
+    while Entry <> nil do
+    begin
+      if Entry = MessageEntry then
+      begin
+        Result := True;
+        Exit;
+      end;
+      Entry := Entry.Next;
+    end;
+    Result := False;
+  finally
+    if not SkipLock then
+      PersistentPlayerMessageLock.Leave;
+  end;
+end;
+procedure THuman.RemoveBubble(MessageEntry: TMessagePlayer; SkipLock: Boolean);
+begin
+  if not SkipLock then
+    PersistentPlayerMessageLock.Enter;
+  try
+    if MessageEntry.Prev <> nil then
+      MessageEntry.Prev.Next := MessageEntry.Next;
+    if MessageEntry.Next <> nil then
+      MessageEntry.Next.Prev := MessageEntry.Prev;
+    if LastPersistentPlayerMessage = MessageEntry then
+      LastPersistentPlayerMessage := MessageEntry.Prev;
+    if FirstPersistentPlayerMessage = MessageEntry then
+      FirstPersistentPlayerMessage := MessageEntry.Next;
+    MessageEntry.Free;
+  finally
+    if not SkipLock then
+      PersistentPlayerMessageLock.Leave;
+  end;
+end;
+function THuman.RemoveBubblesExceptKinds(
+    Key: WideString;
+    ExcludedKinds: TPlayerMessageKindSet;
+    SkipLock: Boolean
+): Boolean;
+var
+  MessageEntry: TMessagePlayer;
+begin
+  Result := False;
+  if not SkipLock then
+    PersistentPlayerMessageLock.Enter;
+  try
+    repeat
+      MessageEntry := FindBubbleExceptKinds(Key, ExcludedKinds, True);
+      if MessageEntry <> nil then
+      begin
+        RemoveBubble(MessageEntry, True);
+        Result := True;
+      end;
+    until MessageEntry = nil;
+  finally
+    if not SkipLock then
+      PersistentPlayerMessageLock.Leave;
+  end;
+end;
+function THuman.FindBubbleByText(const Text: WideString; SkipLock: Boolean): TMessagePlayer;
+var
+  Entry: TMessagePlayer;
+begin
+  Result := nil;
+  if not SkipLock then
+    PersistentPlayerMessageLock.Enter;
+  try
+    Entry := FirstPersistentPlayerMessage;
+    while Entry <> nil do
+    begin
+      if Entry.Text = Text then
+      begin
+        Result := Entry;
+        Exit;
+      end;
+      Entry := Entry.Next;
+    end;
+  finally
+    if not SkipLock then
+      PersistentPlayerMessageLock.Leave;
+  end;
+end;
+function THuman.FindBubbleByKey(const Key: WideString; SkipLock: Boolean): TMessagePlayer;
+var
+  Entry: TMessagePlayer;
+begin
+  Result := nil;
+  if not SkipLock then
+    PersistentPlayerMessageLock.Enter;
+  try
+    Entry := FirstPersistentPlayerMessage;
+    while Entry <> nil do
+    begin
+      if Entry.Key = Key then
+      begin
+        Result := Entry;
+        Exit;
+      end;
+      Entry := Entry.Next;
+    end;
+  finally
+    if not SkipLock then
+      PersistentPlayerMessageLock.Leave;
+  end;
+end;
+procedure THuman.RemoveBubbleByKey(const Key: WideString);
+var
+  Entry: TMessagePlayer;
+begin
+  PersistentPlayerMessageLock.Enter;
+  try
+    Entry := FirstPersistentPlayerMessage;
+    while Entry <> nil do
+    begin
+      if Entry.Key = Key then
+      begin
+        if Entry.Prev <> nil then
+          Entry.Prev.Next := Entry.Next;
+        if Entry.Next <> nil then
+          Entry.Next.Prev := Entry.Prev;
+        if LastPersistentPlayerMessage = Entry then
+          LastPersistentPlayerMessage := Entry.Prev;
+        if FirstPersistentPlayerMessage = Entry then
+          FirstPersistentPlayerMessage := Entry.Next;
+        Entry.Free;
+        Exit;
+      end;
+      Entry := Entry.Next;
+    end;
+  finally
+    PersistentPlayerMessageLock.Leave;
+  end;
+end;
+procedure THuman.RemoveBubblePages(const Prefix: WideString; FirstPage: Integer);
+var
+  Entry, Next: TMessagePlayer;
+  PrefixLength: Integer;
+  Suffix: WideString;
+begin
+  PersistentPlayerMessageLock.Enter;
+  try
+    Entry := FirstPersistentPlayerMessage;
+    while Entry <> nil do
+    begin
+      Next := Entry.Next;
+      PrefixLength := Pos(Prefix, Entry.Key);
+      if PrefixLength = 1 then
+      begin
+        PrefixLength := Length(Prefix);
+        Suffix :=
+            CopyWideStringUnchecked(Entry.Key, PrefixLength + 1, Length(Entry.Key) - PrefixLength);
+        if IsIntegerTextW(Suffix) and (ExtractDigitsToIntW(Suffix) >= FirstPage) then
+        begin
+          if Entry.Prev <> nil then
+            Entry.Prev.Next := Entry.Next;
+          if Entry.Next <> nil then
+            Entry.Next.Prev := Entry.Prev;
+          if LastPersistentPlayerMessage = Entry then
+            LastPersistentPlayerMessage := Entry.Prev;
+          if FirstPersistentPlayerMessage = Entry then
+            FirstPersistentPlayerMessage := Entry.Next;
+          Entry.Free;
+        end;
+      end;
+      Entry := Next;
+    end;
+  finally
+    PersistentPlayerMessageLock.Leave;
+  end;
+end;
+function THuman.FindBubbleExceptKinds(
+    const Key: WideString;
+    ExcludedKinds: TPlayerMessageKindSet;
+    SkipLock: Boolean
+): TMessagePlayer;
+var
+  MessageEntry: TMessagePlayer;
+begin
+  Result := nil;
+  if not SkipLock then
+    PersistentPlayerMessageLock.Enter;
+  try
+    MessageEntry := FirstPersistentPlayerMessage;
+    while MessageEntry <> nil do
+    begin
+      if not (MessageEntry.Kind in ExcludedKinds)
+          and ((Length(Key) = 0) or (Pos(Key, MessageEntry.Key) > 0)) then
+      begin
+        Result := MessageEntry;
+        Exit;
+      end;
+      MessageEntry := MessageEntry.Next;
+    end;
+  finally
+    if not SkipLock then
+      PersistentPlayerMessageLock.Leave;
+  end;
+end;
+function THuman.CreateBubble: TMessagePlayer;
+var
+  Entry: TMessagePlayer;
+begin
+  PersistentPlayerMessageLock.Enter;
+  try
+    Entry := TMessagePlayer.Create;
+    if LastPersistentPlayerMessage <> nil then
+      LastPersistentPlayerMessage.Next := Entry;
+    Entry.Prev := LastPersistentPlayerMessage;
+    Entry.Next := nil;
+    LastPersistentPlayerMessage := Entry;
+    if FirstPersistentPlayerMessage = nil then
+      FirstPersistentPlayerMessage := Entry;
+  finally
+    PersistentPlayerMessageLock.Leave;
+  end;
+  Result := Entry;
+end;
+function THuman.AddOrUpdateBubble(
+    Kind: Byte;
+    Turn: Integer;
+    const Text, Key: WideString
+): TMessagePlayer;
+var
+  Entry: TMessagePlayer;
+begin
+  PersistentPlayerMessageLock.Enter;
+  try
+    if Key <> '' then
+    begin
+      Entry := FindBubbleByKey(Key, True);
+      if Entry <> nil then
+      begin
+        if Entry.Kind <> Kind then
+        begin
+          Entry.WasRead := False;
+          Entry.NotificationSoundPlayed := False;
+        end;
+        Entry.Kind := Kind;
+        Entry.Turn := Turn;
+        if Text <> '' then
+          Entry.Text := Text;
+        Result := Entry;
+        Exit;
+      end;
+    end;
+    Entry := FindBubbleByText(Text, True);
+    if Entry <> nil then
+    begin
+      Result := Entry;
+      Exit;
+    end;
+    Entry := TMessagePlayer.Create;
+    if LastPersistentPlayerMessage <> nil then
+      LastPersistentPlayerMessage.Next := Entry;
+    Entry.Prev := LastPersistentPlayerMessage;
+    Entry.Next := nil;
+    LastPersistentPlayerMessage := Entry;
+    if FirstPersistentPlayerMessage = nil then
+      FirstPersistentPlayerMessage := Entry;
+    Entry.Key := Key;
+    Entry.Kind := Kind;
+    Entry.Turn := Turn;
+    Entry.Text := Text;
+    Entry.WasRead := False;
+    Entry.NotificationSoundPlayed := False;
+    Result := Entry;
+  finally
+    PersistentPlayerMessageLock.Leave;
+  end;
+end;
+procedure THuman.PruneExpiredBubbles;
+var
+  Next, Entry: TMessagePlayer;
+begin
+  PersistentPlayerMessageLock.Enter;
+  try
+    Next := FirstPersistentPlayerMessage;
+    while Next <> nil do
+    begin
+      Entry := Next;
+      Next := Next.Next;
+      if Entry.WasRead and (Entry.Kind in [6]) and (Galaxy.CurrentTurn - Entry.Turn >= 7) then
+        RemoveBubble(Entry, True)
+      else if Galaxy.CurrentTurn - Entry.Turn
+          >= PlayerMessagePresentations[Entry.Kind].LifetimeTurns then
+        RemoveBubble(Entry, True)
+      else if Entry.WasRead and (Entry.Kind in [0..2, 4, 5, 8]) then
+        RemoveBubble(Entry, True)
+      else if not Player.InNormalSpace and (Entry.Kind = 1) then
+        RemoveBubble(Entry, True);
+    end;
+  finally
+    PersistentPlayerMessageLock.Leave;
+  end;
+end;
+
+function ActorHuman(const Command: TPlayerCommand): THuman;
+begin
+  Result := FindHuman(Integer(Command.Actor));
+end;
+
+function Actor(const Command: TPlayerCommand): TPlayer;
+var
+  Human: THuman;
+begin
+  Human := ActorHuman(Command);
+  if Human = nil then
+    Result := nil
+  else
+    Result := Human.Player;
+end;
+
+function JoinHuman(Planet: TPlanet; const Name: WideString; CharacterPreset: Integer): THuman;
+var
+  Player: TPlayer;
+  Money: Integer;
+begin
+  Money := GalaxyDifficultyTuning[Galaxy.DifficultyLevels[1]].DifficultyValue18;
+  Player := TPlayer.Create;
+  Player.InitializePlayerAtPlanet(Planet, Money, CharacterPreset);
+  Player.HomePlanet.ChangeRelationToRanger(Player, 100);
+  Player.Name := Name;
+  Player.ApplyCharacterPreset(Planet, Money, CharacterPreset);
+  if Player.RuinsProxy = nil then
+    Player.CreateRuinsProxy;
+  Galaxy.RefreshRangerWealthStats;
+  Galaxy.RefreshRangerStrengthStats;
+  Result := AddHuman(Player);
+  Result.PlayerStar := Planet.CurrentStar;
+  Result.PlayerOldQuests := aMyFunction.TObjectList.Create;
 end;
 
 initialization

@@ -77,16 +77,12 @@ uses
   aGalaxyStruct,
   aItem,
   aPlanet,
+  aHuman,
   aPlayer,
   aRanger,
   aSession,
   Globals,
   GR_Main;
-
-function Actor(const Command: TPlayerCommand): TPlayer;
-begin
-  Result := GetPlayer;
-end;
 
 function ScriptIndex(Script: TScript): Integer;
 begin

@@ -183,11 +183,6 @@ begin
   Slots[High(Slots)] := Slot;
 end;
 
-function Actor(const Command: TPlayerCommand): TPlayer;
-begin
-  Result := GetPlayer;
-end;
-
 procedure ExecuteParkPlayer(const Command: TPlayerCommand);
 var
   P: TPlayer;

@@ -236,11 +236,6 @@ uses
   aShopStock,
   aTranclucator;
 
-function Actor(const Command: TPlayerCommand): TPlayer;
-begin
-  Result := GetPlayer;
-end;
-
 // Moved from TfShip2.CanUseLocalStorage.
 function CanUseLocalStorage: Boolean;
 begin

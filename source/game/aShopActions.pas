@@ -66,11 +66,6 @@ uses
   aShopStock,
   aTranclucator;
 
-function Actor(const Command: TPlayerCommand): TPlayer;
-begin
-  Result := GetPlayer;
-end;
-
 function ShopSlotIndex(Item: TItem): Integer;
 var
   I: Integer;

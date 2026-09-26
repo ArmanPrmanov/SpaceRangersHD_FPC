@@ -20,6 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = ROOT / "tests" / "golden"
 ROUNDTRIP_TURNS = 5
 LOG_TURNS = 10
+# More than one human (ROADMAP.md, Phase 4): 2, and enough that code which assumes "one or
+# two" fails.
+HUMAN_COUNTS = (2, 8)
+HUMAN_TURNS = 20
 REPLAYS = ROOT / "tests" / "replays"
 
 
@@ -109,6 +113,26 @@ def check_replay(args, binary: Path, log: Path) -> tuple[bool, list[str]]:
     return passed, [summary, *notes]
 
 
+def check_humans(args, binary: Path, save: Path, count: int) -> tuple[bool, str]:
+    """Play with extra humans: no crash, a clean round trip, the same hashes twice."""
+    options = [
+        f"--sim-humans={count}", "--sim-roundtrip", f"--sim-turns={HUMAN_TURNS}", "--sim-hash",
+        f"--sim-seed={args.seed}",
+    ]  # fmt: skip
+    runs = []
+    for _ in range(2):
+        code, output = simulate(binary, args.game_dir, save, options)
+        roundtrip = [line for line in output.splitlines() if line.startswith("roundtrip ")]
+        if code != 0 or not roundtrip or any("=ok" not in line for line in roundtrip):
+            return False, f"{count} humans failed:" + output_tail(output)
+        # TODO(Phase 4, respawn): a lost human fails the test once destroyed humans respawn.
+        lost = "" if f" humans={count} " in last_line(output, "done ") + " " else ", a human was lost"
+        runs.append(turn_lines(output))
+    if runs[0] != runs[1]:
+        return False, f"{count} humans nondeterministic: " + first_divergence(runs[0], runs[1])
+    return True, f"{count} humans: {HUMAN_TURNS} turns, round trip ok, deterministic{lost}"
+
+
 def turn_lines(output: str) -> list[str]:
     return [line.strip() for line in output.splitlines() if line.startswith("turn ")]
 
@@ -162,6 +186,11 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     notes.append(note)
     if not passed_log:
         return False, notes
+
+    for count in HUMAN_COUNTS:
+        passed_humans, note = check_humans(args, binary, save, count)
+        notes.append(note)
+        passed = passed and passed_humans
 
     golden = GOLDEN / target_name() / f"{save_digest(save)}.txt"
     header = f"# {save.name}: {args.turns} turns, seed {args.seed}"

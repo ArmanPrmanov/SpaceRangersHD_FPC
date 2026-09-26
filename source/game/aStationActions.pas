@@ -248,11 +248,6 @@ uses
   Globals,
   GR_Main;
 
-function Actor(const Command: TPlayerCommand): TPlayer;
-begin
-  Result := GetPlayer;
-end;
-
 procedure SubmitSimple(Kind: TCommandKind);
 begin
   SubmitCommand(NewCommand(Kind));

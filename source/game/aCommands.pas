@@ -82,6 +82,7 @@ uses
   aItem,
   aAsteroid,
   aMissile,
+  aHuman,
   aPlayer,
   SimulationThread;
 
@@ -95,9 +96,11 @@ function NewCommand(Kind: TCommandKind): TPlayerCommand;
 begin
   Result := Default(TPlayerCommand);
   Result.Kind := Kind;
-  if GetPlayer <> nil then
-    Result.Actor := Cardinal(GetPlayer.Id);
+  // The UI submits commands for the human at this machine.
+  if LocalPlayer <> nil then
+    Result.Actor := Cardinal(LocalPlayer.Id);
 end;
+
 
 function CanNameObject(Instance: TObject): Boolean;
 begin
@@ -293,8 +296,8 @@ procedure ExecuteCommand(const Command: TPlayerCommand);
 begin
   if (Command.Kind > MaximumCommandKind) or not Assigned(Executors[Command.Kind]) then
     raise Exception.Create('No executor for ' + CommandKindName(Command.Kind));
-  if (GetPlayer = nil) or (Cardinal(GetPlayer.Id) <> Command.Actor) then
-    raise Exception.Create(CommandKindName(Command.Kind) + ' names another actor');
+  if Actor(Command) = nil then
+    raise Exception.Create(CommandKindName(Command.Kind) + ' names no human');
   Executors[Command.Kind](Command);
 end;
 
