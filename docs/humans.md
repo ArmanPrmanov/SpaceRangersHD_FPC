@@ -38,6 +38,8 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
 | `StarHasHumanInSpace(Star)` | whether some human's ranger is in the star in normal space, where it sees the fights |
 | `FilmHuman(Star)` | the human whose view the star's shared film follows (radar range, film path, camera): the local human when it is in the star, else the first human there; nil when none is |
 | `HasLivingHuman` | whether some human's ranger still has hull points; the day stops when none does |
+| `IsMultiplayer` | whether the game has more than one human, so the multiplayer rules of ROADMAP.md, Phase 6, apply (see Respawn) |
+| `Human.Finished` | whether the human's game has ended while others play on (see Respawn) |
 | `FindHuman(Id)` | the human with that id, or nil |
 | `IsRuinsProxy(Station)` | whether a station is some human's ruins proxy, the storage station that is not part of the galaxy |
 | `Human.AddOrUpdateBubble(...)` etc. | that human's message bubbles; the `Globals` functions of the old names are the local human's |
@@ -103,6 +105,54 @@ Converting the script functions (`aScriptFun`):
   quests are off in multiplayer (ROADMAP.md, Phase 6), so they follow the
   local human.
 
+## Respawn and game end
+
+The multiplayer rules (ROADMAP.md, Phase 6) apply when `IsMultiplayer`:
+`Session.Humans.Count > 1` at the moment it is asked. With one human the game is
+single player and keeps the original rules; the goldens check that. A human whose
+game has ended still counts, so the rules do not switch back when one finishes.
+
+**Death.** The damage that takes a human's ranger to zero hull (weapon, missile,
+interceptor, asteroid, explosion, star heat, a destroyed station it is docked
+to) calls `TShip.RecordHumanDeath`. It adds the `PlayerDeath` event with the
+cause, which names the human (`TGalaxyEvent.HumanId`). With one human it also
+records the game result, as native does. The kill counts for the killer as any
+ranger kill: hull kills, rank points, reputation.
+
+**Respawn.** The ranger stays in the star, destroyed, until the end of the
+star's day (`TStar.NextDay`, where destroyed ships are freed). The film has then
+shown the fatal hit. In multiplayer the ranger is not freed there:
+
+- `TShip.FindRespawnPlanet` picks the nearest planet that takes it, by the rules
+  `TryRelocateUnseenShip` moves unseen rangers by: a planet of a race or of the
+  pirates, in a coalition star without a battle or a script faction, and not
+  hostile to the ranger. The ranger's own star counts as nearest; there the planet
+  nearest to the ranger wins. When no star passes, any star with such a planet
+  will do.
+- The ranger leaves the film as a landing ship does (detached, graphics kept).
+- `TShip.RespawnHuman` clears what the ranger's destruction would have cleared
+  in other ships (enemy and truce targets, orders to it, interceptors, missiles,
+  weapon targets, follow and land orders in the star) and its own orders and
+  targets. Partners and ships docked to it stay. The shop it had open takes its
+  stock back. The hull is repaired; equipment, cargo, money and quests are kept.
+- It lands at the planet. In another star it travels through
+  `Galaxy.ShipsInTransit` at the end of the turn job, like a ship that jumps. The
+  human's `PlayerStar` follows, and the human gets a bubble
+  (`Multiplayer.Respawned` in the language data, English when missing).
+
+Only when no planet at all takes it is the ranger freed: the human leaves
+`Session.Humans` (`RemoveHuman`) and the others stay. For the local human that
+is the game over on this machine. `SetPlayer(nil, ...)`, which forgets every
+human, is left for clearing the galaxy.
+
+**Script game end.** In multiplayer a quest script's `EndGame` ends the game for
+the script's human only (`FinishHuman`): `Finished` and `FinishReason` (the
+reason `EndGame` gave, or -1 for the ending with the credits) are set, the
+ranger holds position, the human counts as having ended its turn, and
+`ExecuteCommand` refuses its commands. It stays in `Session.Humans`. The ending
+shows only when that human is the local one. With one human `EndGame` is as
+native.
+
 ## Saving
 
 Every `TPlayer` is saved as a ship, so every human's ranger survives a save.
@@ -117,11 +167,13 @@ reference table:
   follow target, automatic control, tips, bubbles, finished quests, the hangar
   slots, the hold order and the open shop);
 - the human each script is bound to (`TScript.HumanId`);
-- the human each galaxy event is about (`TGalaxyEvent.HumanId`).
+- the human each galaxy event is about (`TGalaxyEvent.HumanId`);
+- from version 2, whether each human's game has ended (`Finished`,
+  `FinishReason`). A version 1 block loads with every human playing.
 
 The block is written only when a save without it would load differently: more
-than one human, a flag that is not its default, a cheat on record, or a script
-or event bound to a human other than the first. A single-player save is
+than one human, a flag that is not its default, a cheat on record, a finished
+human, or a script or event bound to a human other than the first. A single-player save is
 therefore byte for byte as before. A save without the block loads as the
 original does: every script and event is bound to the first human. After a
 load the local human is still the saved `PlayerRangerIndex`, and
@@ -222,4 +274,8 @@ note in the progress entry.
   change. The same run plays each save with 2 and 8 humans
   (`--sim-humans=N`) and checks for crashes, a clean round trip and
   determinism. Hashes with several humans are expected to change as sites are
-  converted, since extra humans stop being treated as NPCs.
+  converted, since extra humans stop being treated as NPCs. Those runs also
+  destroy two humans' rangers (`--sim-kill-human=TURN`: the local one, and the
+  last one among planets made hostile to it) and check that they respawn
+  landed, repaired and with the same money and items, that no human is lost,
+  and that a finished human's command is refused.
