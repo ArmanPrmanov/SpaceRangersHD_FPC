@@ -10116,7 +10116,7 @@ begin
   end
   else
   begin
-    if (GetPlayer = Ship) and (LocalHuman.PendingPlayerFollowTarget <> nil) then
+    if IsHuman(Ship) and (HumanOf(Ship).PendingPlayerFollowTarget <> nil) then
       av[0].SetInt(-1)
     else
       av[0].SetInt(Ord(Ship.Order));
@@ -10161,14 +10161,14 @@ begin
   Ship := TShip(av[1].GetDword);
   if Ship <> nil then
   begin
-    if (GetPlayer = Ship) and (LocalHuman.PendingPlayerFollowTarget <> nil) then
-      av[0].SetDword(PtrUInt(LocalHuman.PendingPlayerFollowTarget))
+    if IsHuman(Ship) and (HumanOf(Ship).PendingPlayerFollowTarget <> nil) then
+      av[0].SetDword(PtrUInt(HumanOf(Ship).PendingPlayerFollowTarget))
     else
       av[0].SetDword(PtrUInt(Ship.OrderTarget));
     if High(av) > 1 then
     begin
-      if (GetPlayer = Ship) and (LocalHuman.PendingPlayerFollowTarget <> nil) then
-        LocalHuman.PendingPlayerFollowTarget := TShip(av[2].GetDword)
+      if IsHuman(Ship) and (HumanOf(Ship).PendingPlayerFollowTarget <> nil) then
+        HumanOf(Ship).PendingPlayerFollowTarget := TShip(av[2].GetDword)
       else
         Ship.OrderTarget := TObject(av[2].GetDword);
     end;
@@ -10183,11 +10183,11 @@ begin
   Obj := TObject(av[1].GetDword);
   if Obj <> nil then
   begin
-    if GetPlayer = Obj then
+    if IsHuman(Obj) then
     begin
-      av[0].SetDword(PtrUInt(GetPlayer.QueuedTravelTarget));
+      av[0].SetDword(PtrUInt(TPlayer(Obj).QueuedTravelTarget));
       if High(av) > 1 then
-        GetPlayer.QueuedTravelTarget := TStar(av[2].GetDword);
+        TPlayer(Obj).QueuedTravelTarget := TStar(av[2].GetDword);
     end
     else if Obj is TRuins then
     begin
@@ -10972,8 +10972,8 @@ begin
   Star := TStar(av[2].GetDword);
   Origin := TStar(av[3].GetDword);
   State := av[4].GetDword;
-  if (GetPlayer = Ship) and (LocalHuman.TemporaryShopSlots <> nil) then
-    RestoreTemporaryShopStock;
+  if IsHuman(Ship) and (HumanOf(Ship).TemporaryShopSlots <> nil) then
+    RestoreTemporaryShopStock(HumanOf(Ship));
   I := Ship.CurrentStar.Ships.IndexOf(Ship);
   if I >= 0 then
     Ship.CurrentStar.Ships.Delete(I);
@@ -11462,7 +11462,7 @@ var
   CustomTypes: array of WideString;
   Text: WideString;
   Value: TVarEC;
-  I, J, K, L, Count: Integer;
+  I, J, K, L, H, Count: Integer;
   Star: TStar;
   Planet: TPlanet;
   Ship: TShip;
@@ -11643,8 +11643,10 @@ begin
       for J := 0 to Star.MovingDropItems.Count - 1 do
         CheckItem(PMovingDropItemEntry(Star.MovingDropItems[J]).Payload as TItem);
     end;
-    for I := 0 to GetPlayer.StorageEntries.Count - 1 do
-      CheckItem(PStorageEntry(GetPlayer.StorageEntries[I]).Item);
+    // Items in every human's storage are in the galaxy.
+    for H := 0 to Session.Humans.Count - 1 do
+      for I := 0 to Session.Humans[H].Player.StorageEntries.Count - 1 do
+        CheckItem(PStorageEntry(Session.Humans[H].Player.StorageEntries[I]).Item);
   end;
   Count := av[1].GetArray.Count;
   av[0].SetInt(Count);
@@ -11665,7 +11667,7 @@ begin
     raise Exception.Create('Error.Script Chameleon');
   Ship := TShip(av[1].GetDword);
   if Ship = nil then
-    Ship := GetPlayer;
+    Ship := ScriptPlayer;
   if (High(av) > 1) and (av[2].GetString <> '') then
   begin
     if av[2].GetString = 'GraphName' then
@@ -11711,7 +11713,7 @@ begin
     raise Exception.Create('Error.Script IsChameleon');
   Ship := TShip(av[1].GetDword);
   if Ship = nil then
-    Ship := GetPlayer;
+    Ship := ScriptPlayer;
   if Ship.ScriptChameleon then
     av[0].SetInt(1)
   else
@@ -11724,23 +11726,23 @@ begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script PlayerChameleonCharges');
   Index := av[1].GetInt;
-  av[0].SetInt(GetPlayer.ChameleonCharges[Index]);
+  av[0].SetInt(ScriptPlayer.ChameleonCharges[Index]);
   if High(av) > 1 then
-    GetPlayer.ChameleonCharges[Index] := av[2].GetInt;
+    ScriptPlayer.ChameleonCharges[Index] := av[2].GetInt;
 end;
 procedure SF_PlayerChameleonCurType(av: array of TVarEC; code: TCodeEC);
 begin
-  if not GetPlayer.ChameleonActive then
+  if not ScriptPlayer.ChameleonActive then
     av[0].SetInt(-1)
   else
-    av[0].SetInt(Ord(GetPlayer.ChameleonSeries));
+    av[0].SetInt(Ord(ScriptPlayer.ChameleonSeries));
   if High(av) > 0 then
     if av[1].GetInt < 0 then
-      GetPlayer.ChameleonActive := False
+      ScriptPlayer.ChameleonActive := False
     else
     begin
-      GetPlayer.ChameleonActive := True;
-      GetPlayer.ChameleonSeries := TDominatorSeries(av[1].GetInt);
+      ScriptPlayer.ChameleonActive := True;
+      ScriptPlayer.ChameleonSeries := TDominatorSeries(av[1].GetInt);
     end;
 end;
 procedure SF_PlayerChameleonDetected(av: array of TVarEC; code: TCodeEC);
@@ -11750,9 +11752,9 @@ begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script PlayerChameleonDetected');
   Index := av[1].GetInt;
-  av[0].SetInt(Ord(GetPlayer.ChameleonDetected[Index]));
+  av[0].SetInt(Ord(ScriptPlayer.ChameleonDetected[Index]));
   if High(av) > 1 then
-    GetPlayer.ChameleonDetected[Index] := av[2].GetInt <> 0;
+    ScriptPlayer.ChameleonDetected[Index] := av[2].GetInt <> 0;
 end;
 procedure SF_PlayerLogicChameleon(av: array of TVarEC; code: TCodeEC);
 var
@@ -11761,9 +11763,9 @@ begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script PlayerLogicChameleon');
   Index := av[1].GetInt;
-  av[0].SetInt(GetPlayer.ChameleonLogic[Index]);
+  av[0].SetInt(ScriptPlayer.ChameleonLogic[Index]);
   if High(av) > 1 then
-    GetPlayer.ChameleonLogic[Index] := av[2].GetInt;
+    ScriptPlayer.ChameleonLogic[Index] := av[2].GetInt;
 end;
 procedure SF_SwitchToMirrorImage(av: array of TVarEC; code: TCodeEC);
 var
@@ -11775,7 +11777,7 @@ begin
     raise Exception.Create('Error.Script SwitchToMirrorImage');
   Ship := TShip(av[1].GetDword);
   if Ship = nil then
-    Ship := GetPlayer;
+    Ship := ScriptPlayer;
   if Ship.ScriptChameleon and (av[2].RealVType = vkString) then
   begin
     Mirror := CreateSpaceObjectByName('Ship2', av[2].GetString, Point(0, 0)) as TShip2SE;
@@ -11981,6 +11983,8 @@ begin
   end
   else
   begin
+    // HUMANS: script game end. Does a script's EndGame end the game for every human, and
+    // whose result does it record? Native records whether the player is alive.
     SimEvents.RecordPlayerResult(GetPlayer <> nil);
     AboutScreen.ReturnToScores := True;
     RequestedScreenId := screenAbout;
@@ -12187,11 +12191,11 @@ var
   Ship: TShip;
 begin
   if High(av) < 1 then
-    av[0].SetInt(Ord(GetPlayer.TalkLocked))
+    av[0].SetInt(Ord(ScriptPlayer.TalkLocked))
   else if (High(av) = 1) and ((av[1].RealVType <> vkDword) or (av[1].GetDword < $FF)) then
   begin
-    av[0].SetInt(Ord(GetPlayer.TalkLocked));
-    GetPlayer.TalkLocked := av[1].GetInt <> 0;
+    av[0].SetInt(Ord(ScriptPlayer.TalkLocked));
+    ScriptPlayer.TalkLocked := av[1].GetInt <> 0;
   end
   else
   begin
@@ -12212,11 +12216,11 @@ var
   Ship: TShip;
 begin
   if High(av) < 1 then
-    av[0].SetInt(Ord(GetPlayer.ScanLocked))
+    av[0].SetInt(Ord(ScriptPlayer.ScanLocked))
   else if (High(av) = 1) and ((av[1].RealVType <> vkDword) or (av[1].GetDword < $FF)) then
   begin
-    av[0].SetInt(Ord(GetPlayer.ScanLocked));
-    GetPlayer.ScanLocked := av[1].GetInt <> 0;
+    av[0].SetInt(Ord(ScriptPlayer.ScanLocked));
+    ScriptPlayer.ScanLocked := av[1].GetInt <> 0;
   end
   else
   begin
@@ -12234,12 +12238,12 @@ begin
 end;
 procedure SF_NoJump(av: array of TVarEC; code: TCodeEC);
 begin
-  if GetPlayer.NoJump then
+  if ScriptPlayer.NoJump then
     av[0].SetInt(1)
   else
     av[0].SetInt(0);
   if High(av) > 0 then
-    GetPlayer.NoJump := av[1].GetInt <> 0;
+    ScriptPlayer.NoJump := av[1].GetInt <> 0;
 end;
 procedure SF_NoLanding(av: array of TVarEC; code: TCodeEC);
 var
@@ -12376,9 +12380,9 @@ begin
   Ship := TShip(av[1].GetDword);
   if Ship.CurrentPlanet <> nil then
   begin
-    if GetPlayer = Ship then
+    if IsHuman(Ship) then
     begin
-      if GetPlayer.InPrison then
+      if TPlayer(Ship).InPrison then
         av[0].SetInt(1);
     end
     else
@@ -12431,10 +12435,10 @@ procedure SF_PlayerPirates(av: array of TVarEC; code: TCodeEC);
 var
   Index, Count: Integer;
 begin
-  if GetPlayer.PiratePartners = nil then
+  if ScriptPlayer.PiratePartners = nil then
     Count := 0
   else
-    Count := GetPlayer.PiratePartners.Count;
+    Count := ScriptPlayer.PiratePartners.Count;
   if High(av) < 1 then
     av[0].SetInt(Count)
   else
@@ -12443,7 +12447,7 @@ begin
     if (Index < 0) or (Index >= Count) then
       av[0].SetDword(0)
     else
-      av[0].SetDword(PtrUInt(GetPlayer.PiratePartners[Index]));
+      av[0].SetDword(PtrUInt(ScriptPlayer.PiratePartners[Index]));
   end;
 end;
 procedure SF_ShipIsPartner(av: array of TVarEC; code: TCodeEC);
@@ -12754,6 +12758,10 @@ begin
   if Count = 0 then
     av[1].GetArray.AddItem(TVarEC.Create(vkEmpty));
 end;
+// The GalaxyEvent* builtins read any event as it is. HUMANS: event human id. The Player*
+// events (PlayerExtortsMoney/Goods, PlayerAcceptsMoneyForTruce, PlayerFinishesQuest,
+// PlayerReceivesMMAsReward, GlobalChangeToPlayerReputation, PlayerUsesSubportal) fire for
+// any human and carry no human id, so a script cannot tell whose event it reads.
 procedure SF_GalaxyEvents(av: array of TVarEC; code: TCodeEC);
 begin
   av[0].SetInt(Galaxy.GalaxyEvents.Count);
@@ -12974,9 +12982,9 @@ begin
   if High(av) > 2 then
     Series := av[3].GetInt;
   Index := 0;
-  while Index < GetPlayer.StorageEntries.Count do
+  while Index < ScriptPlayer.StorageEntries.Count do
   begin
-    Entry := GetPlayer.StorageEntries[Index];
+    Entry := ScriptPlayer.StorageEntries[Index];
     if ((Entry.LocationOwner = Location) or (Location = nil))
         and (Byte(Entry.Item.ItemType) = Byte(t_Protoplasm)) then
     begin
@@ -12999,7 +13007,7 @@ begin
         else
         begin
           Dec(Remaining, Nodes.Weight);
-          GetPlayer.StorageEntries.Delete(Index);
+          ScriptPlayer.StorageEntries.Delete(Index);
           Entry.Item.Free;
           Dispose(Entry);
         end;
@@ -13043,7 +13051,8 @@ begin
     raise Exception.Create('Error.Script RuinsMicromoduleChain - not a ruins');
   Station := TRuins(Obj);
   Kind := av[2].GetInt;
-  Player := GetPlayer;
+  // The script's human's ranger asks for the micro-module.
+  Player := ScriptPlayer;
   if High(av) = 2 then
   begin
     for Index := 0 to 50 do
@@ -13066,7 +13075,7 @@ end;
 procedure SF_DomikKilledInCurSystem(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) < 1 then
-    av[0].SetInt(GetPlayer.CurrentSystemKills.Dominator)
+    av[0].SetInt(ScriptPlayer.CurrentSystemKills.Dominator)
   else
     av[0].SetInt(TNormalShip(av[1].GetDword).CurrentSystemKills.Dominator);
 end;
@@ -13116,8 +13125,8 @@ procedure SF_ShipChangeStar(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) < 2 then
     raise Exception.Create('Error.Script ShipChangeStar');
-  if (TShip(av[1].GetDword) = GetPlayer) and (LocalHuman.TemporaryShopSlots <> nil) then
-    RestoreTemporaryShopStock;
+  if IsHuman(TShip(av[1].GetDword)) and (HumanOf(TShip(av[1].GetDword)).TemporaryShopSlots <> nil) then
+    RestoreTemporaryShopStock(HumanOf(TShip(av[1].GetDword)));
   TShip(av[1].GetDword).TransferToStar(TStar(av[2].GetDword));
   if IsHuman(TShip(av[1].GetDword)) then
   begin
@@ -13144,7 +13153,8 @@ begin
     raise Exception.Create('Error.Script FilmFlags');
   if av[1].GetDword <= 3 then
   begin
-    Star := LocalHuman.PlayerStar;
+    // The script's human's star, whose film pacing the flags steer.
+    Star := ScriptHuman.PlayerStar;
     Kind := av[1].GetDword;
     Arg := 2;
   end
@@ -13214,8 +13224,8 @@ begin
     Color := CurrentPixelFormat.PackRgb(av[8].GetInt, av[9].GetInt, av[10].GetInt)
   else if Target is TShip then
   begin
-    if GetPlayer = Target then
-      Color := OwnerToFilmColor(RaceToOwner(GetPlayer.PilotRace))
+    if IsHuman(Target) then
+      Color := OwnerToFilmColor(RaceToOwner(TPlayer(Target).PilotRace))
     else if TShip(Target).HasNamedScriptFaction then
       Color := CustomFactionToFilmColor(TScriptShip(TShip(Target).ScriptShip).StateText)
     else
@@ -13227,7 +13237,9 @@ begin
   if High(av) >= 11 then
     Variant := av[11].GetInt;
   Effect := TWeaponSE.Create(Name, Point(0, 0), ShotVisual, Variant);
-  if (LocalHuman.PlayerStar <> nil) and LocalHuman.PlayerStar.RecordingTurnFilm then
+  // CHANGE: CLEANUP - The effect goes into the film of the script's human's star, recorded
+  // while that star's day runs.
+  if (ScriptHuman.PlayerStar <> nil) and ScriptHuman.PlayerStar.RecordingTurnFilm then
   begin
     if PrimaryFilm <> nil then
     begin
@@ -13290,7 +13302,7 @@ begin
             SourceFilm := Item.FilmObject;
         end;
       end;
-      Step := LocalHuman.PlayerStar.CurrentStepIndex;
+      Step := ScriptHuman.PlayerStar.CurrentStepIndex;
       Film := PrimaryFilm.AddObject(0, Effect);
       PrimaryFilm.SetWeaponEndpoints(Step, Film, SourceFilm, TargetFilm);
       PrimaryFilm.SetWeaponHit(Step, Film, Word(Color), Damage, Destroyed, PlaySound);
@@ -13392,12 +13404,14 @@ begin
     Scale := av[4].GetInt * 0.01
   else
     Scale := 1;
-  if (LocalHuman.PlayerStar <> nil) and LocalHuman.PlayerStar.RecordingTurnFilm then
+  // CHANGE: CLEANUP - The effect goes into the film of the script's human's star, recorded
+  // while that star's day runs.
+  if (ScriptHuman.PlayerStar <> nil) and ScriptHuman.PlayerStar.RecordingTurnFilm then
   begin
     if PrimaryFilm <> nil then
     begin
       Effect := TGAIEffectSE.Create('Effect.' + Name, Point(0, 0));
-      Step := LocalHuman.PlayerStar.CurrentStepIndex;
+      Step := ScriptHuman.PlayerStar.CurrentStepIndex;
       Film := PrimaryFilm.AddObject(0, Effect);
       PrimaryFilm.SetEffectImagePosition(Step, Film, Point(X, Y));
       PrimaryFilm.SetEffectDurationScale(Step, Film, Scale);
@@ -13458,7 +13472,9 @@ var
 begin
   if High(av) < 2 then
     raise Exception.Create('Error.Script FilmSound');
-  if (LocalHuman.PlayerStar <> nil) and LocalHuman.PlayerStar.RecordingTurnFilm and (PrimaryFilm <> nil) then
+  // CHANGE: CLEANUP - The sound goes into the film of the script's human's star, recorded
+  // while that star's day runs.
+  if (ScriptHuman.PlayerStar <> nil) and ScriptHuman.PlayerStar.RecordingTurnFilm and (PrimaryFilm <> nil) then
   begin
     Text := av[1].GetString;
     Obj := TObject(av[2].GetDword);
@@ -13490,7 +13506,7 @@ begin
       if Item <> nil then
         FilmObject := Item.FilmObject;
     end;
-    Step := LocalHuman.PlayerStar.CurrentStepIndex;
+    Step := ScriptHuman.PlayerStar.CurrentStepIndex;
     PrimaryFilm.PlayObjectSound(Step, FilmObject, Text);
   end;
 end;
@@ -13790,15 +13806,15 @@ var
   Index: Integer;
   Planet: TPlanet;
 begin
-  if GetPlayer.Quests <> nil then
+  if ScriptPlayer.Quests <> nil then
   begin
     if High(av) > 0 then
       Planet := TPlanet(av[1].GetDword)
     else
       Planet := nil;
-    for Index := 0 to GetPlayer.Quests.Count - 1 do
+    for Index := 0 to ScriptPlayer.Quests.Count - 1 do
     begin
-      Quest := PQuest(GetPlayer.Quests[Index]);
+      Quest := PQuest(ScriptPlayer.Quests[Index]);
       if ((Planet = nil) or (Quest.Planet = Planet)) and not Quest.Successful then
       begin
         av[0].SetInt(1);
@@ -13814,10 +13830,10 @@ var
   Index: Integer;
 begin
   av[0].SetInt(0);
-  if (LocalHuman.PlayerOldQuests <> nil) and (LocalHuman.PlayerOldQuests.Count > 0) then
-    for Index := 0 to LocalHuman.PlayerOldQuests.Count - 1 do
+  if (ScriptHuman.PlayerOldQuests <> nil) and (ScriptHuman.PlayerOldQuests.Count > 0) then
+    for Index := 0 to ScriptHuman.PlayerOldQuests.Count - 1 do
     begin
-      Quest := PPlayerOldQuest(LocalHuman.PlayerOldQuests[Index]);
+      Quest := PPlayerOldQuest(ScriptHuman.PlayerOldQuests[Index]);
       if (High(av) < 1) or (TQuestType(av[1].GetInt) = Quest.QuestType) then
         if Quest.Successful then
           av[0].SetInt(av[0].GetInt + 1);
@@ -13834,10 +13850,10 @@ begin
     raise Exception.Create('Error.Script QuestsStatusByNom');
   Kind := TQuestType(av[1].GetInt);
   Number := av[2].GetInt;
-  if (LocalHuman.PlayerOldQuests <> nil) and (LocalHuman.PlayerOldQuests.Count > 0) then
-    for Index := 0 to LocalHuman.PlayerOldQuests.Count - 1 do
+  if (ScriptHuman.PlayerOldQuests <> nil) and (ScriptHuman.PlayerOldQuests.Count > 0) then
+    for Index := 0 to ScriptHuman.PlayerOldQuests.Count - 1 do
     begin
-      OldQuest := PPlayerOldQuest(LocalHuman.PlayerOldQuests[Index]);
+      OldQuest := PPlayerOldQuest(ScriptHuman.PlayerOldQuests[Index]);
       if (OldQuest.QuestType = Kind) and (OldQuest.QuestNumber = Number) then
       begin
         if OldQuest.Successful then
@@ -13847,10 +13863,10 @@ begin
         Exit;
       end;
     end;
-  if (GetPlayer.Quests <> nil) and (GetPlayer.Quests.Count > 0) then
-    for Index := 0 to GetPlayer.Quests.Count - 1 do
+  if (ScriptPlayer.Quests <> nil) and (ScriptPlayer.Quests.Count > 0) then
+    for Index := 0 to ScriptPlayer.Quests.Count - 1 do
     begin
-      Quest := PQuest(GetPlayer.Quests[Index]);
+      Quest := PQuest(ScriptPlayer.Quests[Index]);
       if (Quest.QuestType = Kind) and (Quest.QuestNumber = Number) then
       begin
         if Quest.Successful then
@@ -13864,18 +13880,18 @@ begin
 end;
 procedure SF_PlayerPlanetaryBattlesCompleted(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(GetPlayer.PlanetBattles);
+  av[0].SetInt(ScriptPlayer.PlanetBattles);
 end;
 procedure SF_PlayerMayTakeSubCrack(av: array of TVarEC; code: TCodeEC);
 begin
-  if GetPlayer.MayTakeSubCrack then
+  if ScriptPlayer.MayTakeSubCrack then
     av[0].SetInt(1)
   else
     av[0].SetInt(0);
 end;
 procedure SF_SubCrackCost(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(GetPlayer.GetSubCrackCost);
+  av[0].SetInt(ScriptPlayer.GetSubCrackCost);
 end;
 procedure SF_ShipCalcParam(av: array of TVarEC; code: TCodeEC);
 begin
@@ -14070,67 +14086,69 @@ procedure SF_PlayerBridge(av: array of TVarEC; code: TCodeEC);
 var
   Mode: Integer;
 begin
-  av[0].SetInt(GetPlayer.RuinsMode);
+  av[0].SetInt(ScriptPlayer.RuinsMode);
   if High(av) > 0 then
   begin
     Mode := av[1].GetInt;
     if High(av) > 1 then
-      GetPlayer.RuinsStatusText := av[2].GetString
+      ScriptPlayer.RuinsStatusText := av[2].GetString
     else
-      GetPlayer.RuinsStatusText := '';
+      ScriptPlayer.RuinsStatusText := '';
+    // HUMANS: remote dialogue (Phase 5). EnterRuinsMode and CloseRuinsModeScreen request
+    // the ruins screens on this machine, whoever the script's human is.
     if Mode > 0 then
-      GetPlayer.EnterRuinsMode(Mode)
+      ScriptPlayer.EnterRuinsMode(Mode)
     else
-      GetPlayer.CloseRuinsModeScreen;
+      ScriptPlayer.CloseRuinsModeScreen;
   end;
 end;
 procedure SF_PlayerDebt(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(GetPlayer.DebtAmount);
+  av[0].SetInt(ScriptPlayer.DebtAmount);
   if High(av) > 0 then
-    GetPlayer.DebtAmount := av[1].GetInt;
+    ScriptPlayer.DebtAmount := av[1].GetInt;
 end;
 procedure SF_PlayerDebtDate(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(GetPlayer.DebtDueTurn);
+  av[0].SetInt(ScriptPlayer.DebtDueTurn);
   if High(av) > 0 then
-    GetPlayer.DebtDueTurn := av[1].GetInt;
+    ScriptPlayer.DebtDueTurn := av[1].GetInt;
 end;
 procedure SF_PlayerDebtCnt(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(GetPlayer.DebtDefaultCount);
+  av[0].SetInt(ScriptPlayer.DebtDefaultCount);
   if High(av) > 0 then
-    GetPlayer.DebtDefaultCount := av[1].GetInt;
+    ScriptPlayer.DebtDefaultCount := av[1].GetInt;
 end;
 procedure SF_PlayerDeposit(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(GetPlayer.DepositAmount);
+  av[0].SetInt(ScriptPlayer.DepositAmount);
   if High(av) > 0 then
-    GetPlayer.DepositAmount := av[1].GetInt;
+    ScriptPlayer.DepositAmount := av[1].GetInt;
 end;
 procedure SF_PlayerDepositDate(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(GetPlayer.DepositStartTurn);
+  av[0].SetInt(ScriptPlayer.DepositStartTurn);
   if High(av) > 0 then
-    GetPlayer.DepositStartTurn := av[1].GetInt;
+    ScriptPlayer.DepositStartTurn := av[1].GetInt;
 end;
 procedure SF_PlayerDepositDay(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(GetPlayer.DepositDayCount);
+  av[0].SetInt(ScriptPlayer.DepositDayCount);
   if High(av) > 0 then
-    GetPlayer.DepositDayCount := av[1].GetInt;
+    ScriptPlayer.DepositDayCount := av[1].GetInt;
 end;
 procedure SF_PlayerDepositPercent(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(Round(GetPlayer.DepositInterestRate * 100));
+  av[0].SetInt(Round(ScriptPlayer.DepositInterestRate * 100));
   if High(av) > 0 then
-    GetPlayer.DepositInterestRate := av[1].GetInt * 0.01;
+    ScriptPlayer.DepositInterestRate := av[1].GetInt * 0.01;
 end;
 procedure SF_PlayerMedPolicy(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(GetPlayer.MedicalPolicyTicks);
+  av[0].SetInt(ScriptPlayer.MedicalPolicyTicks);
   if High(av) > 0 then
-    GetPlayer.MedicalPolicyTicks := av[1].GetInt;
+    ScriptPlayer.MedicalPolicyTicks := av[1].GetInt;
 end;
 procedure SF_ShipCustomShipInfosCount(av: array of TVarEC; code: TCodeEC);
 var
@@ -15419,65 +15437,72 @@ begin
       Exit;
     Item := TArtefactTranclucator(av[1].GetDword);
   end;
-  if GetPlayer <> nil then
+  if ScriptPlayer <> nil then
   begin
     Ship := TObject(Item.Ship) as TTranclucator;
     av[0].SetDword(PtrUInt(Ship));
-    if GetPlayer.InNormalSpace then
+    if ScriptPlayer.InNormalSpace then
     begin
-      SoundManager.PlaySound('Sound.UseATranc');
+      if ScriptHuman = LocalHuman then
+        SoundManager.PlaySound('Sound.UseATranc');
       Item.Ship := nil;
-      Ship.CurrentStar := GetPlayer.CurrentStar;
-      GetPlayer.CurrentStar.Ships.Add(Ship);
+      Ship.CurrentStar := ScriptPlayer.CurrentStar;
+      ScriptPlayer.CurrentStar.Ships.Add(Ship);
       Angle :=
           SeededRandomIntRange(
                   0,
                   360,
                   Cardinal(Ship.Id)
-                      * (Cardinal(Galaxy.CurrentTurn) * GetPlayer.CurrentStar.GenerationSeed))
+                      * (Cardinal(Galaxy.CurrentTurn) * ScriptPlayer.CurrentStar.GenerationSeed))
               * Pi
               / 180;
-      Ship.Position.X := GetPlayer.Position.X + Sin(Angle) * 100;
-      Ship.Position.Y := GetPlayer.Position.Y - Cos(Angle) * 100;
+      Ship.Position.X := ScriptPlayer.Position.X + Sin(Angle) * 100;
+      Ship.Position.Y := ScriptPlayer.Position.Y - Cos(Angle) * 100;
       Ship.Graphic.SetPosition(Ship.Position);
-      Ship.OwnerShip := GetPlayer;
-      Index := GetPlayer.Artefacts.IndexOf(Item);
+      Ship.OwnerShip := ScriptPlayer;
+      Index := ScriptPlayer.Artefacts.IndexOf(Item);
       if Index >= 0 then
-        GetPlayer.Artefacts.Delete(Index);
-      Index := GetPlayer.Inventory.IndexOf(Item);
+        ScriptPlayer.Artefacts.Delete(Index);
+      Index := ScriptPlayer.Inventory.IndexOf(Item);
       if Index >= 0 then
-        GetPlayer.Inventory.Delete(Index);
+        ScriptPlayer.Inventory.Delete(Index);
       Item.Free;
       if Session.ScriptUseItem = Item then
         Session.ScriptUseItem := nil;
-      GetPlayer.RefreshDerivedStats(True);
+      ScriptPlayer.RefreshDerivedStats(True);
       Ship.NextDay;
-      GetPlayer.AchievementStats.CheckTranclucatorFleetAchievement;
-      Star := GetPlayer.CurrentStar;
-      if GetPlayer.ChameleonActive then
+      // Steam achievements are this machine's.
+      if ScriptPlayer = LocalPlayer then
+        LocalPlayer.AchievementStats.CheckTranclucatorFleetAchievement;
+      Star := ScriptPlayer.CurrentStar;
+      if ScriptPlayer.ChameleonActive then
         for Index := 0 to Star.Ships.Count - 1 do
         begin
           Other := TObject(Star.Ships[Index]);
           if (Other is TKling) and not TShip(Other).HasIndependentScriptFaction then
-            TKling(Other).DetectAttackingPlayer(GetPlayer);
+            TKling(Other).DetectAttackingPlayer(ScriptPlayer);
         end;
     end
+    // HUMANS: remote dialogue (Phase 5). Docked, the ship is deployed through this machine's
+    // ship screen, so only for the local human.
+    else if ScriptHuman <> LocalHuman then
+      Exit
     else if ShipScreen.TryDeployTranclucator(Ship) then
     begin
       Item.Ship := nil;
-      Index := GetPlayer.Artefacts.IndexOf(Item);
+      Index := ScriptPlayer.Artefacts.IndexOf(Item);
       if Index >= 0 then
-        GetPlayer.Artefacts.Delete(Index);
-      Index := GetPlayer.Inventory.IndexOf(Item);
+        ScriptPlayer.Artefacts.Delete(Index);
+      Index := ScriptPlayer.Inventory.IndexOf(Item);
       if Index >= 0 then
-        GetPlayer.Inventory.Delete(Index);
-      for Index := 0 to GetPlayer.StorageEntries.Count - 1 do
+        ScriptPlayer.Inventory.Delete(Index);
+      for Index := 0 to ScriptPlayer.StorageEntries.Count - 1 do
       begin
-        Entry := PStorageEntry(GetPlayer.StorageEntries[Index]);
+        Entry := PStorageEntry(ScriptPlayer.StorageEntries[Index]);
         if Entry.Item = Item then
         begin
-          GetPlayer.StorageEntries.Delete(Index);
-          GetPlayer.RefreshStorageBubbles;
+          ScriptPlayer.StorageEntries.Delete(Index);
+          ScriptPlayer.RefreshStorageBubbles;
           Dispose(Entry);
           Break;
         end;
@@ -15485,7 +15510,7 @@ begin
       Item.Free;
       if Session.ScriptUseItem = Item then
         Session.ScriptUseItem := nil;
-      GetPlayer.RefreshDerivedStats(True);
+      ScriptPlayer.RefreshDerivedStats(True);
       SoundManager.PlaySound('Sound.UseATranc');
       ShowMessageBoxGI(
           ShipScreen,
@@ -15507,7 +15532,7 @@ end;
 procedure SF_OnUseCodeTransmitter(av: array of TVarEC; code: TCodeEC);
 var
   Artefact: TArtefactTransmitter;
-  ShowFeedback: Boolean;
+  ShowFeedback, Local: Boolean;
 begin
   if (Session.ScriptUseItem <> nil) and (Session.ScriptUseItem is TArtefactTransmitter) then
     Artefact := TArtefactTransmitter(Session.ScriptUseItem)
@@ -15525,18 +15550,23 @@ begin
     ShowFeedback := av[2].GetInt <> 0
   else
     ShowFeedback := True;
-  if not (GetPlayer.InNormalSpace or not ShowFeedback) then
+  // The feedback shows on this machine, so only for the local human's use.
+  Local := ScriptHuman = LocalHuman;
+  if not (ScriptPlayer.InNormalSpace or not ShowFeedback) then
   begin
-    SoundManager.PlaySound('Sound.NoMoney');
-    ShowMessageBoxGI(
-        ShipScreen,
-        LocalizedColorText('FormShip.UseOnlyInSpace'),
-        mbgCancel or mbgUnused04
-    );
+    if Local then
+    begin
+      SoundManager.PlaySound('Sound.NoMoney');
+      ShowMessageBoxGI(
+          ShipScreen,
+          LocalizedColorText('FormShip.UseOnlyInSpace'),
+          mbgCancel or mbgUnused04
+      );
+    end;
   end
-  else if GetPlayer.UseDominatorTransmitter(Artefact) then
+  else if ScriptPlayer.UseDominatorTransmitter(Artefact) then
   begin
-    if ShowFeedback then
+    if ShowFeedback and Local then
     begin
       SoundManager.PlaySound('Sound.UseATranc');
       ShowMessageBoxGI(
@@ -15545,13 +15575,13 @@ begin
               LocalizedColorText('FormShip.UseTransmitter'),
               '<color=255,240,100>',
               '<Star>',
-              GetPlayer.CurrentStar.Name
+              ScriptPlayer.CurrentStar.Name
           ),
           mbgCancel or mbgUnused04
       );
     end;
   end
-  else if ShowFeedback then
+  else if ShowFeedback and Local then
   begin
     SoundManager.PlaySound('Sound.NoMoney');
     // The native failure message reads Session.ScriptUseItem even when an explicit artefact was supplied.
@@ -15590,39 +15620,43 @@ begin
       Exit;
     Item := TArtefact(av[1].GetDword);
   end;
-  if GetPlayer <> nil then
+  if ScriptPlayer <> nil then
   begin
-    if not GetPlayer.InNormalSpace then
+    if not ScriptPlayer.InNormalSpace then
     begin
-      SoundManager.PlaySound('Sound.NoMoney');
-      ShowMessageBoxGI(
-          ShipScreen,
-          LocalizedColorText('FormShip.UseOnlyInSpace'),
-          mbgCancel or mbgUnused04
-      );
+      // The feedback shows on this machine, so only for the local human's use.
+      if ScriptHuman = LocalHuman then
+      begin
+        SoundManager.PlaySound('Sound.NoMoney');
+        ShowMessageBoxGI(
+            ShipScreen,
+            LocalizedColorText('FormShip.UseOnlyInSpace'),
+            mbgCancel or mbgUnused04
+        );
+      end;
     end
     else
     begin
-      Index := GetPlayer.Artefacts.IndexOf(Item);
+      Index := ScriptPlayer.Artefacts.IndexOf(Item);
       if Index >= 0 then
-        GetPlayer.Artefacts.Delete(Index);
-      Index := GetPlayer.Inventory.IndexOf(Item);
+        ScriptPlayer.Artefacts.Delete(Index);
+      Index := ScriptPlayer.Inventory.IndexOf(Item);
       if Index >= 0 then
-        GetPlayer.Inventory.Delete(Index);
+        ScriptPlayer.Inventory.Delete(Index);
       Item.Free;
       if Session.ScriptUseItem = Item then
         Session.ScriptUseItem := nil;
-      GetPlayer.RefreshDerivedStats(True);
+      ScriptPlayer.RefreshDerivedStats(True);
       Hole := THole.Create;
       av[0].SetDword(PtrUInt(Hole));
       Hole.InitializeGraphic('');
       THoleSE(Hole.Graphic).SetState(1);
-      Hole.Star1 := GetPlayer.CurrentStar;
-      Angle := ArcTan2(GetPlayer.Position.X, -GetPlayer.Position.Y);
+      Hole.Star1 := ScriptPlayer.CurrentStar;
+      Angle := ArcTan2(ScriptPlayer.Position.X, -ScriptPlayer.Position.Y);
       Distance :=
           Max(
-              GetPlayer.CurrentStar.SafeRadius + 100,
-              Sqrt(PointDistanceSquared(GetPlayer.Position, MakePointF(0, 0))) + 200
+              ScriptPlayer.CurrentStar.SafeRadius + 100,
+              Sqrt(PointDistanceSquared(ScriptPlayer.Position, MakePointF(0, 0))) + 200
           );
       Hole.Position1 := MakePointF(Sin(Angle) * Distance, -Cos(Angle) * Distance);
       Hole.Star2 := nil;
@@ -15631,31 +15665,34 @@ begin
         begin
           Distance :=
               PointDistanceSquared(
-                  GetPlayer.CurrentStar.Position,
+                  ScriptPlayer.CurrentStar.Position,
                   TStar(Galaxy.Stars[Index]).Position
               );
           if (Distance > 400) and (Distance < 2500) then
-            if (Hole.Star2 = nil) or (NextRandomIntRange(0, 100, GetPlayer.RandomState) < 50) then
+            if (Hole.Star2 = nil) or (NextRandomIntRange(0, 100, ScriptPlayer.RandomState) < 50) then
             begin
               Hole.Star2 := TStar(Galaxy.Stars[Index]);
-              if NextRandomIntRange(0, 100, GetPlayer.RandomState) < 20 then
+              if NextRandomIntRange(0, 100, ScriptPlayer.RandomState) < 20 then
                 Break;
             end;
         end;
       if Hole.Star2 = nil then
-        Hole.Star2 := GetPlayer.CurrentStar;
+        Hole.Star2 := ScriptPlayer.CurrentStar;
       Angle := HeadingDegreesToRadians(SeededRandomIntRange(0, 359, Galaxy.RandomState));
       Distance := SeededRandomIntRange(1000, 2000, Galaxy.RandomState);
       Hole.Position2 := MakePointF(Sin(Angle) * Distance, -Cos(Angle) * Distance);
       Hole.CreatedTurn := Galaxy.CurrentTurn;
       Hole.HoleType := 1;
-      StarMapScreen.PendingHoleRefresh := Hole;
+      if ScriptHuman = LocalHuman then
+        StarMapScreen.PendingHoleRefresh := Hole;
       Galaxy.Holes.Add(Hole);
+      // HUMANS: event human id. The event does not say which human used the subportal.
       Event := AddGalaxyEvent('PlayerUsesSubportal');
       Event.AddData(Hole.Id);
       Event.AddData(Hole.CreatedTurn);
       aCalc.WaitForTurnCalculationUI;
-      ShipScreen.CloseClicked(nil);
+      if ScriptHuman = LocalHuman then
+        ShipScreen.CloseClicked(nil);
     end;
   end;
 end;
@@ -15663,28 +15700,33 @@ procedure SF_OnUseCodeMissileDef(av: array of TVarEC; code: TCodeEC);
 var
   I: Integer;
 begin
-  if GetPlayer <> nil then
+  if ScriptPlayer <> nil then
   begin
-    if not GetPlayer.InNormalSpace then
+    if not ScriptPlayer.InNormalSpace then
     begin
-      SoundManager.PlaySound('Sound.NoMoney');
-      ShowMessageBoxGI(
-          ShipScreen,
-          LocalizedColorText('FormShip.UseOnlyInSpace'),
-          mbgCancel or mbgUnused04
-      );
+      // The feedback shows on this machine, so only for the local human's use.
+      if ScriptHuman = LocalHuman then
+      begin
+        SoundManager.PlaySound('Sound.NoMoney');
+        ShowMessageBoxGI(
+            ShipScreen,
+            LocalizedColorText('FormShip.UseOnlyInSpace'),
+            mbgCancel or mbgUnused04
+        );
+      end;
     end
     else
     begin
-      for I := 0 to GetPlayer.CurrentStar.Missiles.Count - 1 do
-        with TMissile(GetPlayer.CurrentStar.Missiles[I]) do
-          if GetPlayer = OwnerShip then
+      for I := 0 to ScriptPlayer.CurrentStar.Missiles.Count - 1 do
+        with TMissile(ScriptPlayer.CurrentStar.Missiles[I]) do
+          if ScriptPlayer = OwnerShip then
             FlightTicks := 10000;
-      ShowMessageBoxGI(
-          ShipScreen,
-          LocalizedColorText('FormShip.UseMissileDef'),
-          mbgCancel or mbgUnused04
-      );
+      if ScriptHuman = LocalHuman then
+        ShowMessageBoxGI(
+            ShipScreen,
+            LocalizedColorText('FormShip.UseMissileDef'),
+            mbgCancel or mbgUnused04
+        );
     end;
   end;
 end;
@@ -16976,11 +17018,15 @@ procedure SF_BlinkingWarning(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) <> 1 then
     raise Exception.Create('Error.Script BlinkingWarning');
+  // CHANGE: CLEANUP - The warning flashes on this machine's screens, so only for the local
+  // human's scripts.
+  if ScriptHuman <> LocalHuman then
+    Exit;
   if av[1].GetString = 'Money' then
   begin
     if CurrentScreenId = screenShip then
       ShipScreen.StartMoneyWarning
-    else if (CurrentScreenId = screenGoodsShop) and GetPlayer.InNormalSpace then
+    else if (CurrentScreenId = screenGoodsShop) and LocalPlayer.InNormalSpace then
       GoodsShopScreen.FlashMoneyWarning
     else if TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)])
         is TMessageLoopGIWithMainPanel then
@@ -16990,7 +17036,7 @@ begin
   end
   else if (av[1].GetString = 'Space') and (CurrentScreenId <> screenShip) then
   begin
-    if (CurrentScreenId = screenGoodsShop) and GetPlayer.InNormalSpace then
+    if (CurrentScreenId = screenGoodsShop) and LocalPlayer.InNormalSpace then
       GoodsShopScreen.FlashCargoWarning
     else if TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)])
         is TMessageLoopGIWithMainPanel then
@@ -17333,7 +17379,7 @@ begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script ShipCustomFaction');
   Ship := TShip(av[1].GetDword);
-  if GetPlayer = Ship then
+  if IsHuman(Ship) then
   begin
     if High(av) > 1 then
       raise Exception.Create('Error.Script ShipCustomFaction Player');
@@ -18027,9 +18073,9 @@ begin
   end;
   if Orbit >= OrbitCount then
     Exit;
-  for I := 0 to GetPlayer.Satellites.Count - 1 do
+  for I := 0 to ScriptPlayer.Satellites.Count - 1 do
   begin
-    Probe := GetPlayer.Satellites[I];
+    Probe := ScriptPlayer.Satellites[I];
     if (Probe.TargetPlanet = Planet) and (Probe.TrajectoryIndex = Orbit) then
     begin
       if av[3].GetInt <> 0 then
@@ -18037,7 +18083,7 @@ begin
         // Compatibility: detach without freeing, moving into cargo, or
         // refreshing the player's property notification. The caller owns it.
         Probe.TargetPlanet := nil;
-        GetPlayer.Satellites.Delete(I);
+        ScriptPlayer.Satellites.Delete(I);
       end;
       av[0].SetDword(PtrUInt(Probe));
       Exit;
@@ -18057,9 +18103,11 @@ begin
   // Same signed-char bound as GetPlanetOrbitProbe (DLL 1000BBB8).
   if Orbit >= ShortInt(Planet.ProbeOrbitCount) then
     Exit;
-  for I := 0 to GetPlayer.Satellites.Count - 1 do
+  // HUMANS: probe orbits. Do humans share a planet's probe orbits? Only the script's
+  // human's probes are checked, as native checks only the player's.
+  for I := 0 to ScriptPlayer.Satellites.Count - 1 do
   begin
-    Existing := GetPlayer.Satellites[I];
+    Existing := ScriptPlayer.Satellites[I];
     if (Existing.TargetPlanet = Planet) and (Existing.TrajectoryIndex = Orbit) then
       UtilityError('Another probe occupies this planet orbit');
   end;
@@ -18067,7 +18115,7 @@ begin
   // orbit numbers, and assumes the caller has already detached the probe.
   Probe.TrajectoryIndex := Orbit;
   Probe.TargetPlanet := Planet;
-  GetPlayer.Satellites.Add(Probe);
+  ScriptPlayer.Satellites.Add(Probe);
 end;
 
 function UtilityLootHidden(Planet: TPlanet; Entry: PPlanetSurfaceLootEntry): Boolean;
@@ -18173,7 +18221,7 @@ begin
     Result := Names[Ship.TypeId];
   case Ship.TypeId of
     1:
-      if Ship <> GetPlayer then
+      if not IsHuman(Ship) then
       begin
         Binding := TScriptShip(Ship.ScriptShip);
         if (Binding <> nil)
@@ -18199,7 +18247,7 @@ begin
         Result := 'Tranclucator';
       end;
     8:
-      if Ship = GetPlayer.RuinsProxy then
+      if IsRuinsProxy(Ship) then
         Result := 'PlayerBridge';
     13: UtilityError('Unspecified custom station type');
   end;
@@ -18207,10 +18255,10 @@ end;
 
 function UtilityInNormalSpace(Ship: TShip): Boolean;
 begin
-  if (Ship = GetPlayer) and (GetPlayer.RuinsMode <> 0) then
+  if IsHuman(Ship) and (TPlayer(Ship).RuinsMode <> 0) then
     Result :=
-        (GetPlayer.RuinsSavedPlanet = nil)
-            and (GetPlayer.RuinsSavedDockedTo = nil)
+        (TPlayer(Ship).RuinsSavedPlanet = nil)
+            and (TPlayer(Ship).RuinsSavedDockedTo = nil)
             and not Ship.InHyperspace
   else
     Result := (Ship.CurrentPlanet = nil) and (Ship.DockedTo = nil) and not Ship.InHyperspace;
@@ -18335,12 +18383,12 @@ var
 begin
   Ship := UtilityShip(av[1]);
   Value := av[2].GetInt;
-  if Ship = GetPlayer then
+  if IsHuman(Ship) then
     case av[3].GetInt of
-      1: GetPlayer.ExperienceByDominators := Value;
-      2: GetPlayer.ExperienceByPirates := Value;
-      3: GetPlayer.ExperienceByNormals := Value;
-      4: GetPlayer.ExperienceByTraderCareer := Value;
+      1: TPlayer(Ship).ExperienceByDominators := Value;
+      2: TPlayer(Ship).ExperienceByPirates := Value;
+      3: TPlayer(Ship).ExperienceByNormals := Value;
+      4: TPlayer(Ship).ExperienceByTraderCareer := Value;
     else
       Ship.TotalExperience := Value;
     end
@@ -18407,7 +18455,7 @@ var
   Text: WideString;
 begin
   av[0].SetString('');
-  if TObject(av[1].GetDword) = GetPlayer then
+  if IsHuman(TObject(av[1].GetDword)) then
     Exit;
   Ship := UtilityShip(av[1]);
   Binding := TScriptShip(Ship.ScriptShip);
@@ -18433,7 +18481,7 @@ var
   Path, Name: WideString;
   I, GroupIndex, OldIndex: Integer;
 begin
-  if TObject(av[1].GetDword) = GetPlayer then
+  if IsHuman(TObject(av[1].GetDword)) then
     Exit;
   Ship := UtilityShip(av[1]);
   Path := av[2].GetString;
@@ -18754,9 +18802,9 @@ var
   Station: TRuins;
   Factor, UnitCost, Product: Single;
 begin
-  for I := 0 to GetPlayer.StorageEntries.Count - 1 do
+  for I := 0 to ScriptPlayer.StorageEntries.Count - 1 do
   begin
-    Entry := GetPlayer.StorageEntries[I];
+    Entry := ScriptPlayer.StorageEntries[I];
     Item := Entry.Item;
     Kind := Ord(Item.ItemType);
     if Kind > 7 then
