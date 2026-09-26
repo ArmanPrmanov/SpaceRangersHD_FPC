@@ -251,7 +251,11 @@ begin
   Result.Player := Player;
   Result.Id := Player.Id;
   if Result <> LocalHuman then
+  begin
     Result.PlayerStar := Player.CurrentStar;
+    // Saved for the local human only, until the per-human save block (Phase 4, item 5).
+    Result.PlayerOldQuests := TList.Create;
+  end;
   Session.Humans.Add(Result);
 end;
 
@@ -636,6 +640,8 @@ destructor THuman.Destroy;
 begin
   if PersistentPlayerMessageLock <> nil then
     ClearBubbles;
+  // As TGalaxy.LoadFromBuffer releases the local human's list.
+  PlayerOldQuests.Free;
   inherited Destroy;
 end;
 
@@ -672,7 +678,8 @@ begin
   Galaxy.RefreshRangerStrengthStats;
   Result := AddHuman(Player);
   Result.PlayerStar := Planet.CurrentStar;
-  Result.PlayerOldQuests := aMyFunction.TObjectList.Create;
+  if Result.PlayerOldQuests = nil then
+    Result.PlayerOldQuests := aMyFunction.TObjectList.Create;
 end;
 
 initialization
