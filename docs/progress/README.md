@@ -11,18 +11,17 @@ has got.
 
 ## Status
 
-- Phase: 0, 1 and 2 done; Phase 3 in progress. The command log, headless
-  replay and checkpoints are in place. Travel, orders, shops, the ship
-  screen, conversations, planets and the government are commands. Stations
-  and the 600 range (text quests, arcade, cheats, UI scripts) are not yet.
-  CI is not used; tests run locally (`tools/test.py`,
-  `tools/unit_tests.py`, `tools/check_layers.py`).
-- Next: finish stations from the draft in `.local/drafts/station/`, then
-  the 600 range, then record a real session for the exit test.
+- Phase: 0-2 done. Phase 3 done except the arcade checkpoint (needs the
+  owner's go-ahead) and the recorded-session exit test. Phase 4 in
+  progress: the foundation, the turn structure, scripts bound to humans,
+  and the classification of `GetPlayer` sites (1,773 -> 118, the rest
+  are `HUMANS:` markers) are done.
+- Next: per-human save block and session flags, PvP, respawn, the day
+  waiting for every human, hot-seat, then the `HUMANS:` decisions.
 - Open issues: chaotic mode is seeded from the clock (Phase 1 entry); a
-  loaded game drifts from the live one (Phase 3 entry); no converted screen
-  has been exercised in the UI yet.
-- Latest entry: [2026-09-25-phase3.md](2026-09-25-phase3.md)
+  loaded game drifts from the live one (Phase 3 entry); no converted
+  screen has been exercised in the UI yet.
+- Latest entry: [2026-09-26-phase4.md](2026-09-26-phase4.md)
 
 ## Session entry format
 
