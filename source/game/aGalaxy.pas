@@ -16071,9 +16071,9 @@ begin
     end;
     if (Self.LiberationRewardsPending) and (Session.Humans.Count > 0) then
     begin
-      // CHANGE: CLEANUP - The rewards go to every ship in the star; the ranger passed only
-      // seeds their texts: the first human's, as the one player's did.
-      ProcessSystemLiberationRewards(Session.Humans[0].Player, Self);
+      // CHANGE: CLEANUP - The rewards go to every ship in the star; the first human's ranger
+      // seeds only their news texts, as the one player's did.
+      ProcessSystemLiberationRewards(Session.Humans[0].Player.Seed, Self);
       Self.LastLiberationRewardsTurn := Cardinal(Galaxy.CurrentTurn);
       Self.LiberationRewardsPending := False;
     end;

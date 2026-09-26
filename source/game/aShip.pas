@@ -16909,7 +16909,7 @@ begin
     end
     else
     begin
-      Result := (Self as TNormalShip).SelectSituationalMessage(False);
+      Result := (Self as TNormalShip).SelectSituationalMessage(False, Player);
       if Result <> '' then
         Exit;
       case Integer(GetRelationLevelToShip(Player)) and $7F of
@@ -16942,7 +16942,7 @@ begin
         if Result <> '' then
           Exit;
       end;
-      Result := (Self as TNormalShip).SelectSituationalMessage(False);
+      Result := (Self as TNormalShip).SelectSituationalMessage(False, Player);
       if Result <> '' then
         Exit;
       case Integer(GetRelationLevelToShip(Player)) and $7F of
