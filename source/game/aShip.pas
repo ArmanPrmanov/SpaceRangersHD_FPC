@@ -362,6 +362,8 @@ type
     function HasPlayerChameleonCharges: Boolean;
     function SelectChameleonVisualType: Byte;
     function IsPlayerChameleonEffectiveAgainstSelf: Boolean;
+    // CHANGE: CLEANUP - Whether Player's chameleon fools this ship, for any human's ranger.
+    function IsChameleonEffectiveAgainstSelf(Player: TShip): Boolean;
     procedure RefreshGraphic;
     procedure CreateNormalGraphic;
     procedure CreateDominatorGraphic;
@@ -3265,18 +3267,23 @@ end;
 
 function TShip.IsPlayerChameleonEffectiveAgainstSelf: Boolean;
 begin
-  if not GetPlayer.ChameleonActive or (GetPlayer = Self) then
+  Result := IsChameleonEffectiveAgainstSelf(GetPlayer);
+end;
+
+function TShip.IsChameleonEffectiveAgainstSelf(Player: TShip): Boolean;
+begin
+  if not Player.ChameleonActive or (Player = Self) then
   begin
     Result := False;
     Exit;
   end;
   Result :=
       (TypeId <> stPirate)
-          and (GetPlayer <> PartnerShip)
+          and (Player <> PartnerShip)
           and not ((ScriptShip <> nil)
               and (TScriptShip(ScriptShip).Script.ScriptFileName = 'Script.PC_fem_rangers')
               and (TScriptShip(ScriptShip).GetGroup.Name = 'GroupFem'));
-  Result := GetPlayer.ScriptItemsAct(satOnChameleonConfusion, Self, nil, Ord(Result)) <> 0;
+  Result := Player.ScriptItemsAct(satOnChameleonConfusion, Self, nil, Ord(Result)) <> 0;
   Result := ScriptItemsAct(satOnChameleonConfusion, nil, nil, Ord(Result)) <> 0;
 end;
 

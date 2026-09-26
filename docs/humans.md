@@ -31,6 +31,7 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
 | `IsHuman(Ship)` | whether a ranger is a human's |
 | `HumanOf(Ship)` | the `THuman` of a human's ranger, or nil |
 | `StarHasHuman(Star)` | whether some human's ranger is in the star |
+| `StarHasHuman(Star, Ship)` | the same, not counting `Ship`, for example a human who is party to a talk others overhear |
 | `FindHuman(Id)` | the human with that id, or nil |
 | `Human.AddOrUpdateBubble(...)` etc. | that human's message bubbles; the `Globals` functions of the old names are the local human's |
 | `JoinHuman(Planet, Name, Preset)` | adds a human landed at a planet |

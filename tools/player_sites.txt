@@ -24,12 +24,12 @@ game/aNormalShip.pas	simulation	137	3	0	0	0
 game/aPirate.pas	simulation	64	0	0	0	0
 game/aPlanet.pas	simulation	75	11	0	0	0
 game/aPlanetActions.pas	simulation	4	2	34	0	0
-game/aPlayer.pas	simulation	2	5	0	0	0
+game/aPlayer.pas	simulation	2	2	0	0	3
 game/aPlayerActions.pas	simulation	10	25	29	0	0
 game/aQuestActions.pas	simulation	3	0	6	0	0
-game/aRanger.pas	simulation	156	29	0	0	0
+game/aRanger.pas	simulation	21	8	0	8	78
 game/aRuins.pas	simulation	32	8	0	0	0
-game/aShip.pas	simulation	436	63	0	0	3
+game/aShip.pas	simulation	433	63	0	0	3
 game/aShopActions.pas	simulation	4	18	8	0	0
 game/aShopStock.pas	simulation	8	33	0	0	0
 game/aStationActions.pas	simulation	4	1	56	0	0
@@ -84,5 +84,5 @@ screens/fTalk.pas	presentation	0	721	0	0	0
 screens/SimEventHandlers.pas	presentation	0	1	0	0	0
 script/aScript.pas	simulation	18	0	0	0	0
 script/aScriptFun.pas	simulation	326	62	0	0	3
-total	simulation	1760	1441	217	20	18
+total	simulation	1622	1417	217	28	99
 total	presentation	0	4415	0	4	1

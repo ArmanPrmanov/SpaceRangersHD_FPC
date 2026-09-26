@@ -263,12 +263,47 @@ uses
   aPlayer,
   aGalaxyEvent,
   GR_Main;
+
+// CHANGE: CLEANUP - The bubble half of Galaxy.AddPlanetNewsWithPlayerBubble, for Human
+// instead of the local human; nobody gets it when Human is nil (docs/humans.md).
+procedure AddNewsBubble(Human: THuman; const Text: WideString);
+begin
+  if (Human <> nil) and (Galaxy.CurrentTurn > 300) then
+    Human.AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
+end;
+
+// CHANGE: CLEANUP - The finished quests of a human's ranger. Nil for a ship that is not a
+// human's, and for a human whose list was never created: humans rebuilt from a save get one
+// only once the per-human save block exists (ROADMAP.md, Phase 4, item 5).
+function OldQuestsOf(Ranger: TObject): TList;
+var
+  Human: THuman;
+begin
+  Human := HumanOf(Ranger);
+  if Human = nil then
+    Result := nil
+  else
+    Result := Human.PlayerOldQuests;
+end;
+
+// CHANGE: CLEANUP - AddOrUpdatePlayerBubble for the human whose ranger this is about,
+// instead of the local human; nobody gets it when Ranger is not a human's.
+procedure AddHumanBubble(Ranger: TObject; const Text: WideString);
+var
+  Human: THuman;
+begin
+  Human := HumanOf(Ranger);
+  if Human <> nil then
+    Human.AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
+end;
+
 destructor TRanger.Destroy;
 var
   I, J, RangerIndex: Integer;
   Planet: TPlanet;
   Quest: PQuest;
   OldQuest: PPlayerOldQuest;
+  OldQuests: TList;
   Star: TStar;
   Ship: TShip;
 begin
@@ -280,15 +315,16 @@ begin
       Quests.Delete(I);
       Dispose(Quest);
     end;
-  if GetPlayer = Self then
+  OldQuests := OldQuestsOf(Self);
+  if OldQuests <> nil then
   begin
-    for I := LocalHuman.PlayerOldQuests.Count - 1 downto 0 do
+    for I := OldQuests.Count - 1 downto 0 do
     begin
-      OldQuest := PPlayerOldQuest(LocalHuman.PlayerOldQuests[I]);
-      LocalHuman.PlayerOldQuests.Delete(I);
+      OldQuest := PPlayerOldQuest(OldQuests[I]);
+      OldQuests.Delete(I);
       Dispose(OldQuest);
     end;
-    LocalHuman.PlayerOldQuests.Clear;
+    OldQuests.Clear;
   end;
   RangerIndex := Galaxy.Rangers.IndexOf(Self);
   for I := 0 to Galaxy.Stars.Count - 1 do
@@ -754,9 +790,10 @@ begin
       PreferredCareer := rcTrader;
     ProcessCareerActivityAndEminentProgress;
     ProcessQuestTimersAndOutcomes;
-    if GetPlayer = Self then
+    // CHANGE: CLEANUP - Every human is left to its commands; only NPCs are flown here.
+    if IsHuman(Self) then
     begin
-      LocalHuman.PlayerEquipmentBrokenThisTurn := False;
+      HumanOf(Self).PlayerEquipmentBrokenThisTurn := False;
       if not ProcessPendingPlayerFollowTargeting then
         Exit;
     end;
@@ -815,7 +852,7 @@ begin
                 and (CountWingmen = 0)
                 and (PartnerShip = nil) then
               BuyProfitableGoods;
-            if GetPlayer <> Self then
+            if not IsHuman(Self) then
               SimulateUnseenProgression;
             TrainSkillsAutomatically;
             OrderTakeoff;
@@ -846,10 +883,11 @@ begin
           TrainSkillsAutomatically;
         end;
         Ord(rstMilitaryBase):
+          // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
           if (Rank < 6) or ((GetPlayer <> nil) and (GetPlayer.Rank >= 7)) then
             TryPromoteRank;
       end;
-      if GetPlayer <> Self then
+      if not IsHuman(Self) then
         SimulateUnseenProgression;
       RepairBrokenEquipmentAtLocation;
       AutoEquipInventory;
@@ -876,7 +914,7 @@ begin
     if not InNormalSpace then
       Exit;
     Stage := 7;
-    if (GetPlayer <> Self) and ((Integer(Seed) + Galaxy.CurrentTurn) mod 53 = 0) then
+    if not IsHuman(Self) and ((Integer(Seed) + Galaxy.CurrentTurn) mod 53 = 0) then
       SimulateUnseenProgression;
     AutoApplyMicroModules;
     BuildReachablePlanetQueue;
@@ -1077,8 +1115,11 @@ function TRanger.ProcessPendingPlayerFollowTargeting: Boolean;
 var
   I: Integer;
   Weapon: TWeapon;
+  Human: THuman;
 begin
-  if LocalHuman.PlayerAutomaticControl then
+  // CHANGE: CLEANUP - The state of Self's human, not the local human's.
+  Human := HumanOf(Self);
+  if Human.PlayerAutomaticControl then
   begin
     Result := True;
     AutoEquipInventory;
@@ -1086,13 +1127,13 @@ begin
   end;
   if (EnemyShip <> nil) and (EnemyShip.CurrentStar <> CurrentStar) then
     EnemyShip := nil;
-  if LocalHuman.PendingPlayerFollowTarget <> nil then
+  if Human.PendingPlayerFollowTarget <> nil then
   begin
-    if LocalHuman.PendingPlayerFollowTarget.InNormalSpace
+    if Human.PendingPlayerFollowTarget.InNormalSpace
         and InNormalSpace
-        and (LocalHuman.PendingPlayerFollowTarget.CurrentStar = CurrentStar) then
+        and (Human.PendingPlayerFollowTarget.CurrentStar = CurrentStar) then
     begin
-      OrderFollowShip(LocalHuman.PendingPlayerFollowTarget, 1, False);
+      OrderFollowShip(Human.PendingPlayerFollowTarget, 1, False);
       for I := 1 to WeaponCount do
       begin
         Weapon := Weapons[I];
@@ -1100,14 +1141,14 @@ begin
             and (not (Byte(Weapon.GetWeaponInfo.ShotType) in [Ord(wstTorpedo)..Ord(wstRocket)])
                 or (Weapon.Ammo > 0))
             and (GetWeaponRange(Weapon) * GetWeaponRange(Weapon)
-                >= PointDistanceSquared(Position, LocalHuman.PendingPlayerFollowTarget.Position)) then
-          Weapon.Target := LocalHuman.PendingPlayerFollowTarget
+                >= PointDistanceSquared(Position, Human.PendingPlayerFollowTarget.Position)) then
+          Weapon.Target := Human.PendingPlayerFollowTarget
         else
           Weapon.Target := nil;
       end;
     end
     else
-      LocalHuman.PendingPlayerFollowTarget := nil;
+      Human.PendingPlayerFollowTarget := nil;
   end;
   Result := False;
 end;
@@ -1297,6 +1338,7 @@ begin
   if DaysSincePlayerSeen
       < 50 * GalaxyDifficultyTuning[Galaxy.DifficultyLevels[7]].QuestTimeAndExperienceFactor then
     Exit;
+  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
   if GetPlayer = nil then
     Exit;
   if not Galaxy.HasUnresolvedDominatorSeries([dsBlazer, dsKeller, dsTerron]) then
@@ -1546,7 +1588,7 @@ var
     end;
   end;
 begin
-  if (GetPlayer <> Self)
+  if not IsHuman(Self)
       and ((Galaxy.EminentCareerShips[Ord(rcTrader)] = Self)
           or (Galaxy.EminentCareerShips[Ord(rcPirate)] = Self)
           or (Galaxy.EminentCareerShips[Ord(rcWarrior)] = Self)) then
@@ -1557,7 +1599,7 @@ begin
   if PendingCareerActivity[0] > 0 then
   begin
     Delta := PendingCareerActivity[0];
-    if GetPlayer = Self then
+    if IsHuman(Self) then
     begin
       Amount := TradeExperience;
       TradeExperience := 0;
@@ -1608,10 +1650,8 @@ begin
                 '<Points>',
                 IntToStr(Amount)
             );
-        if GetPlayer = Self then
-          Galaxy.AddPlanetNewsWithPlayerBubble(38, Text)
-        else
-          Galaxy.AddPlanetNews(38, Text);
+        AddNewsBubble(HumanOf(Self), Text);
+        Galaxy.AddPlanetNews(38, Text);
         EminentProgress[Ord(rcTrader)] := 0;
         HalveAllRangerEminentProgress(rcTrader);
         GainExperience(Amount, 0);
@@ -1665,10 +1705,8 @@ begin
                 '<Points>',
                 IntToStr(Amount)
             );
-        if GetPlayer = Self then
-          Galaxy.AddPlanetNewsWithPlayerBubble(39, Text)
-        else
-          Galaxy.AddPlanetNews(39, Text);
+        AddNewsBubble(HumanOf(Self), Text);
+        Galaxy.AddPlanetNews(39, Text);
         EminentProgress[Ord(rcPirate)] := 0;
         HalveAllRangerEminentProgress(rcPirate);
         RemoveExperience(Amount);
@@ -1722,10 +1760,8 @@ begin
                 '<Points>',
                 IntToStr(Amount)
             );
-        if GetPlayer = Self then
-          Galaxy.AddPlanetNewsWithPlayerBubble(37, Text)
-        else
-          Galaxy.AddPlanetNews(37, Text);
+        AddNewsBubble(HumanOf(Self), Text);
+        Galaxy.AddPlanetNews(37, Text);
         EminentProgress[Ord(rcWarrior)] := 0;
         HalveAllRangerEminentProgress(rcWarrior);
         GainExperience(Amount, 0);
@@ -2313,7 +2349,7 @@ begin
             )
         )
     );
-    if GetPlayer = Self then
+    if IsHuman(Self) then
       AddPirateCareerActivity(4)
     else if NextRandomUnitFloat(RandomState) < 0.2 then
       AddPirateCareerActivity(4);
@@ -2504,7 +2540,7 @@ begin
   Result :=
       (GetHull.Weight * (1 - RemapClamped(Aggression, 0, 100, 0.7, 0.9)) > GetHull.HullPoints)
           or ((EnemyShip <> nil)
-              and ((EnemyShip.OrderTarget = Self) or (GetPlayer = EnemyShip))
+              and ((EnemyShip.OrderTarget = Self) or IsHuman(EnemyShip))
               and AcceptsRansomDemandFrom(EnemyShip));
   if not Result then
   begin
@@ -2544,10 +2580,10 @@ begin
         > HullThreshold + RemapClamped(Aggression, 0, 100, 0, 1) then
       Result := True;
   end;
-  if (GetPlayer = PartnerShip)
+  if IsHuman(PartnerShip)
       and (GetHullIntegrityPercent > 35)
-      and (GetPlayer.CurrentStar = CurrentStar)
-      and GetPlayer.InNormalSpace
+      and (PartnerShip.CurrentStar = CurrentStar)
+      and PartnerShip.InNormalSpace
       and OrderAbsolute then
     Result := False;
   InFear := Result;
@@ -2587,7 +2623,7 @@ begin
           );
       OtherShip := EnemyShip;
       Accepted := OtherShip.BuildTrucePaymentResponse(Self, Text, Amount);
-      if (GetPlayer <> OtherShip) and (GetPlayer.CurrentStar = CurrentStar) then
+      if StarHasHuman(CurrentStar, OtherShip) then
         NotifyTruceOffer(OtherShip, Text, Amount);
       if Accepted and RecomputeFearState then
         TryOfferRansomToPursuer;
@@ -2597,7 +2633,7 @@ function TRanger.AcceptsRansomDemandFrom(Ship: TShip): Boolean;
 var
   LicenseFactor: Single;
 begin
-  if (GetPlayer = Ship) and (GetPlayer.PirateLicenseTicks > 0) then
+  if IsHuman(Ship) and (TPlayer(Ship).PirateLicenseTicks > 0) then
     LicenseFactor := 1.15
   else
     LicenseFactor := 1;
@@ -2614,12 +2650,13 @@ var
   Planet: TPlanet;
   Ship: TShip;
 begin
-  if (GetPlayer = Self) and (Victim.CurrentStanding <> ssCustom) then
+  // CHANGE: CLEANUP - Achievements belong to the human at this machine.
+  if (Self = LocalPlayer) and (Victim.CurrentStanding <> ssCustom) then
   begin
     if Victim is TKling then
     begin
       if (Victim as TKling).KlingType = ktBertor then
-        TrySetAchievementProgress('BERTORSLAYER', GetPlayer.DominatorKillsByType[6]);
+        TrySetAchievementProgress('BERTORSLAYER', TPlayer(Self).DominatorKillsByType[6]);
       case (Victim as TKling).DominatorSeries of
         dsBlazer: TryAddAchievementProgress('REDKILLS', 1);
         dsTerron: TryAddAchievementProgress('GREENKILLS', 1);
@@ -2641,7 +2678,7 @@ begin
     Exit;
   if Victim.HasScriptBindings then
     Exit;
-  if GetPlayer = Self then
+  if IsHuman(Self) then
     LastStar := Galaxy.Stars.Count - 1
   else
     LastStar := Galaxy.Stars.Count div 3;
@@ -2653,7 +2690,7 @@ begin
       Effect := RemapClamped(I, 0, LastStar, 0.5, 0.05) * Severity;
       if (Victim.OwnerId = Byte(oiDominator)) or (Victim.OwnerId = Byte(oiPirate)) then
         Effect := 0.05 * Effect
-      else if GetPlayer <> Self then
+      else if not IsHuman(Self) then
         Effect := 0.1 * Effect;
       if Victim is TRuins then
         Effect := Effect * 3;
@@ -2689,7 +2726,7 @@ begin
     Effect := Effect * 3
   else if Victim.OwnerId <> Byte(oiPirate) then
     Effect := 0.05 * Effect;
-  if GetPlayer <> Self then
+  if not IsHuman(Self) then
     Effect := 0.1 * Effect;
   if (Galaxy.CoalitionDefeatedTurn <> 0) and (CurrentStar.Battle = 0) then
     Effect := 0.2 * Effect;
@@ -2714,7 +2751,7 @@ var
   Planet: TPlanet;
   Ship: TShip;
 begin
-  if GetPlayer = Self then
+  if IsHuman(Self) then
     Activity := 8
   else
     Activity := 1;
@@ -2727,7 +2764,7 @@ begin
         and ((Star.Status.CustomFaction = '') or (Star.Battle <> 0)) then
     begin
       Effect := RemapClamped(I, 0, LastStar, 0.3, 0.05);
-      if GetPlayer <> Self then
+      if not IsHuman(Self) then
         Effect := 0.1 * Effect;
       for J := 0 to Star.Ships.Count - 1 do
       begin
@@ -2782,7 +2819,7 @@ begin
             and (Ranger.PartnerShip <> Self)
             and (Ranger <> EnemyShip)
             and (Ranger.EnemyShip <> Self)
-            and (GetPlayer <> Ranger)
+            and not IsHuman(Ranger)
             and (MaxDistance >= PointDistanceSquared(Position, Ranger.Position))
             and (Ranger.RelationToShip(Self) >= 30)
             and ((NextRandomUnitFloat(RandomState) >= 0.7) or (Rank >= Ranger.Rank))
@@ -2794,7 +2831,7 @@ begin
             Continue;
           if (Ranger.AcceptPartnershipOffer(Self, Text, Amount)
                   or (NextRandomUnitFloat(RandomState) > 0.8))
-              and (GetPlayer.CurrentStar = CurrentStar) then
+              and StarHasHuman(CurrentStar) then
           begin
             NotifyPartnershipOffer(Ship, Text, Amount);
             Break;
@@ -2818,7 +2855,7 @@ var
       Result := False
     else if CanContactShip(PartnerShip) then
       Result := True
-    else if not PartnerShip.NoTalk or (GetPlayer <> PartnerShip) then
+    else if not PartnerShip.NoTalk or not IsHuman(PartnerShip) then
       Result := False
     else
     begin
@@ -2881,8 +2918,9 @@ var
   Warrior: TShip;
   procedure Imprison; // @addr 0x72D6BC @ida "void __cdecl $name(void *ParentFrame);" @note "Caller-popped static link; ranger -4, blocked-turn output -5. Female human pilots have their resulting prison term cleared."
   var
-    I: Integer;
+    I, HumanIndex: Integer;
     Ship: TShip;
+    Player: TPlayer;
     Text: WideString;
   begin
     PrisonTermRemaining :=
@@ -2931,12 +2969,15 @@ var
       );
       ReplaceTextToken(Text, '<Name>', GetName, '<color=255,240,100>');
       ReplaceTextToken(Text, '<FullName>', GetFullName(' '), '<color=255,240,100>');
-      if (GetPlayer.CurrentStar = CurrentStar)
-          and GetPlayer.InNormalSpace
-          and (Galaxy.CoalitionDefeatedTurn = 0) then
-        Galaxy.AddPlanetNewsWithPlayerBubble(40, Text)
-      else
-        Galaxy.AddPlanetNews(40, Text);
+      // CHANGE: CLEANUP - Every human who sees the arrest gets the bubble.
+      if Galaxy.CoalitionDefeatedTurn = 0 then
+        for HumanIndex := 0 to Session.Humans.Count - 1 do
+        begin
+          Player := Session.Humans[HumanIndex].Player;
+          if (Player <> nil) and (Player.CurrentStar = CurrentStar) and Player.InNormalSpace then
+            AddNewsBubble(Session.Humans[HumanIndex], Text);
+        end;
+      Galaxy.AddPlanetNews(40, Text);
     end;
   end;
 begin
@@ -3112,9 +3153,11 @@ begin
       end;
     end;
   end;
-  if GetPlayer = Self then
+  if IsHuman(Self) then
   begin
-    GetPlayer.AchievementStats.CheckHaterAchievement;
+    // CHANGE: CLEANUP - Achievements belong to the human at this machine.
+    if Self = LocalPlayer then
+      TPlayer(Self).AchievementStats.CheckHaterAchievement;
     if Scope = nil then
     begin
       Event := AddGalaxyEvent('GlobalChangeToPlayerReputation');
@@ -3208,6 +3251,8 @@ var
   Asteroid: TAsteroid;
   Distance: Single;
   Missile: TMissile;
+  HumanIndex: Integer;
+  Player: TPlayer;
 begin
   for I := 1 to WeaponCount do
   begin
@@ -3264,7 +3309,7 @@ begin
         and ((RelationToShip(Ship) < 10) or (Ship = EnemyShip) or (Ship.EnemyShip = Self))
         and (Ship.LiberationGroup = nil)
         and (TruceShip <> Ship)
-        and ((GetPlayer <> Ship) or (GetPlayer.TruceShip <> Self)) then
+        and (not IsHuman(Ship) or (Ship.TruceShip <> Self)) then
     begin
       { Native can replace an existing weapon target in this pass. }
       for J := 1 to WeaponCount do
@@ -3331,26 +3376,31 @@ begin
         end;
       end;
     end;
-  if (GetPlayer <> nil)
-      and (GetPlayer.CurrentStar = CurrentStar)
-      and GetPlayer.InNormalSpace
-      and GetPlayer.ChameleonActive
-      and IsPlayerChameleonEffectiveAgainstSelf then
+  // CHANGE: CLEANUP - Free weapons turn on every human here whose chameleon fools this ship.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    for J := 1 to WeaponCount do
+    Player := Session.Humans[HumanIndex].Player;
+    if (Player <> nil)
+        and (Player.CurrentStar = CurrentStar)
+        and Player.InNormalSpace
+        and Player.ChameleonActive
+        and IsChameleonEffectiveAgainstSelf(Player) then
     begin
-      Weapon := Weapons[J];
-      if ((not (Weapon.GetWeaponInfo.ShotType in [wstTorpedo, wstMissile, wstRocket]))
-              or (Weapon.Ammo <> 0))
-          and (Weapon.Target = nil)
-          and IsEquipmentUsable(Weapon) then
-        if PointDistanceSquared(Position, GetPlayer.Position) <= Sqr(GetWeaponRange(Weapon)) then
-        begin
-          Weapon.Target := GetPlayer;
-          Inc(AssignedCount);
-          if WeaponCount = AssignedCount then
-            Exit;
-        end;
+      for J := 1 to WeaponCount do
+      begin
+        Weapon := Weapons[J];
+        if ((not (Weapon.GetWeaponInfo.ShotType in [wstTorpedo, wstMissile, wstRocket]))
+                or (Weapon.Ammo <> 0))
+            and (Weapon.Target = nil)
+            and IsEquipmentUsable(Weapon) then
+          if PointDistanceSquared(Position, Player.Position) <= Sqr(GetWeaponRange(Weapon)) then
+          begin
+            Weapon.Target := Player;
+            Inc(AssignedCount);
+            if WeaponCount = AssignedCount then
+              Exit;
+          end;
+      end;
     end;
   end;
 end;
@@ -3360,6 +3410,8 @@ var
   Ship, PreviousEnemy: TShip;
   Chance, BestChance: Double;
   HasPriorityTarget: Boolean;
+  HumanIndex: Integer;
+  Defended: TShip;
 begin
   if (EnemyShip <> nil) and (EnemyShip.CurrentStar = CurrentStar) then
     Exit;
@@ -3374,17 +3426,24 @@ begin
     EnemyShip := PartnerShip.EnemyShip;
     Exit;
   end;
+  // CHANGE: CLEANUP - A pirate goes for the ship a human here is to defend, first human first.
   if PreferredCareer = rcPirate then
-    if (GetPlayer.QuestTargetDefendShip <> nil)
-        and (GetPlayer.QuestTargetDefendShip.CurrentStar = CurrentStar)
-        and (GetPlayer.QuestTargetDefendShip <> Self)
-        and GetPlayer.QuestTargetDefendShip.InNormalSpace
-        and (GetPlayer.QuestTargetDefendShip <> TruceShip)
-        and (GetPlayer.QuestTargetDefendShip.ScriptShip = nil) then
+    for HumanIndex := 0 to Session.Humans.Count - 1 do
     begin
-      EnemyShip := GetPlayer.QuestTargetDefendShip;
-      AssignWeaponTargetsInStar;
-      Exit;
+      if Session.Humans[HumanIndex].Player = nil then
+        Continue;
+      Defended := Session.Humans[HumanIndex].Player.QuestTargetDefendShip;
+      if (Defended <> nil)
+          and (Defended.CurrentStar = CurrentStar)
+          and (Defended <> Self)
+          and Defended.InNormalSpace
+          and (Defended <> TruceShip)
+          and (Defended.ScriptShip = nil) then
+      begin
+        EnemyShip := Defended;
+        AssignWeaponTargetsInStar;
+        Exit;
+      end;
     end;
   PreviousEnemy := EnemyShip;
   EnemyShip := nil;
@@ -3436,7 +3495,7 @@ begin
       else if (CurrentStar.Battle <> 0) or (RelationToShip(Ship) >= 10) then
         Continue;
       if ((Chance < 1) and not IsTargetStillPursuable(Ship))
-          or ((Ship.TypeId = stRanger) and (Chance < 0.9) and (GetPlayer <> Ship)) then
+          or ((Ship.TypeId = stRanger) and (Chance < 0.9) and not IsHuman(Ship)) then
         Continue;
     end;
     EnemyShip := Ship;
@@ -3509,7 +3568,7 @@ begin
 end;
 procedure TRanger.ReactToExtortionDemand(Ranger: Pointer);
 begin
-  if (GetPlayer = Ranger) or (NextRandomUnitFloat(RandomState) < 0.05) then
+  if IsHuman(TObject(Ranger)) or (NextRandomUnitFloat(RandomState) < 0.05) then
   begin
     ChangeRelationToRanger(Ranger, -15);
     HomePlanet.ChangeRelationToRanger(Ranger, -5);
@@ -3530,7 +3589,7 @@ var
   begin
     AddTraderCareerActivity(4);
     AbductedByPirateClan := False;
-    if GetPlayer = OtherShip then
+    if IsHuman(OtherShip) then
     begin
       LastPlayerExtortionTurn := Galaxy.CurrentTurn;
       Event := AddGalaxyEvent('PlayerExtortsMoney');
@@ -3541,15 +3600,15 @@ var
       Event.AddData(OwnerId);
       Event.AddTextData(GetName);
       Event.AddTextData(TypeNameOverrideKey);
-      if GetPlayer.PirateLicenseTicks > 0 then
+      if TPlayer(OtherShip).PirateLicenseTicks > 0 then
       begin
-        GetPlayer.SetMoney(GetPlayer.Money + Round(DemandedAmount * 0.9));
-        Inc(GetPlayer.PendingPirateLicenseCash, Round(DemandedAmount * 0.1));
-        if GetPlayer.PendingPirateLicenseCash > 100000000 then
-          GetPlayer.PendingPirateLicenseCash := 100000000;
+        TPlayer(OtherShip).SetMoney(TPlayer(OtherShip).Money + Round(DemandedAmount * 0.9));
+        Inc(TPlayer(OtherShip).PendingPirateLicenseCash, Round(DemandedAmount * 0.1));
+        if TPlayer(OtherShip).PendingPirateLicenseCash > 100000000 then
+          TPlayer(OtherShip).PendingPirateLicenseCash := 100000000;
       end
       else
-        GetPlayer.SetMoney(GetPlayer.Money + DemandedAmount);
+        TPlayer(OtherShip).SetMoney(TPlayer(OtherShip).Money + DemandedAmount);
     end
     else
       OtherShip.SetMoney(OtherShip.Money + DemandedAmount);
@@ -3562,17 +3621,19 @@ var
   end;
 begin
   Result := False;
-  if (GetPlayer = OtherShip) and (GetPlayer.PirateLicenseTicks > 0) then
+  if IsHuman(OtherShip) and (TPlayer(OtherShip).PirateLicenseTicks > 0) then
     LicenseFactor := 1.15
   else
     LicenseFactor := 1;
   NextDemandTurn := LastPlayerExtortionTurn + 30;
   if OtherShip is TRanger then
     ReactToExtortionDemand(OtherShip);
-  if ((GetPlayer <> OtherShip) or (LocalHuman.PlayerAutomaticControl <> False))
+  if (not IsHuman(OtherShip) or HumanOf(OtherShip).PlayerAutomaticControl)
       and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
     EnemyShip := OtherShip;
-  if (GetPlayer = Self) and not LocalHuman.PlayerAutomaticControl then
+  // HUMANS: How does an NPC's offer or demand reach a human at another machine: sent to
+  // their client with the day waiting, or answered for them? Until then only the local one sees it.
+  if (GetPlayer = Self) and not HumanOf(Self).PlayerAutomaticControl then
   begin
     if OtherShip.ShowPlayerDialogue(
             tkMoneyDemand,
@@ -3587,15 +3648,15 @@ begin
     begin
       AcceptMoneyDemand;
       Result := True;
-      LocalHuman.PlayerStar.InterruptLongTravel := True;
-      GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, OtherShip, nil, 0);
+      HumanOf(Self).PlayerStar.InterruptLongTravel := True;
+      ScriptItemsAct(satOnShipTalkedWithPlayer, OtherShip, nil, 0);
     end;
   end
   else if OtherShip.TruceShip = Self then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and PlayerExtortionPactActive then
+  else if IsHuman(OtherShip) and PlayerExtortionPactActive then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
+  else if IsHuman(OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
   else if not AcceptsRansomDemandFrom(OtherShip) then
     Response := LookupVisibleTalkText('Talk.Money.' + GetTypeNameKey + 'No', OtherShip)
@@ -3662,7 +3723,7 @@ var
         Break;
     end;
     OtherShip.TruceWithShip(Self);
-    if GetPlayer = OtherShip then
+    if IsHuman(OtherShip) then
     begin
       LastPlayerExtortionTurn := Galaxy.CurrentTurn;
       Event := AddGalaxyEvent('PlayerExtortsGoods');
@@ -3674,7 +3735,7 @@ var
       Event.AddTextData(GetName);
       Event.AddTextData(TypeNameOverrideKey);
     end;
-    if GetPlayer = OtherShip then
+    if IsHuman(OtherShip) then
       PlayerExtortionPactActive := True;
     OtherShip.OrderMove(Position, True);
     if OtherShip is TRanger then
@@ -3686,29 +3747,31 @@ begin
   Result := False;
   if OtherShip is TRanger then
     ReactToExtortionDemand(OtherShip);
-  if ((GetPlayer <> OtherShip) or (LocalHuman.PlayerAutomaticControl <> False))
+  if (not IsHuman(OtherShip) or HumanOf(OtherShip).PlayerAutomaticControl)
       and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
     EnemyShip := OtherShip;
-  if (GetPlayer = Self) and not LocalHuman.PlayerAutomaticControl then
+  // HUMANS: How does an NPC's offer or demand reach a human at another machine: sent to
+  // their client with the day waiting, or answered for them? Until then only the local one sees it.
+  if (GetPlayer = Self) and not HumanOf(Self).PlayerAutomaticControl then
   begin
     if OtherShip.ShowPlayerDialogue(tkGoodsDemand, OtherShip.LookupTalkText('Talk.Goods.Send'), 0)
         <> 0 then
     begin
       AcceptCargoDemand;
       Result := True;
-      LocalHuman.PlayerStar.InterruptLongTravel := True;
-      GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, OtherShip, nil, 0);
+      HumanOf(Self).PlayerStar.InterruptLongTravel := True;
+      ScriptItemsAct(satOnShipTalkedWithPlayer, OtherShip, nil, 0);
     end;
   end
   else
   begin
-    Forced := (GetPlayer = OtherShip) and OtherShip.IsHealthEffectActive(14);
+    Forced := IsHuman(OtherShip) and OtherShip.IsHealthEffectActive(14);
     NextDemandTurn := LastPlayerExtortionTurn + 30;
     if OtherShip.TruceShip = Self then
       Response := LookupVisibleTalkText('Talk.Goods.WeAlreadyHavePact', OtherShip)
-    else if (GetPlayer = OtherShip) and PlayerExtortionPactActive then
+    else if IsHuman(OtherShip) and PlayerExtortionPactActive then
       Response := LookupVisibleTalkText('Talk.Goods.WeAlreadyHavePact', OtherShip)
-    else if (GetPlayer = OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
+    else if IsHuman(OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
       Response := LookupVisibleTalkText('Talk.Goods.WeAlreadyHavePact', OtherShip)
     else if not AcceptsRansomDemandFrom(OtherShip) and not Forced then
       Response := LookupVisibleTalkText('Talk.Goods.' + GetTypeNameKey + 'No', OtherShip)
@@ -3720,7 +3783,7 @@ begin
     begin
       Response := LookupVisibleTalkText('Talk.Goods.' + GetTypeNameKey + 'Ok', OtherShip);
       AcceptCargoDemand;
-      if GetPlayer = OtherShip then
+      if IsHuman(OtherShip) then
         PlayerExtortionPactActive := True;
       Result := True;
     end;
@@ -3739,7 +3802,7 @@ var
     Event: TGalaxyEvent;
   begin
     OtherShip.SetMoney(OtherShip.Money - OfferedAmount);
-    if GetPlayer = Self then
+    if IsHuman(Self) then
     begin
       Event := AddGalaxyEvent('PlayerAcceptsMoneyForTruce');
       Event.AddData(OfferedAmount);
@@ -3749,14 +3812,14 @@ var
       Event.AddData(OtherShip.OwnerId);
       Event.AddTextData(OtherShip.GetName);
       Event.AddTextData(OtherShip.TypeNameOverrideKey);
-      if (GetPlayer.PirateLicenseTicks > 0)
+      if (TPlayer(Self).PirateLicenseTicks > 0)
           and (OtherShip.TypeId <> stPirate)
           and ((OtherShip.TypeId <> stRanger) or (OtherShip.GetDominantCareer <> rcPirate)) then
       begin
         SetMoney(Money + Round(OfferedAmount * 0.9));
-        Inc(GetPlayer.PendingPirateLicenseCash, Round(OfferedAmount * 0.1));
-        if GetPlayer.PendingPirateLicenseCash > 100000000 then
-          GetPlayer.PendingPirateLicenseCash := 100000000;
+        Inc(TPlayer(Self).PendingPirateLicenseCash, Round(OfferedAmount * 0.1));
+        if TPlayer(Self).PendingPirateLicenseCash > 100000000 then
+          TPlayer(Self).PendingPirateLicenseCash := 100000000;
       end
       else
         SetMoney(Money + OfferedAmount);
@@ -3774,7 +3837,9 @@ begin
   NextDemandTurn := LastPlayerExtortionTurn + 30;
   if OtherShip is TRanger then
     (OtherShip as TRanger).AddTraderCareerActivity(1);
-  if (GetPlayer = Self) and not LocalHuman.PlayerAutomaticControl then
+  // HUMANS: How does an NPC's offer or demand reach a human at another machine: sent to
+  // their client with the day waiting, or answered for them? Until then only the local one sees it.
+  if (GetPlayer = Self) and not HumanOf(Self).PlayerAutomaticControl then
   begin
     if Cardinal(ReservedMessageCounter) < 7 then
       Exit;
@@ -3787,15 +3852,15 @@ begin
     begin
       AcceptTrucePayment;
       Result := True;
-      LocalHuman.PlayerStar.InterruptLongTravel := True;
-      GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, OtherShip, nil, 0);
+      HumanOf(Self).PlayerStar.InterruptLongTravel := True;
+      ScriptItemsAct(satOnShipTalkedWithPlayer, OtherShip, nil, 0);
     end;
   end
   else if OtherShip.TruceShip = Self then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and PlayerExtortionPactActive then
+  else if IsHuman(OtherShip) and PlayerExtortionPactActive then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
+  else if IsHuman(OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
   else if RecomputeFearState
       or ((ChanceToWin(OtherShip) < 1) and (GetHullIntegrityPercent < 40))
@@ -3837,7 +3902,9 @@ begin
     else
       (Requester as TRanger).AddPirateCareerActivity(8);
   end;
-  if (GetPlayer = Self) and not LocalHuman.PlayerAutomaticControl then
+  // HUMANS: How does an NPC's offer or demand reach a human at another machine: sent to
+  // their client with the day waiting, or answered for them? Until then only the local one sees it.
+  if (GetPlayer = Self) and not HumanOf(Self).PlayerAutomaticControl then
   begin
     if Requester.ShowPlayerDialogue(
             tkAttack,
@@ -3852,8 +3919,8 @@ begin
     begin
       SetJointAttackTarget(Requester, Target);
       Result := True;
-      LocalHuman.PlayerStar.InterruptLongTravel := True;
-      GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Requester, nil, 0);
+      HumanOf(Self).PlayerStar.InterruptLongTravel := True;
+      ScriptItemsAct(satOnShipTalkedWithPlayer, Requester, nil, 0);
     end;
   end
   else if (PartnerShip = Requester)
@@ -3944,8 +4011,9 @@ begin
     Result := True;
     SetMoney(Money + PaymentAmount);
     OtherShip.SetMoney(OtherShip.Money - PaymentAmount);
-    if GetPlayer = OtherShip then
-      GetPlayer.AchievementStats.CheckMasterAchievement;
+    // CHANGE: CLEANUP - Achievements belong to the human at this machine.
+    if OtherShip = LocalPlayer then
+      LocalPlayer.AchievementStats.CheckMasterAchievement;
   end
   else
     Result := False;
@@ -4514,8 +4582,8 @@ begin
   end;
   if StandingMode = ssmFixed then
     Exit;
-  if (GetPlayer <> nil) and (GetPlayer = PartnerShip) then
-    Owner := GetPlayer.OwnerId
+  if IsHuman(PartnerShip) then
+    Owner := PartnerShip.OwnerId
   else
     Owner := OwnerId;
   if IsInPrison then
@@ -4550,7 +4618,9 @@ begin
         if (Quest.QuestType <> qtPlanetQuest)
             or (HumanScreen <> screenPlanetQuest)
             or not (Quest.ObjectiveTarget is TPlanet)
-            or (GetPlayer.CurrentPlanet <> (Quest.ObjectiveTarget as TPlanet)) then
+            // CHANGE: CLEANUP - The quest screen is the local human's; text quests are single
+            // player only (ROADMAP.md, Phase 6).
+            or (LocalPlayer.CurrentPlanet <> (Quest.ObjectiveTarget as TPlanet)) then
         begin
           PublishQuestStatus(Quest, -1);
           if (Quest.Planet.OwnerId = Byte(oiPirate))
@@ -4580,9 +4650,10 @@ begin
               Quest.Planet.GetRelationLevelTextToShip(Self),
               '<color=255,240,100>'
           );
-          if Quest.QuestType = qtSendLetter then
+          // CHANGE: CLEANUP - Achievements belong to the human at this machine.
+          if (Quest.QuestType = qtSendLetter) and (Self = LocalPlayer) then
             TryAddAchievementProgress('POSTMAN', 1);
-          AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, Text, '');
+          AddHumanBubble(Self, Text);
           CheckQuestFailureAward(Quest, [qtSendLetter, qtKillShip, qtPlanetQuest]);
           ArchiveQuest(I);
         end;
@@ -4643,10 +4714,10 @@ begin
             );
           end;
         end;
-        ReplaceTextToken(Text, '<Player>', GetPlayer.Name, '<color=255,240,100>');
+        ReplaceTextToken(Text, '<Player>', Name, '<color=255,240,100>');
         { Native code still dereferences Planet after the nil-planet text branches. }
         ReplaceTextToken(Text, '<Planet>', Quest.Planet.Name, '<color=255,240,100>');
-        AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, Text, '');
+        AddHumanBubble(Self, Text);
         Quest.Successful := True;
         PublishQuestStatus(Quest, 0);
       end
@@ -4661,11 +4732,15 @@ function TRanger.CountFailedQuests(OwnerId: Byte; QuestTypes: TQuestTypes): Inte
 var
   I: Integer;
   Quest: PPlayerOldQuest;
+  OldQuests: TList;
 begin
   Result := 0;
-  for I := 0 to LocalHuman.PlayerOldQuests.Count - 1 do
+  OldQuests := OldQuestsOf(Self);
+  if OldQuests = nil then
+    Exit;
+  for I := 0 to OldQuests.Count - 1 do
   begin
-    Quest := PPlayerOldQuest(LocalHuman.PlayerOldQuests[I]);
+    Quest := PPlayerOldQuest(OldQuests[I]);
     if not Quest.Successful
         and not Quest.Declined
         and (Quest.Planet.OwnerId = OwnerId)
@@ -4696,7 +4771,7 @@ var
         if Award <> AwardNotFound then
         begin
           AddAward(Award);
-          if GetPlayer = Self then
+          if IsHuman(Self) then
           begin
             Text :=
                 PickLocalizedTextVariant(
@@ -4704,7 +4779,7 @@ var
                     Seed + Cardinal(Galaxy.CurrentTurn div 10)
                 );
             ReplaceTextToken(Text, '<Reward>', GetAwardInfo(Award).Name, '<color=255,240,100>');
-            AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, Text, '');
+            AddHumanBubble(Self, Text);
           end;
         end;
         Break;
@@ -4729,10 +4804,12 @@ end;
 procedure TRanger.ArchiveQuest(Index: Integer);
 var
   OldQuest: PPlayerOldQuest;
+  OldQuests: TList;
   Quest: PQuest;
 begin
   Quest := PQuest(Quests[Index]);
-  if GetPlayer = Self then
+  OldQuests := OldQuestsOf(Self);
+  if OldQuests <> nil then
   begin
     New(OldQuest);
     OldQuest.QuestType := Quest.QuestType;
@@ -4741,7 +4818,7 @@ begin
     OldQuest.Description := Quest.Description;
     OldQuest.Successful := Quest.Successful;
     OldQuest.Declined := False;
-    LocalHuman.PlayerOldQuests.Add(OldQuest);
+    OldQuests.Add(OldQuest);
   end;
   Quests.Delete(Index);
   Dispose(Quest);
@@ -4825,7 +4902,7 @@ var
                         .QuestTimeAndExperienceFactor)
         );
     GainExperience(Experience, 0);
-    if GetPlayer = Self then
+    if IsHuman(Self) then
     begin
       ResponseText :=
           ResponseText
@@ -4839,7 +4916,7 @@ var
     end
     else
       ResponseText := '';
-    if GetPlayer = Self then
+    if IsHuman(Self) then
     begin
       Event := AddGalaxyEvent('PlayerFinishesQuest');
       Event.AddData(Ord(Quest.QuestType));
@@ -4847,7 +4924,7 @@ var
       Event.AddData(Quest.RewardMoney);
       Event.AddData(Experience);
     end;
-    if (GetPlayer = Self) and (CurrentPlanet <> nil) then
+    if IsHuman(Self) and (CurrentPlanet <> nil) then
     begin
       ReplaceTextToken(
           ResponseText,
@@ -4858,14 +4935,15 @@ var
       ReplaceTextToken(ResponseText, '<Planet>', CurrentPlanet.Name, '<color=255,240,100>');
     end;
     PublishQuestStatus(Quest, 1);
-    if GetPlayer = Self then
+    if IsHuman(Self) then
     begin
       ReplaceTextToken(ResponseText, '<Ranger>', Name, '<color=255,240,100>');
       ReplaceTextToken(ResponseText, '<Money>', IntToStr(Quest.RewardMoney), '<color=255,240,100>');
     end;
-    if Quest.QuestType = qtDefendSystem then
+    // CHANGE: CLEANUP - Achievements belong to the human at this machine.
+    if (Quest.QuestType = qtDefendSystem) and (Self = LocalPlayer) then
       TryAddAchievementProgress('GUARD', 1);
-    if Quest.QuestType = qtSendLetter then
+    if (Quest.QuestType = qtSendLetter) and (Self = LocalPlayer) then
       TryAddAchievementProgress('DELIVERY', 1);
     ArchiveQuest(Index);
     RefreshPlayerQuestTargets;
@@ -5145,7 +5223,7 @@ begin
       if Award <> AwardNotFound then
       begin
         AddAward(Award);
-        if GetPlayer = Self then
+        if IsHuman(Self) then
         begin
           ResponseText :=
               ResponseText + #13#10 + LocalizedColorText('PlanetCongratulations.Quest.AddReward');
@@ -5179,7 +5257,7 @@ begin
               ProgramIndex + CurrentStar.GenerationSeed * (Galaxy.CurrentTurn div 25)
           );
       Inc(ProgramCounts[ProgramIndex], Quantity);
-      if GetPlayer = Self then
+      if IsHuman(Self) then
       begin
         ResponseText :=
             ResponseText + #13#10 + LocalizedColorText('PlanetCongratulations.Quest.AddProgramms');
@@ -5216,9 +5294,9 @@ begin
         Artefacts.Add(RewardItem)
       else
         Inventory.Add(RewardItem);
-      if GetPlayer = Self then
+      if IsHuman(Self) then
       begin
-        GetPlayer.ScriptItemsAct(satOnGovItemReward, RewardItem, nil, 0);
+        ScriptItemsAct(satOnGovItemReward, RewardItem, nil, 0);
         ResponseText :=
             ResponseText
                 + #13#10
@@ -5259,18 +5337,18 @@ begin
         Inc(Experience);
         if Experience > 50 then
           Break;
-      until GetPlayer.NeedsMicroModule(ModuleIndex + 1);
+      until NeedsMicroModule(ModuleIndex + 1);
       ModuleItem := TMicroModule.Create;
       ModuleItem.Init(ModuleIndex);
-      if GetPlayer = Self then
+      if IsHuman(Self) then
       begin
-        GetPlayer.ScriptItemsAct(satOnGovItemReward, ModuleItem, nil, 0);
+        ScriptItemsAct(satOnGovItemReward, ModuleItem, nil, 0);
         Event := AddGalaxyEvent('PlayerReceivesMMAsReward');
         Event.AddData(ModuleItem.Id);
         Event.AddData(ModuleItem.MicroModuleIndex - 1);
       end;
       Inventory.Add(ModuleItem);
-      if GetPlayer = Self then
+      if IsHuman(Self) then
       begin
         if CurrentPlanet.OwnerId = Byte(oiPirate) then
           ResponseText :=
@@ -5387,7 +5465,7 @@ begin
       if Award <> AwardNotFound then
       begin
         AddAward(Award);
-        if GetPlayer = Self then
+        if IsHuman(Self) then
         begin
           Result := Result + #13#10 + LocalizedColorText('PlanetCongratulations.Quest.AddReward');
           ReplaceTextToken(Result, '<Reward>', GetAwardInfo(Award).Name, '<color=255,240,100>');
@@ -5415,7 +5493,7 @@ begin
               ProgramIndex + CurrentStar.GenerationSeed * (Galaxy.CurrentTurn div 25)
           );
       Inc(ProgramCounts[ProgramIndex], Quantity);
-      if GetPlayer = Self then
+      if IsHuman(Self) then
       begin
         Result := Result + #13#10 + LocalizedColorText('PlanetCongratulations.Quest.AddProgramms');
         ReplaceTextToken(Result, '<Programm>', GetProgramName(ProgramIndex), '<color=255,240,100>');
@@ -5438,9 +5516,9 @@ begin
         Artefacts.Add(RewardItem)
       else
         Inventory.Add(RewardItem);
-      if GetPlayer = Self then
+      if IsHuman(Self) then
       begin
-        GetPlayer.ScriptItemsAct(satOnGovItemReward, RewardItem, nil, 0);
+        ScriptItemsAct(satOnGovItemReward, RewardItem, nil, 0);
         Result :=
             Result
                 + #13#10
@@ -5467,18 +5545,18 @@ begin
         Inc(Amount);
         if Amount > 50 then
           Break;
-      until GetPlayer.NeedsMicroModule(ModuleIndex + 1);
+      until NeedsMicroModule(ModuleIndex + 1);
       ModuleItem := TMicroModule.Create;
       ModuleItem.Init(ModuleIndex);
-      if GetPlayer = Self then
+      if IsHuman(Self) then
       begin
-        GetPlayer.ScriptItemsAct(satOnGovItemReward, ModuleItem, nil, 0);
+        ScriptItemsAct(satOnGovItemReward, ModuleItem, nil, 0);
         Event := AddGalaxyEvent('PlayerReceivesMMAsReward');
         Event.AddData(ModuleItem.Id);
         Event.AddData(ModuleItem.MicroModuleIndex - 1);
       end;
       Inventory.Add(ModuleItem);
-      if GetPlayer = Self then
+      if IsHuman(Self) then
       begin
         if CurrentPlanet.OwnerId = Byte(oiPirate) then
           Result :=
@@ -5521,7 +5599,7 @@ begin
   end;
   GainExperience(Amount, 0);
   ExperienceAwarded := Amount;
-  if GetPlayer = Self then
+  if IsHuman(Self) then
   begin
     Result :=
         Result
@@ -5681,7 +5759,7 @@ begin
                                   'Quest.SendLetter.' + IntToStr(QuestNumber) + '.PlayerRace')
                               = 0)
                           or (Pos(
-                                  OwnerToSys(RaceToOwner(GetPlayer.PilotRace)),
+                                  OwnerToSys(RaceToOwner(PilotRace)),
                                   LookupLocalizedTextByKey(
                                       'Quest.SendLetter.' + IntToStr(QuestNumber) + '.PlayerRace'
                                   ))
@@ -5726,7 +5804,7 @@ begin
                               QuestTuning[Ord(Quest.QuestType)].RewardCapitalPercent
                                   * Min(
                                       Galaxy.AverageRangerCapital * 0.01,
-                                      GetPlayer.Wealth * 0.01));
+                                      Wealth * 0.01));
                   Quest.RewardMoney :=
                       Round(
                           Quest.RewardMoney
@@ -5857,7 +5935,7 @@ begin
                                   'Quest.KillShip.' + IntToStr(QuestNumber) + '.PlayerRace')
                               = 0)
                           or (Pos(
-                                  OwnerToSys(RaceToOwner(GetPlayer.PilotRace)),
+                                  OwnerToSys(RaceToOwner(PilotRace)),
                                   LookupLocalizedTextByKey(
                                       'Quest.KillShip.' + IntToStr(QuestNumber) + '.PlayerRace'
                                   ))
@@ -5922,8 +6000,8 @@ begin
                           + Round(
                               RemapClamped(
                                       Target.Wealth,
-                                      GetPlayer.Wealth div 2,
-                                      2 * GetPlayer.Wealth,
+                                      Wealth div 2,
+                                      2 * Wealth,
                                       0,
                                       30)
                                   + PointDistance(
@@ -5943,11 +6021,11 @@ begin
                               (QuestTuning[Ord(Quest.QuestType)].RewardCapitalPercent
                                       * Min(
                                           Galaxy.AverageRangerCapital * 0.01,
-                                          GetPlayer.Wealth * 0.01))
+                                          Wealth * 0.01))
                                   * RemapClamped(
                                       Target.Wealth,
-                                      GetPlayer.Wealth div 2,
-                                      2 * GetPlayer.Wealth,
+                                      Wealth div 2,
+                                      2 * Wealth,
                                       0.8,
                                       1.2));
                   Quest.RewardMoney :=
@@ -6107,7 +6185,7 @@ begin
                                   (QuestTuning[Ord(Quest.QuestType)].RewardCapitalPercent
                                           * Min(
                                               Galaxy.AverageRangerCapital * 0.01,
-                                              GetPlayer.Wealth * 0.01))
+                                              Wealth * 0.01))
                                       * RemapClamped(TextQuest.Difficulty, 50, 100, 1, 2.1));
                       Quest.RewardMoney :=
                           Round(
@@ -6184,7 +6262,7 @@ begin
                               'Quest.DefSystem.' + IntToStr(QuestNumber) + '.PlayerRace')
                           = 0)
                       or (Pos(
-                              OwnerToSys(RaceToOwner(GetPlayer.PilotRace)),
+                              OwnerToSys(RaceToOwner(PilotRace)),
                               LookupLocalizedTextByKey(
                                   'Quest.DefSystem.' + IntToStr(QuestNumber) + '.PlayerRace'
                               ))
@@ -6227,7 +6305,7 @@ begin
                   QuestTuning[Ord(Quest.QuestType)].BaseRewardMoney
                       + Round(
                           QuestTuning[Ord(Quest.QuestType)].RewardCapitalPercent
-                              * Min(Galaxy.AverageRangerCapital * 0.01, GetPlayer.Wealth * 0.01));
+                              * Min(Galaxy.AverageRangerCapital * 0.01, Wealth * 0.01));
               Quest.RewardMoney :=
                   Round(
                       Quest.RewardMoney
@@ -6271,7 +6349,7 @@ begin
             for J := 0 to Star.Ships.Count - 1 do
             begin
               Target := Star.Ships[J];
-              if GetPlayer <> Target then
+              if not IsHuman(Target) then
               begin
                 DefendedShip := Target;
                 if (Target.TypeId in [stRanger..stPirate])
@@ -6319,7 +6397,7 @@ begin
                                       'Quest.DefShip.' + IntToStr(QuestNumber) + '.PlayerRace')
                                   = 0)
                               or (Pos(
-                                      OwnerToSys(RaceToOwner(GetPlayer.PilotRace)),
+                                      OwnerToSys(RaceToOwner(PilotRace)),
                                       LookupLocalizedTextByKey(
                                           'Quest.DefShip.' + IntToStr(QuestNumber) + '.PlayerRace'
                                       ))
@@ -6404,7 +6482,7 @@ begin
                                   QuestTuning[Ord(Quest.QuestType)].RewardCapitalPercent
                                       * Min(
                                           Galaxy.AverageRangerCapital * 0.01,
-                                          GetPlayer.Wealth * 0.01));
+                                          Wealth * 0.01));
                       Quest.RewardMoney :=
                           Round(
                               Quest.RewardMoney
@@ -6595,7 +6673,7 @@ begin
         Text := TextQuest.QuestSuccessGovMessageText.Text
       else
         Text := TextQuest.QuestDescriptionText.Text;
-      ReplaceTextToken(Text, '<Ranger>', GetPlayer.Name, '<color=255,240,100>');
+      ReplaceTextToken(Text, '<Ranger>', Name, '<color=255,240,100>');
       ReplaceTextToken(
           Text,
           '<ToPlanet>',
@@ -6860,7 +6938,7 @@ begin
           if MainPiratePlanet.GetRelationLevelToShip(Self) >= rlExcellent then
             MainPiratePlanet.SetRelationLevelToRanger(Self, rlGood);
         end;
-        if GetPlayer = Ranger then
+        if IsHuman(Ranger) then
         begin
           Text :=
               PickLocalizedTextVariant(
@@ -6881,7 +6959,7 @@ begin
               (Quest.ObjectiveTarget as TStar).Name,
               '<color=255,240,100>'
           );
-          AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, Text, '');
+          AddHumanBubble(Ranger, Text);
         end;
         { The original calls these on Self, even while iterating another ranger's quests. }
         PublishQuestStatus(Quest, -1);
@@ -6908,7 +6986,7 @@ begin
             if MainPiratePlanet.GetRelationLevelToShip(Self) >= rlExcellent then
               MainPiratePlanet.SetRelationLevelToRanger(Self, rlGood);
           end;
-          if GetPlayer = Ranger then
+          if IsHuman(Ranger) then
           begin
             Text :=
                 PickLocalizedTextVariant(
@@ -6924,14 +7002,14 @@ begin
             );
             ReplaceTextToken(Text, '<Ship>', Ship.GetFullName(' '), '<color=255,240,100>');
             ReplaceTextToken(Text, '<Star>', Ship.CurrentStar.Name, '<color=255,240,100>');
-            AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, Text, '');
+            AddHumanBubble(Ranger, Text);
           end;
           PublishQuestStatus(Quest, -1);
           ArchiveQuest(J);
         end
         else
         begin
-          Quest.SpecialCompletionText := GetPlayer.BuildQuestText(Quest^, qtkProtectedShipLost);
+          Quest.SpecialCompletionText := Ranger.BuildQuestText(Quest^, qtkProtectedShipLost);
           Quest.ObjectiveTarget := nil;
           RefreshPlayerQuestTargets;
         end;
@@ -6944,7 +7022,7 @@ begin
           and (Quest.QuestType = qtKillShip)
           and (Ship = Quest.ObjectiveTarget) then
       begin
-        if GetPlayer = Ranger then
+        if IsHuman(Ranger) then
         begin
           Text :=
               PickLocalizedTextVariant(
@@ -6953,7 +7031,7 @@ begin
               );
           ReplaceTextToken(Text, '<Planet>', Quest.Planet.Name, '<color=255,240,100>');
           ReplaceTextToken(Text, '<Ship>', Ship.GetFullName(' '), '<color=255,240,100>');
-          AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, Text, '');
+          AddHumanBubble(Ranger, Text);
         end;
         Quest.Successful := True;
         PublishQuestStatus(Quest, 0);
@@ -6985,12 +7063,13 @@ var
   I: Integer;
   Quest: PQuest;
   OldQuest: PPlayerOldQuest;
+  OldQuests: TList;
   Player: TPlayer;
 begin
   Result := False;
-  if GetPlayer <> Self then
+  if not IsHuman(Self) then
     Exit;
-  Player := GetPlayer;
+  Player := TPlayer(Self);
   for I := 0 to Player.Quests.Count - 1 do
   begin
     Quest := PQuest(Player.Quests[I]);
@@ -7001,9 +7080,10 @@ begin
     if Result then
       Exit;
   end;
-  if LocalHuman.PlayerOldQuests.Count > 0 then
+  OldQuests := OldQuestsOf(Self);
+  if (OldQuests <> nil) and (OldQuests.Count > 0) then
   begin
-    OldQuest := PPlayerOldQuest(LocalHuman.PlayerOldQuests[LocalHuman.PlayerOldQuests.Count - 1]);
+    OldQuest := PPlayerOldQuest(OldQuests[OldQuests.Count - 1]);
     if Pos(Ship.Name, OldQuest.Description) > 0 then
       Result := True;
   end;
@@ -7014,9 +7094,9 @@ var
   Quest: PQuest;
   Player: TPlayer;
 begin
-  if GetPlayer <> Self then
+  if not IsHuman(Self) then
     Exit;
-  Player := GetPlayer;
+  Player := TPlayer(Self);
   Player.QuestTargetKillShip := nil;
   Player.QuestTargetDefendShip := nil;
   Player.QuestTargetDefendStar := nil;

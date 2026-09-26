@@ -4216,6 +4216,7 @@ begin
   CurrentStar.Ships.Delete(CurrentStar.Ships.IndexOf(RuinsProxy));
 end;
 
+// CHANGE: CLEANUP - The open shop is Self's human's, not the local human's.
 procedure TPlayer.EnterRuinsMode(Mode: Integer);
 var
   SelectedMode: Integer;
@@ -4230,7 +4231,7 @@ begin
     Exit;
   if RuinsMode = 0 then
   begin
-    if LocalHuman.TemporaryShopSlots <> nil then
+    if HumanOf(Self).TemporaryShopSlots <> nil then
       RestoreTemporaryShopStock;
     RuinsSavedPlanet := CurrentPlanet;
     RuinsSavedDockedTo := DockedTo;
@@ -4245,13 +4246,14 @@ begin
   RequestScreen(screenRuinsTalk);
 end;
 
+// CHANGE: CLEANUP - The open shop is Self's human's, not the local human's.
 procedure TPlayer.CloseRuinsModeScreen;
 begin
   RuinsStatusText := '';
   if (RuinsSavedPlanet = nil) and (RuinsSavedDockedTo = nil) then
   begin
     RequestedScreenId := screenStarMap;
-    if LocalHuman.TemporaryShopSlots <> nil then
+    if HumanOf(Self).TemporaryShopSlots <> nil then
     begin
       aCalc.WaitForTurnCalculationUI;
       CurrentPlanet := nil;
@@ -4274,10 +4276,11 @@ begin
   RequestScreen(RequestedScreenId);
 end;
 
+// CHANGE: CLEANUP - The open shop is Self's human's, not the local human's.
 procedure TPlayer.ExitRuinsMode;
 begin
   aCalc.WaitForTurnCalculationUI;
-  if LocalHuman.TemporaryShopSlots <> nil then
+  if HumanOf(Self).TemporaryShopSlots <> nil then
   begin
     CurrentPlanet := nil;
     DockedTo := RuinsProxy;
