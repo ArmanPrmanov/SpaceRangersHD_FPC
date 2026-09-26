@@ -10,13 +10,13 @@ arcade/ab_Space.pas	presentation	0	63	0	0	0
 aSaveLoad.pas	presentation	0	79	0	0	0
 CheatCode.pas	presentation	0	221	0	0	0
 game/aArcadeActions.pas	simulation	1	3	7	0	0
-game/aAsteroid.pas	simulation	0	0	0	1	0
+game/aAsteroid.pas	simulation	0	0	0	1	1
 game/aCommands.pas	simulation	0	2	5	0	0
 game/aConst.pas	simulation	8	0	0	0	0
-game/aGalaxy.pas	simulation	29	109	0	72	66
+game/aGalaxy.pas	simulation	29	109	0	72	73
 game/aHold.pas	simulation	4	73	0	0	0
 game/aHoldActions.pas	simulation	21	835	27	0	0
-game/aHuman.pas	simulation	0	13	6	26	11
+game/aHuman.pas	simulation	0	13	6	26	20
 game/aItem.pas	simulation	4	6	0	5	1
 game/aKling.pas	simulation	6	0	0	12	9
 game/aMissile.pas	simulation	0	4	0	0	0
@@ -28,8 +28,8 @@ game/aPlayer.pas	simulation	2	2	0	0	4
 game/aPlayerActions.pas	simulation	10	25	29	0	0
 game/aQuestActions.pas	simulation	3	0	6	0	0
 game/aRanger.pas	simulation	21	8	0	8	78
-game/aRuins.pas	simulation	2	19	0	8	8
-game/aShip.pas	simulation	25	81	0	56	135
+game/aRuins.pas	simulation	2	19	0	8	11
+game/aShip.pas	simulation	25	81	0	56	141
 game/aShopActions.pas	simulation	4	18	8	0	0
 game/aShopStock.pas	simulation	0	3	0	0	0
 game/aStationActions.pas	simulation	4	1	56	0	0
@@ -37,7 +37,7 @@ game/aTalkActions.pas	simulation	7	187	39	0	0
 game/aTranclucator.pas	simulation	0	0	0	0	4
 game/aTransport.pas	simulation	4	0	0	0	18
 game/aUiScriptActions.pas	simulation	2	0	2	0	0
-game/aWarrior.pas	simulation	4	0	0	0	8
+game/aWarrior.pas	simulation	4	0	0	0	9
 game/ThreadCalc.pas	simulation	0	4	0	2	0
 GameBootstrap.pas	presentation	0	1	0	0	0
 Globals.pas	presentation	0	20	0	0	0
@@ -84,5 +84,5 @@ screens/fTalk.pas	presentation	0	722	0	0	0
 screens/SimEventHandlers.pas	presentation	0	1	0	0	0
 script/aScript.pas	simulation	18	0	0	0	0
 script/aScriptFun.pas	simulation	326	62	0	0	3
-total	simulation	522	1517	219	225	422
+total	simulation	522	1517	219	225	449
 total	presentation	0	4421	0	4	1
