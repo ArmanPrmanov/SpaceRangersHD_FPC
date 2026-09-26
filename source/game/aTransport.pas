@@ -231,10 +231,11 @@ begin
     CargoGoods[Good].Count := 0;
     CargoGoods[Good].TotalCost := 0;
   end;
-  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
-  if GetPlayer <> nil then
+  // CHANGE: ENHANCEMENT - NPC catch-up follows the host human (ROADMAP.md, Phase 6, item
+  // "NPC catch-up").
+  if HostHuman <> nil then
   begin
-    Rank := NextRandomIntRange(0, GetPlayer.Rank, RandomState);
+    Rank := NextRandomIntRange(0, HostHuman.Player.Rank, RandomState);
     if Rank > 3 then
       Rank := 3;
     AddRankPoints(NextRandomIntRange(0, CoalitionRankPointThresholds[Rank] div 2, RandomState));
@@ -716,15 +717,17 @@ procedure TTransport.ProcessUnseenProgression;
 var
   Award: Byte;
 begin
-  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
-  if (DaysSincePlayerSeen >= 60) and (GetPlayer <> nil) then
+  // CHANGE: ENHANCEMENT - NPC catch-up follows the host human (ROADMAP.md, Phase 6, item
+  // "NPC catch-up").
+  if (DaysSincePlayerSeen >= 60) and (HostHuman <> nil) then
   begin
     if NextRandomUnitFloat(RandomState) < 0.06 then
       GainExperience(
           SeededRandomIntRange(100, 500, Seed + Cardinal(Galaxy.CurrentTurn div 59) + 789),
           0
       );
-    if (GetPlayer.Rank > Rank) and (NextRandomUnitFloat(RandomState) < 0.03) and (Rank < 4) then
+    if (HostHuman.Player.Rank > Rank) and (NextRandomUnitFloat(RandomState) < 0.03) and (Rank < 4)
+    then
     begin
       AddRankPoints(NextRandomIntRange(10, 20, RandomState));
       TryPromoteRank;

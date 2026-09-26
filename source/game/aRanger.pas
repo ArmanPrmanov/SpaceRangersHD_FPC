@@ -886,8 +886,9 @@ begin
           TrainSkillsAutomatically;
         end;
         Ord(rstMilitaryBase):
-          // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
-          if (Rank < 6) or ((GetPlayer <> nil) and (GetPlayer.Rank >= 7)) then
+          // CHANGE: ENHANCEMENT - NPC catch-up follows the host human (ROADMAP.md, Phase 6,
+          // item "NPC catch-up").
+          if (Rank < 6) or ((HostHuman <> nil) and (HostHuman.Player.Rank >= 7)) then
             TryPromoteRank;
       end;
       if not IsHuman(Self) then
@@ -1341,13 +1342,16 @@ end;
 procedure TRanger.SimulateUnseenProgression;
 var
   Award: Byte;
+  Host: TPlayer;
 begin
   if DaysSincePlayerSeen
       < 50 * GalaxyDifficultyTuning[Galaxy.DifficultyLevels[7]].QuestTimeAndExperienceFactor then
     Exit;
-  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
-  if GetPlayer = nil then
+  // CHANGE: ENHANCEMENT - NPC catch-up follows the host human (ROADMAP.md, Phase 6, item
+  // "NPC catch-up").
+  if HostHuman = nil then
     Exit;
+  Host := HostHuman.Player;
   if not Galaxy.HasUnresolvedDominatorSeries([dsBlazer, dsKeller, dsTerron]) then
     Exit;
   if NextRandomUnitFloat(RandomState) < 0.05 then
@@ -1355,7 +1359,7 @@ begin
   if (Money < 50000)
       and (NextRandomUnitFloat(RandomState) < 0.6)
       and (NextRandomFloatRange(0, 1, RandomState) > WealthInBestRanger) then
-    case Round(GetPlayer.WealthInBestRanger * 100) of
+    case Round(Host.WealthInBestRanger * 100) of
       0..20: SetMoney(Money + Galaxy.ComputeScaledAverageMoney(2));
       21..40: SetMoney(Money + Galaxy.ComputeScaledAverageMoney(2));
       41..60: SetMoney(Money + Galaxy.ComputeScaledAverageMoney(2));
@@ -1377,8 +1381,7 @@ begin
     GenerateExtraWeapon;
   if ((CurrentStar.ShipTypeCounts[stKling] > 0) and (NextRandomUnitFloat(RandomState) < 0.2))
       or ((CurrentStar.ShipTypeCounts[stKling] > 0)
-          and (GetPlayer <> nil)
-          and (GetPlayer.PlaceInRating < Galaxy.Rangers.Count div 3)
+          and (Host.PlaceInRating < Galaxy.Rangers.Count div 3)
           and (NextRandomUnitFloat(RandomState) < 0.5))
       or ((Galaxy.CurrentTurn < 300)
           and ((NextRandomUnitFloat(RandomState) < 0.4)
@@ -1436,14 +1439,13 @@ begin
       AddPirateCareerActivity(1);
   end;
   if (NextRandomUnitFloat(RandomState) < 0.09)
-      or ((GetPlayer <> nil)
-          and (GetPlayer.PlaceInRating < Galaxy.Rangers.Count div 3)
-          and ((GetPlayer.PlaceInRating < PlaceInRating)
+      or ((Host.PlaceInRating < Galaxy.Rangers.Count div 3)
+          and ((Host.PlaceInRating < PlaceInRating)
               or (NextRandomUnitFloat(RandomState) < 0.4))
           and (NextRandomUnitFloat(RandomState) < 0.3))
       or ((Galaxy.CurrentTurn < 300) and (NextRandomUnitFloat(RandomState) < 0.3)) then
   begin
-    case Round(RemapClamped(GetPlayer.PlaceInRating, 1, Galaxy.Rangers.Count, 0, 100)) of
+    case Round(RemapClamped(Host.PlaceInRating, 1, Galaxy.Rangers.Count, 0, 100)) of
       0..20: GainExperience(NextRandomIntRange(100, 1000, RandomState), 0);
       21..40: GainExperience(NextRandomIntRange(100, 500, RandomState), 0);
       41..60: GainExperience(NextRandomIntRange(100, 500, RandomState), 0);
@@ -1454,7 +1456,7 @@ begin
       GainExperience(NextRandomIntRange(100, 500, RandomState), 0);
   end;
   if (Rank < 5)
-      and (GetPlayer.Rank > Byte(Rank + 1))
+      and (Host.Rank > Byte(Rank + 1))
       and (NextRandomUnitFloat(RandomState) < 0.05) then
   begin
     AddRankPoints(NextRandomIntRange(2, 20, RandomState));
@@ -1465,13 +1467,13 @@ begin
   end;
   if CurrentPlanet <> nil then
   begin
-    if ((GetPlayer.AwardIds <> nil)
-            and ((AwardIds = nil) or (AwardIds.Count < Min(5, GetPlayer.AwardIds.Count)))
+    if ((Host.AwardIds <> nil)
+            and ((AwardIds = nil) or (AwardIds.Count < Min(5, Host.AwardIds.Count)))
             and (NextRandomUnitFloat(RandomState) < 0.1))
-        or ((GetPlayer.AwardIds <> nil)
-            and ((AwardIds = nil) or (GetPlayer.AwardIds.Count + 5 > AwardIds.Count))
+        or ((Host.AwardIds <> nil)
+            and ((AwardIds = nil) or (Host.AwardIds.Count + 5 > AwardIds.Count))
             and (NextRandomUnitFloat(RandomState) < 0.004))
-        or ((GetPlayer.AwardIds = nil)
+        or ((Host.AwardIds = nil)
             and ((AwardIds = nil) or (AwardIds.Count < 4))
             and (NextRandomUnitFloat(RandomState) < 0.006))
         or (((AwardIds = nil) or (DominatorKillCount div 10 > AwardIds.Count))
@@ -1508,7 +1510,7 @@ begin
     if (Galaxy.TechLevel > 3)
         and (NextRandomUnitFloat(RandomState) < 0.1)
         and ((Galaxy.TechLevel > 5) or (NextRandomUnitFloat(RandomState) < 0.2))
-        and (((GetPlayer.StrengthInBestRanger > 0.9) and (StrengthInBestRanger < 0.7))
+        and (((Host.StrengthInBestRanger > 0.9) and (StrengthInBestRanger < 0.7))
             or (StrengthInBestRanger < 0.3)) then
       GenerateExtraWeapon;
   end;

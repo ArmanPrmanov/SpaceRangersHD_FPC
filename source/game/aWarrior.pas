@@ -222,10 +222,11 @@ begin
             + IntToStr(Cardinal(Id) mod 100 + 1)
             + '-';
   end;
-  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
-  if GetPlayer <> nil then
+  // CHANGE: ENHANCEMENT - NPC catch-up follows the host human (ROADMAP.md, Phase 6, item
+  // "NPC catch-up").
+  if HostHuman <> nil then
   begin
-    Rank := NextRandomIntRange(0, Min(5, GetPlayer.Rank + 2), RandomState);
+    Rank := NextRandomIntRange(0, Min(5, HostHuman.Player.Rank + 2), RandomState);
     if Rank > 5 then
       Rank := 5;
     if WarriorType = wtFlagship then
@@ -1035,12 +1036,13 @@ procedure TWarrior.ProcessUnseenProgression;
 var
   Award: Byte;
 begin
-  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
-  if (DaysSincePlayerSeen >= 60) and (GetPlayer <> nil) then
+  // CHANGE: ENHANCEMENT - NPC catch-up follows the host human (ROADMAP.md, Phase 6, item
+  // "NPC catch-up").
+  if (DaysSincePlayerSeen >= 60) and (HostHuman <> nil) then
   begin
     if NextRandomUnitFloat(RandomState) < 0.05 then
       GainExperience(SeededRandomIntRange(100, 500, RandomState), 0);
-    if (GetPlayer.Rank > Rank)
+    if (HostHuman.Player.Rank > Rank)
         and (NextRandomUnitFloat(RandomState) < 0.01)
         and ((Rank < 4) or ((WarriorType = wtFlagship) and (Rank < 6))) then
     begin

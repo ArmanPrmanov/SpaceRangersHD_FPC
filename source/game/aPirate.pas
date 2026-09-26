@@ -241,10 +241,11 @@ begin
   SelectUniqueName(ModShipNameConfig);
   if Length(GetName) = 0 then
     SelectUniqueName(LanguageDataConfig.GetBlock('ShipName'));
-  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
-  if GetPlayer <> nil then
+  // CHANGE: ENHANCEMENT - NPC catch-up follows the host human (ROADMAP.md, Phase 6, item
+  // "NPC catch-up").
+  if HostHuman <> nil then
   begin
-    Rank := NextRandomIntRange(0, GetPlayer.Rank, RandomState);
+    Rank := NextRandomIntRange(0, HostHuman.Player.Rank, RandomState);
     if Rank > 3 then
       Rank := 3;
     AddRankPoints(NextRandomIntRange(0, CoalitionRankPointThresholds[Rank] div 2, RandomState));
@@ -263,7 +264,7 @@ begin
       );
     if OwnerId = Byte(oiPirate) then
     begin
-      PirateRank := NextRandomIntRange(0, GetPlayer.PirateRank, RandomState);
+      PirateRank := NextRandomIntRange(0, HostHuman.Player.PirateRank, RandomState);
       if PirateRank > 3 then
         PirateRank := 3;
       AddPirateRankPoints(
@@ -1102,8 +1103,9 @@ var
   Award: Byte;
   ProgressFactor, StrengthFactor: Double;
 begin
-  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
-  if (DaysSincePlayerSeen >= 60) and (GetPlayer <> nil) then
+  // CHANGE: ENHANCEMENT - NPC catch-up follows the host human (ROADMAP.md, Phase 6, item
+  // "NPC catch-up").
+  if (DaysSincePlayerSeen >= 60) and (HostHuman <> nil) then
     if (OwnerId = Byte(oiPirate)) and (PirateType <> 0) then
     begin
       ProgressFactor := ShortInt(Galaxy.DifficultyLevels[0] + Byte(0)) * 0.2 + 0.6;
@@ -1123,7 +1125,7 @@ begin
         GenerateExtraWeapon;
       if 0.05 * ProgressFactor > NextRandomUnitFloat(RandomState) then
         GainExperience(SeededRandomIntRange(100, 500, RandomState), 0);
-      if (GetPlayer.PirateRank > PirateRank)
+      if (HostHuman.Player.PirateRank > PirateRank)
           and (NextRandomUnitFloat(RandomState) < 0.01)
           and (PirateRank < 4) then
       begin
@@ -2426,6 +2428,7 @@ procedure TPirate.ReviewPartnership;
 var
   Leader: TShip;
   Longest, I: Integer;
+  PartnerHuman: TPlayer;
   function CanNotifyPartner: Boolean; // @addr $514B78 @ida "unsigned __int8 __usercall $name@<al>(void *ParentFrame@<^0>);" @calls "0x514c7f 0x514d07 0x514dba 0x514e2d" @stackpop 0 @note "Nested in the partnership check; caller-popped static link."
   begin
     if (CurrentStar <> PartnerShip.CurrentStar)
@@ -2494,15 +2497,19 @@ begin
       end;
     end
     else if CanNotifyPartner then
-      // HUMANS: A pirate an NPC leads, which scripts can set up, leaves when the one player
-      // has more pirate partners than it may. Whose count decides with several humans: the
-      // leader's when it is a human, and whose for an NPC leader?
-      if GetPlayer.GetMaxDominionShips < GetPlayer.PiratePartners.Count then
+    begin
+      // CHANGE: ENHANCEMENT - The partner cap is the leading pirate's human's when the leader
+      // is human, otherwise the host human's (ROADMAP.md, Phase 6, item 11).
+      if IsHuman(PartnerShip) then
+        PartnerHuman := TPlayer(PartnerShip)
+      else
+        PartnerHuman := HostHuman.Player;
+      if PartnerHuman.GetMaxDominionShips < PartnerHuman.PiratePartners.Count then
       begin
         Longest := PartnershipDaysRemaining;
-        for I := 0 to GetPlayer.PiratePartners.Count - 1 do
-          if TShip(GetPlayer.PiratePartners[I]).PartnershipDaysRemaining > Longest then
-            Longest := TShip(GetPlayer.PiratePartners[I]).PartnershipDaysRemaining;
+        for I := 0 to PartnerHuman.PiratePartners.Count - 1 do
+          if TShip(PartnerHuman.PiratePartners[I]).PartnershipDaysRemaining > Longest then
+            Longest := TShip(PartnerHuman.PiratePartners[I]).PartnershipDaysRemaining;
         if Longest >= PartnershipDaysRemaining then
         begin
           Leader := PartnerShip;
@@ -2513,6 +2520,7 @@ begin
           NotifyPiratePartnerRatingBreak(Leader);
         end;
       end;
+    end;
 end;
 
 procedure TPirate.MoveToRandomPlanetOrbit;
