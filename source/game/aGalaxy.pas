@@ -12910,7 +12910,7 @@ var
   RemainingAmmo: Integer;
   PickupIndex: Integer;
   PickupWeight: Integer;
-  DeathEvent: Pointer;
+  RespawnPlanet: TPlanet;
   FilmText: WideString;
   NearestMissileDistance: Integer;
   MissileDistance: Integer;
@@ -15862,18 +15862,13 @@ begin
         begin
           // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs on the
           // player, and native code also updates that ranger's relations and archives its quests:
-          // which human runs it? And what records a human's death once humans respawn (Phase 4,
-          // item 9)? Native records the game over: the game result and the PlayerDeath event.
+          // which human runs it?
           if GetPlayer <> nil then
-          begin
             GetPlayer.ProcessShipDestructionQuests(Ship);
-            if GetPlayer = Ship then
-            begin
-              SimEvents.RecordPlayerResult(False);
-              DeathEvent := AddGalaxyEvent('PlayerDeath');
-              TGalaxyEvent(DeathEvent).AddTextData('StationDestroyed');
-            end;
-          end;
+          // CHANGE: ENHANCEMENT - Every human's death is recorded; with one human it is the game
+          // over, as native records it (TShip.RecordHumanDeath).
+          if IsHuman(Ship) then
+            Ship.RecordHumanDeath('StationDestroyed');
         end;
         Index := 0;
         if RecordFilm and (Ship.FilmObject = nil) then
@@ -15893,6 +15888,26 @@ begin
       Ship := Self.Ships[Index];
       if Ship.IsHullDestroyed then
       begin
+        // CHANGE: ENHANCEMENT - In multiplayer a destroyed human's ranger respawns instead of
+        // being freed (ROADMAP.md, Phase 4, item 9). The star's day is over, so its film has
+        // shown the destruction. The ranger leaves the film as a ship that lands does, keeping
+        // its graphics, and lands at the nearest planet that takes it (TShip.RespawnHuman).
+        RespawnPlanet := nil;
+        if IsHuman(Ship) and IsMultiplayer then
+          RespawnPlanet := Ship.FindRespawnPlanet;
+        if RespawnPlanet <> nil then
+        begin
+          if RecordFilm then
+          begin
+            if Ship.FilmObject <> nil then
+              CurrentFilm.DetachObject(StepIndex, Ship.FilmObject);
+            if Ship.AuxiliaryFilmObject <> nil then
+              CurrentFilm.DetachObject(StepIndex, Ship.AuxiliaryFilmObject);
+          end;
+          Ship.RespawnHuman(RespawnPlanet);
+          Inc(Index);
+          Continue;
+        end;
         if RecordFilm then
         begin
           EntryCount := Ship.Inventory.Count;
@@ -15933,11 +15948,10 @@ begin
         end;
         if Ship is TRuins then
           StationDestroyed := 1;
-        // HUMANS: What happens to a destroyed human's ranger once humans respawn (Phase 4,
-        // item 9)? Native ends the game here for the one player: the game result, the ranger
-        // released from the screens and the score screen. Another human's ranger is freed like
-        // any ship until then.
-        if GetPlayer = Ship then
+        // The game ends here for the local human: the game result, the ranger released from
+        // the screens and the score screen. That is single player, or a human no planet
+        // takes. Another human's ranger is freed like any ship and leaves Session.Humans.
+        if Ship = LocalPlayer then
         begin
           SimEvents.RecordPlayerResult(False);
           ReleasePlayerShip;

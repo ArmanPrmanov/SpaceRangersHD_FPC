@@ -370,6 +370,12 @@ type
     procedure TransferToStar(Star: TStar);
     function FindCarriedItemById(Id: Cardinal): TItem;
     procedure TryRelocateUnseenShip;
+    // CHANGE: ENHANCEMENT - A human's death and respawn (ROADMAP.md, Phase 4, item 9). The
+    // damage that destroys a human's ranger records the death; TStar.NextDay respawns the
+    // ranger at the end of the star's day in multiplayer, or frees it in single player.
+    procedure RecordHumanDeath(const Cause: WideString);
+    function FindRespawnPlanet: TPlanet;
+    procedure RespawnHuman(Planet: TPlanet);
     procedure SynchronizeDockedLocation;
     function InNormalSpace: Boolean;
     function IsOutsideStarSpace: Boolean;
@@ -3792,6 +3798,189 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - The damage sites record a human's death here. The PlayerDeath event
+// names the human (TGalaxyEvent.HumanId). With one human it is the game over, and the game
+// result is recorded as native does; in multiplayer the human respawns at the end of the
+// star's day (TStar.NextDay, RespawnHuman).
+procedure TShip.RecordHumanDeath(const Cause: WideString);
+var
+  Event: TGalaxyEvent;
+begin
+  if not IsMultiplayer then
+    SimEvents.RecordPlayerResult(False);
+  Event := AddGalaxyEvent('PlayerDeath');
+  Event.AddTextData(Cause);
+  Event.HumanId := Id;
+end;
+
+// CHANGE: ENHANCEMENT - Where a destroyed human's ranger respawns (ROADMAP.md, Phase 6: at the
+// nearest planet). A planet may take it by the rules TryRelocateUnseenShip moves unseen
+// rangers by: a planet of a race or of the pirates, in a coalition star without a battle or
+// a script faction, and, for a human, a planet not hostile to the ranger. The nearest such
+// star wins, the star the ranger is in first; in that star the planet nearest to the ranger,
+// in another the first. When no star passes, any star with such a planet will do. Nil when
+// no planet at all will take the ranger. It draws no random numbers.
+function TShip.FindRespawnPlanet: TPlanet;
+  function PlanetIn(Star: TStar): TPlanet;
+  var
+    I: Integer;
+    Planet: TPlanet;
+    Distance, BestDistance: Single;
+  begin
+    Result := nil;
+    BestDistance := 0;
+    for I := 0 to Star.Planets.Count - 1 do
+    begin
+      Planet := Star.Planets[I];
+      if not (Planet.OwnerId in [Ord(oiMaloc)..Ord(oiGaal), Ord(oiPirate)])
+          or (Planet.GetRelationLevelToShip(Self) <= rlHostile) then
+        Continue;
+      if Star <> CurrentStar then
+        Exit(Planet);
+      Distance := PointDistanceSquared(Position, Planet.GetPosition);
+      if (Result = nil) or (Distance < BestDistance) then
+      begin
+        Result := Planet;
+        BestDistance := Distance;
+      end;
+    end;
+  end;
+  function Search(Strict: Boolean): TPlanet;
+  var
+    I: Integer;
+    Star: TStar;
+    Planet: TPlanet;
+    Distance, BestDistance: Single;
+  begin
+    Result := nil;
+    BestDistance := 0;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+    begin
+      Star := Galaxy.Stars[I];
+      if Strict
+          and ((Star.ControlFaction <> sfCoalition)
+              or (Star.Status.CustomFaction <> '')
+              or (Star.Battle <> 0)) then
+        Continue;
+      if Star = CurrentStar then
+        Distance := -1
+      else
+        Distance := PointDistanceSquared(CurrentStar.Position, Star.Position);
+      if (Result <> nil) and (Distance >= BestDistance) then
+        Continue;
+      Planet := PlanetIn(Star);
+      if Planet <> nil then
+      begin
+        Result := Planet;
+        BestDistance := Distance;
+      end;
+    end;
+  end;
+begin
+  Result := nil;
+  if CurrentStar = nil then
+    Exit;
+  Result := Search(True);
+  if Result = nil then
+    Result := Search(False);
+end;
+
+// CHANGE: ENHANCEMENT - A destroyed human's ranger respawns at Planet (FindRespawnPlanet)
+// instead of being freed (ROADMAP.md, Phase 6). TStar.NextDay calls it at the end of the day
+// of the star where the ranger was destroyed, once the film has shown the destruction. The
+// human loses nothing: the ranger keeps its equipment, cargo, money, quests and partners, and
+// its hull is repaired. The kill has already counted for the killer (hull kills, rank points,
+// reputation), as for any ranger. What the ranger's destruction would have cleared in other
+// ships (TShip.Destroy) is cleared, except their partnership with it and ships docked to it,
+// which go along. A planet in another star is reached through Galaxy.ShipsInTransit at the
+// end of the turn job, as TryRelocateUnseenShip's rangers are; the human's PlayerStar follows.
+procedure TShip.RespawnHuman(Planet: TPlanet);
+var
+  I, J: Integer;
+  Star: TStar;
+  Ship: TShip;
+  SavedAbsoluteOrder: Byte;
+  Human: THuman;
+  Text: WideString;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+    if Session.Humans[I].PendingPlayerFollowTarget = Self then
+      Session.Humans[I].PendingPlayerFollowTarget := nil;
+  for I := 0 to Galaxy.Stars.Count - 1 do
+  begin
+    Star := Galaxy.Stars[I];
+    for J := 0 to Star.Ships.Count - 1 do
+    begin
+      Ship := Star.Ships[J];
+      if Ship = Self then
+        Continue;
+      if Ship.EnemyShip = Self then
+        Ship.EnemyShip := nil;
+      if Ship.TruceShip = Self then
+        Ship.TruceShip := nil;
+      if Ship.OrderTarget = Self then
+      begin
+        SavedAbsoluteOrder := Ship.AbsoluteScriptOrder;
+        Ship.AbsoluteScriptOrder := 0;
+        Ship.OrderNone(False);
+        Ship.AbsoluteScriptOrder := SavedAbsoluteOrder;
+        if Star.RecordingTurnFilm and (Ship.FilmObject <> nil) then
+        begin
+          Ship.FilmAlpha := 255;
+          Ship.FilmAlphaStep := 0;
+        end;
+      end;
+      if Ship.GetHull.InterceptorTarget = Self then
+        Ship.GetHull.InterceptorTarget := nil;
+      if Ship.InterceptorSourceShip = Self then
+        Ship.InterceptorSourceShip := nil;
+    end;
+    for J := 0 to Star.Missiles.Count - 1 do
+      TMissile(Star.Missiles[J]).ClearReferencesTo(Self);
+  end;
+  Star := CurrentStar;
+  Star.ClearShipReferences(Self);
+  Star.HandleObjectLeavingStar(Self);
+  // Orders and targets that point at where it died.
+  SavedAbsoluteOrder := AbsoluteScriptOrder;
+  AbsoluteScriptOrder := 0;
+  OrderNone(False);
+  AbsoluteScriptOrder := SavedAbsoluteOrder;
+  ClearMovementPath;
+  ClearPickupTargets;
+  ClearIncomingInterceptors;
+  EnemyShip := nil;
+  TruceShip := nil;
+  AfterburnerActive := False;
+  DestroyQueued := False;
+  if IsHuman(Self) then
+    TPlayer(Self).QueuedTravelTarget := nil;
+  GetHull.HullPoints := GetHull.Weight;
+  RefreshDerivedStats(True);
+  DockedTo := nil;
+  CurrentPlanet := Planet;
+  Position := Planet.GetPosition;
+  if Planet.CurrentStar <> Star then
+  begin
+    OrderTarget := Planet.CurrentStar;
+    if Galaxy.ShipsInTransit.IndexOf(Self) < 0 then
+      Galaxy.ShipsInTransit.Add(Self);
+  end;
+  Human := HumanOf(Self);
+  if Human = nil then
+    Exit;
+  // The shop it had open where it died takes its stock back.
+  RestoreTemporaryShopStock(Human);
+  Human.PlayerStar := Planet.CurrentStar;
+  Text := LocalizedColorText('Multiplayer.Respawned');
+  if Text = '' then
+    Text := 'Your ship was destroyed. Rescuers brought it to <Planet> in the <Star> system '
+        + 'and repaired it.';
+  ReplaceTextToken(Text, '<Planet>', Planet.Name, '<color=255,240,100>');
+  ReplaceTextToken(Text, '<Star>', Planet.CurrentStar.Name, '<color=255,240,100>');
+  Human.AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
+end;
+
 procedure TShip.SynchronizeDockedLocation;
 begin
   if DockedTo = nil then
@@ -5021,7 +5210,6 @@ const
 var
   I, RolledDamage, Damage, MaxDamage, MinDamage, Spread, SkillDifference: Integer;
   AdjustedDamage, DamageStep: Single;
-  Event: TGalaxyEvent;
   Flags: TDamageFlagSet;
   ScriptFlags: Integer;
   Film: TEFilmObj;
@@ -5143,14 +5331,10 @@ begin
     if Weapon.GetWeaponInfo.DamageFlags and 1 <> 0 then
       TryAddAchievementProgress('ENERGY', 1);
   end;
-  // HUMANS: What records a human's death once humans respawn (Phase 4, item 9)? Native
-  // records the game over: the PlayerDeath event and the game result.
-  if (GetPlayer = Self) and (GetHull.HullPoints < 1) then
-  begin
-    Event := AddGalaxyEvent('PlayerDeath');
-    Event.AddTextData('KilledByBeamWeapon');
-    SimEvents.RecordPlayerResult(False);
-  end;
+  // CHANGE: ENHANCEMENT - Every human's death is recorded; with one human it is the game
+  // over, as native records it (RecordHumanDeath).
+  if IsHuman(Self) and (GetHull.HullPoints < 1) then
+    RecordHumanDeath('KilledByBeamWeapon');
 end;
 
 function TShip.ApplyMissileHit(
@@ -5162,7 +5346,6 @@ var
   Shot: TMissile;
   RolledDamage, Damage, MaxDamage, MinDamage, Spread, SkillDifference: Integer;
   AdjustedDamage, DamageStep: Single;
-  Event: TGalaxyEvent;
   Flags: TDamageFlagSet;
   ScriptFlags: Integer;
   HitRange: Single;
@@ -5220,14 +5403,10 @@ begin
   // CHANGE: CLEANUP - Achievements belong to the human at this machine.
   if (GetHull.HullPoints < 1) and (Shot.OwnerShip <> nil) and (Shot.OwnerShip = LocalPlayer) then
     TryAddAchievementProgress('ROCKET', 1);
-  // HUMANS: What records a human's death once humans respawn (Phase 4, item 9)? Native
-  // records the game over: the PlayerDeath event and the game result.
-  if (GetPlayer = Self) and (GetHull.HullPoints < 1) then
-  begin
-    SimEvents.RecordPlayerResult(False);
-    Event := AddGalaxyEvent('PlayerDeath');
-    Event.AddTextData('KilledByMissile');
-  end;
+  // CHANGE: ENHANCEMENT - Every human's death is recorded; with one human it is the game
+  // over, as native records it (RecordHumanDeath).
+  if IsHuman(Self) and (GetHull.HullPoints < 1) then
+    RecordHumanDeath('KilledByMissile');
 end;
 
 procedure TShip.FireWeaponAtMissile(Weapon: TWeapon; Target: TObject; RecordFilm: Boolean);
@@ -6051,7 +6230,6 @@ const
   InterceptorDamageFlags = [dkEnergy];
 var
   Damage: Integer;
-  Event: TGalaxyEvent;
   SourceShip: TShip;
 begin
   SourceShip := InterceptorSourceShip;
@@ -6062,14 +6240,10 @@ begin
   if (Self is TKling) and (Ord((Self as TKling).KlingType) = 0) then
     Damage := Max(1, Damage div 2);
   Result := ApplyDamage(SourceShip, Damage, -1, DamageColor, InterceptorDamageFlags);
-  // HUMANS: What records a human's death once humans respawn (Phase 4, item 9)? Native
-  // records the game over: the PlayerDeath event and the game result.
-  if (GetPlayer = Self) and (GetHull.HullPoints < 1) then
-  begin
-    SimEvents.RecordPlayerResult(False);
-    Event := AddGalaxyEvent('PlayerDeath');
-    Event.AddTextData('KilledByInterceptor');
-  end;
+  // CHANGE: ENHANCEMENT - Every human's death is recorded; with one human it is the game
+  // over, as native records it (RecordHumanDeath).
+  if IsHuman(Self) and (GetHull.HullPoints < 1) then
+    RecordHumanDeath('KilledByInterceptor');
 end;
 
 function TShip.ApplyShockStatusDamage(out DamageColor: Cardinal): Integer;
@@ -6084,7 +6258,6 @@ function TShip.ApplyAsteroidImpactDamage(Asteroid: TAsteroid; out DamageColor: C
 var
   Damage: Integer;
   Factor: Single;
-  Event: TGalaxyEvent;
   Companion: TShip;
 begin
   if (ScriptShip <> nil) and not HasScriptStateText then
@@ -6152,14 +6325,10 @@ begin
   if Damage <= 0 then
     DamageColor := 0;
   Result := Damage;
-  // HUMANS: What records a human's death once humans respawn (Phase 4, item 9)? Native
-  // records the game over: the PlayerDeath event and the game result.
-  if (GetPlayer = Self) and (GetHull.HullPoints < 1) then
-  begin
-    SimEvents.RecordPlayerResult(False);
-    Event := AddGalaxyEvent('PlayerDeath');
-    Event.AddTextData('KilledByAsteroid');
-  end;
+  // CHANGE: ENHANCEMENT - Every human's death is recorded; with one human it is the game
+  // over, as native records it (RecordHumanDeath).
+  if IsHuman(Self) and (GetHull.HullPoints < 1) then
+    RecordHumanDeath('KilledByAsteroid');
   // CHANGE: ENHANCEMENT - Record combat events for observer playback.
   if Assigned(ObserverHit) then
     ObserverHit(CurrentStar, Asteroid, Self, nil, Result, DamageColor, 5);
@@ -6178,7 +6347,6 @@ var
   Item: TItem;
   Ship: TShip;
   DistanceSquared: Single;
-  Event: TGalaxyEvent;
   Companion: TShip;
 begin
   Damage := ExtraDamage;
@@ -6267,14 +6435,10 @@ begin
       Companion := CompanionHuman(Self);
       if Companion <> nil then
         NotifyCompanionDeath(Companion);
-      // HUMANS: What records a human's death once humans respawn (Phase 4, item 9)? Native
-      // records the game over: the PlayerDeath event and the game result.
-      if GetPlayer = Self then
-      begin
-        SimEvents.RecordPlayerResult(False);
-        Event := AddGalaxyEvent('PlayerDeath');
-        Event.AddTextData('KilledByExplosion');
-      end;
+      // CHANGE: ENHANCEMENT - Every human's death is recorded; with one human it is the game
+      // over, as native records it (RecordHumanDeath).
+      if IsHuman(Self) then
+        RecordHumanDeath('KilledByExplosion');
     end;
     if (TypeId = stKling) and (SourceShip <> nil) then
       (Self as TKling).DetectAttackingPlayer(SourceShip);
@@ -6288,7 +6452,6 @@ end;
 function TShip.ApplyStarHeatDamage: Integer;
 var
   Damage, DistanceSquared: Single;
-  Event: TGalaxyEvent;
   FuelAdded, I: Integer;
   Companion: TShip;
   HumanIndex: Integer;
@@ -6355,14 +6518,10 @@ begin
       Companion := CompanionHuman(Self);
       if Companion <> nil then
         NotifyCompanionDeath(Companion);
-      // HUMANS: What records a human's death once humans respawn (Phase 4, item 9)? Native
-      // records the game over: the PlayerDeath event and the game result.
-      if GetPlayer = Self then
-      begin
-        SimEvents.RecordPlayerResult(False);
-        Event := AddGalaxyEvent('PlayerDeath');
-        Event.AddTextData('KilledBySunDamage');
-      end;
+      // CHANGE: ENHANCEMENT - Every human's death is recorded; with one human it is the game
+      // over, as native records it (RecordHumanDeath).
+      if IsHuman(Self) then
+        RecordHumanDeath('KilledBySunDamage');
     end;
     if GetFuelTanks <> nil then
     begin

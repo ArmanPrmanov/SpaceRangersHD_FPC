@@ -173,6 +173,11 @@ function StarHasHuman(Star: TStar; Excluded: TObject = nil): Boolean;
 function StarHasHumanInSpace(Star: TStar): Boolean;
 // Whether some human's ranger still has hull points. The day stops when none does.
 function HasLivingHuman: Boolean;
+// Whether the game has more than one human. The multiplayer rules (ROADMAP.md, Phase 6)
+// apply then: a destroyed human respawns (TShip.FindRespawnPlanet), and a script's EndGame
+// ends the game for the script's human only. With one human the game is single player and
+// keeps the original rules. A human who has finished (THuman.Finished) still counts.
+function IsMultiplayer: Boolean;
 // Whether Station is some human's ruins proxy: the station a human's ranger docks at to
 // reach its storage, which is not a station of the galaxy. It asks every TPlayer in
 // Galaxy.Rangers, not Session.Humans, because a joining human creates its proxy before it is
@@ -285,6 +290,11 @@ begin
       Exit(True);
   end;
   Result := False;
+end;
+
+function IsMultiplayer: Boolean;
+begin
+  Result := Session.Humans.Count > 1;
 end;
 
 function IsRuinsProxy(Station: TObject): Boolean;
