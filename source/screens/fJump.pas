@@ -115,7 +115,7 @@ var
 begin
 
   // CHANGE: PERFORMANCE - Skip travel waits/presentation when fast transitions are enabled.
-  DeferScreenPresentation := FastTravelTransitions and not GetPlayer.IsDockedToShip;
+  DeferScreenPresentation := FastTravelTransitions and not LocalPlayer.IsDockedToShip;
   if DeferScreenPresentation then
     PollMs := 1
   else
@@ -124,14 +124,14 @@ begin
   // them under the normal LRU budget instead of forcing disk reads every jump.
   GlobalCache.TrimToBudget(GlobalCache.ResidentByteLimit);
   ReleaseAllTextureSurfaces;
-  if not GetPlayer.IsDockedToShip then
+  if not LocalPlayer.IsDockedToShip then
   begin
     SetCursorActive(True);
     LoadPanel.OnOpen;
-    RunGlobalScriptsForContext(GetPlayer.CurrentStar, 2);
+    RunGlobalScriptsForContext(LocalPlayer.CurrentStar, 2);
     LoadingStarted := False;
     NoPendingLoads := False;
-    if GetPlayer.InHyperspace or GetPlayer.IsDockedToShip then
+    if LocalPlayer.InHyperspace or LocalPlayer.IsDockedToShip then
       TransitionTimer := ScheduleCallbackTimer(PollMs, PollMs, AdvanceTravel)
     else
       AdvanceLoading(nil, 0);
@@ -141,11 +141,11 @@ begin
       LoadPanel.Show;
     Present;
   end
-  else if GetPlayer.IsDockedToShip then
+  else if LocalPlayer.IsDockedToShip then
   begin
     SetCursorActive(False);
     LoadPanel.OnOpen;
-    RunGlobalScriptsForContext(GetPlayer.CurrentStar, 2);
+    RunGlobalScriptsForContext(LocalPlayer.CurrentStar, 2);
     LoadingStarted := False;
     NoPendingLoads := False;
     Progress := 0;
@@ -157,9 +157,9 @@ begin
     end;
     LoadPanel.SetProgress(1);
     LoadPanel.Hide;
-    if GetPlayer.DockedTo.TypeId = Byte(rstMilitaryBase) then
+    if LocalPlayer.DockedTo.TypeId = Byte(rstMilitaryBase) then
       MovieConfig := LanguageDataConfig.GetParamByPathOrMarker('FormRuins.WB.HyperJumpVideo')
-    else if GetPlayer.DockedTo.TypeId = Byte(rstDominion) then
+    else if LocalPlayer.DockedTo.TypeId = Byte(rstDominion) then
       MovieConfig := LanguageDataConfig.GetParamByPathOrMarker('FormRuins.CB.HyperJumpVideo')
     else
     begin
@@ -216,11 +216,11 @@ end;
 
 procedure TfJump.AdvanceTravel(Timer: PCallbackTimerGI; UserData: PtrInt);
 begin
-  if (GetPlayer = nil) or (GetPlayer.GetHull.HullPoints <= 0) then
+  if (LocalPlayer = nil) or (LocalPlayer.GetHull.HullPoints <= 0) then
   begin
-    if GetPlayer <> nil then
+    if LocalPlayer <> nil then
       DismissScoreScreen;
-    while GetPlayer <> nil do
+    while LocalPlayer <> nil do
       SysUtils.Sleep(1);
     RequestedScreenId := screenGameEnd;
     RequestClose(1);
@@ -238,34 +238,34 @@ begin
     QueuePlayerStarTurnCalculation;
     Exit;
   end;
-  if GetPlayer.IsDockedToShip then
+  if LocalPlayer.IsDockedToShip then
   begin
-    if (GetPlayer.DockedTo.Order <> soTeleport)
-        and (((GetPlayer.DockedTo as TRuins).FlyToStar = GetPlayer.DockedTo.CurrentStar)
-            or ((GetPlayer.DockedTo as TRuins).FlyToStar = nil)) then
+    if (LocalPlayer.DockedTo.Order <> soTeleport)
+        and (((LocalPlayer.DockedTo as TRuins).FlyToStar = LocalPlayer.DockedTo.CurrentStar)
+            or ((LocalPlayer.DockedTo as TRuins).FlyToStar = nil)) then
     begin
       QueueGalaxyTurnCalculation;
       AdvanceLoading(nil, 0);
       Exit;
     end;
     HyperspaceStep(False);
-    Galaxy.GenerateSpaceBackground(GetPlayer.CurrentStar.BackgroundImage);
+    Galaxy.GenerateSpaceBackground(LocalPlayer.CurrentStar.BackgroundImage);
     QueueGalaxyTurnCalculation;
     Present;
   end
   else
   begin
-    if not (GetPlayer.Order in [soJump, soJumpHole, soTeleport])
-        or ((GetPlayer.Order = soJumpHole) and (GetPlayer.OrderStateData = -65536)) then
+    if not (LocalPlayer.Order in [soJump, soJumpHole, soTeleport])
+        or ((LocalPlayer.Order = soJumpHole) and (LocalPlayer.OrderStateData = -65536)) then
     begin
       QueueGalaxyTurnCalculation;
-      StarMapScreen.SetMapCenterManually(TruncatePointF(GetPlayer.Position));
+      StarMapScreen.SetMapCenterManually(TruncatePointF(LocalPlayer.Position));
       StarMapScreen.ResumeMode := smrTurnFilm;
       AdvanceLoading(nil, 0);
       Exit;
     end;
     HyperspaceStep(False);
-    Galaxy.GenerateSpaceBackground(GetPlayer.CurrentStar.BackgroundImage);
+    Galaxy.GenerateSpaceBackground(LocalPlayer.CurrentStar.BackgroundImage);
     QueueGalaxyTurnCalculation;
     Present;
   end;
@@ -326,7 +326,7 @@ begin
         CancelCallbackTimer(TransitionTimer);
         TransitionTimer := nil;
       end;
-      if GetPlayer.IsDockedToShip then
+      if LocalPlayer.IsDockedToShip then
       begin
         RuinsTalkScreen.ShowArrivalVideo := True;
         RequestedScreenId := screenRuinsTalk;
@@ -337,7 +337,7 @@ begin
         if RestoreOrdersOnArrival then
         begin
           StarMapScreen.ResumeMode := smrOrders;
-          SpaceViewPosition := GetPlayer.Position;
+          SpaceViewPosition := LocalPlayer.Position;
           RestoreOrdersOnArrival := False;
         end;
       end;

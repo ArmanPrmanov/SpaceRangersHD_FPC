@@ -144,8 +144,8 @@ begin
   (GetByName('PM_Quest') as TGraphButtonGI).SetHitTestDisabled(True);
   (GetByName('PM_EndTurn') as TGraphButtonGI).SetHitTestDisabled(True);
   (GetByName('PM_Logo') as TGraphButtonGI).SetHitTestDisabled(True);
-  if GetPlayer <> nil then
-    GetPlayer.RefreshNewsAtLocation;
+  if LocalPlayer <> nil then
+    LocalPlayer.RefreshNewsAtLocation;
   with GetByName('MainPanel') do
   begin
     KeyDownCallback := MainPanelKeyDown;
@@ -180,16 +180,16 @@ begin
   end;
   JournalSelected := not JournalSelected;
   ToggleJournalNews(nil);
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnEnteringForm, nil, nil, 0);
   aCalc.WaitForTurnCalculationUI;
 end;
 
 procedure TfJournal.OnClose;
 begin
   aCalc.WaitForTurnCalculationUI;
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnLeavingForm, nil, nil, 0);
   InfoPanel.FreeOwnedChildren;
   MainPanel.OnClose;
 end;
@@ -551,10 +551,10 @@ end;
 function TfJournal.HasTelevisionReception: Boolean;
 begin
   Result :=
-      (GetPlayer <> nil)
-          and (GetPlayer.IsDockedToShip
-              or (GetPlayer.IsOnPlanet
-                  and (GetPlayer.CurrentPlanet.OwnerId
+      (LocalPlayer <> nil)
+          and (LocalPlayer.IsDockedToShip
+              or (LocalPlayer.IsOnPlanet
+                  and (LocalPlayer.CurrentPlanet.OwnerId
                       in [Ord(oiMaloc)..Ord(oiGaal), Ord(oiPirate)])));
 end;
 
@@ -577,7 +577,7 @@ begin
           mbgOK or mbgCancel or mbgQuestion)
       = mbgResultOK then
   begin
-    if GetPlayer <> nil then
+    if LocalPlayer <> nil then
       DeleteJournalRecord(Sender.UserValue);
     Position := InfoPanel.VerticalScrollBar.Position;
     RebuildJournalEntries;
@@ -592,7 +592,7 @@ end;
 
 procedure TfJournal.ClearEntriesConfirmed;
 begin
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
   begin
     if JournalSelected then
     begin
@@ -627,18 +627,18 @@ procedure TfJournal.ExportEntriesConfirmed;
 var
   FileName: WideString;
 begin
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
   begin
     if JournalSelected then
     begin
-      if GetPlayer.JournalRecords.Count > 0 then
+      if LocalPlayer.JournalRecords.Count > 0 then
         if ShowMessageBoxGI(
                 Self,
                 LookupLocalizedTextByKey('FormInfo.ExtractRecord'),
                 mbgOK or mbgCancel or mbgQuestion)
             = mbgResultOK then
         begin
-          FileName := GetPlayer.ExportJournal;
+          FileName := LocalPlayer.ExportJournal;
           ShowMessageBoxGI(
               Self,
               ReplaceColoredToken(
@@ -653,14 +653,14 @@ begin
           BreakUiMessage;
         end;
     end
-    else if GetPlayer.NewsEntries.Count > 0 then
+    else if LocalPlayer.NewsEntries.Count > 0 then
       if ShowMessageBoxGI(
               Self,
               LookupLocalizedTextByKey('FormInfo.ExtractNews'),
               mbgOK or mbgCancel or mbgQuestion)
           = mbgResultOK then
       begin
-        FileName := GetPlayer.ExportNews;
+        FileName := LocalPlayer.ExportNews;
         ShowMessageBoxGI(
             Self,
             ReplaceColoredToken(
@@ -686,22 +686,22 @@ end;
 
 procedure TfJournal.SelectMusic;
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     MusicManager.RequestFadeOut
   else
   begin
-    if GetPlayer.IsOnPlanet or GetPlayer.IsDockedToShip then
+    if LocalPlayer.IsOnPlanet or LocalPlayer.IsDockedToShip then
     begin
       if not MusicInPlanetEnabled then
         MusicManager.RequestFadeOut
-      else if GetPlayer.IsOnPlanet then
+      else if LocalPlayer.IsOnPlanet then
       begin
-        if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+        if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
         begin
-          if not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+          if not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
             MusicManager.PlayCategory(
                 'Nation.'
-                    + OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and $7F]
+                    + OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and $7F]
                         .InternalName
                     + 'Pirate'
             )
@@ -710,31 +710,31 @@ begin
         end
         else
           MusicManager
-              .PlayCategory('Nation.' + OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].InternalName);
+              .PlayCategory('Nation.' + OwnerInfo[LocalPlayer.CurrentPlanet.OwnerId].InternalName);
       end
-      else if GetPlayer.IsDockedToShip then
+      else if LocalPlayer.IsDockedToShip then
       begin
         if not MusicInPlanetEnabled then
           MusicManager.RequestFadeOut
-        else if GetPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
+        else if LocalPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
           MusicManager.PlayCategory(
               'Nation.'
-                  + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F]
+                  + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F]
                       .InternalName
                   + 'Pirate'
           )
         else
           MusicManager.PlayCategory(
               'Nation.'
-                  + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F]
+                  + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F]
                       .InternalName
           );
       end;
     end
     else if MusicInSpaceEnabled then
     begin
-      if (GetPlayer <> nil)
-          and (GetPlayer.GetHull.CapitalShip = 1)
+      if (LocalPlayer <> nil)
+          and (LocalPlayer.GetHull.CapitalShip = 1)
           and (RandomIntRange(0, 100) < 20) then
       begin
         StarMapScreen.BattleMusicSelected := True;
@@ -760,12 +760,12 @@ begin
   ClearEntries;
   AddEntrySpacing(10);
   Count := 0;
-  for I := GetPlayer.NewsEntries.Count - 1 downto 0 do
+  for I := LocalPlayer.NewsEntries.Count - 1 downto 0 do
   begin
     Inc(Count);
     if Count > MaxPlayerNews then
       Break;
-    Entry := GetPlayer.NewsEntries[I];
+    Entry := LocalPlayer.NewsEntries[I];
     AddEntryHeading(
         WrapTextInColor(Galaxy.FormatTurnDate(Entry.Turn) + HeadingSuffix, '<color=255,240,100>'),
         WrapTextInColor(Galaxy.FormatTurnDate(Entry.Turn), '<color=255,240,100>')
@@ -794,10 +794,10 @@ begin
   AddEntryText(LocalizedColorText('FormInfo.RecordTitle'), taxCenter, NormalBoldFontName);
   AddEntrySpacing(10);
   Displayed := 0;
-  Count := GetPlayer.JournalRecords.Count;
+  Count := LocalPlayer.JournalRecords.Count;
   for I := Count - 1 downto 0 do
   begin
-    Entry := GetPlayer.JournalRecords[I];
+    Entry := LocalPlayer.JournalRecords[I];
     AddEntryHeading(
         WrapTextInColor(Galaxy.FormatTurnDate(Entry.DateTurn), '<color=255,240,100>'),
         WrapTextInColor(Galaxy.FormatTurnDate(Entry.DateTurn), '<color=255,240,100>')

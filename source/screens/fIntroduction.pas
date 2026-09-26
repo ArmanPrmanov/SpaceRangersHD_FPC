@@ -165,7 +165,7 @@ begin
             LocalizedText('FormIntroduction.Text'),
             '<color=255,240,100>',
             '<Player>',
-            GetPlayer.Name
+            LocalPlayer.Name
         )
   else
     Text :=
@@ -403,11 +403,11 @@ end;
 procedure TfIntroduction.ContinueClicked(Sender: TObjectGI);
 begin
   ReleaseAllTextureSurfaces;
-  if GetPlayer.DockedTo <> nil then
+  if LocalPlayer.DockedTo <> nil then
     RequestedScreenId := screenRuinsTalk
-  else if GetPlayer.CurrentPlanet = nil then
+  else if LocalPlayer.CurrentPlanet = nil then
     RaiseWideMessage('No player location')
-  else if GetPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited) then
+  else if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited) then
     RequestedScreenId := screenPlanetNO
   else
     RequestedScreenId := screenPlanet;

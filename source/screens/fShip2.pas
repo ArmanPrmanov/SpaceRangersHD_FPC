@@ -756,7 +756,7 @@ begin
   if ShipToInspect <> nil then
     OpenShipScreen(ShipToInspect, SavedFlag)
   else
-    OpenShipScreen(GetPlayer, SavedFlag);
+    OpenShipScreen(LocalPlayer, SavedFlag);
   ScriptChangedFlag := FlagD4;
   FlagD4 := SavedFlag;
   MainPanel.OnOpen;
@@ -794,7 +794,7 @@ begin
     else
       SetText(LocalHuman.PlayerHoldShip.GetFullName(#13#10));
     if (LocalHuman.PlayerHoldShip is TTranclucator)
-        and ((LocalHuman.PlayerHoldShip as TTranclucator).OwnerShip = GetPlayer) then
+        and ((LocalHuman.PlayerHoldShip as TTranclucator).OwnerShip = LocalPlayer) then
       LeftButtonDownCallback := ShipNameMouseDown
     else
       LeftButtonDownCallback := nil;
@@ -847,7 +847,7 @@ begin
   end;
   with GetByName('RankAdd') as TImageGI do
   begin
-    if (GetPlayer = LocalHuman.PlayerHoldShip) and (GetPlayer.OwnerId = Byte(oiPirate)) then
+    if (LocalPlayer = LocalHuman.PlayerHoldShip) and (LocalPlayer.OwnerId = Byte(oiPirate)) then
       SetActive(False)
     else if LocalHuman.PlayerHoldShip is TRanger then
     begin
@@ -1032,22 +1032,22 @@ begin
     else
       SetPosition(Classes.Point(DestrPanelRestLeft, LocalPosition.Y));
     SetActive(
-        not RemoteHoldMode and (GetPlayer = LocalHuman.PlayerHoldShip) and (GetPlayer.GetHull.CapitalShip = 1)
+        not RemoteHoldMode and (LocalPlayer = LocalHuman.PlayerHoldShip) and (LocalPlayer.GetHull.CapitalShip = 1)
     );
   end;
   with GetByName('DestrInto') do
     SetActive(
-        (GetPlayer = LocalHuman.PlayerHoldShip)
-            and not GetPlayer.InHyperspace
-            and (GetPlayer.RuinsMode = 0)
+        (LocalPlayer = LocalHuman.PlayerHoldShip)
+            and not LocalPlayer.InHyperspace
+            and (LocalPlayer.RuinsMode = 0)
             and (QueuedArcadeBattles.Count <= 0)
     );
   with GetByName('CustomBridgeInto') as TGraphButtonGI do
     SetActive(
-        (GetPlayer = LocalHuman.PlayerHoldShip)
-            and (GetPlayer.GetHull.CapitalShip > 1)
-            and not GetPlayer.InHyperspace
-            and (GetPlayer.RuinsMode = 0)
+        (LocalPlayer = LocalHuman.PlayerHoldShip)
+            and (LocalPlayer.GetHull.CapitalShip > 1)
+            and not LocalPlayer.InHyperspace
+            and (LocalPlayer.RuinsMode = 0)
             and (QueuedArcadeBattles.Count <= 0)
     );
   if not FlagD4 then
@@ -1151,7 +1151,7 @@ begin
       CancelCallbackTimer(StorageSlideTimer);
       StorageSlideTimer := nil;
     end;
-    if not GetPlayer.HasAccessibleStorageAt(nil) then
+    if not LocalPlayer.HasAccessibleStorageAt(nil) then
       StorageDownClicked(nil);
     with GetByName('SC_Panel') as TPanelGI do
       SetPosition(Classes.Point(0, LocalPosition.Y));
@@ -1219,7 +1219,7 @@ begin
   if ShipToInspect <> nil then
     LeaveShipScreen(ShipToInspect, FlagD4)
   else
-    LeaveShipScreen(GetPlayer, FlagD4);
+    LeaveShipScreen(LocalPlayer, FlagD4);
   BackgroundBuffer.GraphBuf.Clear;
   if HoldScrollTimer <> nil then
   begin
@@ -2607,11 +2607,11 @@ begin
   end;
   if ((Kind = phkEquipment) or (Kind = phkArtefact))
       and (Item as TEquipment).NeedsRepair
-      and ((Item.ItemType <> t_Protoplasm) or (GetPlayer.DockedTo.TypeId <> Byte(rstRangerCenter)))
+      and ((Item.ItemType <> t_Protoplasm) or (LocalPlayer.DockedTo.TypeId <> Byte(rstRangerCenter)))
       and not PreserveSpaceMusic
-      and (GetPlayer.IsDockedToShip
-          or (GetPlayer.IsOnPlanet
-              and not (GetPlayer.CurrentPlanet.OwnerId
+      and (LocalPlayer.IsDockedToShip
+          or (LocalPlayer.IsOnPlanet
+              and not (LocalPlayer.CurrentPlanet.OwnerId
                   in [Ord(oiDominator), Ord(oiUninhabited)]))) then
   begin
     OpenSpecialSlot1;
@@ -2634,9 +2634,9 @@ begin
           or ((Item.ScriptItem <> nil) and TScriptItem(Item.ScriptItem).CanSell))
       and ((Kind = phkGoods) or (Kind = phkArtefact) or not (Item is THull) or (Origin <> 0))
       and not PreserveSpaceMusic
-      and (GetPlayer.IsDockedToShip
-          or (GetPlayer.IsOnPlanet
-              and not (GetPlayer.CurrentPlanet.OwnerId
+      and (LocalPlayer.IsDockedToShip
+          or (LocalPlayer.IsOnPlanet
+              and not (LocalPlayer.CurrentPlanet.OwnerId
                   in [Ord(oiDominator), Ord(oiUninhabited)]))) then
   begin
     OpenSpecialSlot2;
@@ -2648,7 +2648,7 @@ begin
                 LocalizedText('FormShip.Sell'),
                 '',
                 '<Money>',
-                IntToStr(Quantity * GetPlayer.ShopGoodsSellPrice(Good, nil))
+                IntToStr(Quantity * LocalPlayer.ShopGoodsSellPrice(Good, nil))
             )
         )
       else
@@ -2657,7 +2657,7 @@ begin
                 LocalizedText('FormShip.Sell'),
                 '',
                 '<Money>',
-                IntToStr(Item.CalculateResaleValue(GetPlayer.GetEffectiveSkillLevel(psTrading)))
+                IntToStr(Item.CalculateResaleValue(LocalPlayer.GetEffectiveSkillLevel(psTrading)))
             )
         );
     end;
@@ -2669,9 +2669,9 @@ begin
       and (TWeapon(Item).GetWeaponInfo.ShotType in [wstTorpedo..wstRocket])
       and (TWeapon(Item).Ammo < TWeapon(Item).AmmoCapacity)
       and not PreserveSpaceMusic
-      and (GetPlayer.IsDockedToShip
-          or (GetPlayer.IsOnPlanet
-              and not (GetPlayer.CurrentPlanet.OwnerId
+      and (LocalPlayer.IsDockedToShip
+          or (LocalPlayer.IsOnPlanet
+              and not (LocalPlayer.CurrentPlanet.OwnerId
                   in [Ord(oiDominator), Ord(oiUninhabited)]))) then
   begin
     OpenSpecialSlot3;
@@ -2692,19 +2692,19 @@ begin
       and (Item is TCistern)
       and ((Item as TCistern).Fuel < (Item as TCistern).Capacity)
       and not PreserveSpaceMusic
-      and (GetPlayer.IsDockedToShip
-          or (GetPlayer.IsOnPlanet
-              and not (GetPlayer.CurrentPlanet.OwnerId
+      and (LocalPlayer.IsDockedToShip
+          or (LocalPlayer.IsOnPlanet
+              and not (LocalPlayer.CurrentPlanet.OwnerId
                   in [Ord(oiDominator), Ord(oiUninhabited)]))) then
   begin
     OpenSpecialSlot3;
     with GetByName('SC_Slot3_Text') as TLabelGI do
     begin
-      if GetPlayer.IsOnPlanet then
+      if LocalPlayer.IsOnPlanet then
         I :=
             CalculateRoundedFuelCost(
                 (Item as TCistern).Capacity - (Item as TCistern).Fuel,
-                GetPlayer.CurrentPlanet.OwnerId
+                LocalPlayer.CurrentPlanet.OwnerId
             )
       else
         I := CalculateRoundedFuelCost((Item as TCistern).Capacity - (Item as TCistern).Fuel, 6);
@@ -2715,19 +2715,19 @@ begin
       and (Item is TFuelTanks)
       and ((Item as TFuelTanks).Fuel < (Item as TFuelTanks).Capacity)
       and not PreserveSpaceMusic
-      and (GetPlayer.IsDockedToShip
-          or (GetPlayer.IsOnPlanet
-              and not (GetPlayer.CurrentPlanet.OwnerId
+      and (LocalPlayer.IsDockedToShip
+          or (LocalPlayer.IsOnPlanet
+              and not (LocalPlayer.CurrentPlanet.OwnerId
                   in [Ord(oiDominator), Ord(oiUninhabited)]))) then
   begin
     OpenSpecialSlot3;
     with GetByName('SC_Slot3_Text') as TLabelGI do
     begin
-      if GetPlayer.IsOnPlanet then
+      if LocalPlayer.IsOnPlanet then
         I :=
             CalculateRoundedFuelCost(
                 (Item as TFuelTanks).Capacity - (Item as TFuelTanks).Fuel,
-                GetPlayer.CurrentPlanet.OwnerId
+                LocalPlayer.CurrentPlanet.OwnerId
             )
       else
         I := CalculateRoundedFuelCost((Item as TFuelTanks).Capacity - (Item as TFuelTanks).Fuel, 6);
@@ -2742,7 +2742,7 @@ begin
     Equipment := LocalHuman.PlayerHoldShip.Inventory[I];
     if (not (Equipment is TWeapon)
         or (TWeapon(Equipment).GetWeaponInfo.Availability <> waNotSoldAndNodeRepair)
-        or GetPlayer.CanRepairArtefactsAtLocation) then
+        or LocalPlayer.CanRepairArtefactsAtLocation) then
       if LocalHuman.PlayerHoldShip.CanRepairEquipmentTech(Equipment)
           and (Equipment <> Item)
           and ((Equipment.EquippedFlag <> 0) or (Equipment is THull))
@@ -2822,7 +2822,7 @@ begin
   if (SelectedHoldKind = phkEmpty)
       and (LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(ItemType, Slot) = nil) then
     Exit;
-  if (GetPlayer.InHyperspace or (QueuedArcadeBattles.Count > 0))
+  if (LocalPlayer.InHyperspace or (QueuedArcadeBattles.Count > 0))
       and not Galaxy.IsArcadeEquipmentChangeEnabled then
   begin
     SoundManager.PlaySound('Sound.NoMoney');
@@ -3590,16 +3590,16 @@ var
   Button: TGraphButtonGI;
   I: Integer;
 begin
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
     for I := 0 to 9 do
     begin
       Button := FindControlByPath('Compl' + IntToStr(I)) as TGraphButtonGI;
       if Button <> nil then
       begin
         Button.SetDisabled(
-            (GetPlayer.SelectedEquipmentConfiguration = I) and (GetPlayer = LocalHuman.PlayerHoldShip)
+            (LocalPlayer.SelectedEquipmentConfiguration = I) and (LocalPlayer = LocalHuman.PlayerHoldShip)
         );
-        Button.SetDown(GetPlayer.HasEquipmentConfiguration(I) and (GetPlayer = LocalHuman.PlayerHoldShip));
+        Button.SetDown(LocalPlayer.HasEquipmentConfiguration(I) and (LocalPlayer = LocalHuman.PlayerHoldShip));
       end;
     end;
 end;
@@ -3608,9 +3608,9 @@ procedure TfShip2.SelectEquipmentConfiguration(Index: Integer);
 var
   Button: TGraphButtonGI;
 begin
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
   begin
-    if GetPlayer <> LocalHuman.PlayerHoldShip then
+    if LocalPlayer <> LocalHuman.PlayerHoldShip then
     begin
       Button := FindControlByPath('Compl' + IntToStr(Index)) as TGraphButtonGI;
       if Button <> nil then
@@ -3619,9 +3619,9 @@ begin
         Button.SetDown(False);
       end;
     end
-    else if not GetPlayer.InHyperspace
+    else if not LocalPlayer.InHyperspace
         and (QueuedArcadeBattles.Count <= 0)
-        and (GetPlayer.SelectedEquipmentConfiguration <> Index) then
+        and (LocalPlayer.SelectedEquipmentConfiguration <> Index) then
     begin
       aCalc.WaitForTurnCalculationUI;
       if ChooseEquipmentConfiguration(Index, not IsVirtualKeyDown(VK_CONTROL)) then
@@ -3631,7 +3631,7 @@ begin
       end
       else
         RefreshEquipmentConfigurationButtons;
-      RunScriptItemsAct(GetPlayer, satOnNonStandartEqChange, nil, nil, 0);
+      RunScriptItemsAct(LocalPlayer, satOnNonStandartEqChange, nil, nil, 0);
       aCalc.WaitForTurnCalculationUI;
     end;
   end;
@@ -3659,11 +3659,11 @@ begin
     )
   else if Key = VK_CONTROL then
   begin
-    if GetPlayer.IsOnPlanet then
+    if LocalPlayer.IsOnPlanet then
       RefreshShipView;
   end;
-  if (GetPlayer = LocalHuman.PlayerHoldShip)
-      and not GetPlayer.InHyperspace
+  if (LocalPlayer = LocalHuman.PlayerHoldShip)
+      and not LocalPlayer.InHyperspace
       and (QueuedArcadeBattles.Count <= 0)
       and (Key >= Ord('1'))
       and (Key <= Ord('9')) then
@@ -3705,7 +3705,7 @@ begin
       aCalc.WaitForTurnCalculationUI;
       Exit;
     end;
-    if (GetPlayer = LocalHuman.PlayerHoldShip) and (Key = Ord('K')) and ConfigureChameleon then
+    if (LocalPlayer = LocalHuman.PlayerHoldShip) and (Key = Ord('K')) and ConfigureChameleon then
     begin
       Flag3BC := True;
       FlagD4 := True;
@@ -3720,9 +3720,9 @@ begin
     end
     else if Key = Ord('B') then
     begin
-      if (GetPlayer = LocalHuman.PlayerHoldShip)
-          and (GetPlayer.GetHull.CapitalShip > 0)
-          and (GetPlayer.RuinsMode = 0) then
+      if (LocalPlayer = LocalHuman.PlayerHoldShip)
+          and (LocalPlayer.GetHull.CapitalShip > 0)
+          and (LocalPlayer.RuinsMode = 0) then
       begin
         if SelectedHoldKind <> phkEmpty then
           ReturnSelectedHoldEntry;
@@ -3806,7 +3806,7 @@ begin
         SelectedHoldOrigin
     )
   else if Key = VK_CONTROL then
-    if GetPlayer.IsOnPlanet then
+    if LocalPlayer.IsOnPlanet then
       RefreshShipView;
 end;
 
@@ -4036,14 +4036,14 @@ begin
     Exit;
   end;
   Changed := False;
-  if (GetPlayer = LocalHuman.PlayerHoldShip) and not Changed then
+  if (LocalPlayer = LocalHuman.PlayerHoldShip) and not Changed then
   begin
     Zone := GetByName('S_Hull_0z') as TZoneGI;
     if Zone.ContainsPoint(Point) then
       Changed := ConfigureChameleon;
   end;
-  if (GetPlayer.IsOnPlanet and (GetPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
-      or (GetPlayer.IsDockedToShip and (GetPlayer.RuinsMode = 0)) then
+  if (LocalPlayer.IsOnPlanet and (LocalPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
+      or (LocalPlayer.IsDockedToShip and (LocalPlayer.RuinsMode = 0)) then
   begin
     if not Changed then
     begin
@@ -4428,15 +4428,15 @@ begin
       end;
     if not Full then
     begin
-      (Ship as TTranclucator).OwnerShip := GetPlayer;
-      if GetPlayer.IsOnPlanet then
+      (Ship as TTranclucator).OwnerShip := LocalPlayer;
+      if LocalPlayer.IsOnPlanet then
       begin
-        Ship.CurrentPlanet := GetPlayer.CurrentPlanet;
+        Ship.CurrentPlanet := LocalPlayer.CurrentPlanet;
         Result := True;
       end
-      else if GetPlayer.IsDockedToShip then
+      else if LocalPlayer.IsDockedToShip then
       begin
-        Ship.DockedTo := GetPlayer.DockedTo;
+        Ship.DockedTo := LocalPlayer.DockedTo;
         Result := True;
       end;
       if Result then
@@ -4761,17 +4761,17 @@ var
   Nodes: Integer;
   Text: WideString;
 begin
-  if GetPlayer.IsOnPlanet
-      and (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) <= rlBad)
-      and not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+  if LocalPlayer.IsOnPlanet
+      and (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) <= rlBad)
+      and not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
   begin
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
       ShowMessageBoxGI(
           Self,
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPiratePlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -4782,7 +4782,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -4793,7 +4793,7 @@ begin
   if (SelectedHoldKind in [phkEquipment, phkArtefact])
       and (SelectedHoldItem as TEquipment).NeedsRepair then
   begin
-    if not GetPlayer.CanRepairEquipmentTech(SelectedHoldItem as TEquipment) then
+    if not LocalPlayer.CanRepairEquipmentTech(SelectedHoldItem as TEquipment) then
     begin
       Flag3BC := True;
       ShowMessageBoxGI(
@@ -4803,13 +4803,13 @@ begin
       );
       RefreshShipView;
     end
-    else if GetPlayer.CanRepairArtefactsAtLocation
+    else if LocalPlayer.CanRepairArtefactsAtLocation
         or (not (SelectedHoldItem is TArtefact)
             and (not (SelectedHoldItem is TWeapon)
                 or (TWeapon(SelectedHoldItem).GetWeaponInfo.Availability
                     <> waNotSoldAndNodeRepair))) then
     begin
-      if (SelectedHoldItem as TEquipment).CalculateRepairCost > GetPlayer.Money then
+      if (SelectedHoldItem as TEquipment).CalculateRepairCost > LocalPlayer.Money then
       begin
         SoundManager.PlaySound('Sound.NoMoney');
         StartMoneyWarning;
@@ -4822,7 +4822,7 @@ begin
         Nodes := Round((SelectedHoldItem as TEquipment).CalculateRepairCost * 0.0025);
         if Nodes = 0 then
           Nodes := 1;
-        if GetPlayer.GetAvailableNodeCount(LocalHuman.PlayerHoldShip) < Nodes then
+        if LocalPlayer.GetAvailableNodeCount(LocalHuman.PlayerHoldShip) < Nodes then
         begin
           SoundManager.PlaySound('Sound.NoMoney');
           ShowMessageBoxGI(
@@ -4831,7 +4831,7 @@ begin
                   LocalizedText('FormShip.RepairMsgNeedNode'),
                   '<color=255,240,100>',
                   '<NeedNode>',
-                  IntToStr(Nodes - GetPlayer.GetAvailableNodeCount(LocalHuman.PlayerHoldShip))
+                  IntToStr(Nodes - LocalPlayer.GetAvailableNodeCount(LocalHuman.PlayerHoldShip))
               ),
               mbgCancel
           );
@@ -4902,18 +4902,18 @@ begin
     ShowNoDropMessage(SelectedHoldItem.NoDropFlag);
     Exit;
   end;
-  if GetPlayer.IsOnPlanet
-      and (GetPlayer.CurrentPlanet <> nil)
-      and (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) <= rlBad)
-      and not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+  if LocalPlayer.IsOnPlanet
+      and (LocalPlayer.CurrentPlanet <> nil)
+      and (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) <= rlBad)
+      and not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
   begin
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
       ShowMessageBoxGI(
           Self,
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPiratePlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -4924,7 +4924,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -5000,12 +5000,12 @@ begin
                   (SelectedHoldItem as TCountableItem).StackCount,
                   Round(
                       SelectedHoldItem.CalculateResaleValue(
-                              GetPlayer.GetEffectiveSkillLevel(psTrading))
+                              LocalPlayer.GetEffectiveSkillLevel(psTrading))
                           / (SelectedHoldItem as TCountableItem).StackCount
                   ),
                   Count,
                   SelectedHoldItem
-                      .CalculateResaleValue(GetPlayer.GetEffectiveSkillLevel(psTrading)),
+                      .CalculateResaleValue(LocalPlayer.GetEffectiveSkillLevel(psTrading)),
                   Count)
               <> 1)
           or (Count < 1)
@@ -5023,7 +5023,7 @@ begin
   end
   else if SelectedHoldKind = phkGoods then
   begin
-    if GetPlayer.IsCargoGoodIllegalOnCurrentPlanet(SelectedGoodsIndex)
+    if LocalPlayer.IsCargoGoodIllegalOnCurrentPlanet(SelectedGoodsIndex)
         and (ShowMessageBoxGI(
                 Self,
                 LanguageDataConfig.GetParamByPathOrMarker('FormGS.NotPermitGoods'),
@@ -5044,7 +5044,7 @@ begin
                   0,
                   SelectedGoodsQuantity,
                   SelectedGoodsQuantity,
-                  GetPlayer.ShopGoodsSellPrice(SelectedGoodsIndex, nil),
+                  LocalPlayer.ShopGoodsSellPrice(SelectedGoodsIndex, nil),
                   Count,
                   1000000000,
                   Count)
@@ -5110,7 +5110,7 @@ var
 begin
   if UsePanelSlideTimer <> nil then
     Exit;
-  if (GetPlayer = LocalHuman.PlayerHoldShip)
+  if (LocalPlayer = LocalHuman.PlayerHoldShip)
       and (SelectedHoldKind in [phkEquipment, phkArtefact])
       and (SelectedHoldItem.ScriptItem <> nil)
       and (TScriptItem(SelectedHoldItem.ScriptItem).OnUseText <> WideString('')) then
@@ -5138,7 +5138,7 @@ begin
       end;
     end;
   end
-  else if (GetPlayer = LocalHuman.PlayerHoldShip)
+  else if (LocalPlayer = LocalHuman.PlayerHoldShip)
       and (SelectedHoldKind = phkEquipment)
       and (SelectedHoldItem.ItemType = t_UselessItem)
       and ((SelectedHoldItem as TUselessItem).GetOnUseCodeText <> WideString('')) then
@@ -5183,7 +5183,7 @@ begin
       PlayTransitionSounds := False;
       CloseClicked(nil);
     end;
-    if (GetPlayer = LocalHuman.PlayerHoldShip)
+    if (LocalPlayer = LocalHuman.PlayerHoldShip)
         and (SelectedHoldKind = phkArtefact)
         and (SelectedHoldItem is TArtefact)
         and ((SelectedHoldItem as TArtefact).GetOnUseCodeText <> WideString('')) then
@@ -5237,11 +5237,11 @@ begin
   begin
     Cistern := SelectedHoldItem as TCistern;
     Limit := Cistern.Capacity - Cistern.Fuel;
-    if GetPlayer.IsOnPlanet then
-      UnitPrice := CalculateFuelCost(1, GetPlayer.CurrentPlanet.OwnerId)
+    if LocalPlayer.IsOnPlanet then
+      UnitPrice := CalculateFuelCost(1, LocalPlayer.CurrentPlanet.OwnerId)
     else
       UnitPrice := CalculateFuelCost(1, 6);
-    Affordable := Min(Limit, Trunc(GetPlayer.Money / UnitPrice));
+    Affordable := Min(Limit, Trunc(LocalPlayer.Money / UnitPrice));
     if Affordable <= 0 then
     begin
       SoundManager.PlaySound('Sound.NoMoney');
@@ -5266,18 +5266,18 @@ begin
               Affordable,
               UnitPrice,
               Limit,
-              GetPlayer.Money,
+              LocalPlayer.Money,
               Amount,
               GetShopItemIconName(Cistern) + 's',
               SmallFontName)
           <> 1 then
         Exit;
     end;
-    if GetPlayer.IsOnPlanet then
-      Cost := CalculateRoundedFuelCost(Amount, GetPlayer.CurrentPlanet.OwnerId)
+    if LocalPlayer.IsOnPlanet then
+      Cost := CalculateRoundedFuelCost(Amount, LocalPlayer.CurrentPlanet.OwnerId)
     else
       Cost := CalculateRoundedFuelCost(Amount, 6);
-    if GetPlayer.Money < Cost then
+    if LocalPlayer.Money < Cost then
     begin
       SoundManager.PlaySound('Sound.NoMoney');
       StartMoneyWarning;
@@ -5298,11 +5298,11 @@ begin
   begin
     FuelTanks := SelectedHoldItem as TFuelTanks;
     Limit := FuelTanks.Capacity - FuelTanks.Fuel;
-    if GetPlayer.IsOnPlanet then
-      UnitPrice := CalculateFuelCost(1, GetPlayer.CurrentPlanet.OwnerId)
+    if LocalPlayer.IsOnPlanet then
+      UnitPrice := CalculateFuelCost(1, LocalPlayer.CurrentPlanet.OwnerId)
     else
       UnitPrice := CalculateFuelCost(1, 6);
-    Affordable := Min(Limit, Trunc(GetPlayer.Money / UnitPrice));
+    Affordable := Min(Limit, Trunc(LocalPlayer.Money / UnitPrice));
     if Affordable <= 0 then
     begin
       SoundManager.PlaySound('Sound.NoMoney');
@@ -5327,18 +5327,18 @@ begin
               Affordable,
               UnitPrice,
               Limit,
-              GetPlayer.Money,
+              LocalPlayer.Money,
               Amount,
               GetShopItemIconName(FuelTanks) + 's',
               SmallFontName)
           <> 1 then
         Exit;
     end;
-    if GetPlayer.IsOnPlanet then
-      Cost := CalculateRoundedFuelCost(Amount, GetPlayer.CurrentPlanet.OwnerId)
+    if LocalPlayer.IsOnPlanet then
+      Cost := CalculateRoundedFuelCost(Amount, LocalPlayer.CurrentPlanet.OwnerId)
     else
       Cost := CalculateRoundedFuelCost(Amount, 6);
-    if GetPlayer.Money < Cost then
+    if LocalPlayer.Money < Cost then
     begin
       SoundManager.PlaySound('Sound.NoMoney');
       StartMoneyWarning;
@@ -5355,17 +5355,17 @@ begin
   end
   else
   begin
-    if GetPlayer.IsOnPlanet
-        and (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) <= rlBad)
-        and not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+    if LocalPlayer.IsOnPlanet
+        and (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) <= rlBad)
+        and not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
     begin
-      if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+      if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
         ShowMessageBoxGI(
             Self,
             ReplaceColoredToken(
                 LocalizedColorText('FormShip.SellOrBuyInPiratePlanetAndBadRelations'),
                 '<Planet>',
-                GetPlayer.CurrentPlanet.Name,
+                LocalPlayer.CurrentPlanet.Name,
                 '<color=255,240,100>'
             ),
             mbgCancel or mbgWarning
@@ -5376,7 +5376,7 @@ begin
             ReplaceColoredToken(
                 LocalizedColorText('FormShip.SellOrBuyInPlanetAndBadRelations'),
                 '<Planet>',
-                GetPlayer.CurrentPlanet.Name,
+                LocalPlayer.CurrentPlanet.Name,
                 '<color=255,240,100>'
             ),
             mbgCancel or mbgWarning
@@ -5391,7 +5391,7 @@ begin
       Weapon := SelectedHoldItem as TWeapon;
       Limit := Weapon.AmmoCapacity - Weapon.Ammo;
       UnitPrice := Galaxy.ScaleIntByTechLevel(10, 100);
-      Affordable := Min(Limit, Trunc(GetPlayer.Money / UnitPrice));
+      Affordable := Min(Limit, Trunc(LocalPlayer.Money / UnitPrice));
       if Affordable <= 0 then
       begin
         SoundManager.PlaySound('Sound.NoMoney');
@@ -5416,7 +5416,7 @@ begin
                 Affordable,
                 UnitPrice,
                 Limit,
-                GetPlayer.Money,
+                LocalPlayer.Money,
                 Amount,
                 GetShopItemIconName(Weapon) + 's',
                 SmallFontName)
@@ -5424,7 +5424,7 @@ begin
           Exit;
       end;
       Cost := Round(Amount * UnitPrice);
-      if GetPlayer.Money < Cost then
+      if LocalPlayer.Money < Cost then
       begin
         SoundManager.PlaySound('Sound.NoMoney');
         StartMoneyWarning;
@@ -5450,17 +5450,17 @@ var
 begin
   if not CanUseLocalStorage then
     Exit;
-  if GetPlayer.IsOnPlanet
-      and (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) <= rlBad)
-      and not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+  if LocalPlayer.IsOnPlanet
+      and (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) <= rlBad)
+      and not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
   begin
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
       ShowMessageBoxGI(
           Self,
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPiratePlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -5471,7 +5471,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -5496,9 +5496,9 @@ begin
   end;
   if Cost + NodeCost <= 0 then
     Exit;
-  if not GetPlayer.CanRepairArtefactsAtLocation then
+  if not LocalPlayer.CanRepairArtefactsAtLocation then
     NodeCost := 0;
-  if GetPlayer.Money < Cost + NodeCost then
+  if LocalPlayer.Money < Cost + NodeCost then
   begin
     SoundManager.PlaySound('Sound.NoMoney');
     StartMoneyWarning;
@@ -5510,7 +5510,7 @@ begin
     Nodes := Round(NodeCost * 0.0025);
     if Nodes = 0 then
       Nodes := 1;
-    if GetPlayer.GetAvailableNodeCount(LocalHuman.PlayerHoldShip) < Nodes then
+    if LocalPlayer.GetAvailableNodeCount(LocalHuman.PlayerHoldShip) < Nodes then
     begin
       ShowMessageBoxGI(
           Self,
@@ -5604,17 +5604,17 @@ begin
     with GetByName('LoadRocketsInHold') do
       if not Active or not Parent.Active then
         Exit;
-  if GetPlayer.IsOnPlanet
-      and (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) <= rlBad)
-      and not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+  if LocalPlayer.IsOnPlanet
+      and (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) <= rlBad)
+      and not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
   begin
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
       ShowMessageBoxGI(
           Self,
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPiratePlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -5625,7 +5625,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -5655,7 +5655,7 @@ begin
     );
     Exit;
   end;
-  if GetPlayer.Money < Cost then
+  if LocalPlayer.Money < Cost then
   begin
     ShowMessageBoxGI(
         Self,
@@ -5680,7 +5680,7 @@ begin
           mbgOK or mbgCancel or mbgQuestion)
       = 2 then
     Exit;
-  if GetPlayer.Money < Cost then
+  if LocalPlayer.Money < Cost then
   begin
     SoundManager.PlaySound('Sound.NoMoney');
     StartMoneyWarning;
@@ -5864,10 +5864,10 @@ begin
       if StorageImages[I].ContainsPoint(GetCursorPoint) then
       begin
         Slot :=
-            GetPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, StorageFirstSlot + I);
+            LocalPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, StorageFirstSlot + I);
         if Slot >= 0 then
         begin
-          Stored := GetPlayer.StorageEntries[Slot];
+          Stored := LocalPlayer.StorageEntries[Slot];
           CenterY := True;
           Position.X := 158;
           with GetByName('Storage_' + IntToStr(I) + 'i') as TImageGI do
@@ -6205,19 +6205,19 @@ begin
       ItemInfoHideTimer := nil;
     end;
     ItemInfoHideTimer := ScheduleCallbackTimer(100, 99999, HideItemInfo);
-    if (GetPlayer = LocalHuman.PlayerHoldShip)
+    if (LocalPlayer = LocalHuman.PlayerHoldShip)
         and (SelectedHoldKind in [phkEquipment, phkArtefact])
         and not PreserveSpaceMusic
         and (SelectedHoldItem.ScriptItem <> nil)
         and (TScriptItem(SelectedHoldItem.ScriptItem).OnUseText <> '') then
       OpenUseSidePanel
-    else if (GetPlayer = LocalHuman.PlayerHoldShip)
+    else if (LocalPlayer = LocalHuman.PlayerHoldShip)
         and (SelectedHoldKind = phkArtefact)
         and (SelectedHoldItem is TArtefact)
         and not PreserveSpaceMusic
         and ((SelectedHoldItem as TArtefact).GetOnUseCodeText <> '') then
       OpenUseSidePanel
-    else if (GetPlayer = LocalHuman.PlayerHoldShip)
+    else if (LocalPlayer = LocalHuman.PlayerHoldShip)
         and (SelectedHoldKind = phkEquipment)
         and not PreserveSpaceMusic
         and (SelectedHoldItem.ItemType = t_UselessItem)
@@ -6235,35 +6235,35 @@ begin
     DisplayedItemKey := PtrInt(Item);
     UpdateInfoHint(0, 0);
     SoundManager.PlaySound('Sound.ShipItemInfo');
-    if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
+    if (Galaxy <> nil) and not Galaxy.Destroying and (LocalPlayer <> nil) then
       RunItemInfoScripts(Item);
-    if (GetPlayer = LocalHuman.PlayerHoldShip)
+    if (LocalPlayer = LocalHuman.PlayerHoldShip)
         and (SelectedHoldKind in [phkEquipment, phkArtefact])
         and not PreserveSpaceMusic
         and (SelectedHoldItem.ScriptItem <> nil)
         and (TScriptItem(SelectedHoldItem.ScriptItem).OnUseText <> '') then
       OpenUseSidePanel
-    else if (GetPlayer = LocalHuman.PlayerHoldShip)
+    else if (LocalPlayer = LocalHuman.PlayerHoldShip)
         and (SelectedHoldKind = phkArtefact)
         and not PreserveSpaceMusic
         and (SelectedHoldItem is TArtefact)
         and ((SelectedHoldItem as TArtefact).GetOnUseCodeText <> '') then
       OpenUseSidePanel
-    else if (GetPlayer = LocalHuman.PlayerHoldShip)
+    else if (LocalPlayer = LocalHuman.PlayerHoldShip)
         and (SelectedHoldKind = phkEquipment)
         and (SelectedHoldItem.ItemType = t_UselessItem)
         and ((SelectedHoldItem as TUselessItem).GetOnUseCodeText <> '') then
       OpenUseSidePanel;
-    if (GetPlayer = LocalHuman.PlayerHoldShip)
+    if (LocalPlayer = LocalHuman.PlayerHoldShip)
         and (Item.ScriptItem <> nil)
         and (TScriptItem(Item.ScriptItem).OnUseText <> '') then
       OpenUseSidePanel
-    else if (GetPlayer = LocalHuman.PlayerHoldShip)
+    else if (LocalPlayer = LocalHuman.PlayerHoldShip)
         and not PreserveSpaceMusic
         and (Item is TArtefact)
         and ((Item as TArtefact).GetOnUseCodeText <> '') then
       OpenUseSidePanel
-    else if (GetPlayer = LocalHuman.PlayerHoldShip)
+    else if (LocalPlayer = LocalHuman.PlayerHoldShip)
         and not PreserveSpaceMusic
         and (Item.ItemType = t_UselessItem)
         and ((Item as TUselessItem).GetOnUseCodeText <> '') then
@@ -6670,7 +6670,7 @@ begin
     with GetByName('ADD_Money') as TLabelGI do
     begin
       SetTextColor(CurrentPixelFormat.PackRgbBytes(255, 128, 61));
-      SetText(IntToStr(GetPlayer.Money));
+      SetText(IntToStr(LocalPlayer.Money));
       SetActive(True);
     end;
   end
@@ -7162,7 +7162,7 @@ begin
   for I := 0 to StorageImageCount - 1 do
   begin
     Index :=
-        GetPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, StorageFirstSlot + I);
+        LocalPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, StorageFirstSlot + I);
     if Index < 0 then
     begin
       with StorageImages[I] do
@@ -7173,7 +7173,7 @@ begin
     end
     else
     begin
-      Entry := GetPlayer.StorageEntries[Index];
+      Entry := LocalPlayer.StorageEntries[Index];
       with StorageImages[I] do
       begin
         if Entry.Item is TGoods then
@@ -7199,7 +7199,7 @@ begin
   begin
     SetDisabled(
         ((StorageImageCount - 3 + Self.StorageFirstSlot) div 3) * 3
-            > Max(0, (GetPlayer.GetStorageSlotExtent(Self.GetLocalStorageOwner) div 3) * 3 - 3)
+            > Max(0, (LocalPlayer.GetStorageSlotExtent(Self.GetLocalStorageOwner) div 3) * 3 - 3)
     );
     UpCallback := ScrollStorageDown;
   end;
@@ -7216,7 +7216,7 @@ var
   Limit: Integer;
 begin
   StorageFirstSlot := ((StorageFirstSlot + 3) div 3) * 3;
-  Limit := Max(0, (GetPlayer.GetStorageSlotExtent(GetLocalStorageOwner) div 3) * 3 - 3);
+  Limit := Max(0, (LocalPlayer.GetStorageSlotExtent(GetLocalStorageOwner) div 3) * 3 - 3);
   if StorageFirstSlot > Limit then
     StorageFirstSlot := Limit;
   RefreshStorageView;
@@ -7238,11 +7238,11 @@ begin
     Exit;
   end;
   Slot := ExtractDigitsToIntW(Sender.ControlName) + StorageFirstSlot;
-  Index := GetPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, Slot);
+  Index := LocalPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, Slot);
   if (Index >= 0)
       and (SelectedHoldKind = phkEmpty)
-      and (GetPlayer <> LocalHuman.PlayerHoldShip)
-      and (PStorageEntry(GetPlayer.StorageEntries[Index]).Item.NoDropFlag > 0) then
+      and (LocalPlayer <> LocalHuman.PlayerHoldShip)
+      and (PStorageEntry(LocalPlayer.StorageEntries[Index]).Item.NoDropFlag > 0) then
     Exit;
   aCalc.WaitForTurnCalculationUI;
   if (SelectedHoldKind <> phkEmpty) and (SelectedHoldOrigin = 0) then
@@ -7330,7 +7330,7 @@ begin
     begin
       if Index >= 0 then
       begin
-        Entry := GetPlayer.StorageEntries[Index];
+        Entry := LocalPlayer.StorageEntries[Index];
         if not (Entry.Item is THull) then
         begin
           aCalc.WaitForTurnCalculationUI;
@@ -7551,9 +7551,9 @@ begin
       end;
       AddLine(1, RadiationHealthDefinitions[I].Name, Name, 0);
     end;
-  if GetPlayer = LocalHuman.PlayerHoldShip then
+  if LocalPlayer = LocalHuman.PlayerHoldShip then
   begin
-    if GetPlayer.MedicalPolicyTicks > 0 then
+    if LocalPlayer.MedicalPolicyTicks > 0 then
       AddLine(
           0,
           LocalizedText('ShipInfo.AddInfo.MedPolicy.Name'),
@@ -7563,10 +7563,10 @@ begin
                   LocalizedText('ShipInfo.AddInfo.MedPolicy.Text'),
                   '<color=255,240,100>',
                   '<Date>',
-                  Galaxy.FormatTurnDate(Galaxy.CurrentTurn + GetPlayer.MedicalPolicyTicks)),
+                  Galaxy.FormatTurnDate(Galaxy.CurrentTurn + LocalPlayer.MedicalPolicyTicks)),
           0
       );
-    if GetPlayer.DebtAmount > 0 then
+    if LocalPlayer.DebtAmount > 0 then
     begin
       Name := LocalizedText('ShipInfo.AddInfo.DebtInfo.Name');
       AddLine(
@@ -7578,67 +7578,67 @@ begin
                   LocalizedText('ShipInfo.AddInfo.DebtInfo.Text'),
                   '<color=255,240,100>',
                   '<Money>',
-                  IntToStr(GetPlayer.DebtAmount),
+                  IntToStr(LocalPlayer.DebtAmount),
                   '<Date>',
-                  Galaxy.FormatTurnDate(GetPlayer.DebtDueTurn)),
+                  Galaxy.FormatTurnDate(LocalPlayer.DebtDueTurn)),
           0
       );
     end;
-    if GetPlayer.DepositAmount > 0 then
+    if LocalPlayer.DepositAmount > 0 then
     begin
       Name := LocalizedText('ShipInfo.AddInfo.DepositInfo.Name');
       Text := LocalizedText('ShipInfo.AddInfo.DepositInfo.Text');
       ReplaceTextToken(
           Text,
           '<Date>',
-          Galaxy.FormatTurnDate(GetPlayer.DepositStartTurn),
+          Galaxy.FormatTurnDate(LocalPlayer.DepositStartTurn),
           '<color=255,240,100>'
       );
-      ReplaceTextToken(Text, '<Money>', IntToStr(GetPlayer.DepositAmount), '<color=255,240,100>');
+      ReplaceTextToken(Text, '<Money>', IntToStr(LocalPlayer.DepositAmount), '<color=255,240,100>');
       ReplaceTextToken(
           Text,
           '<Percent>',
-          FloatToStrF(GetPlayer.DepositInterestRate, ffFixed, 1, 1),
+          FloatToStrF(LocalPlayer.DepositInterestRate, ffFixed, 1, 1),
           '<color=255,240,100>'
       );
       ReplaceTextToken(
           Text,
           '<Sum>',
-          IntToStr(GetPlayer.ComputeDepositAccruedValue),
+          IntToStr(LocalPlayer.ComputeDepositAccruedValue),
           '<color=255,240,100>'
       );
       AddLine(0, Name, Name + '~' + Text, 0);
     end;
-    if GetPlayer.PirateLicenseTicks > 0 then
+    if LocalPlayer.PirateLicenseTicks > 0 then
     begin
       Name := LocalizedText('ShipInfo.AddInfo.PirateLicenseInfo.Name');
       Text := LocalizedText('ShipInfo.AddInfo.PirateLicenseInfo.Text');
       ReplaceTextToken(
           Text,
           '<Date>',
-          Galaxy.FormatTurnDate(Galaxy.CurrentTurn + GetPlayer.PirateLicenseTicks),
+          Galaxy.FormatTurnDate(Galaxy.CurrentTurn + LocalPlayer.PirateLicenseTicks),
           '<color=255,240,100>'
       );
       AddLine(0, Name, Name + '~' + Text, 0);
     end;
-    if GetPlayer.ChameleonActive or GetPlayer.HasPlayerChameleonCharges then
+    if LocalPlayer.ChameleonActive or LocalPlayer.HasPlayerChameleonCharges then
     begin
       Name := LocalizedText('ShipInfo.AddInfo.Chameleon.Name');
       Text := '';
-      if GetPlayer.ChameleonActive then
+      if LocalPlayer.ChameleonActive then
       begin
         SeriesName :=
             LookupLocalizedTextByKey(
-                'ShipType.Dominator.' + DominatorSeriesNames[Ord(GetPlayer.ChameleonSeries)] + '.0'
+                'ShipType.Dominator.' + DominatorSeriesNames[Ord(LocalPlayer.ChameleonSeries)] + '.0'
             );
         TypeName :=
             LookupLocalizedTextByKey(
                 'ShipType.Dominator.'
-                    + DominatorSeriesNames[Ord(GetPlayer.ChameleonSeries)]
+                    + DominatorSeriesNames[Ord(LocalPlayer.ChameleonSeries)]
                     + '.'
-                    + IntToStr(GetPlayer.ChameleonVisualType)
+                    + IntToStr(LocalPlayer.ChameleonVisualType)
             );
-        CountText := IntToStr(GetPlayer.ChameleonDisplayCount);
+        CountText := IntToStr(LocalPlayer.ChameleonDisplayCount);
         Text :=
             FormatText3(
                 LocalizedText('ShipInfo.AddInfo.Chameleon.Text'),
@@ -7651,14 +7651,14 @@ begin
                 CountText
             );
       end;
-      if GetPlayer.HasPlayerChameleonCharges then
+      if LocalPlayer.HasPlayerChameleonCharges then
       begin
         if Length(Text) > 0 then
           Text := Text + #13#10;
         Text := Text + LocalizedText('ShipInfo.AddInfo.Chameleon.Charge');
         ChargesText := '';
         for ColorIndex := 0 to 2 do
-          if GetPlayer.ChameleonCharges[ColorIndex] > 0 then
+          if LocalPlayer.ChameleonCharges[ColorIndex] > 0 then
           begin
             SeriesName :=
                 LookupLocalizedTextByKey(
@@ -7669,7 +7669,7 @@ begin
                     LocalizedText('ShipInfo.AddInfo.Chameleon.Count'),
                     '<color=255,240,100>',
                     '<Count>',
-                    IntToStr(GetPlayer.ChameleonCharges[ColorIndex])
+                    IntToStr(LocalPlayer.ChameleonCharges[ColorIndex])
                 );
             if Length(ChargesText) > 0 then
               ChargesText := ChargesText + #13#10;
@@ -7684,13 +7684,13 @@ begin
       AddLine(0, Name, Name + '~' + Text, 0);
     end;
     for ProgramIndex := Low(ProgramNames) to High(ProgramNames) do
-      if GetPlayer.ProgramCounts[ProgramIndex] > 0 then
+      if LocalPlayer.ProgramCounts[ProgramIndex] > 0 then
         AddLine(
             3,
-            GetPlayer.GetProgramName(ProgramIndex),
-            GetPlayer.GetProgramName(ProgramIndex)
+            LocalPlayer.GetProgramName(ProgramIndex),
+            LocalPlayer.GetProgramName(ProgramIndex)
                 + '~'
-                + GetPlayer.GetProgramInfoText(ProgramIndex),
+                + LocalPlayer.GetProgramInfoText(ProgramIndex),
             0
         );
   end;
@@ -7762,18 +7762,18 @@ end;
 
 procedure TfShip2.SelectMusic;
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     MusicManager.PlayCategory('Base')
-  else if GetPlayer.IsOnPlanet then
+  else if LocalPlayer.IsOnPlanet then
   begin
     if not MusicInPlanetEnabled then
       MusicManager.RequestFadeOut
-    else if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    else if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
     begin
-      if not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+      if not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
         MusicManager.PlayCategory(
             'Nation.'
-                + OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and $7F]
+                + OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and $7F]
                     .InternalName
                 + 'Pirate'
         )
@@ -7782,30 +7782,30 @@ begin
     end
     else
       MusicManager
-          .PlayCategory('Nation.' + OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].InternalName);
+          .PlayCategory('Nation.' + OwnerInfo[LocalPlayer.CurrentPlanet.OwnerId].InternalName);
   end
-  else if GetPlayer.IsDockedToShip then
+  else if LocalPlayer.IsDockedToShip then
   begin
     if not MusicInPlanetEnabled then
       MusicManager.RequestFadeOut
-    else if GetPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
+    else if LocalPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
               + 'Pirate'
       )
     else
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
       );
   end
   else if not PreserveSpaceMusic and LocalHuman.PlayerHoldShip.InNormalSpace then
   begin
     if MusicInSpaceEnabled then
     begin
-      if (GetPlayer = LocalHuman.PlayerHoldShip)
-          and (GetPlayer.GetHull.CapitalShip = 1)
+      if (LocalPlayer = LocalHuman.PlayerHoldShip)
+          and (LocalPlayer.GetHull.CapitalShip = 1)
           and (RandomIntRange(0, 100) < 20) then
       begin
         StarMapScreen.BattleMusicSelected := True;
@@ -7852,8 +7852,8 @@ begin
   with GetByName('PanelDestr') do
     SetActive(
         not Self.RemoteHoldMode
-            and (GetPlayer = LocalHuman.PlayerHoldShip)
-            and (GetPlayer.GetHull.CapitalShip = 1)
+            and (LocalPlayer = LocalHuman.PlayerHoldShip)
+            and (LocalPlayer.GetHull.CapitalShip = 1)
     );
   MainPanel.ShowControlHelp(nil, False);
 end;
@@ -7975,8 +7975,8 @@ procedure TfShip2.StorageToShipClicked(Sender: TObjectGI);
 begin
   if not LocalHuman.PlayerHoldShip.InHyperspace
       and (QueuedArcadeBattles.Count <= 0)
-      and ((GetPlayer = LocalHuman.PlayerHoldShip) or (LocalHuman.PlayerHoldShip is TTranclucator))
-      and (GetPlayer.RuinsMode <= 0) then
+      and ((LocalPlayer = LocalHuman.PlayerHoldShip) or (LocalHuman.PlayerHoldShip is TTranclucator))
+      and (LocalPlayer.RuinsMode <= 0) then
   begin
     aCalc.WaitForTurnCalculationUI;
     if TakeAllFromStorage then
@@ -8002,15 +8002,15 @@ begin
   Value := 0;
   if QueuedArcadeBattles.Count <= 0 then
   begin
-    if GetPlayer.CurrentPlanet <> nil then
-      Location := GetPlayer.CurrentPlanet
+    if LocalPlayer.CurrentPlanet <> nil then
+      Location := LocalPlayer.CurrentPlanet
     else
-      Location := GetPlayer.DockedTo;
+      Location := LocalPlayer.DockedTo;
     if Location <> nil then
     begin
-      for I := 0 to GetPlayer.StorageEntries.Count - 1 do
+      for I := 0 to LocalPlayer.StorageEntries.Count - 1 do
       begin
-        Entry := GetPlayer.StorageEntries[I];
+        Entry := LocalPlayer.StorageEntries[I];
         if Entry <> nil then
           if Entry.LocationOwner = Location then
           begin
@@ -8022,12 +8022,12 @@ begin
                   Inc(
                       Value,
                       TGoods(Item).Quantity
-                          * GetPlayer.ShopGoodsSellPrice(Byte(TGoods(Item).ItemType), Location)
+                          * LocalPlayer.ShopGoodsSellPrice(Byte(TGoods(Item).ItemType), Location)
                   )
                 else if Item is TEquipment then
                   Inc(
                       Value,
-                      Item.CalculateResaleValue(GetPlayer.GetEffectiveSkillLevel(psTrading))
+                      Item.CalculateResaleValue(LocalPlayer.GetEffectiveSkillLevel(psTrading))
                   );
           end;
       end;
@@ -8043,9 +8043,9 @@ end;
 
 procedure TfShip2.ShipToStorageClicked(Sender: TObjectGI);
 begin
-  if ((GetPlayer = LocalHuman.PlayerHoldShip) or (LocalHuman.PlayerHoldShip is TTranclucator))
-      and (GetPlayer.RuinsMode <= 0)
-      and not GetPlayer.InHyperspace
+  if ((LocalPlayer = LocalHuman.PlayerHoldShip) or (LocalHuman.PlayerHoldShip is TTranclucator))
+      and (LocalPlayer.RuinsMode <= 0)
+      and not LocalPlayer.InHyperspace
       and (QueuedArcadeBattles.Count <= 0) then
   begin
     aCalc.WaitForTurnCalculationUI;
@@ -8080,7 +8080,7 @@ end;
 
 procedure TfShip2.LoadHoldRocketsClicked(Sender: TObjectGI);
 begin
-  if GetPlayer.RuinsMode <= 0 then
+  if LocalPlayer.RuinsMode <= 0 then
     LoadRockets(False);
 end;
 
@@ -8092,22 +8092,22 @@ var
   Item: TEquipment;
   Location: TObject;
 begin
-  if ((GetPlayer = LocalHuman.PlayerHoldShip) or (LocalHuman.PlayerHoldShip is TTranclucator))
-      and (GetPlayer.RuinsMode <= 0) then
-    if GetPlayer.IsDocked
-        and ((GetPlayer.CurrentPlanet = nil)
-            or (GetPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited))) then
+  if ((LocalPlayer = LocalHuman.PlayerHoldShip) or (LocalHuman.PlayerHoldShip is TTranclucator))
+      and (LocalPlayer.RuinsMode <= 0) then
+    if LocalPlayer.IsDocked
+        and ((LocalPlayer.CurrentPlanet = nil)
+            or (LocalPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited))) then
     begin
       Text := LocalizedColorText('FormShip.SellAllFromHold');
       Value := 0;
-      if GetPlayer.CurrentPlanet <> nil then
-        Location := GetPlayer.CurrentPlanet
+      if LocalPlayer.CurrentPlanet <> nil then
+        Location := LocalPlayer.CurrentPlanet
       else
-        Location := GetPlayer.DockedTo;
+        Location := LocalPlayer.DockedTo;
       for Good := 0 to 7 do
         Inc(
             Value,
-            LocalHuman.PlayerHoldShip.CargoGoods[Good].Count * GetPlayer.ShopGoodsSellPrice(Good, Location)
+            LocalHuman.PlayerHoldShip.CargoGoods[Good].Count * LocalPlayer.ShopGoodsSellPrice(Good, Location)
         );
       for I := 1 to LocalHuman.PlayerHoldShip.Inventory.Count - 1 do
       begin
@@ -8115,11 +8115,11 @@ begin
         if (Item.EquippedFlag = 0)
             and (Item.NoDropFlag <= 0)
             and (Item.ScriptItem = nil)
-            and GetPlayer.CanAccessStoredItem(Item)
+            and LocalPlayer.CanAccessStoredItem(Item)
             and (Item.NoDropFlag <= 0)
             and ((Item.ScriptItem = nil) or TScriptItem(Item.ScriptItem).CanSell)
-            and GetPlayer.CanAccessStoredItem(Item) then
-          Inc(Value, Item.CalculateResaleValue(GetPlayer.GetEffectiveSkillLevel(psTrading)));
+            and LocalPlayer.CanAccessStoredItem(Item) then
+          Inc(Value, Item.CalculateResaleValue(LocalPlayer.GetEffectiveSkillLevel(psTrading)));
       end;
       for I := 0 to LocalHuman.PlayerHoldShip.Artefacts.Count - 1 do
       begin
@@ -8127,8 +8127,8 @@ begin
         if (Item.EquippedFlag = 0)
             and (Item.NoDropFlag <= 0)
             and ((Item.ScriptItem = nil) or TScriptItem(Item.ScriptItem).CanSell)
-            and GetPlayer.CanAccessStoredItem(Item) then
-          Inc(Value, Item.CalculateResaleValue(GetPlayer.GetEffectiveSkillLevel(psTrading)));
+            and LocalPlayer.CanAccessStoredItem(Item) then
+          Inc(Value, Item.CalculateResaleValue(LocalPlayer.GetEffectiveSkillLevel(psTrading)));
       end;
       if Value > 0 then
       begin
@@ -8141,7 +8141,7 @@ end;
 
 procedure TfShip2.LoadEquippedRocketsClicked(Sender: TObjectGI);
 begin
-  if GetPlayer.RuinsMode <= 0 then
+  if LocalPlayer.RuinsMode <= 0 then
     LoadRockets(True);
 end;
 
@@ -8169,7 +8169,7 @@ begin
           or (LocalHuman.PlayerHoldShip is TRuins))
       and ((LocalHuman.PlayerHoldShip.CurrentPlanet = nil)
           or (LocalHuman.PlayerHoldShip.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
-      and ((GetPlayer <> LocalHuman.PlayerHoldShip) or (GetPlayer.RuinsMode <= 0)) then
+      and ((LocalPlayer <> LocalHuman.PlayerHoldShip) or (LocalPlayer.RuinsMode <= 0)) then
     for I := 1 to 5 do
       if LocalHuman.PlayerHoldShip.Weapons[I] <> nil then
         if LocalHuman.PlayerHoldShip.Weapons[I].NeedsAmmo then
@@ -8188,25 +8188,25 @@ var
   Good: Byte;
   Entry: PStorageEntry;
 begin
-  if GetPlayer.InNormalSpace
-      or GetPlayer.InHyperspace
-      or (GetPlayer.RuinsMode > 0)
+  if LocalPlayer.InNormalSpace
+      or LocalPlayer.InHyperspace
+      or (LocalPlayer.RuinsMode > 0)
       or (QueuedArcadeBattles.Count > 0)
-      or ((GetPlayer.CurrentPlanet <> nil)
-          and (GetPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited))) then
+      or ((LocalPlayer.CurrentPlanet <> nil)
+          and (LocalPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited))) then
     Exit;
-  if GetPlayer.IsOnPlanet
-      and (GetPlayer.CurrentPlanet <> nil)
-      and (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) <= rlBad)
-      and not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+  if LocalPlayer.IsOnPlanet
+      and (LocalPlayer.CurrentPlanet <> nil)
+      and (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) <= rlBad)
+      and not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
   begin
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
       ShowMessageBoxGI(
           Self,
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPiratePlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -8217,7 +8217,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -8240,7 +8240,7 @@ begin
       if (Item.NoDropFlag = 0)
           and (TEquipment(Item).EquippedFlag = 0)
           and ((Item.ScriptItem = nil) or TScriptItem(Item.ScriptItem).CanSell)
-          and GetPlayer.CanAccessStoredItem(Item) then
+          and LocalPlayer.CanAccessStoredItem(Item) then
       begin
         if Item is TArtefactTranclucator then
           if ShowMessageBoxGI(
@@ -8263,9 +8263,9 @@ begin
     end;
     for Good := 0 to 7 do
       if LocalHuman.PlayerHoldShip.CargoGoods[Good].Count > 0 then
-        if GetPlayer.CanAccessHoldGoods(Good) then
+        if LocalPlayer.CanAccessHoldGoods(Good) then
         begin
-          if GetPlayer.IsCargoGoodIllegalOnCurrentPlanet(Good)
+          if LocalPlayer.IsCargoGoodIllegalOnCurrentPlanet(Good)
               and not AllowIllegal
               and not DeclineIllegal then
             if ShowMessageBoxGI(
@@ -8276,19 +8276,19 @@ begin
               DeclineIllegal := True
             else
               AllowIllegal := True;
-          if not (GetPlayer.IsCargoGoodIllegalOnCurrentPlanet(Good) and DeclineIllegal) then
+          if not (LocalPlayer.IsCargoGoodIllegalOnCurrentPlanet(Good) and DeclineIllegal) then
             SellHoldGoods(Good);
         end;
   end
   else
   begin
-    I := GetPlayer.GetStorageSlotExtent(GetLocalStorageOwner) - 1;
+    I := LocalPlayer.GetStorageSlotExtent(GetLocalStorageOwner) - 1;
     while I >= 0 do
     begin
-      StorageIndex := GetPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, I);
+      StorageIndex := LocalPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner, I);
       if StorageIndex >= 0 then
       begin
-        Entry := GetPlayer.StorageEntries[StorageIndex];
+        Entry := LocalPlayer.StorageEntries[StorageIndex];
         Item := Entry.Item;
         if (Item.NoDropFlag > 0)
             or ((Item.ScriptItem <> nil) and not TScriptItem(Item.ScriptItem).CanSell) then
@@ -8312,7 +8312,7 @@ begin
             Continue;
           end;
         if Item is TGoods then
-          if GetPlayer.IsCargoGoodIllegalOnCurrentPlanet(Byte(Item.ItemType))
+          if LocalPlayer.IsCargoGoodIllegalOnCurrentPlanet(Byte(Item.ItemType))
               and not AllowIllegal
               and not DeclineIllegal then
             if ShowMessageBoxGI(
@@ -8324,7 +8324,7 @@ begin
             else
               AllowIllegal := True;
         if (Item is TGoods)
-            and GetPlayer.IsCargoGoodIllegalOnCurrentPlanet(Byte(Item.ItemType))
+            and LocalPlayer.IsCargoGoodIllegalOnCurrentPlanet(Byte(Item.ItemType))
             and DeclineIllegal then
         begin
           Dec(I);

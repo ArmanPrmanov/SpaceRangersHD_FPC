@@ -347,7 +347,7 @@ begin
   MainPanel.OnOpen;
   MainPanel.NavigationLocked := False;
   MainPanel.Show;
-  if GetPlayer.IsOnPlanet then
+  if LocalPlayer.IsOnPlanet then
   begin
     PlanetPanel.OnOpen;
     PlanetPanel.Show;
@@ -361,42 +361,42 @@ begin
   end;
   TakeOffPending := False;
   with GetByName('ButClose') as TGraphButtonGI do
-    if GetPlayer.IsOnPlanet then
+    if LocalPlayer.IsOnPlanet then
       UpCallback := PlanetPanel.PlanetClicked
-    else if GetPlayer.IsDockedToShip then
+    else if LocalPlayer.IsDockedToShip then
       UpCallback := StationPanel.ServicesClicked;
   GetByName('MainPanel').KeyDownCallback := MainKeyDown;
   with GetByName('BGCity2') as TImageGI do
   begin
-    SetActive(GetPlayer.IsDockedToShip and (GetPlayer.DockedTo.TypeId = Byte(rstMilitaryBase)));
+    SetActive(LocalPlayer.IsDockedToShip and (LocalPlayer.DockedTo.TypeId = Byte(rstMilitaryBase)));
     if Active then
     begin
-      SetImagePath('GAI,' + GetPlayer.CurrentStar.GetBackgroundImagePath(I));
+      SetImagePath('GAI,' + LocalPlayer.CurrentStar.GetBackgroundImagePath(I));
       GaiImageControl.LoadFrameSequenceFromText('[50,0-0]');
       SetImageKindX(ikxCenter);
       SetImageKindY(ikyCenter);
     end;
   end;
   with GetByName('BGCity') as TImageGI do
-    if GetPlayer.IsOnPlanet then
+    if LocalPlayer.IsOnPlanet then
     begin
       SetActive(True);
       (FindByNameRecursive('BGCity') as TImageGI)
-          .SetImagePath(GetPlayer.CurrentPlanet.GetGovernmentBackgroundGraph);
+          .SetImagePath(LocalPlayer.CurrentPlanet.GetGovernmentBackgroundGraph);
     end
-    else if GetPlayer.IsDockedToShip then
+    else if LocalPlayer.IsDockedToShip then
     begin
       SetActive(True);
-      if GetPlayer.DockedTo.TypeNameOverrideKey <> WideString('') then
+      if LocalPlayer.DockedTo.TypeNameOverrideKey <> WideString('') then
       begin
-        Path := 'Bm.FormRuins.' + GiResourceSuffix + GetPlayer.DockedTo.TypeNameOverrideKey + 'bg';
+        Path := 'Bm.FormRuins.' + GiResourceSuffix + LocalPlayer.DockedTo.TypeNameOverrideKey + 'bg';
         if CacheDataRoot.FileExistsByPath(Path) then
           SetImagePath('GI,' + Path)
         else
           SetImagePath(
               'GI,Bm.FormRuins.'
                   + GiResourceSuffix
-                  + ShipTypeNames[GetPlayer.DockedTo.TypeId].Name
+                  + ShipTypeNames[LocalPlayer.DockedTo.TypeId].Name
                   + 'bg'
           );
       end
@@ -404,7 +404,7 @@ begin
         SetImagePath(
             'GI,Bm.FormRuins.'
                 + GiResourceSuffix
-                + ShipTypeNames[GetPlayer.DockedTo.TypeId].Name
+                + ShipTypeNames[LocalPlayer.DockedTo.TypeId].Name
                 + 'bg'
         );
     end
@@ -465,7 +465,7 @@ begin
   GetByName('FaceGB').SetActive(False);
   with GetByName('CaptainI') as TImageGI do
   begin
-    SetImagePath('GI,' + GetPlayer.GetCaptainPortraitResourceBase + 'i');
+    SetImagePath('GI,' + LocalPlayer.GetCaptainPortraitResourceBase + 'i');
     SetImageKindX(ikxCenter);
     SetImageKindY(ikyCenter);
     SetActive(True);
@@ -473,7 +473,7 @@ begin
   with GetByName('CaptainA') as TgaiGI do
   begin
     FirstFrameOnly := not AnimCaptain;
-    SetImagePath(GetPlayer.GetCaptainPortraitResourceBase + 'a');
+    SetImagePath(LocalPlayer.GetCaptainPortraitResourceBase + 'a');
     SequenceIndex := 0;
     UpdateAutoGeometry;
     SetImageKindX(ikxCenter);
@@ -489,8 +489,8 @@ begin
     GetByName('Ship' + IntToStr(I)).SetActive(False);
   end;
   RefreshDockedShips;
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnEnteringForm, nil, nil, 0);
   aCalc.WaitForTurnCalculationUI;
   RefreshServiceButtons;
   MainPanel.RebuildMessageButtons(False);
@@ -501,8 +501,8 @@ var
   I: Integer;
 begin
   aCalc.WaitForTurnCalculationUI;
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnLeavingForm, nil, nil, 0);
   ShipInfoWindow.SetActive(False);
   HoveredShip := nil;
   if ShipInfoHideTimer <> nil then
@@ -530,7 +530,7 @@ begin
   if RequestedScreenId <> screenScanner then
     SoundManager.StopUncontrolledSounds;
   MainPanel.OnClose;
-  if (GetPlayer <> nil) and GetPlayer.IsOnPlanet then
+  if (LocalPlayer <> nil) and LocalPlayer.IsOnPlanet then
     PlanetPanel.OnClose
   else
     StationPanel.OnClose;
@@ -633,7 +633,7 @@ begin
   CalculatePlayerStarTurnAndWait;
   if ExitScreenLoop then
     Exit;
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
   begin
     Session.GameEndReason := 2;
     RequestedScreenId := screenGameEnd;
@@ -649,33 +649,33 @@ end;
 
 procedure TfHangar.EndTurnClicked(Sender: TObjectGI);
 begin
-  if (GetPlayer = nil) or (GetPlayer.QueuedTravelTarget <> nil) then
+  if (LocalPlayer = nil) or (LocalPlayer.QueuedTravelTarget <> nil) then
     Exit;
-  if GetPlayer.IsDockedToShip
-      and (GetPlayer.DockedTo.TypeId = Byte(rstDominion))
-      and (GetPlayer.DockedTo.Order = soTeleport)
-      and (Cardinal(GetPlayer.DockedTo.OrderStateData) > 0)
-      and not GetPlayer.DockedTo.InHyperspace then
+  if LocalPlayer.IsDockedToShip
+      and (LocalPlayer.DockedTo.TypeId = Byte(rstDominion))
+      and (LocalPlayer.DockedTo.Order = soTeleport)
+      and (Cardinal(LocalPlayer.DockedTo.OrderStateData) > 0)
+      and not LocalPlayer.DockedTo.InHyperspace then
   begin
     RuinsTalkScreen.DepartWithStation(1);
     Exit;
   end;
-  if GetPlayer.IsDockedToShip
-      and (GetPlayer.DockedTo.TypeId = Byte(rstDominion))
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> nil)
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> GetPlayer.CurrentStar)
-      and ((GetPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
+  if LocalPlayer.IsDockedToShip
+      and (LocalPlayer.DockedTo.TypeId = Byte(rstDominion))
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> nil)
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> LocalPlayer.CurrentStar)
+      and ((LocalPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
   begin
     RuinsTalkScreen.DepartWithStation(1);
     Exit;
   end;
-  if GetPlayer.IsDockedToShip
-      and (GetPlayer.DockedTo.TypeId = Byte(rstMilitaryBase))
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> nil)
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> GetPlayer.CurrentStar)
-      and ((GetPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
+  if LocalPlayer.IsDockedToShip
+      and (LocalPlayer.DockedTo.TypeId = Byte(rstMilitaryBase))
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> nil)
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> LocalPlayer.CurrentStar)
+      and ((LocalPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
   begin
-    if GetPlayer.Speed <= 0 then
+    if LocalPlayer.Speed <= 0 then
       RuinsTalkScreen.DepartWithStation(1)
     else
       StationPanel.TakeOffForStationTravel;
@@ -762,15 +762,15 @@ begin
   end
   else if Key = Ord('S') then
   begin
-    SelectedShip := GetPlayer;
+    SelectedShip := LocalPlayer;
     ShipClicked(nil);
   end
   else
   begin
     MainPanel.ProcessKeyDown(Key);
-    if GetPlayer.IsDockedToShip then
+    if LocalPlayer.IsDockedToShip then
       StationPanel.ProcessKeyDown(Key)
-    else if GetPlayer.IsOnPlanet then
+    else if LocalPlayer.IsOnPlanet then
       PlanetPanel.ProcessKeyDown(Key);
   end;
 end;
@@ -785,14 +785,14 @@ begin
     MusicManager.RequestFadeOut;
     Exit;
   end;
-  if GetPlayer.IsOnPlanet then
+  if LocalPlayer.IsOnPlanet then
   begin
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
     begin
-      if not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+      if not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
         MusicManager.PlayCategory(
             'Nation.'
-                + OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and $7F]
+                + OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and $7F]
                     .InternalName
                 + 'Pirate'
         )
@@ -801,25 +801,25 @@ begin
     end
     else
       MusicManager
-          .PlayCategory('Nation.' + OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].InternalName);
+          .PlayCategory('Nation.' + OwnerInfo[LocalPlayer.CurrentPlanet.OwnerId].InternalName);
   end
-  else if GetPlayer.IsDockedToShip then
+  else if LocalPlayer.IsDockedToShip then
   begin
     if not MusicInPlanetEnabled then
     begin
       MusicManager.RequestFadeOut;
       Exit;
     end;
-    if GetPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
+    if LocalPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
               + 'Pirate'
       )
     else
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
       );
   end;
 end;
@@ -838,7 +838,7 @@ procedure TfHangar.RefreshServiceButtons;
 begin
   with GetByName('ButRepair') as TGraphButtonGI do
   begin
-    SetDisabled((GetPlayer = nil) or (GetPlayer.GetHull.HullPoints >= GetPlayer.GetHull.Weight));
+    SetDisabled((LocalPlayer = nil) or (LocalPlayer.GetHull.HullPoints >= LocalPlayer.GetHull.Weight));
     if Disabled then
       HelpText := LocalizedColorText('Help.ButRepair')
     else
@@ -849,11 +849,11 @@ begin
                   LocalizedColorText('FormHangar.HullStatus.Cost'),
                   '<color=255,240,100>',
                   '<Money>',
-                  IntToStr(GetPlayer.GetHull.CalculateRepairCost));
+                  IntToStr(LocalPlayer.GetHull.CalculateRepairCost));
   end;
   with GetByName('ButRefuel') as TGraphButtonGI do
   begin
-    SetDisabled((GetPlayer = nil) or (GetPlayer.GetFullRefuelCost <= 0));
+    SetDisabled((LocalPlayer = nil) or (LocalPlayer.GetFullRefuelCost <= 0));
     if Disabled then
       HelpText := LocalizedColorText('Help.ButRefuel')
     else
@@ -864,7 +864,7 @@ begin
                   LocalizedColorText('FormHangar.FuelTankStatus.Cost'),
                   '<color=255,240,100>',
                   '<Money>',
-                  IntToStr(GetPlayer.GetFullRefuelCost));
+                  IntToStr(LocalPlayer.GetFullRefuelCost));
   end;
   (GetByName('ButTakeOff') as TGraphButtonGI).SetDisabled(not RefreshTakeOffStatus);
 end;
@@ -873,7 +873,7 @@ procedure TfHangar.RepairHullClicked(Sender: TObjectGI);
 begin
   if LoadPanel.IsAnimatingShutters or MainPanel.NavigationLocked or HasPendingScriptRequests then
     Exit;
-  if GetPlayer.Money <= 0 then
+  if LocalPlayer.Money <= 0 then
   begin
     aCalc.WaitForTurnCalculationUI;
     RepairHull;
@@ -884,7 +884,7 @@ begin
             LocalizedColorText('FormHangar.HullStatus.NotMoney'),
             '<color=255,240,100>',
             '<Money>',
-            IntToStr(GetPlayer.GetHull.CalculateRepairCost)
+            IntToStr(LocalPlayer.GetHull.CalculateRepairCost)
         ),
         mbgCancel or mbgError
     );
@@ -911,7 +911,7 @@ procedure TfHangar.RefuelClicked(Sender: TObjectGI);
 begin
   if LoadPanel.IsAnimatingShutters or MainPanel.NavigationLocked or HasPendingScriptRequests then
     Exit;
-  if GetPlayer.GetFullRefuelCost > GetPlayer.Money then
+  if LocalPlayer.GetFullRefuelCost > LocalPlayer.Money then
   begin
     ShowMessageBoxGI(
         Self,
@@ -919,7 +919,7 @@ begin
             LocalizedColorText('FormHangar.FuelTankStatus.NotMoney'),
             '<color=255,240,100>',
             '<Money>',
-            IntToStr(GetPlayer.GetFullRefuelCost)
+            IntToStr(LocalPlayer.GetFullRefuelCost)
         ),
         mbgCancel or mbgError
     );
@@ -1020,17 +1020,17 @@ var
   TotalText, Text: WideString;
   Warning: Boolean;
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
   begin
     Result := False;
     Exit;
   end;
   aCalc.WaitForTurnCalculationUI;
-  GetPlayer.RefreshDerivedStats(True);
+  LocalPlayer.RefreshDerivedStats(True);
   aCalc.WaitForTurnCalculationUI;
   Result := True;
   TotalText := LocalizedColorText('FormHangar.TotalStatus.Good');
-  with GetPlayer do
+  with LocalPlayer do
   begin
     Text := '';
     Warning := False;
@@ -1131,7 +1131,7 @@ begin
       end
       else
         Text := LocalizedColorText('FormHangar.EngineStatus.Ok');
-      if (GetPlayer.DockedTo <> nil) and GetPlayer.DockedTo.InHyperspace then
+      if (LocalPlayer.DockedTo <> nil) and LocalPlayer.DockedTo.InHyperspace then
       begin
         TotalText := LocalizedColorText('FormHangar.TotalStatus.RuinInHyperSpace');
         Result := False;
@@ -1317,8 +1317,8 @@ begin
     begin
       Ship := TShip(Galaxy.IdToShip(LocalHuman.HangarShipIds[I], False));
       if (Ship = nil)
-          or (not (GetPlayer.IsOnPlanet and (GetPlayer.CurrentPlanet = Ship.CurrentPlanet))
-              and not (GetPlayer.IsDockedToShip and (GetPlayer.DockedTo = Ship.DockedTo))) then
+          or (not (LocalPlayer.IsOnPlanet and (LocalPlayer.CurrentPlanet = Ship.CurrentPlanet))
+              and not (LocalPlayer.IsDockedToShip and (LocalPlayer.DockedTo = Ship.DockedTo))) then
       begin
         ShipSlots[I].AnimationState := 3;
         ShipSlots[I].Opacity := 255;
@@ -1330,8 +1330,8 @@ begin
       Ship := TShip(Galaxy.IdToShip(LocalHuman.HangarShipIds[I], False));
       if Ship <> nil then
       begin
-        if not ((GetPlayer.IsOnPlanet and (GetPlayer.CurrentPlanet = Ship.CurrentPlanet))
-            or (GetPlayer.IsDockedToShip and (GetPlayer.DockedTo = Ship.DockedTo))) then
+        if not ((LocalPlayer.IsOnPlanet and (LocalPlayer.CurrentPlanet = Ship.CurrentPlanet))
+            or (LocalPlayer.IsDockedToShip and (LocalPlayer.DockedTo = Ship.DockedTo))) then
           Ship := nil
         else
         begin
@@ -1375,17 +1375,17 @@ begin
     begin
       Ship := nil;
       if SlotOrder[I] = 0 then
-        Ship := GetPlayer
+        Ship := LocalPlayer
       else if Ship = nil then
       begin
-        if GetPlayer.IsOnPlanet then
+        if LocalPlayer.IsOnPlanet then
         begin
-          for J := 0 to GetPlayer.CurrentStar.Ships.Count - 1 do
+          for J := 0 to LocalPlayer.CurrentStar.Ships.Count - 1 do
           begin
-            Ship := TShip(GetPlayer.CurrentStar.Ships[J]);
-            if GetPlayer = Ship then
+            Ship := TShip(LocalPlayer.CurrentStar.Ships[J]);
+            if LocalPlayer = Ship then
               Ship := nil
-            else if GetPlayer.CurrentPlanet <> Ship.CurrentPlanet then
+            else if LocalPlayer.CurrentPlanet <> Ship.CurrentPlanet then
               Ship := nil
             else
             begin
@@ -1402,10 +1402,10 @@ begin
             end;
           end;
           if Ship = nil then
-            for J := 0 to GetPlayer.CurrentPlanet.Warriors.Count - 1 do
+            for J := 0 to LocalPlayer.CurrentPlanet.Warriors.Count - 1 do
             begin
-              Ship := TShip(GetPlayer.CurrentPlanet.Warriors[J]);
-              if GetPlayer.CurrentPlanet <> Ship.CurrentPlanet then
+              Ship := TShip(LocalPlayer.CurrentPlanet.Warriors[J]);
+              if LocalPlayer.CurrentPlanet <> Ship.CurrentPlanet then
                 Ship := nil
               else
               begin
@@ -1422,13 +1422,13 @@ begin
               end;
             end;
         end
-        else if GetPlayer.IsDockedToShip then
-          for J := 0 to GetPlayer.CurrentStar.Ships.Count - 1 do
+        else if LocalPlayer.IsDockedToShip then
+          for J := 0 to LocalPlayer.CurrentStar.Ships.Count - 1 do
           begin
-            Ship := TShip(GetPlayer.CurrentStar.Ships[J]);
-            if GetPlayer = Ship then
+            Ship := TShip(LocalPlayer.CurrentStar.Ships[J]);
+            if LocalPlayer = Ship then
               Ship := nil
-            else if GetPlayer.DockedTo <> Ship.DockedTo then
+            else if LocalPlayer.DockedTo <> Ship.DockedTo then
               Ship := nil
             else
             begin
@@ -1467,7 +1467,7 @@ var
   Ship: TShip;
   CursorPoint: TPoint;
 begin
-  if (Galaxy = nil) or (GetPlayer = nil) or GetPlayer.IsHullDestroyed then
+  if (Galaxy = nil) or (LocalPlayer = nil) or LocalPlayer.IsHullDestroyed then
     Exit;
   CursorPoint := GetCursorPoint;
   for I := 0 to 8 do
@@ -1515,12 +1515,12 @@ begin
         and (Ship.TypeId <> stKling)
         and not Ship.NoScan then
     begin
-      if GetPlayer = Ship then
+      if LocalPlayer = Ship then
       begin
-        SelectedShip := GetPlayer;
+        SelectedShip := LocalPlayer;
         ShipClicked(nil);
       end
-      else if (Ship is TTranclucator) and ((Ship as TTranclucator).OwnerShip = GetPlayer) then
+      else if (Ship is TTranclucator) and ((Ship as TTranclucator).OwnerShip = LocalPlayer) then
       begin
         if IsVirtualKeyDown(VK_CONTROL) then
         begin
@@ -1579,11 +1579,11 @@ begin
     Exit;
   ShipInfoWindow.SetActive(True);
   RunScriptItemsAct(Ship, satOnShowingShipInfo, nil, nil, 0);
-  if GetPlayer <> Ship then
+  if LocalPlayer <> Ship then
   begin
     (GetByName('InfoShipName') as TLabelGI)
         .SetText(WrapTextInColor(Ship.GetFullName(' '), InfoNameColorTag));
-    if (Ship <> nil) and (GetPlayer = Ship.PartnerShip) then
+    if (Ship <> nil) and (LocalPlayer = Ship.PartnerShip) then
       (GetByName('InfoShipName') as TLabelGI)
           .SetText(
               (GetByName('InfoShipName') as TLabelGI).GetText
@@ -1714,16 +1714,16 @@ begin
     ColorTag := '<color=255,166,0>'
   else
     ColorTag := '';
-  if GetPlayer.CanResolveObjectWithScanner(Ship)
-      or (GetPlayer = Ship)
-      or (GetPlayer = Ship.PartnerShip)
+  if LocalPlayer.CanResolveObjectWithScanner(Ship)
+      or (LocalPlayer = Ship)
+      or (LocalPlayer = Ship.PartnerShip)
       or (Ship.TypeId = stTranclucator) then
   begin
     Text :=
         WrapTextInColor(IntToStr(Ship.GetHull.HullPoints), ColorTag)
             + '/'
             + IntToStr(Ship.GetHull.Weight);
-    if GetPlayer.HasScannerArtefact(Ship) then
+    if LocalPlayer.HasScannerArtefact(Ship) then
     begin
       (GetByName('InfoShipDamage') as TLabelGI).SetText(Ship.GetWeaponDamageSummary);
       Text := Text + ' + ' + WrapTextInColor(Ship.GetRepairPointsSummary, '');
@@ -1733,26 +1733,26 @@ begin
   else
     (GetByName('InfoShipSize') as TLabelGI).SetText(WrapTextInColor('???', ColorTag));
   Text := IntToStr(Integer(Ship.GetDefensePercent) and $7F) + '%';
-  if GetPlayer.CanResolveObjectWithScanner(Ship)
-      or (GetPlayer = Ship)
-      or (GetPlayer = Ship.PartnerShip)
+  if LocalPlayer.CanResolveObjectWithScanner(Ship)
+      or (LocalPlayer = Ship)
+      or (LocalPlayer = Ship.PartnerShip)
       or (Ship.TypeId = stTranclucator) then
   begin
     Text := Text + ' + ' + WrapTextInColor(IntToStr(Ship.GetArmor), '');
-    if GetPlayer.HasScannerArtefact(Ship) then
+    if LocalPlayer.HasScannerArtefact(Ship) then
       Text := Ship.GetManeuverabilitySummary + Text;
   end;
   (GetByName('InfoShipDef') as TLabelGI).SetText(Text);
-  (GetByName('InfoShipRel') as TLabelGI).SetText(Ship.GetRelationLevelTextToShip(GetPlayer));
-  if (GetPlayer <> Ship)
+  (GetByName('InfoShipRel') as TLabelGI).SetText(Ship.GetRelationLevelTextToShip(LocalPlayer));
+  if (LocalPlayer <> Ship)
       and not (Ship is TRuins)
-      and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
-      and GetPlayer.CanResolveObjectWithScanner(Ship) then
+      and (LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
+      and LocalPlayer.CanResolveObjectWithScanner(Ship) then
   begin
     (GetByName('ISWin') as TLabelGI).SetActive(True);
     (GetByName('InfoShipWin') as TLabelGI).SetActive(True);
     (GetByName('InfoShipWin') as TLabelGI)
-        .SetText(IntToStr(Integer(GetPlayer.GetWinChancePercent(Ship)) and $7F) + '%');
+        .SetText(IntToStr(Integer(LocalPlayer.GetWinChancePercent(Ship)) and $7F) + '%');
   end
   else
   begin
@@ -1777,9 +1777,9 @@ begin
   end;
   with GetByName('InfoShipDurable') as TImageGI do
   begin
-    if GetPlayer.CanResolveObjectWithScanner(Ship)
-        or (GetPlayer = Ship)
-        or (GetPlayer = Ship.PartnerShip)
+    if LocalPlayer.CanResolveObjectWithScanner(Ship)
+        or (LocalPlayer = Ship)
+        or (LocalPlayer = Ship.PartnerShip)
         or (Ship.TypeId = stTranclucator) then
       SetPosition(
           Classes.Point(
@@ -1811,7 +1811,7 @@ begin
   end;
   DamageCaption := GetByName('ISDamage') as TLabelGI;
   DamageText := GetByName('InfoShipDamage') as TLabelGI;
-  if GetPlayer.HasScannerArtefact(Ship) then
+  if LocalPlayer.HasScannerArtefact(Ship) then
   begin
     DamageCaption.SetActive(True);
     DamageText.SetActive(True);

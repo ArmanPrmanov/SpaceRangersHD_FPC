@@ -152,8 +152,8 @@ begin
   if AuxRenderBuffer.GetPixels = nil then
     CaptureScreenBackground(True, 0);
   (GetByName('BGBuf') as TGraphBufGI).BindExternalGraphBuf(AuxRenderBuffer);
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnEnteringForm, nil, nil, 0);
   MainPanel.OnOpen;
   (GetByName('PM_Ship') as TGraphButtonGI).SetHitTestDisabled(True);
   (GetByName('PM_Gal') as TGraphButtonGI).SetHitTestDisabled(True);
@@ -163,7 +163,7 @@ begin
   BackgroundClickStarted := True;
   SortColumn := rrscExperience;
   SelectedIndex := -1;
-  SelectedRangerId := GetPlayer.Id;
+  SelectedRangerId := LocalPlayer.Id;
   with GetByName('SortName') do
   begin
     LeftButtonUpCallback := SortHeaderMouseUp;
@@ -197,8 +197,8 @@ procedure TfRating2.OnClose;
 begin
   inherited OnClose;
   aCalc.WaitForTurnCalculationUI;
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnLeavingForm, nil, nil, 0);
   ClearRows;
   MainPanel.OnClose;
 end;
@@ -345,7 +345,7 @@ var
       for I := 0 to Galaxy.Rangers.Count - 1 do
       begin
         Ally := TRanger(Galaxy.Rangers[I]);
-        if (GetPlayer <> Ally) and (Ally.PartnerShip = Ranger) then
+        if (LocalPlayer <> Ally) and (Ally.PartnerShip = Ranger) then
           Result :=
               FormatText2(
                   LocalizedColorText('FormRating.PartnerBossOneText'),
@@ -363,7 +363,7 @@ var
       for I := 0 to Galaxy.Rangers.Count - 1 do
       begin
         Ally := TRanger(Galaxy.Rangers[I]);
-        if (GetPlayer <> Ally) and (Ally.PartnerShip = Ranger) then
+        if (LocalPlayer <> Ally) and (Ally.PartnerShip = Ranger) then
         begin
           if Names <> WideString('') then
             Names :=
@@ -394,7 +394,7 @@ var
   end;
 begin
   RewardWindow.SetActive(True);
-  if GetPlayer = Rows[Sender.UserValue].Ranger then
+  if LocalPlayer = Rows[Sender.UserValue].Ranger then
   begin
     with GetByName('RewardName') as TLabelGI do
       SetText(
@@ -402,16 +402,16 @@ begin
               LocalizedColorText('FormRating.PlayerName'),
               '<color=255,240,100>',
               '<Name>',
-              GetPlayer.GetName
+              LocalPlayer.GetName
           )
       );
-    if GetPlayer.CountWingmen > 0 then
+    if LocalPlayer.CountWingmen > 0 then
     begin
       Names := '';
       for I := 0 to Galaxy.Rangers.Count - 1 do
       begin
         Ally := TRanger(Galaxy.Rangers[I]);
-        if (GetPlayer <> Ally) and (GetPlayer = Ally.PartnerShip) then
+        if (LocalPlayer <> Ally) and (LocalPlayer = Ally.PartnerShip) then
         begin
           if Names <> WideString('') then
             Names :=
@@ -436,9 +436,9 @@ begin
                 );
         end;
       end;
-      for I := 0 to GetPlayer.PiratePartners.Count - 1 do
+      for I := 0 to LocalPlayer.PiratePartners.Count - 1 do
       begin
-        Pirate := TPirate(GetPlayer.PiratePartners[I]);
+        Pirate := TPirate(LocalPlayer.PiratePartners[I]);
         if Names <> WideString('') then
           Names :=
               Names
@@ -593,7 +593,7 @@ var
 begin
   RewardWindow.SetActive(True);
   Ranger := Rows[Sender.UserValue].Ranger;
-  if GetPlayer = Ranger then
+  if LocalPlayer = Ranger then
   begin
     with GetByName('RewardName') as TLabelGI do
       SetText(
@@ -1225,7 +1225,7 @@ begin
         IntToStr(Ranger.TotalShipKillCount - Ranger.PirateKillCount - Ranger.DominatorKillCount)
     );
     ExtraKills := 0;
-    if GetPlayer = Ranger then
+    if LocalPlayer = Ranger then
     begin
       ExtraKills :=
           (Ranger as TPlayer).HyperspaceKillCount + (Ranger as TPlayer).BlackHoleKillCount;
@@ -1366,13 +1366,13 @@ begin
     Image.LeftButtonDownCallback := RowMouseDown;
     Panel.SetSize(Image.ClientSize);
   end;
-  if (GetPlayer = Ranger)
+  if (LocalPlayer = Ranger)
       or Ranger.IsInPrison
       or (Ranger.PartnerShip <> nil)
       or (Ranger.CountWingmen > 0) then
   begin
     Image := TImageGI.Create(Panel);
-    if GetPlayer = Ranger then
+    if LocalPlayer = Ranger then
       Image.SetImagePath('GI,Bm.FormRating2.' + GiResourceSuffix + 'Player')
     else if Ranger.IsInPrison then
       Image.SetImagePath('GI,Bm.FormRating2.' + GiResourceSuffix + 'Prison')
@@ -1618,18 +1618,18 @@ end;
 
 procedure TfRating2.SelectMusic;
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     MusicManager.PlayCategory('Base')
-  else if GetPlayer.IsOnPlanet then
+  else if LocalPlayer.IsOnPlanet then
   begin
     if not MusicInPlanetEnabled then
       MusicManager.RequestFadeOut
-    else if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    else if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
     begin
-      if not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+      if not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
         MusicManager.PlayCategory(
             'Nation.'
-                + OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and $7F]
+                + OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and $7F]
                     .InternalName
                 + 'Pirate'
         )
@@ -1638,29 +1638,29 @@ begin
     end
     else
       MusicManager
-          .PlayCategory('Nation.' + OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].InternalName);
+          .PlayCategory('Nation.' + OwnerInfo[LocalPlayer.CurrentPlanet.OwnerId].InternalName);
   end
-  else if GetPlayer.IsDockedToShip then
+  else if LocalPlayer.IsDockedToShip then
   begin
     if not MusicInPlanetEnabled then
       MusicManager.RequestFadeOut
-    else if GetPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
+    else if LocalPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
               + 'Pirate'
       )
     else
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
       );
   end
-  else if GetPlayer.InNormalSpace then
+  else if LocalPlayer.InNormalSpace then
   begin
     if MusicInSpaceEnabled then
     begin
-      if (GetPlayer.GetHull.CapitalShip = 1) and (RandomIntRange(0, 100) < 20) then
+      if (LocalPlayer.GetHull.CapitalShip = 1) and (RandomIntRange(0, 100) < 20) then
       begin
         StarMapScreen.BattleMusicSelected := True;
         MusicManager.PlayCategory('Destroyer');
@@ -1722,10 +1722,10 @@ var
   end;
 begin
   Ranger := Rows[Sender.UserValue].Ranger;
-  if GetPlayer = Ranger then
+  if LocalPlayer = Ranger then
   begin
     RewardWindow.SetActive(True);
-    if GetPlayer = Ranger then
+    if LocalPlayer = Ranger then
     begin
       with GetByName('RewardName') as TLabelGI do
         SetText(
@@ -1753,7 +1753,7 @@ begin
       with GetByName('RewardImage') as TGraphBufGI do
         LoadGiByPathIntoGraphBuf('Bm.FormRating2.' + GiResourceSuffix + 'DutyB', GraphBuf);
     end;
-    if GetPlayer = Ranger then
+    if LocalPlayer = Ranger then
     begin
       Text :=
           '<td='
@@ -1778,7 +1778,7 @@ begin
                   + FormatDominatorKillsHintColumn(3)
                   + '><align=left>'
                   + WrapTextInColor(
-                      IntToStr(GetPlayer.DominatorKillsByType[Ord(DominatorDisplayOrder[I])]),
+                      IntToStr(LocalPlayer.DominatorKillsByType[Ord(DominatorDisplayOrder[I])]),
                       '<color=255,240,100>')
                   + '</align>'
                   + #13#10;

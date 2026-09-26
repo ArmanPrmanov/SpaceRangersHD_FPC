@@ -269,8 +269,8 @@ begin
   if IsVirtualKeyDown(VK_MENU)
       and (PlayerArcadeShip <> nil)
       and (PlayerArcadeShip.Health > 0)
-      and (GetPlayer <> nil)
-      and GetPlayer.IsEquipmentUsable(GetPlayer.GetCargoHook) then
+      and (LocalPlayer <> nil)
+      and LocalPlayer.IsEquipmentUsable(LocalPlayer.GetCargoHook) then
   begin
     NextObj := FirstArcadeObject;
     while NextObj <> nil do
@@ -278,9 +278,9 @@ begin
       Obj := NextObj;
       NextObj := NextObj.Next;
       if (Obj is TabItem) and ((Obj as TabItem).Item <> nil) then
-        if ((Obj as TabItem).Item.Weight <= GetPlayer.CargoFreeSpace)
+        if ((Obj as TabItem).Item.Weight <= LocalPlayer.CargoFreeSpace)
             and (PlayerArcadeShip.DistanceTo(Obj) < CargoPickupDistance) then
-          if GetPlayer.CalculateCargoHookPower(GetPlayer.GetCargoHook)
+          if LocalPlayer.CalculateCargoHookPower(LocalPlayer.GetCargoHook)
               >= (Obj as TabItem).Item.Weight then
           begin
             ArcadeBattleScreen.PickUpItem(Obj as TabItem);

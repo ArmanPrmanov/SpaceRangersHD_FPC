@@ -55,11 +55,11 @@ var
   Gate: PJumpGateEntry;
   Missile: TMissile;
 begin
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
   begin
-    SpaceProcess.RadarCenter := GetPlayer.Position;
-    SpaceProcess.RadarRange := GetPlayer.GetRadarRange;
-    SpaceProcess.ActionRange := GetPlayer.GetRadarRange;
+    SpaceProcess.RadarCenter := LocalPlayer.Position;
+    SpaceProcess.RadarRange := LocalPlayer.GetRadarRange;
+    SpaceProcess.ActionRange := LocalPlayer.GetRadarRange;
     SpaceProcess.ActionColor := CurrentPixelFormat.PackRgbBytes(0, 255, 0);
   end
   else
@@ -74,8 +74,8 @@ begin
   SpaceProcess.OpenSpace(MapPanel, Screen);
   SpaceProcess.Space.MinimapScale := Minimap.ClientSize.X / ComputeMapDiameter;
   SpaceProcess.Space.AlphaShift := 0;
-  if GetPlayer <> nil then
-    if GetPlayer.IsHealthEffectActive(1) then
+  if LocalPlayer <> nil then
+    if LocalPlayer.IsHealthEffectActive(1) then
       SpaceProcess.Space.AlphaShift := 2;
   SpaceProcess.BindMinimap(Minimap);
   Graphic.AttachToSpace(SpaceProcess.Space);
@@ -114,7 +114,7 @@ begin
       if Ship.Graphic is TShip2SE then
       begin
         with TShip2SE(Ship.Graphic) do
-          if (ShipTail = 2) or ((ShipTail = 1) and (GetPlayer = Ship)) then
+          if (ShipTail = 2) or ((ShipTail = 1) and (LocalPlayer = Ship)) then
             SetTailMode(1)
           else
             SetTailMode(0);

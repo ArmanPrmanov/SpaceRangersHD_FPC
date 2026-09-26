@@ -333,7 +333,7 @@ begin
 
     if ObserverMode
         and (Galaxy <> nil)
-        and (GetPlayer <> nil)
+        and (LocalPlayer <> nil)
         and (NextScreen
             in [
                 screenStarMap,

@@ -144,16 +144,16 @@ begin
   end;
   if MusicManager.CategoryOverride = '' then
   begin
-    if GetPlayer = nil then
+    if LocalPlayer = nil then
       MusicManager.PlayCategory('Base')
-    else if GetPlayer.IsOnPlanet then
+    else if LocalPlayer.IsOnPlanet then
     begin
-      if GetPlayer.CurrentPlanet.OwnerId = 7 then
+      if LocalPlayer.CurrentPlanet.OwnerId = 7 then
       begin
-        if not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+        if not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
           MusicManager.PlayCategory(
               'Nation.'
-                  + OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and $7F]
+                  + OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and $7F]
                       .InternalName
                   + 'Pirate'
           )
@@ -162,38 +162,38 @@ begin
       end
       else
         MusicManager
-            .PlayCategory('Nation.' + OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].InternalName);
+            .PlayCategory('Nation.' + OwnerInfo[LocalPlayer.CurrentPlanet.OwnerId].InternalName);
     end
-    else if GetPlayer.IsDockedToShip then
+    else if LocalPlayer.IsDockedToShip then
     begin
-      if GetPlayer.DockedTo.TypeId in [6..13] then
+      if LocalPlayer.DockedTo.TypeId in [6..13] then
       begin
-        Category := GetPlayer.DockedTo.TypeNameOverrideKey;
+        Category := LocalPlayer.DockedTo.TypeNameOverrideKey;
         if (Category <> '') and (MainDataConfig.GetBlock('Music').CountBlocks(Category) > 0) then
-          MusicManager.PlayCategory(GetPlayer.DockedTo.TypeNameOverrideKey)
+          MusicManager.PlayCategory(LocalPlayer.DockedTo.TypeNameOverrideKey)
         else
-          MusicManager.PlayCategory(GetPlayer.DockedTo.GetTypeNameKey);
+          MusicManager.PlayCategory(LocalPlayer.DockedTo.GetTypeNameKey);
       end
       else
       begin
         // Retain the native CurrentPlanet lookup in this non-station docking branch.
-        if GetPlayer.CurrentPlanet.OwnerId = 7 then
+        if LocalPlayer.CurrentPlanet.OwnerId = 7 then
           MusicManager.PlayCategory(
               'Nation.'
-                  + OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and $7F]
+                  + OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and $7F]
                       .InternalName
                   + 'Pirate'
           )
         else
           MusicManager
-              .PlayCategory('Nation.' + OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].InternalName);
+              .PlayCategory('Nation.' + OwnerInfo[LocalPlayer.CurrentPlanet.OwnerId].InternalName);
       end;
     end
-    else if GetPlayer.InNormalSpace then
+    else if LocalPlayer.InNormalSpace then
     begin
       if MusicInSpaceEnabled then
       begin
-        if (GetPlayer.GetHull.CapitalShip = 1) and (RandomIntRange(0, 100) < 20) then
+        if (LocalPlayer.GetHull.CapitalShip = 1) and (RandomIntRange(0, 100) < 20) then
         begin
           StarMapScreen.BattleMusicSelected := True;
           MusicManager.PlayCategory('Destroyer');

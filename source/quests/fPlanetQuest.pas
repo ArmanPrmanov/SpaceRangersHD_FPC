@@ -295,7 +295,7 @@ begin
   DaysElapsed := 0;
   if Quest.FormatVersion <= 1111111124 then
     ApplyLegacyPictureOverrides;
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     CurrentDate := TrimWideString(Galaxy.FormatTurnDate(300))
   else
     CurrentDate := TrimWideString(Galaxy.FormatTurnDate(Galaxy.CurrentTurn));
@@ -303,10 +303,10 @@ begin
   ImportExternalParameters;
   // CHANGE: BUGFIX - Seed the quest's own stream from the simulation stream.
   TextQuestRandomState := QuestRandomSeed;
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     Quest.Start(-1, False)
   else
-    Quest.Start(GetPlayer.Money, True);
+    Quest.Start(LocalPlayer.Money, True);
   FinishChoiceLayout;
 end;
 
@@ -1139,8 +1139,8 @@ begin
     if Galaxy <> nil then
       EvictMainMenuShipCachesWhenAddressSpaceHigh;
     Stage := 1;
-    if GetPlayer <> nil then
-      RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
+    if LocalPlayer <> nil then
+      RunScriptItemsAct(LocalPlayer, satOnEnteringForm, nil, nil, 0);
     Stage := 2;
     if (QuestStyleIndex < 0) or (QuestStyleIndex >= QuestStyleCount) then
       QuestStyleIndex := 0;
@@ -1154,37 +1154,37 @@ begin
     LayoutParameterPanel;
     Stage := 4;
     if (QueuedTextQuests.Count = 0)
-        and (GetPlayer <> nil)
-        and (GetPlayer.CurrentPlanet <> nil)
-        and (GetPlayer.CurrentPlanet.TextQuestId >= 10000)
+        and (LocalPlayer <> nil)
+        and (LocalPlayer.CurrentPlanet <> nil)
+        and (LocalPlayer.CurrentPlanet.TextQuestId >= 10000)
         and ((LanguageDataConfig.GetBlock('PlanetQuest').CountBlocks('PlanetQuestLic') <= 0)
             or (LanguageDataConfig
                     .GetBlock('PlanetQuest')
                     .GetBlock('PlanetQuestLic')
-                    .GetParamOrMarker(IntToStr(GetPlayer.CurrentPlanet.TextQuestId))
-                = PlanetQuestScreen.GetQuestContentHash(GetPlayer.CurrentPlanet.TextQuestId))) then
-      MoneyLimit := (Galaxy.ComputeScaledBigMoney(2) + GetPlayer.Money)
-    else if (GetPlayer <> nil) and (QueuedTextQuests.Count = 0) then
-      MoneyLimit := (GetPlayer.Money + 50000)
+                    .GetParamOrMarker(IntToStr(LocalPlayer.CurrentPlanet.TextQuestId))
+                = PlanetQuestScreen.GetQuestContentHash(LocalPlayer.CurrentPlanet.TextQuestId))) then
+      MoneyLimit := (Galaxy.ComputeScaledBigMoney(2) + LocalPlayer.Money)
+    else if (LocalPlayer <> nil) and (QueuedTextQuests.Count = 0) then
+      MoneyLimit := (LocalPlayer.Money + 50000)
     else
       MoneyLimit := 1000000000;
     Stage := 5;
-    if (GetPlayer <> nil) and (GetPlayer.CurrentPlanet <> nil) and GetPlayer.InPrison then
+    if (LocalPlayer <> nil) and (LocalPlayer.CurrentPlanet <> nil) and LocalPlayer.InPrison then
     begin
       Stage := 6;
       Quest := TTextQuest.Create;
-      if GetPlayer.CurrentPlanet.OwnerId <> Byte(oiPirate) then
+      if LocalPlayer.CurrentPlanet.OwnerId <> Byte(oiPirate) then
         LoadQuestByName('Prison')
       else
         LoadQuestByName('PirateClanPrison');
       Stage := 7;
-      Quest.ToStarText.Text := GetPlayer.CurrentStar.Name;
-      Quest.ToPlanetText.Text := GetPlayer.CurrentPlanet.Name;
+      Quest.ToStarText.Text := LocalPlayer.CurrentStar.Name;
+      Quest.ToPlanetText.Text := LocalPlayer.CurrentPlanet.Name;
       Quest.DateText.Text := '';
       Quest.MoneyText.Text := '';
-      Quest.FromPlanetText.Text := GetPlayer.CurrentPlanet.Name;
-      Quest.FromStarText.Text := GetPlayer.CurrentStar.Name;
-      Quest.RangerText.Text := GetPlayer.Name;
+      Quest.FromPlanetText.Text := LocalPlayer.CurrentPlanet.Name;
+      Quest.FromStarText.Text := LocalPlayer.CurrentStar.Name;
+      Quest.RangerText.Text := LocalPlayer.Name;
       Stage := 8;
       StartLoadedQuest;
       Stage := 9;
@@ -1199,20 +1199,20 @@ begin
       else
         LoadQuestByName(ActiveQueuedTextQuest.Name);
       Stage := 11;
-      if GetPlayer.CurrentStar <> nil then
+      if LocalPlayer.CurrentStar <> nil then
       begin
-        Quest.ToStarText.Text := GetPlayer.CurrentStar.Name;
-        Quest.FromStarText.Text := GetPlayer.CurrentStar.Name;
+        Quest.ToStarText.Text := LocalPlayer.CurrentStar.Name;
+        Quest.FromStarText.Text := LocalPlayer.CurrentStar.Name;
       end
       else
       begin
         Quest.ToStarText.Text := '';
         Quest.FromStarText.Text := '';
       end;
-      if GetPlayer.CurrentPlanet <> nil then
+      if LocalPlayer.CurrentPlanet <> nil then
       begin
-        Quest.ToPlanetText.Text := GetPlayer.CurrentPlanet.Name;
-        Quest.FromPlanetText.Text := GetPlayer.CurrentPlanet.Name;
+        Quest.ToPlanetText.Text := LocalPlayer.CurrentPlanet.Name;
+        Quest.FromPlanetText.Text := LocalPlayer.CurrentPlanet.Name;
       end
       else
       begin
@@ -1221,36 +1221,36 @@ begin
       end;
       Quest.DateText.Text := '';
       Quest.MoneyText.Text := '';
-      Quest.RangerText.Text := GetPlayer.Name;
+      Quest.RangerText.Text := LocalPlayer.Name;
       Stage := 12;
       StartLoadedQuest;
       Stage := 13;
     end
-    else if (GetPlayer <> nil) and not StandaloneQuestMode then
+    else if (LocalPlayer <> nil) and not StandaloneQuestMode then
     begin
       Stage := 14;
       Found := False;
-      if GetPlayer.CurrentPlanet.TextQuestId > -1 then
-        if GetPlayer.Quests.Count > 0 then
-          for I := 0 to GetPlayer.Quests.Count - 1 do
+      if LocalPlayer.CurrentPlanet.TextQuestId > -1 then
+        if LocalPlayer.Quests.Count > 0 then
+          for I := 0 to LocalPlayer.Quests.Count - 1 do
           begin
-            GovernmentQuest := GetPlayer.Quests[I];
+            GovernmentQuest := LocalPlayer.Quests[I];
             if (GovernmentQuest.QuestType = qtPlanetQuest)
                 and (GovernmentQuest.ObjectiveTarget is TPlanet)
-                and ((GovernmentQuest.ObjectiveTarget as TPlanet) = GetPlayer.CurrentPlanet) then
+                and ((GovernmentQuest.ObjectiveTarget as TPlanet) = LocalPlayer.CurrentPlanet) then
             begin
               Stage := 15;
               ActiveGovernmentQuest := GovernmentQuest;
               Quest := TTextQuest.Create;
-              LoadQuestById(GetPlayer.CurrentPlanet.TextQuestId);
+              LoadQuestById(LocalPlayer.CurrentPlanet.TextQuestId);
               Stage := 16;
-              Quest.ToStarText.Text := GetPlayer.CurrentStar.Name;
-              Quest.ToPlanetText.Text := GetPlayer.CurrentPlanet.Name;
+              Quest.ToStarText.Text := LocalPlayer.CurrentStar.Name;
+              Quest.ToPlanetText.Text := LocalPlayer.CurrentPlanet.Name;
               Quest.DateText.Text := Galaxy.FormatTurnDate(GovernmentQuest.DeadlineTurn);
               Quest.MoneyText.Text := IntToStr(GovernmentQuest.RewardMoney);
               Quest.FromPlanetText.Text := GovernmentQuest.Planet.Name;
               Quest.FromStarText.Text := GovernmentQuest.Planet.CurrentStar.Name;
-              Quest.RangerText.Text := GetPlayer.Name;
+              Quest.RangerText.Text := LocalPlayer.Name;
               for J := 1 to Quest.GetParameterCount do
                 if Quest.GetParameter(J).Enabled
                     and (Quest.GetParameter(J).NameText.Text = 'GRewardMoney') then
@@ -1312,8 +1312,8 @@ procedure TfPlanetQuest.OnClose;
 begin
   if Galaxy <> nil then
     aCalc.WaitForTurnCalculationUI;
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnLeavingForm, nil, nil, 0);
   QuestId := -1;
   if PageAnimationTimer <> nil then
   begin
@@ -1328,7 +1328,7 @@ begin
     Quest := nil;
   end;
   // The money cap and the quest timers, in that order.
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
     CloseQuest(MoneyLimit);
   if (RequestedScreenId = screenMainMenu) or (RequestedScreenId = screenLoad) then
     ClearPendingScriptRequests;
@@ -1670,7 +1670,7 @@ begin
                   LocalizedText('Planet.NotCivil.QuestPlay.MsgLoad'),
                   mbgOK or mbgCancel)
               = mbgResultOK then
-            if GetPlayer <> nil then
+            if LocalPlayer <> nil then
             begin
               PendingLoadFileName := SaveManagerScreen.GetAutoSavePath;
               RequestedScreenId := screenGameLoad;
@@ -1698,7 +1698,7 @@ function TfPlanetQuest.ExpandTemplateText(Text: WideString): WideString;
 var
   Expanded, SourceLineBreak, ReplacementLineBreak, IndentedLineBreak: WideString;
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     CurrentDate := TrimWideString(Galaxy.FormatTurnDate(DaysElapsed + 300))
   else
     CurrentDate := TrimWideString(Galaxy.FormatTurnDate(Galaxy.CurrentTurn));
@@ -1764,12 +1764,12 @@ begin
     Expanded := ReplaceAllWideString(Expanded, '<br>', #13#10);
     Expanded := ReplaceAllWideString(Expanded, '<ll>', #13#10' '#13#10);
     // Native quirk: <Player> is expanded into Result, then overwritten below.
-    if GetPlayer <> nil then
+    if LocalPlayer <> nil then
       Result :=
           ReplaceAllWideString(
               Result,
               '<Player>',
-              WrapTextInColor(GetPlayer.Name, GetTextColorTag(QuestStyleIndex))
+              WrapTextInColor(LocalPlayer.Name, GetTextColorTag(QuestStyleIndex))
           );
     Expanded := ReplaceAllWideString(Expanded, '<clr>', GetTextColorTag(QuestStyleIndex));
     Expanded := ReplaceAllWideString(Expanded, '<clrEnd>', '</color>');
@@ -1803,15 +1803,15 @@ procedure TfPlanetQuest.CompleteQuestSuccess(Value: Integer);
 begin
   ClearChoices;
   if ActiveQueuedTextQuest = nil then
-    if GetPlayer <> nil then
+    if LocalPlayer <> nil then
       if CompleteGovernmentQuest(Quest.CompleteOnFinish, Quest.SuccessRelationDelta) then
         (GetByName('QuestPanel') as TPanelGI).SetActive(False);
   if QuestId >= 0 then
     if (ActiveQueuedTextQuest = nil)
-        or (GetPlayer = nil)
-        or not (GetPlayer.PirateRank in [4, 6]) then
+        or (LocalPlayer = nil)
+        or not (LocalPlayer.PirateRank in [4, 6]) then
     begin
-      if GetPlayer <> nil then
+      if LocalPlayer <> nil then
         TryAddAchievementProgress('QUEST', 1);
       LoadQuestScreen.LoadCompletionData;
       LoadQuestScreen.RecordCompletion(QuestId, 0, 1);
@@ -1828,9 +1828,9 @@ end;
 
 procedure TfPlanetQuest.CompleteQuestFailure(Value: Integer);
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     RequestedScreenId := QuestReturnScreenId
-  else if GetPlayer.InPrison then
+  else if LocalPlayer.InPrison then
   begin
     ReleaseFromPrison;
     if not HangarScreen.TryTakeOff then
@@ -1839,7 +1839,7 @@ begin
   else
   begin
     if ActiveQueuedTextQuest = nil then
-      if GetPlayer <> nil then
+      if LocalPlayer <> nil then
         FailGovernmentQuest;
     if (ActiveQueuedTextQuest = nil)
         and SaveManagerScreen.AutoSaveExists
@@ -1865,7 +1865,7 @@ end;
 
 procedure TfPlanetQuest.CompleteQuestDeath(Value: Integer);
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     RequestedScreenId := QuestReturnScreenId
   else
   begin
@@ -1953,13 +1953,13 @@ procedure TfPlanetQuest.ExportMoneyToPlayer;
 var
   I: Integer;
 begin
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
     for I := 1 to Quest.GetParameterCount do
       if Quest.GetParameter(I).Enabled then
         if Quest.GetParameter(I).IsMoney then
         begin
           SetQuestMoney(Quest.GetParameter(I).Value);
-          Quest.GetParameter(I).Value := GetPlayer.Money;
+          Quest.GetParameter(I).Value := LocalPlayer.Money;
           Break;
         end;
 end;
@@ -1968,12 +1968,12 @@ procedure TfPlanetQuest.ImportMoneyFromPlayer;
 var
   I: Integer;
 begin
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
     for I := 1 to Quest.GetParameterCount do
       if Quest.GetParameter(I).Enabled then
         if Quest.GetParameter(I).IsMoney then
         begin
-          Quest.GetParameter(I).Value := GetPlayer.Money;
+          Quest.GetParameter(I).Value := LocalPlayer.Money;
           Break;
         end;
 end;
@@ -2119,7 +2119,7 @@ end;
 
 procedure TTextQuestPlayerInterface.AddSuccessAction;
 begin
-  if (GetPlayer <> nil) and GetPlayer.InPrison then
+  if (LocalPlayer <> nil) and LocalPlayer.InPrison then
     PlanetQuestScreen.AddChoice(
         '  - ' + LocalizedText('Planet.NotCivil.QuestPlay.MsgSuccessPrison'),
         0,
@@ -2150,7 +2150,7 @@ end;
 
 procedure TTextQuestPlayerInterface.AddFailureAction;
 begin
-  if (GetPlayer <> nil) and GetPlayer.InPrison then
+  if (LocalPlayer <> nil) and LocalPlayer.InPrison then
     PlanetQuestScreen.AddChoice(
         '  - ' + LocalizedText('Planet.NotCivil.QuestPlay.MsgFailPrison'),
         0,

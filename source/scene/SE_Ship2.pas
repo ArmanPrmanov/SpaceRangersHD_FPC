@@ -837,7 +837,7 @@ begin
   CurrentProcess := Space.Process as TProcessSE;
   if (PointDistanceSquared(Position, CurrentProcess.RadarCenter) < Sqr(CurrentProcess.RadarRange))
       or ((AlternateImagePath <> '') and (CurrentProcess.RadarRange > 0))
-      or ((GetPlayer <> nil) and (GetPlayer.Graphic = Self)) then
+      or ((LocalPlayer <> nil) and (LocalPlayer.Graphic = Self)) then
     MinimapImage.Draw(Classes.Rect(0, 0, RenderScratchBuffer.Width, RenderScratchBuffer.Height));
 end;
 

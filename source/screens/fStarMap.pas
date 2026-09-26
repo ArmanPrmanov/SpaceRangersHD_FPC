@@ -401,12 +401,12 @@ begin
     StarThumbnailCache.CaseSensitive := True;
   end;
   if not CacheInfoThumbnails
-      or (StarThumbnailSystem <> GetPlayer.CurrentStar)
+      or (StarThumbnailSystem <> LocalPlayer.CurrentStar)
       or (StarThumbnailTurn <> Galaxy.CurrentTurn)
       or (StarThumbnailCache.Count >= 128) then
   begin
     ClearStarThumbnails;
-    StarThumbnailSystem := GetPlayer.CurrentStar;
+    StarThumbnailSystem := LocalPlayer.CurrentStar;
     StarThumbnailTurn := Galaxy.CurrentTurn;
   end;
   Path := '';
@@ -533,7 +533,7 @@ begin
   ShowObjectInfo(nil);
   if LocalHuman.TalkShip <> nil then
     SetMapCenter(SubtractPoints(TruncatePointF(Position), Offset))
-  else if (LocalHuman.TalkPlanet <> nil) and (LocalHuman.TalkPlanet.CurrentStar = GetPlayer.CurrentStar) then
+  else if (LocalHuman.TalkPlanet <> nil) and (LocalHuman.TalkPlanet.CurrentStar = LocalPlayer.CurrentStar) then
     SetMapCenter(SubtractPoints(TruncatePointF(Position), Offset));
 end;
 procedure TfStarMap.InitializeLayout;
@@ -767,7 +767,7 @@ var
   Statistics: TPlanetBattleStatistics;
   BattleIndex, BattleMode: Integer;
 begin
-  if (GetPlayer <> nil) and (Byte(GetPlayer.RuinsMode) > 0) then
+  if (LocalPlayer <> nil) and (Byte(LocalPlayer.RuinsMode) > 0) then
     LeaveBridge;
   if DispatchPendingScriptRequests then
     Exit;
@@ -783,8 +783,8 @@ begin
   begin
     MapIndex := FindRobotMapById(PlanetBattleMapId);
     StartText := RobotMapDefinitions[MapIndex].RobotsStart;
-    ReplaceTextToken(StartText, '<Star>', GetPlayer.CurrentStar.Name, '<color=255,240,100>');
-    ReplaceTextToken(StartText, '<Player>', GetPlayer.Name, '<color=255,240,100>');
+    ReplaceTextToken(StartText, '<Star>', LocalPlayer.CurrentStar.Name, '<color=255,240,100>');
+    ReplaceTextToken(StartText, '<Player>', LocalPlayer.Name, '<color=255,240,100>');
     ExpandLocalizedTextMarkupAndPrefixLines(StartText);
     StartText := WideString(IntToStr(1)) + StartText;
     StartText :=
@@ -792,12 +792,12 @@ begin
             + StartText;
     StartText := WideString(IntToStr(6)) + StartText;
     WinText := RobotMapDefinitions[MapIndex].RobotsWin;
-    ReplaceTextToken(WinText, '<Star>', GetPlayer.CurrentStar.Name, '<color=255,240,100>');
-    ReplaceTextToken(WinText, '<Player>', GetPlayer.Name, '<color=255,240,100>');
+    ReplaceTextToken(WinText, '<Star>', LocalPlayer.CurrentStar.Name, '<color=255,240,100>');
+    ReplaceTextToken(WinText, '<Player>', LocalPlayer.Name, '<color=255,240,100>');
     ExpandLocalizedTextMarkupAndPrefixLines(WinText);
     LossText := RobotMapDefinitions[MapIndex].RobotsLoss;
-    ReplaceTextToken(LossText, '<Star>', GetPlayer.CurrentStar.Name, '<color=255,240,100>');
-    ReplaceTextToken(LossText, '<Player>', GetPlayer.Name, '<color=255,240,100>');
+    ReplaceTextToken(LossText, '<Star>', LocalPlayer.CurrentStar.Name, '<color=255,240,100>');
+    ReplaceTextToken(LossText, '<Player>', LocalPlayer.Name, '<color=255,240,100>');
     ExpandLocalizedTextMarkupAndPrefixLines(LossText);
     if TerronShip <> nil then
       TerronName := TerronShip.GetFullName(' ');
@@ -871,9 +871,9 @@ begin
     CalculatePlayerStarTurnAndWait;
     if ExitScreenLoop then
       Exit;
-    if GetPlayer <> nil then
+    if LocalPlayer <> nil then
       CalculateGalaxyTurnAndWait;
-    if GetPlayer = nil then
+    if LocalPlayer = nil then
     begin
       RequestedScreenId := screenGameEnd;
       RequestClose(1);
@@ -907,9 +907,9 @@ begin
     CalculatePlayerStarTurnAndWait;
     if ExitScreenLoop then
       Exit;
-    if GetPlayer <> nil then
+    if LocalPlayer <> nil then
       CalculateGalaxyTurnAndWait;
-    if GetPlayer = nil then
+    if LocalPlayer = nil then
     begin
       RequestedScreenId := screenGameEnd;
       RequestClose(1);
@@ -976,7 +976,7 @@ begin
       StartOrderMode;
     end;
     ResumeMode := smrNormal;
-    GetByName('MapPanelA').SetActive((GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(1));
+    GetByName('MapPanelA').SetActive((LocalPlayer <> nil) and LocalPlayer.IsHealthEffectActive(1));
     if ShipScreen.FlagD4 then
     begin
       SetCursorActive(False);
@@ -1007,8 +1007,8 @@ begin
       ShipToInspect := nil;
       HideLargeHelp;
       RefreshPlayerStarSteps;
-      if GetPlayer <> nil then
-        RunScriptItemsAct(GetPlayer, $18, nil, nil, 0);
+      if LocalPlayer <> nil then
+        RunScriptItemsAct(LocalPlayer, $18, nil, nil, 0);
       aCalc.WaitForTurnCalculationUI;
       if EndTurnAfterOpen then
       begin
@@ -1094,8 +1094,8 @@ begin
     Stage := 15;
     WaitForTurnCalculation;
     Stage := 16;
-    if GetPlayer <> nil then
-      RunScriptItemsAct(GetPlayer, $19, nil, nil, 0);
+    if LocalPlayer <> nil then
+      RunScriptItemsAct(LocalPlayer, $19, nil, nil, 0);
     CacheLoadLoggingEnabled := False;
     Stage := 17;
     if AuxRenderBuffer <> nil then
@@ -1132,9 +1132,9 @@ begin
       if Galaxy.Holes[Index] = PendingHoleRefresh then
       begin
         with PendingHoleRefresh do
-          if (GetPlayer.CurrentStar = Star1) or (GetPlayer.CurrentStar = Star2) then
+          if (LocalPlayer.CurrentStar = Star1) or (LocalPlayer.CurrentStar = Star2) then
           begin
-            if GetPlayer.CurrentStar = Star1 then
+            if LocalPlayer.CurrentStar = Star1 then
               Graphic.SetPosition(Position1)
             else
               Graphic.SetPosition(Position2);
@@ -1248,7 +1248,7 @@ begin
       SpaceImage.AddImage(SelectSpaceImageTemplate(Kind), X, Y, Depth);
       Seed := StepRandomSeed(Seed);
     end;
-    if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(2) then
+    if (LocalPlayer <> nil) and LocalPlayer.IsHealthEffectActive(2) then
     begin
       Attempts := 0;
       repeat
@@ -1372,7 +1372,7 @@ begin
         if (Session.TurnCalculationThread.IdleEvent = 0) or (WaitResult = WAIT_OBJECT_0) then
         begin
           RebuildPartnerButtons;
-          if (GetPlayer <> nil) and not GetPlayer.InHyperspace then
+          if (LocalPlayer <> nil) and not LocalPlayer.InHyperspace then
             QueueGalaxyTurnCalculation;
           StartTurnFilm;
         end
@@ -1656,7 +1656,7 @@ var
   SavedSpeed, SavedDirection: Double;
   SavedCommitted: Boolean;
 begin
-  if (Ship = GetPlayer) and (PlayerPathTimer <> nil) then
+  if (Ship = LocalPlayer) and (PlayerPathTimer <> nil) then
   begin
     CancelCallbackTimer(PlayerPathTimer);
     PlayerPathTimer := nil;
@@ -1667,7 +1667,7 @@ begin
   SavedPath := nil;
   LandingTurns := -1;
   if not ShipPathNeedsPreparing(Ship) then
-  else if Ship = GetPlayer then
+  else if Ship = LocalPlayer then
   begin
     aCalc.WaitForTurnCalculationUI;
     // The next day follows the path built here.
@@ -1697,7 +1697,7 @@ begin
   try
     if Ship.MovementPath.ActiveHead <> nil then
     begin
-      if Ship = GetPlayer then
+      if Ship = LocalPlayer then
         PathImages := GetByName('PlayerPath') as TMultiImageGI
       else
         PathImages := GetByName('ShipPath') as TMultiImageGI;
@@ -1722,7 +1722,7 @@ begin
         begin
           if PointDistanceSquared(Point, Cursor.Position) > 225 then
           begin
-            if (Point.X <> 1e10) and (Ship = GetPlayer) then
+            if (Point.X <> 1e10) and (Ship = LocalPlayer) then
               PathLength := PathLength + PointDistance(Point, Cursor.Position);
             Point := Cursor.Position;
             if Cursor <> Ship.MovementPath.ActiveTail then
@@ -1753,7 +1753,7 @@ begin
         Node := LastNode.Next;
       end;
       if (Ship.Order = soLand)
-          and not ((Ship = GetPlayer) and (LocalHuman.PendingPlayerFollowTarget <> nil)) then
+          and not ((Ship = LocalPlayer) and (LocalHuman.PendingPlayerFollowTarget <> nil)) then
       begin
         if Ship.OrderTarget is TShip then
           EndPosition :=
@@ -1769,7 +1769,7 @@ begin
       EndImage := TgaiGI.Create(Owner);
       if not DelayEndImage then
       begin
-        if (LocalHuman.PendingPlayerFollowTarget <> nil) and (Ship = GetPlayer) then
+        if (LocalHuman.PendingPlayerFollowTarget <> nil) and (Ship = LocalPlayer) then
           EndImage.SetImagePath('Bm.PI.PathEndAutoBattle')
         else if Ship.Order = soFollowShip then
         begin
@@ -1793,7 +1793,7 @@ begin
       end
       else
       begin
-        if (LocalHuman.PendingPlayerFollowTarget <> nil) and (Ship = GetPlayer) then
+        if (LocalHuman.PendingPlayerFollowTarget <> nil) and (Ship = LocalPlayer) then
         begin
           EndImage.SetImagePath(InitialImagePath);
           EndImage.HelpText := 'Bm.PI.PathEndAutoBattle';
@@ -1831,7 +1831,7 @@ begin
       end;
       EndImage.SequenceIndex := 0;
       EndImage.UpdateAutoGeometry;
-      if Ship = GetPlayer then
+      if Ship = LocalPlayer then
         EndImage.SetDepth(UnitPathEndDepth)
       else
         EndImage.SetDepth(ShipPathEndDepth);
@@ -1842,7 +1842,7 @@ begin
       EndImage.SetSize(ImageSize);
       EndImage.RestartPlayback;
       LabelGI := TLabelGI.Create(Owner);
-      if Ship = GetPlayer then
+      if Ship = LocalPlayer then
         LabelGI.SetDepth(UnitPathEndDepth)
       else
         LabelGI.SetDepth(ShipPathEndDepth);
@@ -1852,7 +1852,7 @@ begin
       LabelGI.SetTextAlignY(tayCenterEx);
       if LandingTurns < 0 then
       begin
-        if ViewPathLength and (Ship = GetPlayer) and (Ship.Order = soMove) then
+        if ViewPathLength and (Ship = LocalPlayer) and (Ship.Order = soMove) then
           LabelGI.SetText(
               IntToStr(Ship.GetMovementPathTurnCount) + ' (' + IntToStr(Round(PathLength)) + ')'
           )
@@ -1863,7 +1863,7 @@ begin
         LabelGI.SetText(IntToStr(LandingTurns));
       LabelGI.SetPositionModeW(True);
       LabelGI.SetPosition(AddPoints(EndPosition, Classes.Point(20, -32)));
-      if (Ship <> GetPlayer) or (GetPlayer = CursorObject) then
+      if (Ship <> LocalPlayer) or (LocalPlayer = CursorObject) then
       begin
         Count := Ship.MovementPath.NodeCount;
         Positions := AllocEC(Count * SizeOf(TPointF));
@@ -2036,7 +2036,7 @@ var
   Portrait: WideString;
 begin
   ClearPartnerButtons;
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
   begin
     PlacedCount := 0;
     PartnerCount := 0;
@@ -2046,7 +2046,7 @@ begin
       for ShipIndex := 0 to Star.Ships.Count - 1 do
       begin
         Ship := TShip(Star.Ships[ShipIndex]);
-        if Ship.PartnerShip = GetPlayer then
+        if Ship.PartnerShip = LocalPlayer then
           Inc(PartnerCount);
       end;
     end;
@@ -2056,7 +2056,7 @@ begin
       for ShipIndex := 0 to Star.Ships.Count - 1 do
       begin
         Ship := TShip(Star.Ships[ShipIndex]);
-        if Ship.PartnerShip = GetPlayer then
+        if Ship.PartnerShip = LocalPlayer then
         begin
           with TGraphButtonGI.Create(SecondaryPartnerPanel) do
           begin
@@ -2126,7 +2126,7 @@ begin
             RightButtonDownCallback := PartnerRightButtonDown;
             MouseEnterCallback := PartnerMouseEnter;
             MouseLeaveCallback := PartnerMouseLeave;
-            SetDisabled(Ship.InHyperspace or (Ship.CurrentStar <> GetPlayer.CurrentStar));
+            SetDisabled(Ship.InHyperspace or (Ship.CurrentStar <> LocalPlayer.CurrentStar));
             HelpCallback := MainPanel.ShowControlHelp;
             HelpText := Ship.GetFullName(' ');
             Inc(PlacedCount);
@@ -2174,7 +2174,7 @@ begin
     if Instance = nil then
       Exit;
     Ship := Instance as TShip;
-    if (GetPlayer.CurrentStar <> Ship.CurrentStar) or Ship.InHyperspace then
+    if (LocalPlayer.CurrentStar <> Ship.CurrentStar) or Ship.InHyperspace then
       Exit;
     if Ship.InNormalSpace then
       SetMapCenterManually(TruncatePointF(Ship.Position))
@@ -2200,8 +2200,8 @@ begin
     if Obj <> nil then
     begin
       Ship := Obj as TShip;
-      if (GetPlayer.CurrentStar = Ship.CurrentStar) and Ship.InNormalSpace then
-        if PointDistance(GetPlayer.Position, Ship.Position) <= GetPlayer.GetRadarRange then
+      if (LocalPlayer.CurrentStar = Ship.CurrentStar) and Ship.InNormalSpace then
+        if PointDistance(LocalPlayer.Position, Ship.Position) <= LocalPlayer.GetRadarRange then
         begin
           // CHANGE: ENHANCEMENT - The conversation starts as a command (aTalkActions), after
           // waiting for the turn job rather than before.
@@ -2629,7 +2629,7 @@ begin
   PrepareTalkDisplay;
   TalkReturnScreenId := FormToId(Self);
   RequestedScreenId := screenTalk;
-  if GetPlayer <> LocalHuman.TalkShip then
+  if LocalPlayer <> LocalHuman.TalkShip then
     SoundManager.PlaySound('Sound.Talk');
   ScannerSelectionActive := False;
   TalkSelectionActive := False;
@@ -2736,14 +2736,14 @@ begin
       HideLargeHelp;
       ShowObjectInfo(nil);
       ClearPathOverlay(True);
-      BuildShipPathOverlay(GetPlayer, False, '');
+      BuildShipPathOverlay(LocalPlayer, False, '');
       SetCursorActive(False);
       Present;
       CaptureScreenBackground(True, 0);
       SetCursorActive(True);
       ShipScreen.ShipToInspect := ShipToInspect;
       if ShipToInspect = nil then
-        LocalHuman.PlayerHoldShip := GetPlayer;
+        LocalHuman.PlayerHoldShip := LocalPlayer;
       ShipScreen.PlayTransitionSounds := True;
       ShipReturnScreenId := FormToId(Self);
       RequestedScreenId := screenShip;
@@ -2804,7 +2804,7 @@ begin
   MainPanel.RebuildMessageButtons(False);
   Mode := smmOrders;
   aCalc.WaitForTurnCalculationUI;
-  BuildShipPathOverlay(GetPlayer, False, '');
+  BuildShipPathOverlay(LocalPlayer, False, '');
   RebuildPartnerButtons;
   MainPanel.SetDateRange(Galaxy.CurrentTurn, Galaxy.CurrentTurn);
   MainPanel.RefreshDate;
@@ -2842,10 +2842,10 @@ begin
   aCalc.WaitForTurnCalculationUI;
   UpdateTerronTransformation;
   aCalc.WaitForTurnCalculationUI;
-  TalkButton.SetDisabled(not GetPlayer.IsEquipmentUsable(GetPlayer.GetRadar));
+  TalkButton.SetDisabled(not LocalPlayer.IsEquipmentUsable(LocalPlayer.GetRadar));
   ScannerButton.SetDisabled(
-      (not GetPlayer.IsEquipmentUsable(GetPlayer.GetRadar)
-              or not GetPlayer.IsEquipmentUsable(GetPlayer.GetScanner))
+      (not LocalPlayer.IsEquipmentUsable(LocalPlayer.GetRadar)
+              or not LocalPlayer.IsEquipmentUsable(LocalPlayer.GetScanner))
           and (Galaxy.UltraScanModEnabled = 0)
   );
   if CenterShipButton.IsHovered then
@@ -3095,7 +3095,7 @@ begin
       else
         TargetPosition := THole(CursorObject).Position2;
     end;
-    if PointDistanceSquared(GetPlayer.Position, TargetPosition)
+    if PointDistanceSquared(LocalPlayer.Position, TargetPosition)
         > CustomSelectionRadius * CustomSelectionRadius then
       ShowLargeHelp(CustomSelectionOutOfRangeText)
     else
@@ -3116,17 +3116,17 @@ begin
   if not (TalkSelectionActive
       and (CursorObject is TStar)
       and (TerronShip <> nil)
-      and (GetPlayer.CurrentStar = TerronShip.CurrentStar)
+      and (LocalPlayer.CurrentStar = TerronShip.CurrentStar)
       and (Galaxy.TerronToStarTurn >= $40000000)) then
   begin
     if ((ScannerSelectionActive or TalkSelectionActive) and not (CursorObject is TShip))
         or ((CursorObject is TShip)
             and ((ScannerSelectionActive
-                    and ((CursorObject as TShip).NoScan or GetPlayer.ScanLocked))
+                    and ((CursorObject as TShip).NoScan or LocalPlayer.ScanLocked))
                 or (TalkSelectionActive
-                    and ((CursorObject as TShip).NoTalk or GetPlayer.TalkLocked))
+                    and ((CursorObject as TShip).NoTalk or LocalPlayer.TalkLocked))
                 or ((HadWeapons or InterceptorSelectionActive)
-                    and not GetPlayer.CanSelectShipTarget(CursorObject as TShip)))) then
+                    and not LocalPlayer.CanSelectShipTarget(CursorObject as TShip)))) then
     begin
       if ScannerSelectionActive then
         ShowLargeHelp(LookupLocalizedTextByKey('Help.ScanImpossible'))
@@ -3142,7 +3142,7 @@ begin
       Exit;
     end;
   end;
-  if (GetPlayer.CalculateSpeed <= 0)
+  if (LocalPlayer.CalculateSpeed <= 0)
       and not HadWeapons
       and not ScannerSelectionActive
       and not TalkSelectionActive
@@ -3164,17 +3164,17 @@ begin
     else if CursorObject is TRuins then
     begin
       if HadWeapons or InterceptorSelectionActive then
-        if not GetPlayer.CanSelectShipTarget(CursorObject as TRuins) then
+        if not LocalPlayer.CanSelectShipTarget(CursorObject as TRuins) then
           CursorObject := nil;
       if not HadWeapons and not InterceptorSelectionActive then
-        if not (CursorObject as TRuins).CheckDockingPermission(GetPlayer, Response) then
+        if not (CursorObject as TRuins).CheckDockingPermission(LocalPlayer, Response) then
         begin
           ShowLargeHelp(Response);
           CursorObject := nil;
         end;
     end
     else if CursorObject is THole then
-      if GetPlayer.NoJump or ((CursorObject as THole).ArcadeMapName = 'NoEntry') then
+      if LocalPlayer.NoJump or ((CursorObject as THole).ArcadeMapName = 'NoEntry') then
         CursorObject := nil;
   end;
   if CursorObject = nil then
@@ -3182,9 +3182,9 @@ begin
     ClearPathOverlay(True);
     aCalc.WaitForTurnCalculationUI;
     OrderMoveTo(Destination, mfClearPending or mfCorrectEnd);
-    BuildShipPathOverlay(GetPlayer, False, '');
+    BuildShipPathOverlay(LocalPlayer, False, '');
     if InterceptorSelectionActive then
-      if GetPlayer.GetHull.InterceptorTarget <> nil then
+      if LocalPlayer.GetHull.InterceptorTarget <> nil then
       begin
         SetInterceptorTarget(nil);
         RebuildTargetMarkers;
@@ -3197,9 +3197,9 @@ begin
     ClearPathOverlay(True);
     aCalc.WaitForTurnCalculationUI;
     SetPendingFollowTarget(nil);
-    if not (((GetPlayer.Order = soLand) and (GetPlayer.OrderTarget = Location))
+    if not (((LocalPlayer.Order = soLand) and (LocalPlayer.OrderTarget = Location))
         or ((CursorObject as TPlanet).OwnerId = Byte(oiDominator))
-        or ((GetPlayer.CurrentStar.Status.CustomFaction <> '')
+        or ((LocalPlayer.CurrentStar.Status.CustomFaction <> '')
             and ((CursorObject as TPlanet).OwnerId <> Byte(oiUninhabited)))) then
     begin
       OrderLandAt(Location, SubtractPointsF(Destination, TPlanet(Location).GetPosition));
@@ -3210,7 +3210,7 @@ begin
       OrderMoveTo(Destination, 0);
     end;
     aCalc.WaitForTurnCalculationUI;
-    BuildShipPathOverlay(GetPlayer, False, '');
+    BuildShipPathOverlay(LocalPlayer, False, '');
   end
   else if CursorObject is THole then
   begin
@@ -3218,7 +3218,7 @@ begin
     ClearPathOverlay(True);
     aCalc.WaitForTurnCalculationUI;
     SetPendingFollowTarget(nil);
-    if not ((GetPlayer.Order = soJumpHole) and (GetPlayer.OrderTarget = Hole)) then
+    if not ((LocalPlayer.Order = soJumpHole) and (LocalPlayer.OrderTarget = Hole)) then
     begin
       OrderJumpThroughHole(Hole, Destination);
     end
@@ -3227,7 +3227,7 @@ begin
       OrderMoveTo(Destination, 0);
     end;
     aCalc.WaitForTurnCalculationUI;
-    BuildShipPathOverlay(GetPlayer, False, '');
+    BuildShipPathOverlay(LocalPlayer, False, '');
   end
   else if (CursorObject is TRuins)
       or ((TerronShip = CursorObject)
@@ -3238,16 +3238,16 @@ begin
     ClearPathOverlay(True);
     aCalc.WaitForTurnCalculationUI;
     SetPendingFollowTarget(nil);
-    if HadWeapons and (GetPlayer <> CursorObject) then
+    if HadWeapons and (LocalPlayer <> CursorObject) then
     begin
       Mode := 0;
       aCalc.WaitForTurnCalculationUI;
       for Index := 0 to 4 do
         if SelectedWeapons[Index] then
         begin
-          Weapon := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
-          if PointDistance(GetPlayer.Position, (CursorObject as TShip).Position)
-              <= GetPlayer.GetWeaponActionRange(Weapon) then
+          Weapon := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
+          if PointDistance(LocalPlayer.Position, (CursorObject as TShip).Position)
+              <= LocalPlayer.GetWeaponActionRange(Weapon) then
           begin
             SelectedWeapons[Index] := False;
             AddWeaponSlot(TargetSlots, Index);
@@ -3268,21 +3268,21 @@ begin
         ShowLargeHelp(LookupLocalizedTextByKey('Help.ShotOutRange'));
       RebuildTargetMarkers;
     end
-    else if InterceptorSelectionActive and (GetPlayer <> CursorObject) then
+    else if InterceptorSelectionActive and (LocalPlayer <> CursorObject) then
     begin
-      if (PointDistance(GetPlayer.Position, (CursorObject as TShip).Position) <= 1000)
+      if (PointDistance(LocalPlayer.Position, (CursorObject as TShip).Position) <= 1000)
           and ((CursorObject as TRuins).InterceptorPassesRemaining = 0) then
       begin
         SetInterceptorTarget(CursorObject as TRuins);
         ShowLargeHelp(LookupLocalizedTextByKey('Help.InterceptorsSet'));
       end
-      else if PointDistance(GetPlayer.Position, (CursorObject as TShip).Position) > 1000 then
+      else if PointDistance(LocalPlayer.Position, (CursorObject as TShip).Position) > 1000 then
         ShowLargeHelp(LookupLocalizedTextByKey('Help.InterceptorsOutRange'));
       aCalc.WaitForTurnCalculationUI;
       RebuildTargetMarkers;
     end
-    else if not (((GetPlayer.Order = soLand) and (GetPlayer.OrderTarget = Ship))
-        or ((Byte(Ship.GetRelationLevelToShip(GetPlayer)) <= 0)
+    else if not (((LocalPlayer.Order = soLand) and (LocalPlayer.OrderTarget = Ship))
+        or ((Byte(Ship.GetRelationLevelToShip(LocalPlayer)) <= 0)
             and ((Ship <> TerronShip) or (Galaxy.TerronLandingLockTurn <= 0)))) then
     begin
       OrderLandAt(Ship, SubtractPointsF(Destination, Ship.Position));
@@ -3293,21 +3293,21 @@ begin
       OrderMoveTo(Destination, 0);
     end;
     aCalc.WaitForTurnCalculationUI;
-    BuildShipPathOverlay(GetPlayer, False, '');
+    BuildShipPathOverlay(LocalPlayer, False, '');
   end
   else if CursorObject is TShip then
   begin
     Ship := CursorObject as TShip;
     if ScannerSelectionActive then
     begin
-      if (PointDistance(GetPlayer.Position, Ship.Position) <= GetPlayer.GetRadarRange)
-          and (GetPlayer <> CursorObject)
-          and GetPlayer.CanScanShip(Ship)
+      if (PointDistance(LocalPlayer.Position, Ship.Position) <= LocalPlayer.GetRadarRange)
+          and (LocalPlayer <> CursorObject)
+          and LocalPlayer.CanScanShip(Ship)
           and ((Galaxy.UltraScanModEnabled <> 0)
-              or GetPlayer.CanResolveObjectWithScanner(Ship)
+              or LocalPlayer.CanResolveObjectWithScanner(Ship)
               or (Ship.TypeId = stTranclucator)) then
       begin
-        if (Ship is TTranclucator) and ((Ship as TTranclucator).OwnerShip = GetPlayer) then
+        if (Ship is TTranclucator) and ((Ship as TTranclucator).OwnerShip = LocalPlayer) then
         begin
           ShipToInspect := Ship;
           ShipClicked(nil);
@@ -3331,20 +3331,20 @@ begin
           RequestClose(1);
         end;
       end
-      else if GetPlayer = CursorObject then
+      else if LocalPlayer = CursorObject then
       begin
         ScanUnresolved := False;
-        ShipToInspect := GetPlayer;
+        ShipToInspect := LocalPlayer;
         ShipClicked(nil);
       end
-      else if PointDistance(GetPlayer.Position, (CursorObject as TShip).Position)
-          > GetPlayer.GetRadarRange then
+      else if PointDistance(LocalPlayer.Position, (CursorObject as TShip).Position)
+          > LocalPlayer.GetRadarRange then
       begin
         ScanUnresolved := False;
         ShowLargeHelp(LookupLocalizedTextByKey('Help.ScanOutRange'));
       end
-      else if (GetPlayer <> CursorObject) and not (CursorObject is TRuins) then
-        if not GetPlayer.CanResolveObjectWithScanner(CursorObject)
+      else if (LocalPlayer <> CursorObject) and not (CursorObject is TRuins) then
+        if not LocalPlayer.CanResolveObjectWithScanner(CursorObject)
             and ((CursorObject as TShip).TypeId <> stTranclucator) then
         begin
           ScanUnresolved := False;
@@ -3353,9 +3353,9 @@ begin
     end
     else if TalkSelectionActive then
     begin
-      if (PointDistance(GetPlayer.Position, (CursorObject as TShip).Position)
-              <= GetPlayer.GetRadarRange)
-          and (GetPlayer <> CursorObject)
+      if (PointDistance(LocalPlayer.Position, (CursorObject as TShip).Position)
+              <= LocalPlayer.GetRadarRange)
+          and (LocalPlayer <> CursorObject)
           and not ((CursorObject is TKling)
               and (CursorObject as TKling).IsProgramActive(prgDisconnection)) then
       begin
@@ -3369,38 +3369,38 @@ begin
         ClearPathOverlay(True);
         BuildPlayerPath;
         aCalc.WaitForTurnCalculationUI;
-        BuildShipPathOverlay(GetPlayer, False, '');
+        BuildShipPathOverlay(LocalPlayer, False, '');
       end
-      else if PointDistance(GetPlayer.Position, (CursorObject as TShip).Position)
-          > GetPlayer.GetRadarRange then
+      else if PointDistance(LocalPlayer.Position, (CursorObject as TShip).Position)
+          > LocalPlayer.GetRadarRange then
       begin
         TalkUnresolved := False;
         ShowLargeHelp(LookupLocalizedTextByKey('Help.TalkOutRange'));
       end;
     end
-    else if InterceptorSelectionActive and (GetPlayer <> CursorObject) then
+    else if InterceptorSelectionActive and (LocalPlayer <> CursorObject) then
     begin
-      if (PointDistance(GetPlayer.Position, (CursorObject as TShip).Position) <= 1000)
+      if (PointDistance(LocalPlayer.Position, (CursorObject as TShip).Position) <= 1000)
           and ((CursorObject as TShip).InterceptorPassesRemaining = 0) then
       begin
         SetInterceptorTarget(CursorObject as TShip);
         ShowLargeHelp(LookupLocalizedTextByKey('Help.InterceptorsSet'));
       end
-      else if PointDistance(GetPlayer.Position, (CursorObject as TShip).Position) > 1000 then
+      else if PointDistance(LocalPlayer.Position, (CursorObject as TShip).Position) > 1000 then
         ShowLargeHelp(LookupLocalizedTextByKey('Help.InterceptorsOutRange'));
       aCalc.WaitForTurnCalculationUI;
       RebuildTargetMarkers;
     end
-    else if HadWeapons and (GetPlayer <> CursorObject) then
+    else if HadWeapons and (LocalPlayer <> CursorObject) then
     begin
       Mode := 0;
       aCalc.WaitForTurnCalculationUI;
       for Index := 0 to 4 do
         if SelectedWeapons[Index] then
         begin
-          Weapon := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
-          if PointDistance(GetPlayer.Position, (CursorObject as TShip).Position)
-              <= GetPlayer.GetWeaponActionRange(Weapon) then
+          Weapon := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
+          if PointDistance(LocalPlayer.Position, (CursorObject as TShip).Position)
+              <= LocalPlayer.GetWeaponActionRange(Weapon) then
           begin
             SelectedWeapons[Index] := False;
             AddWeaponSlot(TargetSlots, Index);
@@ -3421,19 +3421,19 @@ begin
         ShowLargeHelp(LookupLocalizedTextByKey('Help.ShotOutRange'));
       RebuildTargetMarkers;
     end
-    else if ((GetAsyncKeyState(VK_CONTROL) and $8000) = $8000) and (GetPlayer <> CursorObject) then
+    else if ((GetAsyncKeyState(VK_CONTROL) and $8000) = $8000) and (LocalPlayer <> CursorObject) then
     begin
       ClearPathOverlay(True);
       aCalc.WaitForTurnCalculationUI;
-      if GetPlayer.CanSelectShipTarget(CursorObject as TShip) then
+      if LocalPlayer.CanSelectShipTarget(CursorObject as TShip) then
         OrderAutoBattle(CursorObject as TShip)
       else
         OrderAutoBattle(nil);
       aCalc.WaitForTurnCalculationUI;
-      BuildShipPathOverlay(GetPlayer, False, '');
+      BuildShipPathOverlay(LocalPlayer, False, '');
       ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveAuto'));
     end
-    else if GetPlayer = Ship then
+    else if LocalPlayer = Ship then
     begin
       ClearPathOverlay(True);
       aCalc.WaitForTurnCalculationUI;
@@ -3445,9 +3445,9 @@ begin
       Mode := 0;
       if LocalHuman.PendingPlayerFollowTarget = Ship then
         Mode := 1
-      else if (GetPlayer.Order = soFollowShip) and (GetPlayer.OrderTarget = Ship) then
+      else if (LocalPlayer.Order = soFollowShip) and (LocalPlayer.OrderTarget = Ship) then
       begin
-        if Byte(GetPlayer.OrderStateData) = 1 then
+        if Byte(LocalPlayer.OrderStateData) = 1 then
           Mode := 3
         else
           Mode := 2;
@@ -3464,7 +3464,7 @@ begin
             Mode := 0;
           if DefaultOrder = 0 then
           begin
-            if Byte(Ship.GetRelationLevelToShip(GetPlayer)) <= 0 then
+            if Byte(Ship.GetRelationLevelToShip(LocalPlayer)) <= 0 then
               Mode := 1
             else
               Mode := 2;
@@ -3491,7 +3491,7 @@ begin
         end;
         aCalc.WaitForTurnCalculationUI;
         if Mode = 1 then
-          if not GetPlayer.CanSelectShipTarget(CursorObject as TShip) then
+          if not LocalPlayer.CanSelectShipTarget(CursorObject as TShip) then
             Mode := 2;
         if Mode = 1 then
         begin
@@ -3510,9 +3510,9 @@ begin
         end;
         aCalc.WaitForTurnCalculationUI;
         if AnimatePath then
-          BuildShipPathOverlay(GetPlayer, True, InitialImage)
+          BuildShipPathOverlay(LocalPlayer, True, InitialImage)
         else
-          BuildShipPathOverlay(GetPlayer, False, '');
+          BuildShipPathOverlay(LocalPlayer, False, '');
       end;
     end;
   end
@@ -3520,7 +3520,7 @@ begin
   begin
     if TalkSelectionActive then
     begin
-      if PointDistance(GetPlayer.Position, TerronShip.Position) <= GetPlayer.GetRadarRange then
+      if PointDistance(LocalPlayer.Position, TerronShip.Position) <= LocalPlayer.GetRadarRange then
       begin
         // CHANGE: ENHANCEMENT - The conversation starts as a command (aTalkActions), after
         // waiting for the turn job rather than before.
@@ -3536,7 +3536,7 @@ begin
       aCalc.WaitForTurnCalculationUI;
       OrderMoveTo(Destination, 0);
       aCalc.WaitForTurnCalculationUI;
-      BuildShipPathOverlay(GetPlayer, False, '');
+      BuildShipPathOverlay(LocalPlayer, False, '');
     end;
   end
   else if CursorObject is TItem then
@@ -3548,9 +3548,9 @@ begin
       for Index := 0 to 4 do
         if SelectedWeapons[Index] then
         begin
-          Weapon := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
-          if PointDistance(GetPlayer.Position, (CursorObject as TItem).Position)
-              <= GetPlayer.GetWeaponActionRange(Weapon) then
+          Weapon := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
+          if PointDistance(LocalPlayer.Position, (CursorObject as TItem).Position)
+              <= LocalPlayer.GetWeaponActionRange(Weapon) then
           begin
             SelectedWeapons[Index] := False;
             AddWeaponSlot(TargetSlots, Index);
@@ -3571,8 +3571,8 @@ begin
         ShowLargeHelp(LookupLocalizedTextByKey('Help.ShotOutRange'));
       RebuildTargetMarkers;
     end
-    else if CanCargoHookHandleItem(TItem(CursorObject), GetPlayer) then
-      if not GetPlayer.IsRecentlyDroppedItem(TItem(CursorObject)) then
+    else if CanCargoHookHandleItem(TItem(CursorObject), LocalPlayer) then
+      if not LocalPlayer.IsRecentlyDroppedItem(TItem(CursorObject)) then
       begin
         aCalc.WaitForTurnCalculationUI;
         TogglePickupTarget(CursorObject);
@@ -3589,9 +3589,9 @@ begin
       for Index := 0 to 4 do
         if SelectedWeapons[Index] then
         begin
-          Weapon := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
-          if PointDistance(GetPlayer.Position, (CursorObject as TAsteroid).Position)
-              <= GetPlayer.GetWeaponActionRange(Weapon) then
+          Weapon := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
+          if PointDistance(LocalPlayer.Position, (CursorObject as TAsteroid).Position)
+              <= LocalPlayer.GetWeaponActionRange(Weapon) then
           begin
             SelectedWeapons[Index] := False;
             AddWeaponSlot(TargetSlots, Index);
@@ -3622,9 +3622,9 @@ begin
       for Index := 0 to 4 do
         if SelectedWeapons[Index] then
         begin
-          Weapon := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
-          if PointDistance(GetPlayer.Position, (CursorObject as TMissile).Position)
-              <= GetPlayer.GetWeaponActionRange(Weapon) then
+          Weapon := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
+          if PointDistance(LocalPlayer.Position, (CursorObject as TMissile).Position)
+              <= LocalPlayer.GetWeaponActionRange(Weapon) then
           begin
             SelectedWeapons[Index] := False;
             AddWeaponSlot(TargetSlots, Index);
@@ -3682,7 +3682,7 @@ begin
   begin
     Destination := PointToPointF(MapControls.ToLocalPoint(Point));
     if (CursorObject is THole)
-        and not GetPlayer.NoJump
+        and not LocalPlayer.NoJump
         and ((CursorObject as THole).ArcadeMapName <> 'NoEntry') then
     begin
       Hole := CursorObject as THole;
@@ -3693,7 +3693,7 @@ begin
       aCalc.WaitForTurnCalculationUI;
     end
     else if (CursorObject <> nil)
-        and (((CursorObject is TRuins) and (CursorObject as TRuins).CanDock(GetPlayer))
+        and (((CursorObject is TRuins) and (CursorObject as TRuins).CanDock(LocalPlayer))
             or ((CursorObject = TerronShip) and (Galaxy.TerronLandingLockTurn > 0))) then
     begin
       Ship := CursorObject as TShip;
@@ -3705,7 +3705,7 @@ begin
     end
     else if (CursorObject <> nil)
         and (CursorObject is TShip)
-        and (GetPlayer <> CursorObject)
+        and (LocalPlayer <> CursorObject)
         and (RightClickOnShip <> 2) then
     begin
       ClearPathOverlay(True);
@@ -3713,9 +3713,9 @@ begin
       FollowMode := 0;
       if LocalHuman.PendingPlayerFollowTarget = Ship then
         FollowMode := 1
-      else if (GetPlayer.Order = soFollowShip) and (GetPlayer.OrderTarget = Ship) then
+      else if (LocalPlayer.Order = soFollowShip) and (LocalPlayer.OrderTarget = Ship) then
       begin
-        if Byte(GetPlayer.OrderStateData) = 1 then
+        if Byte(LocalPlayer.OrderStateData) = 1 then
           FollowMode := 3
         else
           FollowMode := 2;
@@ -3727,7 +3727,7 @@ begin
           FollowMode := 0;
         if DefaultOrder = 0 then
         begin
-          if Byte(Ship.GetRelationLevelToShip(GetPlayer)) <= 0 then
+          if Byte(Ship.GetRelationLevelToShip(LocalPlayer)) <= 0 then
             FollowMode := 1
           else
             FollowMode := 2;
@@ -3741,7 +3741,7 @@ begin
       end;
       aCalc.WaitForTurnCalculationUI;
       if FollowMode = 1 then
-        if not GetPlayer.CanSelectShipTarget(CursorObject as TShip) then
+        if not LocalPlayer.CanSelectShipTarget(CursorObject as TShip) then
           FollowMode := 2;
       if FollowMode = 1 then
       begin
@@ -3769,7 +3769,7 @@ begin
       aCalc.WaitForTurnCalculationUI;
       SetPendingFollowTarget(nil);
       if ((CursorObject as TPlanet).OwnerId <> Byte(oiDominator))
-          and ((GetPlayer.CurrentStar.Status.CustomFaction = '')
+          and ((LocalPlayer.CurrentStar.Status.CustomFaction = '')
               or ((CursorObject as TPlanet).OwnerId = Byte(oiUninhabited))) then
       begin
         OrderLandAt(Planet, SubtractPointsF(Destination, Planet.GetPosition));
@@ -3782,18 +3782,18 @@ begin
     end
     else if (CursorObject <> nil) and (CursorObject is TItem) then
     begin
-      CameraVector.X := GetPlayer.Position.X - TItem(CursorObject).Position.X;
-      CameraVector.Y := GetPlayer.Position.Y - TItem(CursorObject).Position.Y;
+      CameraVector.X := LocalPlayer.Position.X - TItem(CursorObject).Position.X;
+      CameraVector.Y := LocalPlayer.Position.Y - TItem(CursorObject).Position.Y;
       Scale :=
-          GetPlayer.GetCargoHookRange
+          LocalPlayer.GetCargoHookRange
               / 4
               * (1 / Sqrt(CameraVector.X * CameraVector.X + CameraVector.Y * CameraVector.Y));
       CameraVector.X := Round(TItem(CursorObject).Position.X + Scale * CameraVector.X);
       CameraVector.Y := Round(TItem(CursorObject).Position.Y + Scale * CameraVector.Y);
       aCalc.WaitForTurnCalculationUI;
       OrderMoveTo(CameraVector, mfClearPending or mfNoPath);
-      if CanCargoHookHandleItem(TItem(CursorObject), GetPlayer)
-          and not GetPlayer.IsRecentlyDroppedItem(TItem(CursorObject)) then
+      if CanCargoHookHandleItem(TItem(CursorObject), LocalPlayer)
+          and not LocalPlayer.IsRecentlyDroppedItem(TItem(CursorObject)) then
       begin
         PrioritizePickupTarget(CursorObject);
         RebuildTargetMarkers;
@@ -3805,7 +3805,7 @@ begin
       aCalc.WaitForTurnCalculationUI;
       BuildPlayerPath;
       aCalc.WaitForTurnCalculationUI;
-      BuildShipPathOverlay(GetPlayer, False, '');
+      BuildShipPathOverlay(LocalPlayer, False, '');
       if DeferredEndTurnTimer <> nil then
       begin
         CancelCallbackTimer(DeferredEndTurnTimer);
@@ -3830,13 +3830,13 @@ begin
     for Index := 0 to 4 do
       SelectedWeapons[Index] := False;
     CursorObject := FindObjectAtCursor;
-    if CursorObject = GetPlayer then
+    if CursorObject = LocalPlayer then
     begin
-      ShipToInspect := GetPlayer;
+      ShipToInspect := LocalPlayer;
       ShipClicked(nil);
     end
     else if (CursorObject is TTranclucator)
-        and ((CursorObject as TTranclucator).OwnerShip = GetPlayer) then
+        and ((CursorObject as TTranclucator).OwnerShip = LocalPlayer) then
     begin
       ShipToInspect := CursorObject as TShip;
       ShipClicked(nil);
@@ -3844,21 +3844,21 @@ begin
     else if (CursorObject is TShip) and not (CursorObject is TRuins) then
     begin
       Ship := CursorObject as TShip;
-      if (Ship <> GetPlayer) and not ScannerSelectionActive and not TalkSelectionActive then
+      if (Ship <> LocalPlayer) and not ScannerSelectionActive and not TalkSelectionActive then
       begin
         if (RightClickOnShip = 0)
-            and ((GetPlayer.IsEquipmentUsable(GetPlayer.GetScanner)
-                    and GetPlayer.IsEquipmentUsable(GetPlayer.GetRadar))
+            and ((LocalPlayer.IsEquipmentUsable(LocalPlayer.GetScanner)
+                    and LocalPlayer.IsEquipmentUsable(LocalPlayer.GetRadar))
                 or (Galaxy.UltraScanModEnabled = 1)) then
         begin
-          if (PointDistance(GetPlayer.Position, Ship.Position) <= GetPlayer.GetRadarRange)
-              and (Ship <> GetPlayer)
-              and GetPlayer.CanScanShip(Ship)
+          if (PointDistance(LocalPlayer.Position, Ship.Position) <= LocalPlayer.GetRadarRange)
+              and (Ship <> LocalPlayer)
+              and LocalPlayer.CanScanShip(Ship)
               and ((Galaxy.UltraScanModEnabled <> 0)
-                  or GetPlayer.CanResolveObjectWithScanner(Ship)
+                  or LocalPlayer.CanResolveObjectWithScanner(Ship)
                   or (Ship.TypeId = stTranclucator)) then
           begin
-            if Ship.NoScan or GetPlayer.ScanLocked then
+            if Ship.NoScan or LocalPlayer.ScanLocked then
               ShowLargeHelp(LookupLocalizedTextByKey('Help.ScanImpossible'))
             else
             begin
@@ -3878,31 +3878,31 @@ begin
               RequestClose(1);
             end;
           end
-          else if CursorObject = GetPlayer then
+          else if CursorObject = LocalPlayer then
           begin
             // Kept by the native routine even after the earlier player-object branch.
-            ShipToInspect := GetPlayer;
+            ShipToInspect := LocalPlayer;
             ShipClicked(nil);
           end
           else
           begin
-            if PointDistance(GetPlayer.Position, Ship.Position) > GetPlayer.GetRadarRange then
+            if PointDistance(LocalPlayer.Position, Ship.Position) > LocalPlayer.GetRadarRange then
               ShowLargeHelp(LookupLocalizedTextByKey('Help.ScanOutRange'))
-            else if (CursorObject <> GetPlayer)
+            else if (CursorObject <> LocalPlayer)
                 and not (CursorObject is TRuins)
-                and not GetPlayer.CanResolveObjectWithScanner(CursorObject)
+                and not LocalPlayer.CanResolveObjectWithScanner(CursorObject)
                 and (Ship.TypeId <> stTranclucator) then
               ShowLargeHelp(LookupLocalizedTextByKey('Help.ScanPowerLow'));
           end;
         end
-        else if (RightClickOnShip = 1) and GetPlayer.IsEquipmentUsable(GetPlayer.GetRadar) then
+        else if (RightClickOnShip = 1) and LocalPlayer.IsEquipmentUsable(LocalPlayer.GetRadar) then
         begin
-          if (PointDistance(GetPlayer.Position, Ship.Position) <= GetPlayer.GetRadarRange)
-              and (CursorObject <> GetPlayer)
+          if (PointDistance(LocalPlayer.Position, Ship.Position) <= LocalPlayer.GetRadarRange)
+              and (CursorObject <> LocalPlayer)
               and not ((CursorObject is TKling)
                   and (CursorObject as TKling).IsProgramActive(prgDisconnection)) then
           begin
-            if Ship.NoTalk or GetPlayer.TalkLocked then
+            if Ship.NoTalk or LocalPlayer.TalkLocked then
               ShowLargeHelp(LookupLocalizedTextByKey('Help.TalkImpossible'))
             else
             begin
@@ -3915,11 +3915,11 @@ begin
               ClearPathOverlay(True);
               BuildPlayerPath;
               aCalc.WaitForTurnCalculationUI;
-              BuildShipPathOverlay(GetPlayer, False, '');
+              BuildShipPathOverlay(LocalPlayer, False, '');
               BreakUiMessage;
             end;
           end
-          else if PointDistance(GetPlayer.Position, Ship.Position) > GetPlayer.GetRadarRange then
+          else if PointDistance(LocalPlayer.Position, Ship.Position) > LocalPlayer.GetRadarRange then
             ShowLargeHelp(LookupLocalizedTextByKey('Help.TalkOutRange'));
         end
         else if RightClickOnShip = 2 then
@@ -3928,9 +3928,9 @@ begin
           FollowMode := 0;
           if LocalHuman.PendingPlayerFollowTarget = Ship then
             FollowMode := 1
-          else if (GetPlayer.Order = soFollowShip) and (GetPlayer.OrderTarget = Ship) then
+          else if (LocalPlayer.Order = soFollowShip) and (LocalPlayer.OrderTarget = Ship) then
           begin
-            if (Byte(GetPlayer.OrderStateData) = 1) and GetPlayer.CanSelectShipTarget(Ship) then
+            if (Byte(LocalPlayer.OrderStateData) = 1) and LocalPlayer.CanSelectShipTarget(Ship) then
               FollowMode := 3
             else
               FollowMode := 2;
@@ -3942,7 +3942,7 @@ begin
               FollowMode := 0;
             if DefaultOrder = 0 then
             begin
-              if Byte(Ship.GetRelationLevelToShip(GetPlayer)) <= 0 then
+              if Byte(Ship.GetRelationLevelToShip(LocalPlayer)) <= 0 then
                 FollowMode := 1
               else
                 FollowMode := 2;
@@ -3954,11 +3954,11 @@ begin
             if FollowMode > 3 then
               FollowMode := 1;
           end;
-          if not GetPlayer.CanSelectShipTarget(Ship) and (FollowMode = 3) then
+          if not LocalPlayer.CanSelectShipTarget(Ship) and (FollowMode = 3) then
             FollowMode := 1;
           aCalc.WaitForTurnCalculationUI;
           if FollowMode = 1 then
-            if not GetPlayer.CanSelectShipTarget(CursorObject as TShip) then
+            if not LocalPlayer.CanSelectShipTarget(CursorObject as TShip) then
               FollowMode := 2;
           if FollowMode = 1 then
           begin
@@ -3976,20 +3976,20 @@ begin
             ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveShot'));
           end;
           aCalc.WaitForTurnCalculationUI;
-          BuildShipPathOverlay(GetPlayer, False, '');
+          BuildShipPathOverlay(LocalPlayer, False, '');
         end;
       end;
     end
     else if ((CursorObject is TPlanet)
             and ((CursorObject as TPlanet).OwnerId in [Ord(oiMaloc)..Ord(oiGaal), Ord(oiPirate)])
             and ((CursorObject as TPlanet).CurrentStar.Status.CustomFaction = '')
-            and (PointDistance(GetPlayer.Position, (CursorObject as TPlanet).GetPosition)
-                <= GetPlayer.GetRadarRange))
+            and (PointDistance(LocalPlayer.Position, (CursorObject as TPlanet).GetPosition)
+                <= LocalPlayer.GetRadarRange))
         or ((CursorObject is TRuins)
-            and (CursorObject as TRuins).CanDock(GetPlayer)
+            and (CursorObject as TRuins).CanDock(LocalPlayer)
             and not (CursorObject as TRuins).NoTalk
-            and (PointDistance(GetPlayer.Position, (CursorObject as TRuins).Position)
-                <= GetPlayer.GetRadarRange)) then
+            and (PointDistance(LocalPlayer.Position, (CursorObject as TRuins).Position)
+                <= LocalPlayer.GetRadarRange)) then
     begin
       AddOrUpdatePlayerBubble(
           7,
@@ -4061,8 +4061,8 @@ begin
       ScannerSelectionActive := False;
       InterceptorSelectionActive := False;
       CustomSelectionActive := False;
-      Weapon := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
-      if not GetPlayer.IsEquipmentUsable(Weapon)
+      Weapon := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
+      if not LocalPlayer.IsEquipmentUsable(Weapon)
           or ((Byte(Weapon.GetWeaponInfo.ShotType) in [Ord(wstTorpedo)..Ord(wstRocket)])
               and (Weapon.Ammo <= 0)) then
         SelectedWeapons[Index] := False
@@ -4091,7 +4091,7 @@ begin
     end
     else if Key = Ord('B') then
     begin
-      if (GetPlayer <> nil) and (GetPlayer.GetHull.CapitalShip > 0) then
+      if (LocalPlayer <> nil) and (LocalPlayer.GetHull.CapitalShip > 0) then
       begin
         aCalc.WaitForTurnCalculationUI;
         EnterBridge(0);
@@ -4100,7 +4100,7 @@ begin
     end
     else if Key = Ord('N') then
     begin
-      if (GetPlayer <> nil) and GetPlayer.GetHull.InterceptorsEnabled then
+      if (LocalPlayer <> nil) and LocalPlayer.GetHull.InterceptorsEnabled then
         SelectInterceptorTarget;
     end
     else if (Key = VK_OEM_PLUS) or (Key = VK_ADD) then
@@ -4117,7 +4117,7 @@ begin
       for Index := 0 to 4 do
       begin
         SelectedWeapons[Index] := False;
-        Weapon := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
+        Weapon := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
         if Weapon <> nil then
         begin
           SetWeaponTargets(nil, [Index]);
@@ -4134,7 +4134,7 @@ begin
     begin
       if Galaxy.SpecialSimulationMode = 0 then
       begin
-        ShipToInspect := GetPlayer;
+        ShipToInspect := LocalPlayer;
         ShipClicked(nil);
       end;
     end
@@ -4154,10 +4154,10 @@ begin
     else if (Key = Ord('F')) and (Mode = smmOrders) then
     begin
       CanAfterburn :=
-          (GetPlayer.GetSlotCount(sskAfterburner) > 0)
-              and GetPlayer.IsEquipmentUsable(GetPlayer.GetEngine)
-              and GetPlayer.InNormalSpace;
-      if not GetPlayer.AfterburnerActive and CanAfterburn then
+          (LocalPlayer.GetSlotCount(sskAfterburner) > 0)
+              and LocalPlayer.IsEquipmentUsable(LocalPlayer.GetEngine)
+              and LocalPlayer.InNormalSpace;
+      if not LocalPlayer.AfterburnerActive and CanAfterburn then
       begin
         SoundManager.PlaySound('Sound.ForsageOn');
         ShowLargeHelp(LookupLocalizedTextByKey('Help.ForsageOn'));
@@ -4165,9 +4165,9 @@ begin
         aCalc.WaitForTurnCalculationUI;
         SetAfterburner(True);
         aCalc.WaitForTurnCalculationUI;
-        BuildShipPathOverlay(GetPlayer, False, '');
+        BuildShipPathOverlay(LocalPlayer, False, '');
       end
-      else if GetPlayer.AfterburnerActive then
+      else if LocalPlayer.AfterburnerActive then
       begin
         SoundManager.PlaySound('Sound.ForsageOff');
         ShowLargeHelp(LookupLocalizedTextByKey('Help.ForsageOff'));
@@ -4175,7 +4175,7 @@ begin
         aCalc.WaitForTurnCalculationUI;
         SetAfterburner(False);
         aCalc.WaitForTurnCalculationUI;
-        BuildShipPathOverlay(GetPlayer, False, '');
+        BuildShipPathOverlay(LocalPlayer, False, '');
       end;
     end;
   end;
@@ -4192,8 +4192,8 @@ begin
   aCalc.WaitForTurnCalculationUI;
   for Index := 0 to 4 do
   begin
-    Weapon := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
-    if not GetPlayer.IsEquipmentUsable(Weapon)
+    Weapon := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
+    if not LocalPlayer.IsEquipmentUsable(Weapon)
         or ((Weapon.GetWeaponInfo.ShotType in [wstTorpedo..wstRocket]) and (Weapon.Ammo <= 0)) then
       SelectedWeapons[Index] := False
     else
@@ -4211,8 +4211,8 @@ var
 begin
   for Index := 0 to 4 do
   begin
-    Weapon := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
-    if not GetPlayer.IsEquipmentUsable(Weapon)
+    Weapon := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
+    if not LocalPlayer.IsEquipmentUsable(Weapon)
         or ((Weapon.GetWeaponInfo.ShotType in [wstTorpedo..wstRocket]) and (Weapon.Ammo <= 0)) then
       SelectedWeapons[Index] := False
     else
@@ -4261,8 +4261,8 @@ begin
   begin
     if (Obj <> nil) and (Obj is TShip) then
       RunScriptItemsAct(TShip(Obj), satOnShowingShipInfo, nil, nil, 0);
-    if (Obj <> nil) and (Obj is TStar) and (GetPlayer <> nil) then
-      RunScriptItemsAct(GetPlayer, satOnShowingStarInfo, Obj, nil, 0);
+    if (Obj <> nil) and (Obj is TStar) and (LocalPlayer <> nil) then
+      RunScriptItemsAct(LocalPlayer, satOnShowingStarInfo, Obj, nil, 0);
     if Obj = nil then
     begin
       InfoWindow.SetActive(False);
@@ -4275,20 +4275,20 @@ begin
       ClearPathOverlay(False);
       DisplayedObject := nil;
     end
-    else if (GetPlayer = nil)
+    else if (LocalPlayer = nil)
         or ((Obj is TItem)
-            and (PointDistance(TItem(Obj).Position, GetPlayer.Position) > GetPlayer.GetRadarRange))
+            and (PointDistance(TItem(Obj).Position, LocalPlayer.Position) > LocalPlayer.GetRadarRange))
         or ((Obj is TShip)
-            and ((GetPlayer.CurrentStar <> TShip(Obj).CurrentStar)
+            and ((LocalPlayer.CurrentStar <> TShip(Obj).CurrentStar)
                 or (TShip(Obj).InHyperspace and (Obj <> TerronShip))
-                or (PointDistance(TShip(Obj).Position, GetPlayer.Position)
-                    > GetPlayer.GetRadarRange)))
+                or (PointDistance(TShip(Obj).Position, LocalPlayer.Position)
+                    > LocalPlayer.GetRadarRange)))
         or ((Obj is TAsteroid)
-            and (PointDistance(TAsteroid(Obj).Position, GetPlayer.Position)
-                > GetPlayer.GetRadarRange))
+            and (PointDistance(TAsteroid(Obj).Position, LocalPlayer.Position)
+                > LocalPlayer.GetRadarRange))
         or ((Obj is TMissile)
-            and (PointDistance(TMissile(Obj).Position, GetPlayer.Position)
-                > GetPlayer.GetRadarRange))
+            and (PointDistance(TMissile(Obj).Position, LocalPlayer.Position)
+                > LocalPlayer.GetRadarRange))
         or (Obj is THole)
         or (Obj is TPlanet) then
     begin
@@ -4300,7 +4300,7 @@ begin
       StandardInfoPanel.SetActive(True);
       if Obj is TItem then
       begin
-        if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
+        if (Galaxy <> nil) and not Galaxy.Destroying and (LocalPlayer <> nil) then
         begin
           ItemObject := Obj as TItem;
           RunItemInfoActionCode(ItemObject, satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil);
@@ -4411,7 +4411,7 @@ begin
         (GetByName('InfoStdName') as TLabelGI)
             .SetText(WrapTextInColor((Obj as TShip).GetFullName(' '), InfoNameColorTag));
         if Obj is TShip then
-          if (Obj as TShip).PartnerShip = GetPlayer then
+          if (Obj as TShip).PartnerShip = LocalPlayer then
             (GetByName('InfoStdName') as TLabelGI)
                 .SetText(
                     (GetByName('InfoStdName') as TLabelGI).GetText
@@ -4593,7 +4593,7 @@ begin
               .SetText(PlanetEconomyInfo[Ord((Obj as TPlanet).Economy)].DisplayName);
           (GetByName('InfoPlanetGov') as TLabelGI).SetText((Obj as TPlanet).GetGovernmentName);
           (GetByName('InfoPlanetRel') as TLabelGI)
-              .SetText((Obj as TPlanet).GetRelationLevelTextToShip(GetPlayer));
+              .SetText((Obj as TPlanet).GetRelationLevelTextToShip(LocalPlayer));
           ShipScreen.LayoutObjectInfo(
               PlanetInfoPanel as TWindowGI,
               GetByName('InfoPlanetName') as TLabelGI,
@@ -4666,7 +4666,7 @@ begin
       PlanetInfoPanel.SetActive(False);
       StarInfoWindow.SetActive(False);
       StandardInfoPanel.SetActive(False);
-      if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
+      if (Galaxy <> nil) and not Galaxy.Destroying and (LocalPlayer <> nil) then
       begin
         ItemObject := Obj as TItem;
         RunItemInfoActionCode(ItemObject, satOnShowingItemInfo, nil, LocalHuman.PlayerStar, nil);
@@ -4817,12 +4817,12 @@ begin
       PlanetInfoPanel.SetActive(False);
       StarInfoWindow.SetActive(False);
       StandardInfoPanel.SetActive(False);
-      if GetPlayer <> Obj then
+      if LocalPlayer <> Obj then
       begin
         (GetByName('InfoShipName') as TLabelGI)
             .SetText(WrapTextInColor((Obj as TShip).GetFullName(' '), InfoNameColorTag));
         if Obj is TShip then
-          if (Obj as TShip).PartnerShip = GetPlayer then
+          if (Obj as TShip).PartnerShip = LocalPlayer then
             (GetByName('InfoShipName') as TLabelGI)
                 .SetText(
                     (GetByName('InfoShipName') as TLabelGI).GetText
@@ -4949,16 +4949,16 @@ begin
         ColorTag := '<color=255,166,0>'
       else
         ColorTag := '';
-      if GetPlayer.CanResolveObjectWithScanner(Obj)
-          or (GetPlayer = Obj)
-          or ((Obj as TShip).PartnerShip = GetPlayer)
+      if LocalPlayer.CanResolveObjectWithScanner(Obj)
+          or (LocalPlayer = Obj)
+          or ((Obj as TShip).PartnerShip = LocalPlayer)
           or ((Obj as TShip).TypeId = stTranclucator) then
       begin
         Text :=
             WrapTextInColor(IntToStr((Obj as TShip).GetHull.HullPoints), ColorTag)
                 + '/'
                 + IntToStr((Obj as TShip).GetHull.Weight);
-        if GetPlayer.HasScannerArtefact(Obj as TShip) then
+        if LocalPlayer.HasScannerArtefact(Obj as TShip) then
         begin
           (GetByName('InfoShipDamage') as TLabelGI).SetText((Obj as TShip).GetWeaponDamageSummary);
           Text := Text + ' + ' + WrapTextInColor((Obj as TShip).GetRepairPointsSummary, '');
@@ -4968,27 +4968,27 @@ begin
       else
         (GetByName('InfoShipSize') as TLabelGI).SetText(WrapTextInColor('???', ColorTag));
       Text := IntToStr(Integer((Obj as TShip).GetDefensePercent) and $7F) + '%';
-      if GetPlayer.CanResolveObjectWithScanner(Obj)
-          or (GetPlayer = Obj)
-          or ((Obj as TShip).PartnerShip = GetPlayer)
+      if LocalPlayer.CanResolveObjectWithScanner(Obj)
+          or (LocalPlayer = Obj)
+          or ((Obj as TShip).PartnerShip = LocalPlayer)
           or ((Obj as TShip).TypeId = stTranclucator) then
       begin
         Text := Text + ' + ' + WrapTextInColor(IntToStr((Obj as TShip).GetArmor), '');
-        if GetPlayer.HasScannerArtefact(Obj as TShip) then
+        if LocalPlayer.HasScannerArtefact(Obj as TShip) then
           Text := (Obj as TShip).GetManeuverabilitySummary + Text;
       end;
       (GetByName('InfoShipDef') as TLabelGI).SetText(Text);
       (GetByName('InfoShipRel') as TLabelGI)
-          .SetText((Obj as TShip).GetRelationLevelTextToShip(GetPlayer));
-      if (GetPlayer <> Obj)
+          .SetText((Obj as TShip).GetRelationLevelTextToShip(LocalPlayer));
+      if (LocalPlayer <> Obj)
           and not (Obj is TRuins)
-          and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
-          and GetPlayer.CanResolveObjectWithScanner(Obj) then
+          and (LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
+          and LocalPlayer.CanResolveObjectWithScanner(Obj) then
       begin
         (GetByName('ISWin') as TLabelGI).SetActive(True);
         (GetByName('InfoShipWin') as TLabelGI).SetActive(True);
         (GetByName('InfoShipWin') as TLabelGI)
-            .SetText(IntToStr(Integer(GetPlayer.GetWinChancePercent(Obj as TShip)) and $7F) + '%');
+            .SetText(IntToStr(Integer(LocalPlayer.GetWinChancePercent(Obj as TShip)) and $7F) + '%');
       end
       else
       begin
@@ -5016,9 +5016,9 @@ begin
       end;
       with GetByName('InfoShipDurable') as TImageGI do
       begin
-        if GetPlayer.CanResolveObjectWithScanner(Obj)
-            or (GetPlayer = Obj)
-            or ((Obj as TShip).PartnerShip = GetPlayer)
+        if LocalPlayer.CanResolveObjectWithScanner(Obj)
+            or (LocalPlayer = Obj)
+            or ((Obj as TShip).PartnerShip = LocalPlayer)
             or ((Obj as TShip).TypeId = stTranclucator) then
           SetPosition(
               Classes.Point(
@@ -5053,7 +5053,7 @@ begin
       end;
       DamageName := GetByName('ISDamage') as TLabelGI;
       DamageValue := GetByName('InfoShipDamage') as TLabelGI;
-      if GetPlayer.HasScannerArtefact(Obj as TShip) then
+      if LocalPlayer.HasScannerArtefact(Obj as TShip) then
       begin
         DamageName.SetActive(True);
         DamageValue.SetActive(True);
@@ -5071,7 +5071,7 @@ begin
         (GetByName('ISEffects') as TLabelGI).SetActive(True);
         with GetByName('InfoShipEffects') as TLabelGI do
         begin
-          if GetPlayer.HasScannerArtefact(Obj as TShip) then
+          if LocalPlayer.HasScannerArtefact(Obj as TShip) then
             SetText((Obj as TShip).GetCombatStatusDescription(StatusCount, True))
           else
             SetText(Text);
@@ -5140,20 +5140,20 @@ begin
           )
       );
       Objects := TList.Create;
-      for I := 0 to GetPlayer.CurrentStar.Planets.Count - 1 do
-        Objects.Add(GetPlayer.CurrentStar.Planets[I]);
-      for I := 0 to GetPlayer.CurrentStar.Ships.Count - 1 do
-        if TObject(GetPlayer.CurrentStar.Ships[I]) is TRuins then
-          if (TObject(GetPlayer.CurrentStar.Ships[I]) as TRuins).InNormalSpace then
-            if ((TObject(GetPlayer.CurrentStar.Ships[I]) as TRuins).Graphic is TRuinsSE)
-                or (((TObject(GetPlayer.CurrentStar.Ships[I]) as TRuins).Graphic is TShip2SE)
-                    and (((TObject(GetPlayer.CurrentStar.Ships[I]) as TRuins).Graphic as TShip2SE)
+      for I := 0 to LocalPlayer.CurrentStar.Planets.Count - 1 do
+        Objects.Add(LocalPlayer.CurrentStar.Planets[I]);
+      for I := 0 to LocalPlayer.CurrentStar.Ships.Count - 1 do
+        if TObject(LocalPlayer.CurrentStar.Ships[I]) is TRuins then
+          if (TObject(LocalPlayer.CurrentStar.Ships[I]) as TRuins).InNormalSpace then
+            if ((TObject(LocalPlayer.CurrentStar.Ships[I]) as TRuins).Graphic is TRuinsSE)
+                or (((TObject(LocalPlayer.CurrentStar.Ships[I]) as TRuins).Graphic is TShip2SE)
+                    and (((TObject(LocalPlayer.CurrentStar.Ships[I]) as TRuins).Graphic as TShip2SE)
                             .AlternateImagePath
                         <> '')) then
             begin
               Distance :=
                   PointDistanceSquared(
-                      TShip(GetPlayer.CurrentStar.Ships[I]).Position,
+                      TShip(LocalPlayer.CurrentStar.Ships[I]).Position,
                       MakePointF(0, 0)
                   );
               J := 0;
@@ -5170,11 +5170,11 @@ begin
                   Break;
                 Inc(J);
               end;
-              Objects.Insert(J, GetPlayer.CurrentStar.Ships[I]);
+              Objects.Insert(J, LocalPlayer.CurrentStar.Ships[I]);
             end;
-      for I := 0 to GetPlayer.CurrentStar.CustomSystemInfos.Count - 1 do
+      for I := 0 to LocalPlayer.CurrentStar.CustomSystemInfos.Count - 1 do
       begin
-        CustomInfo := GetPlayer.CurrentStar.CustomSystemInfos[I];
+        CustomInfo := LocalPlayer.CurrentStar.CustomSystemInfos[I];
         Distance := Sqr(CustomInfo.Distance);
         J := 0;
         while J < Objects.Count do
@@ -5395,7 +5395,7 @@ begin
           RowX := NameWidth + 5 + RowHeight + 5 + 1;
           with TImageGI.Create(Panel) do
           begin
-            case (TObject(Objects[I]) as TPlanet).GetRelationLevelToShip(GetPlayer) of
+            case (TObject(Objects[I]) as TPlanet).GetRelationLevelToShip(LocalPlayer) of
               rlHostile: SetImagePath('GI,Bm.FormGalaxy2.Face4');
               rlBad: SetImagePath('GI,Bm.FormGalaxy2.Face3');
               rlNormal: SetImagePath('GI,Bm.FormGalaxy2.Face2');
@@ -5573,7 +5573,7 @@ begin
       PlanetInfoPanel.SetActive(False);
       StarInfoWindow.SetActive(False);
       StandardInfoPanel.SetActive(False);
-      InfoTextLabel.SetText(GetPlayer.GetObjectInfoText(Obj));
+      InfoTextLabel.SetText(LocalPlayer.GetObjectInfoText(Obj));
       InfoWindow.SetSize(
           Classes.Point(
               InfoTextLabel.ClientSize.X
@@ -5685,11 +5685,11 @@ var
   Added: Boolean;
 begin
   Added := False;
-  for Index := 0 to GetPlayer.CurrentStar.Planets.Count - 1 do
+  for Index := 0 to LocalPlayer.CurrentStar.Planets.Count - 1 do
   begin
-    Planet := TPlanet(GetPlayer.CurrentStar.Planets[Index]);
+    Planet := TPlanet(LocalPlayer.CurrentStar.Planets[Index]);
     if Planet.OwnerId in [Ord(oiMaloc)..Ord(oiGaal), Ord(oiPirate)] then
-      if PointDistance(GetPlayer.Position, Planet.GetPosition) <= GetPlayer.GetRadarRange then
+      if PointDistance(LocalPlayer.Position, Planet.GetPosition) <= LocalPlayer.GetRadarRange then
       begin
         AddOrUpdatePlayerBubble(
             7,
@@ -5700,12 +5700,12 @@ begin
         Added := True;
       end;
   end;
-  for Index := 0 to GetPlayer.CurrentStar.Ships.Count - 1 do
+  for Index := 0 to LocalPlayer.CurrentStar.Ships.Count - 1 do
   begin
-    Ship := TShip(GetPlayer.CurrentStar.Ships[Index]);
+    Ship := TShip(LocalPlayer.CurrentStar.Ships[Index]);
     if Ship is TRuins then
-      if (Ship as TRuins).CanDock(GetPlayer) and not Ship.NoTalk then
-        if PointDistance(GetPlayer.Position, Ship.Position) <= GetPlayer.GetRadarRange then
+      if (Ship as TRuins).CanDock(LocalPlayer) and not Ship.NoTalk then
+        if PointDistance(LocalPlayer.Position, Ship.Position) <= LocalPlayer.GetRadarRange then
         begin
           AddOrUpdatePlayerBubble(
               7,
@@ -5744,7 +5744,7 @@ begin
     Ship := LocalHuman.PlayerStar.Ships[Index];
     if not Ship.IsOutsideStarSpace and (Ship is TKling) then
     begin
-      Distance := PointDistance(GetPlayer.Position, Ship.Position);
+      Distance := PointDistance(LocalPlayer.Position, Ship.Position);
       if Distance > FarthestDistance then
       begin
         FarthestDistance := Distance;
@@ -5765,7 +5765,7 @@ begin
 end;
 procedure TfStarMap.CenterShipClicked(Sender: TObjectGI);
 begin
-  CenterOnShip(GetPlayer);
+  CenterOnShip(LocalPlayer);
 end;
 procedure TfStarMap.CenterShipMouseEnter(Sender: TObjectGI);
 begin
@@ -5774,8 +5774,8 @@ begin
       and ((Session.TurnCalculationThread.Job = tcjPreparePlayerStar)
           or (Integer(Session.TurnCalculationThread.Job) = 5)) then
     Exit;
-  if GetPlayer <> nil then
-    ShowObjectInfo(GetPlayer);
+  if LocalPlayer <> nil then
+    ShowObjectInfo(LocalPlayer);
 end;
 procedure TfStarMap.CenterShipMouseLeave(Sender: TObjectGI);
 begin
@@ -5807,8 +5807,8 @@ begin
       SelectedWeapons[Index] := False;
     InterceptorSelectionActive := False;
     CustomSelectionActive := False;
-    if (not GetPlayer.IsEquipmentUsable(GetPlayer.GetScanner)
-            or not GetPlayer.IsEquipmentUsable(GetPlayer.GetRadar))
+    if (not LocalPlayer.IsEquipmentUsable(LocalPlayer.GetScanner)
+            or not LocalPlayer.IsEquipmentUsable(LocalPlayer.GetRadar))
         and (Galaxy.UltraScanModEnabled = 0) then
       ScannerSelectionActive := False
     else
@@ -5831,7 +5831,7 @@ begin
       SelectedWeapons[Index] := False;
     InterceptorSelectionActive := False;
     CustomSelectionActive := False;
-    if not GetPlayer.IsEquipmentUsable(GetPlayer.GetRadar) then
+    if not LocalPlayer.IsEquipmentUsable(LocalPlayer.GetRadar) then
       TalkSelectionActive := False
     else
       TalkSelectionActive := not TalkSelectionActive;
@@ -5845,9 +5845,9 @@ var
   Index: Integer;
 begin
   if (Mode = smmOrders)
-      and (GetPlayer <> nil)
-      and GetPlayer.GetHull.InterceptorsEnabled
-      and (GetPlayer.GetHull.Energy >= GetPlayer.GetInterceptorEnergyCost) then
+      and (LocalPlayer <> nil)
+      and LocalPlayer.GetHull.InterceptorsEnabled
+      and (LocalPlayer.GetHull.Energy >= LocalPlayer.GetInterceptorEnergyCost) then
   begin
     TalkSelectionActive := False;
     ScannerSelectionActive := False;
@@ -5865,7 +5865,7 @@ procedure TfStarMap.BeginCustomSelection;
 var
   Index: Integer;
 begin
-  if (Mode = smmOrders) and (GetPlayer <> nil) then
+  if (Mode = smmOrders) and (LocalPlayer <> nil) then
   begin
     TalkSelectionActive := False;
     ScannerSelectionActive := False;
@@ -5909,12 +5909,12 @@ begin
     DisplayedObject := nil;
     Index := ExtractDigitsToIntW(Sender.ControlName);
     aCalc.WaitForTurnCalculationUI;
-    Weapon := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
+    Weapon := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Index) as TWeapon;
     TalkSelectionActive := False;
     ScannerSelectionActive := False;
     InterceptorSelectionActive := False;
     CustomSelectionActive := False;
-    if not GetPlayer.IsEquipmentUsable(Weapon)
+    if not LocalPlayer.IsEquipmentUsable(Weapon)
         or ((Weapon.GetWeaponInfo.ShotType in [wstTorpedo..wstRocket]) and (Weapon.Ammo <= 0)) then
       SelectedWeapons[Index] := False
     else
@@ -5943,12 +5943,12 @@ var
 begin
   for Slot := 0 to 4 do
   begin
-    Weapon := GetPlayer.FindEquippedItemInSlot($32, Slot) as TWeapon;
+    Weapon := LocalPlayer.FindEquippedItemInSlot($32, Slot) as TWeapon;
     Button := WeaponButtons[Slot];
     Button.SetDisabled(
-        (GetPlayer.GetSlotCount(sskWeapon) <= Slot) or not GetPlayer.IsEquipmentUsable(Weapon)
+        (LocalPlayer.GetSlotCount(sskWeapon) <= Slot) or not LocalPlayer.IsEquipmentUsable(Weapon)
     );
-    if GetPlayer.GetSlotCount(sskWeapon) <= Slot then
+    if LocalPlayer.GetSlotCount(sskWeapon) <= Slot then
       Button.SetImageDisabledPath(
           'GI,Bm.PanelMain2.' + GiResourceSuffix + 'W' + IntToStr(Slot + 1) + 'Disabled'
       )
@@ -5956,7 +5956,7 @@ begin
       Button.SetImageDisabledPath(
           'GI,Bm.PanelMain2.' + GiResourceSuffix + 'W' + IntToStr(Slot + 1) + 'Empty'
       )
-    else if not GetPlayer.IsEquipmentUsable(Weapon) then
+    else if not LocalPlayer.IsEquipmentUsable(Weapon) then
       Button.SetImageDisabledPath(
           'GI,Bm.PanelMain2.' + GiResourceSuffix + 'W' + IntToStr(Slot + 1) + 'Red'
       );
@@ -6055,15 +6055,15 @@ begin
       AnyWeapon := True;
       Break;
     end;
-  RadarCenter := GetPlayer.Position;
-  RadarRadius := GetPlayer.GetRadarRange;
+  RadarCenter := LocalPlayer.Position;
+  RadarRadius := LocalPlayer.GetRadarRange;
   RadarColor := 0;
-  InnerCenter := TruncatePointF(GetPlayer.Position);
+  InnerCenter := TruncatePointF(LocalPlayer.Position);
   InnerRadius := 0;
   InnerColor := 0;
   InnerVisible := False;
-  MainCenter := TruncatePointF(GetPlayer.Position);
-  MainRadius := GetPlayer.GetRadarRange;
+  MainCenter := TruncatePointF(LocalPlayer.Position);
+  MainRadius := LocalPlayer.GetRadarRange;
   MainColor := 0;
   MainVisible := False;
   if ScannerSelectionActive then
@@ -6101,11 +6101,11 @@ begin
     for Slot := 0 to 4 do
       if SelectedWeapons[Slot] then
       begin
-        Weapon := GetPlayer.FindEquippedItemInSlot($32, Slot) as TWeapon;
-        if GetPlayer.GetWeaponActionRange(Weapon) < MinRange then
-          MinRange := GetPlayer.GetWeaponActionRange(Weapon);
-        if GetPlayer.GetWeaponActionRange(Weapon) > MaxRange then
-          MaxRange := GetPlayer.GetWeaponActionRange(Weapon);
+        Weapon := LocalPlayer.FindEquippedItemInSlot($32, Slot) as TWeapon;
+        if LocalPlayer.GetWeaponActionRange(Weapon) < MinRange then
+          MinRange := LocalPlayer.GetWeaponActionRange(Weapon);
+        if LocalPlayer.GetWeaponActionRange(Weapon) > MaxRange then
+          MaxRange := LocalPlayer.GetWeaponActionRange(Weapon);
       end;
     MainColor := CurrentPixelFormat.PackRgbBytes(255, 0, 0);
     MainRadius := MaxRange;
@@ -6128,13 +6128,13 @@ begin
   begin
     if CursorObject is TItem then
     begin
-      InnerRadius := GetPlayer.GetRadarRange;
+      InnerRadius := LocalPlayer.GetRadarRange;
       InnerColor := CurrentPixelFormat.PackRgbBytes(0, 255, 0);
       InnerVisible := True;
-      if GetPlayer.GetCargoHook <> nil then
+      if LocalPlayer.GetCargoHook <> nil then
       begin
         MainColor := CurrentPixelFormat.PackRgbBytes(0, 0, 255);
-        MainRadius := GetPlayer.GetCargoHookRange;
+        MainRadius := LocalPlayer.GetCargoHookRange;
         MainVisible := True;
         RadarColor := CurrentPixelFormat.PackRgbBytes(0, 255, 0);
       end;
@@ -6175,10 +6175,10 @@ begin
     for Slot := 0 to 4 do
       if SelectedWeapons[Slot] then
       begin
-        Weapon := GetPlayer.FindEquippedItemInSlot($32, Slot) as TWeapon;
+        Weapon := LocalPlayer.FindEquippedItemInSlot($32, Slot) as TWeapon;
         if not (Byte(Weapon.GetWeaponInfo.ShotType) in [Ord(wstTorpedo)..Ord(wstRocket)]) then
         begin
-          RangeValue := GetPlayer.GetWeaponActionRange(Weapon);
+          RangeValue := LocalPlayer.GetWeaponActionRange(Weapon);
           if DirectRange > RangeValue then
             RangeMaximum := DirectRange
           else
@@ -6269,9 +6269,9 @@ var
   BadgePoint: TPointF;
 begin
   ClearTargetMarkers;
-  for I := 1 to GetPlayer.WeaponCount do
+  for I := 1 to LocalPlayer.WeaponCount do
   begin
-    Weapon := GetPlayer.Weapons[I];
+    Weapon := LocalPlayer.Weapons[I];
     if Weapon.Target <> nil then
       if (Weapon.Target is TItem)
           or (Weapon.Target is TAsteroid)
@@ -6288,7 +6288,7 @@ begin
           Point := (Weapon.Target as TShip).Position;
         Point := AddPointsF(Point, MakePointF(-40, -40));
         for J := 1 to I - 1 do
-          if GetPlayer.Weapons[J].Target = Weapon.Target then
+          if LocalPlayer.Weapons[J].Target = Weapon.Target then
             Point.X := Point.X + 32;
         Image := TImageGI.Create(MapControls);
         Image.SetImagePath('GI,' + Weapon.GetBitmapResourceName + 's');
@@ -6301,7 +6301,7 @@ begin
         Image.UserIndex := I;
         Image.MouseBlocking := True;
         if Weapon.Target is TShip then
-          if GetPlayer.CanResolveObjectWithScanner(Weapon.Target)
+          if LocalPlayer.CanResolveObjectWithScanner(Weapon.Target)
               and ((Weapon.GetDamageFlags * TargetDamageFlags) <> NoDamageFlags) then
           begin
             Image := TImageGI.Create(MapControls);
@@ -6319,17 +6319,17 @@ begin
           end;
       end;
   end;
-  if GetPlayer.GetHull.InterceptorsEnabled then
+  if LocalPlayer.GetHull.InterceptorsEnabled then
   begin
-    Target := GetPlayer.GetHull.InterceptorTarget;
+    Target := LocalPlayer.GetHull.InterceptorTarget;
     if Target = nil then
-      Target := GetPlayer.SelectInterceptorTarget;
+      Target := LocalPlayer.SelectInterceptorTarget;
     if Target <> nil then
     begin
       Point := Target.Position;
       Point := AddPointsF(Point, MakePointF(-40, -40));
-      for J := 1 to GetPlayer.WeaponCount do
-        if GetPlayer.Weapons[J].Target = Target then
+      for J := 1 to LocalPlayer.WeaponCount do
+        if LocalPlayer.Weapons[J].Target = Target then
           Point.X := Point.X + 32;
       Image := TImageGI.Create(MapControls);
       Image.SetImagePath('GI,Bm.Items.2Interceptors_s');
@@ -6343,10 +6343,10 @@ begin
       Image.MouseBlocking := True;
     end;
   end;
-  if GetPlayer.PickupTargets <> nil then
-    for I := 0 to GetPlayer.PickupTargets.Count - 1 do
+  if LocalPlayer.PickupTargets <> nil then
+    for I := 0 to LocalPlayer.PickupTargets.Count - 1 do
     begin
-      Item := GetPlayer.PickupTargets[I];
+      Item := LocalPlayer.PickupTargets[I];
       Image := TImageGI.Create(MapControls);
       Image.SetImagePath('GAI,Bm.PI.ItemTakeAnim');
       Image.SetSize(Image.GetContentSize);
@@ -6395,8 +6395,8 @@ begin
     Obj := FindObjectAtCursor;
     if (Obj is TShip) and not (Obj is TRuins) and not (Obj is TKling) then
     begin
-      if Sqr(GetPlayer.GetRadarRange)
-          >= PointDistanceSquared((Obj as TShip).Position, GetPlayer.Position) then
+      if Sqr(LocalPlayer.GetRadarRange)
+          >= PointDistanceSquared((Obj as TShip).Position, LocalPlayer.Position) then
       begin
         if not IsCursorImageSelected('ScanFull') then
           SetCursorByName('ScanFull');
@@ -6412,8 +6412,8 @@ begin
     Obj := FindObjectAtCursor;
     if (Obj is TShip) and not (Obj is TRuins) then
     begin
-      if Sqr(GetPlayer.GetRadarRange)
-          >= PointDistanceSquared((Obj as TShip).Position, GetPlayer.Position) then
+      if Sqr(LocalPlayer.GetRadarRange)
+          >= PointDistanceSquared((Obj as TShip).Position, LocalPlayer.Position) then
       begin
         if not IsCursorImageSelected('TalkFull') then
           SetCursorByName('TalkFull');
@@ -6430,7 +6430,7 @@ begin
     if Obj is TShip then
     begin
       Point := (Obj as TShip).Position;
-      if (PointDistanceSquared(Point, GetPlayer.Position) <= 1000000)
+      if (PointDistanceSquared(Point, LocalPlayer.Position) <= 1000000)
           and ((Obj as TShip).InterceptorPassesRemaining = 0) then
       begin
         if not IsCursorImageSelected('InterceptorsFull') then
@@ -6465,7 +6465,7 @@ begin
       else
         Point := THole(Obj).Position2;
     end;
-    if PointDistanceSquared(GetPlayer.Position, Point)
+    if PointDistanceSquared(LocalPlayer.Position, Point)
         > CustomSelectionRadius * CustomSelectionRadius then
     begin
       if not IsCursorImageSelected(CustomSelectionDeniedCursor) then
@@ -6492,9 +6492,9 @@ begin
       for Index := 0 to 4 do
         if SelectedWeapons[Index] then
         begin
-          Weapon := GetPlayer.FindEquippedItemInSlot($32, Index) as TWeapon;
-          if GetPlayer.GetWeaponActionRange(Weapon) > Range then
-            Range := GetPlayer.GetWeaponActionRange(Weapon);
+          Weapon := LocalPlayer.FindEquippedItemInSlot($32, Index) as TWeapon;
+          if LocalPlayer.GetWeaponActionRange(Weapon) > Range then
+            Range := LocalPlayer.GetWeaponActionRange(Weapon);
         end;
       if Obj is TShip then
         Point := (Obj as TShip).Position
@@ -6504,7 +6504,7 @@ begin
         Point := (Obj as TAsteroid).Position
       else if Obj is TMissile then
         Point := (Obj as TMissile).Position;
-      if PointDistanceSquared(Point, GetPlayer.Position) <= Sqr(Range) then
+      if PointDistanceSquared(Point, LocalPlayer.Position) <= Sqr(Range) then
       begin
         if not IsCursorImageSelected('FireFull') then
           SetCursorByName('FireFull');
@@ -6519,8 +6519,8 @@ begin
   begin
     Obj := FindObjectAtCursor;
     if (Obj is TItem)
-        and CanCargoHookHandleItem(Obj as TItem, GetPlayer)
-        and not GetPlayer.IsRecentlyDroppedItem(TItem(Obj)) then
+        and CanCargoHookHandleItem(Obj as TItem, LocalPlayer)
+        and not LocalPlayer.IsRecentlyDroppedItem(TItem(Obj)) then
     begin
       if not IsCursorImageSelected('Take') then
         SetCursorByName('Take');
@@ -6658,7 +6658,7 @@ var
   Ship: TShip;
 begin
   if (Mode = smmOrders)
-      and ((GetPlayer.Order = soFollowShip) or (LocalHuman.PendingPlayerFollowTarget <> nil)) then
+      and ((LocalPlayer.Order = soFollowShip) or (LocalHuman.PendingPlayerFollowTarget <> nil)) then
   begin
     ClearPathOverlay(True);
     if LocalHuman.PendingPlayerFollowTarget <> nil then
@@ -6666,14 +6666,14 @@ begin
       Ship := LocalHuman.PendingPlayerFollowTarget;
       FollowMode := 1;
     end
-    else if Byte(GetPlayer.OrderStateData) = 1 then
+    else if Byte(LocalPlayer.OrderStateData) = 1 then
     begin
-      Ship := GetPlayer.OrderTarget as TShip;
+      Ship := LocalPlayer.OrderTarget as TShip;
       FollowMode := 3;
     end
     else
     begin
-      Ship := GetPlayer.OrderTarget as TShip;
+      Ship := LocalPlayer.OrderTarget as TShip;
       FollowMode := 2;
     end;
     if Delta = WHEEL_DELTA then
@@ -6690,7 +6690,7 @@ begin
     end;
     aCalc.WaitForTurnCalculationUI;
     if FollowMode = 1 then
-      if not GetPlayer.CanSelectShipTarget(Ship) then
+      if not LocalPlayer.CanSelectShipTarget(Ship) then
         FollowMode := 2;
     if FollowMode = 1 then
     begin
@@ -6708,7 +6708,7 @@ begin
       ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveShot'));
     end;
     aCalc.WaitForTurnCalculationUI;
-    BuildShipPathOverlay(GetPlayer, False, '');
+    BuildShipPathOverlay(LocalPlayer, False, '');
   end;
 end;
 function GetTurnFilmFrameInterval(Activity: Integer): Integer;
@@ -6959,20 +6959,20 @@ begin
       if CompleteHostedTurnFilm then
         Exit;
       Stage := 11;
-      if (GetPlayer = nil) and (SecondaryFilm.Turn >= Galaxy.CurrentTurn) then
+      if (LocalPlayer = nil) and (SecondaryFilm.Turn >= Galaxy.CurrentTurn) then
         TrailingEffectSteps := 200
-      else if (GetPlayer <> nil)
-          and GetPlayer.InHyperspace
-          and not GetPlayer.Graphic.IsAttachedToSpace then
+      else if (LocalPlayer <> nil)
+          and LocalPlayer.InHyperspace
+          and not LocalPlayer.Graphic.IsAttachedToSpace then
       begin
 
         Stage := 12;
         StopTurnFilm(True);
-        if GetPlayer.Order = soJumpHole then
+        if LocalPlayer.Order = soJumpHole then
         begin
           Stage := 13;
-          if GetPlayer.OrderTarget is THole then
-            ArcadeBattleScreen.SelectedMapName := (GetPlayer.OrderTarget as THole).ArcadeMapName
+          if LocalPlayer.OrderTarget is THole then
+            ArcadeBattleScreen.SelectedMapName := (LocalPlayer.OrderTarget as THole).ArcadeMapName
           else
             ArcadeBattleScreen.SelectedMapName := '';
           if Pos('SkipAB', ArcadeBattleScreen.SelectedMapName) <> 1 then
@@ -6997,13 +6997,13 @@ begin
           Stage := 15;
           if (Galaxy <> nil)
               and Galaxy.IsOldHyperspaceEnabled
-              and (GetPlayer.Order <> soTeleport) then
+              and (LocalPlayer.Order <> soTeleport) then
             RequestedScreenId := screenArcadeBattle
           else
             RequestedScreenId := screenJump;
         end;
         Stage := 16;
-        if GetPlayer.Order = soJumpHole then
+        if LocalPlayer.Order = soJumpHole then
           LoadPanel.SelectBackgroundStyle(2)
         else
           LoadPanel.SelectBackgroundStyle(1);
@@ -7011,10 +7011,10 @@ begin
         LoadPanel.StartClosingShutters;
         ReleaseAllTextureSurfaces;
       end
-      else if (GetPlayer <> nil)
+      else if (LocalPlayer <> nil)
           and not LocalHuman.PlayerAutomaticControl
-          and GetPlayer.IsOnPlanet
-          and not GetPlayer.Graphic.IsAttachedToSpace then
+          and LocalPlayer.IsOnPlanet
+          and not LocalPlayer.Graphic.IsAttachedToSpace then
       begin
         Stage := 17;
         StopTurnFilm(True);
@@ -7022,7 +7022,7 @@ begin
         ApplyLandingWear;
         if not IsTurnCalculationRunningUI and (TurnCalculationPhase = tcpPlayerStarFinished) then
           QueueGalaxyTurnCalculation;
-        if GetPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited) then
+        if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited) then
           RequestedScreenId := screenPlanetNO
         else
           RequestedScreenId := screenPlanet;
@@ -7031,16 +7031,16 @@ begin
         LoadPanel.StartClosingShutters;
         ReleaseAllTextureSurfaces;
       end
-      else if (GetPlayer <> nil)
+      else if (LocalPlayer <> nil)
           and not LocalHuman.PlayerAutomaticControl
-          and GetPlayer.IsDockedToShip
-          and not GetPlayer.Graphic.IsAttachedToSpace then
+          and LocalPlayer.IsDockedToShip
+          and not LocalPlayer.Graphic.IsAttachedToSpace then
       begin
         Stage := 18;
         StopTurnFilm(True);
         if not IsTurnCalculationRunningUI and (TurnCalculationPhase = tcpPlayerStarFinished) then
           QueueGalaxyTurnCalculation;
-        if GetPlayer.DockedTo = TerronShip then
+        if LocalPlayer.DockedTo = TerronShip then
         begin
           Stage := 19;
           PlanetBattleMapId := -1;
@@ -7072,7 +7072,7 @@ begin
       begin
         Stage := 21;
         if not ContinueTurnCalculation and ShouldContinuePlayerTravel then
-          if not BreakRequested or (GetPlayer = nil) or GetPlayer.IsOnPlanet then
+          if not BreakRequested or (LocalPlayer = nil) or LocalPlayer.IsOnPlanet then
           begin
             WaitForTurnCalculationUI;
             UpdateTurnCalculation(nil, 0);
@@ -7096,7 +7096,7 @@ begin
           begin
             Stage := 24;
             QueueInterfaceImages;
-            if (GetPlayer <> nil) and not GetPlayer.InHyperspace then
+            if (LocalPlayer <> nil) and not LocalPlayer.InHyperspace then
             begin
               UpdateTerronTransformation;
               QueueGalaxyTurnCalculation;
@@ -7191,7 +7191,7 @@ begin
 end;
 procedure TfStarMap.UpdateTurnCalculation(Timer: PCallbackTimerGI; UserData: PtrInt);
 begin
-  if BreakRequested and (GetPlayer <> nil) and not GetPlayer.IsOnPlanet then
+  if BreakRequested and (LocalPlayer <> nil) and not LocalPlayer.IsOnPlanet then
     ContinueTurnCalculation := False
   else if not IsTurnCalculationRunningUI
       and (((BeginCalcNextTurn < 1.0) and (FilmStepIndex > Round(BeginCalcNextTurn * 200.0)))
@@ -7380,8 +7380,8 @@ begin
       and ((Session.TurnCalculationThread.Job = tcjPreparePlayerStar)
           or (Integer(Session.TurnCalculationThread.Job) = 5)) then
     Exit;
-  if GetPlayer <> nil then
-    ShowFilmObjectInfo(GetPlayer.Graphic, GetPlayer.Id);
+  if LocalPlayer <> nil then
+    ShowFilmObjectInfo(LocalPlayer.Graphic, LocalPlayer.Id);
 end;
 procedure TfStarMap.CenterFilmShipMouseLeave(Sender: TObjectGI);
 begin
@@ -7892,8 +7892,8 @@ begin
               )
             else
               ReplaceTextToken(Text, '<Hill>', '-', '');
-            if GetPlayer <> nil then
-              if GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0 then
+            if LocalPlayer <> nil then
+              if LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0 then
                 Text := Text + #13#10 + Planet^.TreasureHint;
           end
           else if (MainPiratePlanet <> nil) and (Planet^.Id = MainPiratePlanet.Id) then
@@ -9024,8 +9024,8 @@ begin
   ShowObjectInfo(nil);
   if LocalHuman.TalkShip <> nil then
     CenterMapForTalk(LocalHuman.TalkShip.Position)
-  else if (LocalHuman.TalkPlanet <> nil) and (LocalHuman.TalkPlanet.CurrentStar = GetPlayer.CurrentStar) then
-    CenterMapForTalk(GetPlayer.Position);
+  else if (LocalHuman.TalkPlanet <> nil) and (LocalHuman.TalkPlanet.CurrentStar = LocalPlayer.CurrentStar) then
+    CenterMapForTalk(LocalPlayer.Position);
   SpaceProcess.Space.DrawMinimap;
   SetCursorActive(False);
   DrawFrame;
@@ -9055,7 +9055,7 @@ begin
     else
     begin
       RebuildPartnerButtons;
-      if (GetPlayer <> nil) and not GetPlayer.InHyperspace then
+      if (LocalPlayer <> nil) and not LocalPlayer.InHyperspace then
       begin
         UpdateTerronTransformation;
         QueueGalaxyTurnCalculation;
@@ -9078,8 +9078,8 @@ begin
   if ((Galaxy.TerronToStarTurn and $20000000) = 0)
       and ((Galaxy.TerronToStarTurn and $40000000) <> 0)
       and ((Galaxy.TerronToStarTurn and $0FFFFFFF) <= Galaxy.CurrentTurn)
-      and (GetPlayer <> nil)
-      and (GetPlayer.CurrentStar = TerronShip.CurrentStar) then
+      and (LocalPlayer <> nil)
+      and (LocalPlayer.CurrentStar = TerronShip.CurrentStar) then
   begin
     if not AnimStar then
     begin
@@ -9227,14 +9227,14 @@ begin
 end;
 procedure TfStarMap.SelectMusic;
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
   begin
     MusicManager.PlayCategory('Base');
     Exit;
   end;
   if MusicInSpaceEnabled then
   begin
-    if (GetPlayer.GetHull.CapitalShip = 1) and (RandomIntRange(0, 100) < 20) then
+    if (LocalPlayer.GetHull.CapitalShip = 1) and (RandomIntRange(0, 100) < 20) then
     begin
       StarMapScreen.BattleMusicSelected := True;
       MusicManager.PlayCategory('Destroyer');

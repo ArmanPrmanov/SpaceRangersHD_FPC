@@ -163,41 +163,41 @@ var
   Quest: PPlayerOldQuest;
   Difficulty, Award: Byte;
 begin
-  PlayerName := GetPlayer.Name;
-  PortraitFaceId := GetPlayer.PortraitFaceId;
-  PilotRace := GetPlayer.PilotRace;
+  PlayerName := LocalPlayer.Name;
+  PortraitFaceId := LocalPlayer.PortraitFaceId;
+  PilotRace := LocalPlayer.PilotRace;
   for Difficulty := Low(DifficultyLevels) to High(DifficultyLevels) do
     DifficultyLevels[Difficulty] := Galaxy.DifficultyLevels[Difficulty];
   Disqualified :=
       Galaxy.EditableStateApplied or Galaxy.CustomRules.Enabled or (Galaxy.GetCheatPoints <> 0);
   FinishedTurn := Galaxy.CurrentTurn;
-  Rank := GetPlayer.Rank;
-  PirateRank := GetPlayer.PirateRank;
+  Rank := LocalPlayer.Rank;
+  PirateRank := LocalPlayer.PirateRank;
   // Native copies the seven adjacent kill/liberation counters as one block.
-  OtherShipKillCount := GetPlayer.TotalShipKillCount;
-  PirateKillCount := GetPlayer.PirateKillCount;
-  DominatorKillCount := GetPlayer.DominatorKillCount;
-  LiberatedSystemCount := GetPlayer.LiberatedSystemCount;
-  CivilianKillCount := GetPlayer.CivilianKillCount;
-  MilitaryKillCount := GetPlayer.MilitaryKillCount;
-  RangerKillCount := GetPlayer.RangerKillCount;
+  OtherShipKillCount := LocalPlayer.TotalShipKillCount;
+  PirateKillCount := LocalPlayer.PirateKillCount;
+  DominatorKillCount := LocalPlayer.DominatorKillCount;
+  LiberatedSystemCount := LocalPlayer.LiberatedSystemCount;
+  CivilianKillCount := LocalPlayer.CivilianKillCount;
+  MilitaryKillCount := LocalPlayer.MilitaryKillCount;
+  RangerKillCount := LocalPlayer.RangerKillCount;
   OtherShipKillCount := OtherShipKillCount - PirateKillCount - DominatorKillCount;
-  ArcadeKillCount := GetPlayer.HyperspaceKillCount + GetPlayer.BlackHoleKillCount;
-  if GetPlayer.AwardIds = nil then
+  ArcadeKillCount := LocalPlayer.HyperspaceKillCount + LocalPlayer.BlackHoleKillCount;
+  if LocalPlayer.AwardIds = nil then
     AwardCount := 0
   else
   begin
-    AwardCount := GetPlayer.AwardIds.Count;
+    AwardCount := LocalPlayer.AwardIds.Count;
     SetLength(AwardIds, AwardCount);
     for I := 0 to AwardCount - 1 do
     begin
-      Award := Byte(GetPlayer.AwardIds[I]);
+      Award := Byte(LocalPlayer.AwardIds[I]);
       AwardIds[I] := Award;
     end;
   end;
-  TotalExperience := GetPlayer.TotalExperience;
+  TotalExperience := LocalPlayer.TotalExperience;
   for Skill := Low(TPilotSkill) to High(TPilotSkill) do
-    SkillLevels[Ord(Skill)] := GetPlayer.GetBaseSkillLevel(Skill);
+    SkillLevels[Ord(Skill)] := LocalPlayer.GetBaseSkillLevel(Skill);
   ScoreTags.Clear;
   GenerationSeed := Galaxy.GenerationSeed;
   SetLength(QuestResults, LocalHuman.PlayerOldQuests.Count);
@@ -208,10 +208,10 @@ begin
     QuestResults[I].QuestType := Quest.QuestType;
     QuestResults[I].QuestNumber := Quest.QuestNumber;
   end;
-  PlanetBattles := GetPlayer.PlanetBattles;
-  SetLength(PlanetBattleHistory, High(GetPlayer.PlanetBattleHistory) + 1);
-  for I := 0 to High(GetPlayer.PlanetBattleHistory) do
-    PlanetBattleHistory[I] := GetPlayer.PlanetBattleHistory[I];
+  PlanetBattles := LocalPlayer.PlanetBattles;
+  SetLength(PlanetBattleHistory, High(LocalPlayer.PlanetBattleHistory) + 1);
+  for I := 0 to High(LocalPlayer.PlanetBattleHistory) do
+    PlanetBattleHistory[I] := LocalPlayer.PlanetBattleHistory[I];
   if Galaxy.BlazerSeriesResolvedTurn = 0 then
     BlazerEndingState := 0
   else if (Galaxy.BlazerLandingPlanetId <> 0) and (BlazerShip <> nil) then
@@ -256,12 +256,12 @@ begin
   RecalculateTotalScore;
   if VictoryAchieved and not Galaxy.EditableStateApplied and (Galaxy.GetCheatPoints = 0) then
   begin
-    GetPlayer.AchievementStats.CheckNoQuestVictoryAchievement;
-    GetPlayer.AchievementStats.CheckChampionVictoryAchievement(TotalScore);
-    GetPlayer.AchievementStats.CheckLongGameVictoryAchievement(TotalScore, FinishedTurn);
-    GetPlayer.AchievementStats.CheckPacifistVictoryAchievement;
-    GetPlayer.AchievementStats.CheckNoLoadVictoryAchievement;
-    GetPlayer.AchievementStats.CheckFastVictoryAchievement;
+    LocalPlayer.AchievementStats.CheckNoQuestVictoryAchievement;
+    LocalPlayer.AchievementStats.CheckChampionVictoryAchievement(TotalScore);
+    LocalPlayer.AchievementStats.CheckLongGameVictoryAchievement(TotalScore, FinishedTurn);
+    LocalPlayer.AchievementStats.CheckPacifistVictoryAchievement;
+    LocalPlayer.AchievementStats.CheckNoLoadVictoryAchievement;
+    LocalPlayer.AchievementStats.CheckFastVictoryAchievement;
     if SteamInitialized and SteamLeaderboardFound then
       SteamUploadScore(TotalScore);
   end;

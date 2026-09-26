@@ -126,41 +126,41 @@ begin
   MainPanel.OnOpen;
   PlanetPanel.OnOpen;
   LoadPanel.OnOpen;
-  if GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+  if LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
     SoundSection := 0
   else
-    SoundSection := GetPlayer.CurrentPlanet.RaceId + 1;
-  if GetPlayer.CurrentPlanet <> LocalHuman.TemporaryShopPlanet then
+    SoundSection := LocalPlayer.CurrentPlanet.RaceId + 1;
+  if LocalPlayer.CurrentPlanet <> LocalHuman.TemporaryShopPlanet then
   begin
     SelectMusic;
     if LocalHuman.TemporaryShopSlots <> nil then
       ReturnShopStock;
-    RunGlobalScripts(GetPlayer.CurrentStar, 0);
+    RunGlobalScripts(LocalPlayer.CurrentStar, 0);
     PruneMessages;
     OpenShopStock;
   end;
   Galaxy.ReleaseItemGraphics;
   GetByName('MainPanel').KeyDownCallback := MainPanelKeyDown;
   (GetByName('BGCity') as TImageGI)
-      .SetImagePath(GetPlayer.CurrentPlanet.GetGovernmentBackgroundGraph);
+      .SetImagePath(LocalPlayer.CurrentPlanet.GetGovernmentBackgroundGraph);
   RefreshPlanetInfo;
   RefreshTextQuestPrompt;
-  if (GetPlayer = nil)
-      or ((GetPlayer.CurrentPlanet <> nil)
-          and (GetPlayer.CurrentStar.ControlFaction = sfDominators)) then
+  if (LocalPlayer = nil)
+      or ((LocalPlayer.CurrentPlanet <> nil)
+          and (LocalPlayer.CurrentStar.ControlFaction = sfDominators)) then
   begin
     ReportPlanetCaptured;
     RequestedScreenId := screenGameEnd;
     RequestClose(1);
     Exit;
   end;
-  if GetPlayer.PendingLiberationCeremonyPlanet = GetPlayer.CurrentPlanet then
+  if LocalPlayer.PendingLiberationCeremonyPlanet = LocalPlayer.CurrentPlanet then
   begin
     RequestedScreenId := screenGovernment;
     RequestClose(1);
     Exit;
   end;
-  if GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) = rlHostile then
+  if LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) = rlHostile then
   begin
     RequestedScreenId := screenGovernment;
     RequestClose(1);
@@ -171,24 +171,24 @@ begin
     aCalc.WaitForTurnCalculationUI;
     Exit;
   end;
-  if (GetPlayer.CurrentPlanet <> nil)
-      and ((GetPlayer.PendingDockDialogue > 0) or GetPlayer.CurrentPlanet.IsMainPiratePlanet) then
+  if (LocalPlayer.CurrentPlanet <> nil)
+      and ((LocalPlayer.PendingDockDialogue > 0) or LocalPlayer.CurrentPlanet.IsMainPiratePlanet) then
   begin
     RequestedScreenId := screenGovernment;
     RequestClose(1);
     Exit;
   end;
   MainPanel.RebuildMessageButtons(False);
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnEnteringForm, nil, nil, 0);
   aCalc.WaitForTurnCalculationUI;
 end;
 
 procedure TfPlanet.OnClose;
 begin
   aCalc.WaitForTurnCalculationUI;
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnLeavingForm, nil, nil, 0);
   MainPanel.OnClose;
   PlanetPanel.OnClose;
   LoadPanel.OnClose;
@@ -200,20 +200,20 @@ var
 begin
   Window := GetByName('PanelInfo') as TWindowGI;
   with GetByName('PanelInfo_Name') as TLabelGI do
-    if GetPlayer.CurrentPlanet.IsMainPiratePlanet then
-      SetText(GetPlayer.CurrentPlanet.Name)
+    if LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
+      SetText(LocalPlayer.CurrentPlanet.Name)
     else
       SetText(
           ReplaceColoredToken(
               LocalizedText('Planet.Civil.Info.TextNamePlanet'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               InfoNameColorTag
           )
       );
   with GetByName('PanelInfo_Text') as TLabelGI do
   begin
-    SetText(GetPlayer.CurrentPlanet.GetCivilInfoText);
+    SetText(LocalPlayer.CurrentPlanet.GetCivilInfoText);
     Window.SetSize(
         Classes.Point(
             ClientSize.X + Window.WorkSubRect.Left + Window.WorkSubRect.Right,
@@ -228,7 +228,7 @@ begin
   with GetByName('PanelInfo_Image') as TGraphBufGI do
   begin
     SourceHasPerPixelAlpha := True;
-    GetPlayer.CurrentPlanet.Graphic.RenderToBuffer(Self, GraphBuf, False);
+    LocalPlayer.CurrentPlanet.Graphic.RenderToBuffer(Self, GraphBuf, False);
     if Cardinal(GraphBuf.Width) >= Cardinal(GraphBuf.Height) then
       GraphBuf.RescaleRgba(
           ClientSize.X,
@@ -254,7 +254,7 @@ begin
   );
   with GetByName('PanelInfo_Race') as TImageGI do
   begin
-    SetImagePath(GetFactionEmblemPath(GetPlayer.CurrentPlanet.GetFactionResourceName));
+    SetImagePath(GetFactionEmblemPath(LocalPlayer.CurrentPlanet.GetFactionResourceName));
     SetImageKindX(ikxCenter);
     SetImageKindY(ikyCenter);
     SetPosition(
@@ -299,13 +299,13 @@ begin
   Window := GetByName('QuestInfo') as TWindowGI;
   Quest := nil;
   Window.SetActive(False);
-  if (GetPlayer.CurrentPlanet.TextQuestId > -1) and (GetPlayer.Quests.Count > 0) then
-    for I := 0 to GetPlayer.Quests.Count - 1 do
+  if (LocalPlayer.CurrentPlanet.TextQuestId > -1) and (LocalPlayer.Quests.Count > 0) then
+    for I := 0 to LocalPlayer.Quests.Count - 1 do
     begin
-      Quest := PQuest(GetPlayer.Quests[I]);
+      Quest := PQuest(LocalPlayer.Quests[I]);
       if (Quest.QuestType = qtPlanetQuest)
           and (Quest.ObjectiveTarget is TPlanet)
-          and (GetPlayer.CurrentPlanet = (Quest.ObjectiveTarget as TPlanet))
+          and (LocalPlayer.CurrentPlanet = (Quest.ObjectiveTarget as TPlanet))
           and (LanguageDataConfig
                   .GetBlockByPath('PlanetQuest.PlanetQuest')
                   .CountParams(IntToStr(Quest.QuestNumber))
@@ -461,19 +461,19 @@ begin
     MusicManager.RequestFadeOut;
     Exit;
   end;
-  if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+  if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
   begin
-    if not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+    if not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and $7F].InternalName
               + 'Pirate'
       )
     else
       MusicManager.PlayCategory('Nation.PiratePlanetMain');
   end
   else
-    MusicManager.PlayCategory('Nation.' + OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].InternalName);
+    MusicManager.PlayCategory('Nation.' + OwnerInfo[LocalPlayer.CurrentPlanet.OwnerId].InternalName);
 end;
 
 procedure LinkRecoveredTypes;

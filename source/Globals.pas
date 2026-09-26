@@ -2235,7 +2235,7 @@ begin
         RemovePersistentPlayerMessage(Entry, True)
       else if Entry.WasRead and (Entry.Kind in [0..2, 4, 5, 8]) then
         RemovePersistentPlayerMessage(Entry, True)
-      else if not GetPlayer.InNormalSpace and (Entry.Kind = 1) then
+      else if not LocalPlayer.InNormalSpace and (Entry.Kind = 1) then
         RemovePersistentPlayerMessage(Entry, True);
     end;
   finally

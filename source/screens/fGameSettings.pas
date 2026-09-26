@@ -542,8 +542,8 @@ begin
       end;
     end;
     SetPlayer(Player, Galaxy);
-    GetPlayer.HomePlanet.ChangeRelationToRanger(GetPlayer, 100);
-    GetPlayer.Name := PlayerName;
+    LocalPlayer.HomePlanet.ChangeRelationToRanger(LocalPlayer, 100);
+    LocalPlayer.Name := PlayerName;
     LocalHuman.PlayerOldQuests := aMyFunction.TObjectList.Create;
     Session.LastLoadedPlayerName := PlayerName;
     Stage := 8;
@@ -552,13 +552,13 @@ begin
     Galaxy.RefreshRangerStrengthStats;
     Stage := 9;
 
-    Star := TObject(GetPlayer.CurrentStar.StarDistances[Galaxy.Stars.Count - 1].Star) as TStar;
+    Star := TObject(LocalPlayer.CurrentStar.StarDistances[Galaxy.Stars.Count - 1].Star) as TStar;
     Galaxy.CreateDominatorSpawnProxy(Star);
     I := 0;
     while I < Galaxy.Stars.Count do
     begin
       Star := SpecialStar.StarDistances[I].Star;
-      if GetPlayer.CurrentStar = Star then
+      if LocalPlayer.CurrentStar = Star then
         Inc(I)
       else
       begin
@@ -572,7 +572,7 @@ begin
     while I < Galaxy.Stars.Count do
     begin
       Star := SpecialStar.StarDistances[I].Star;
-      if GetPlayer.CurrentStar = Star then
+      if LocalPlayer.CurrentStar = Star then
         Inc(I)
       else
       begin
@@ -585,7 +585,7 @@ begin
     while I < Galaxy.Stars.Count do
     begin
       Star := SpecialStar.StarDistances[I].Star;
-      if GetPlayer.CurrentStar = Star then
+      if LocalPlayer.CurrentStar = Star then
         Inc(I)
       else
       begin
@@ -602,8 +602,8 @@ begin
     for I := 0 to N do
     begin
       Star := TObject(BlazerShip.CurrentStar.StarDistances[I].Star) as TStar;
-      if (GetPlayer.CurrentStar.Constellation <> Star.Constellation)
-          and (GetPlayer.CurrentStar.StarDistances[1].Star <> Star)
+      if (LocalPlayer.CurrentStar.Constellation <> Star.Constellation)
+          and (LocalPlayer.CurrentStar.StarDistances[1].Star <> Star)
           and (Star.Constellation.Id <> 20) then
       begin
         if (BlazerShip.CurrentStar = Star)
@@ -627,8 +627,8 @@ begin
     begin
       Star := Galaxy.Stars[70];
       Star := TObject(Star.StarDistances[I].Star) as TStar;
-      if (GetPlayer.CurrentStar.Constellation <> Star.Constellation)
-          and (GetPlayer.CurrentStar.StarDistances[1].Star <> Star)
+      if (LocalPlayer.CurrentStar.Constellation <> Star.Constellation)
+          and (LocalPlayer.CurrentStar.StarDistances[1].Star <> Star)
           and (Star.Constellation.Id <> 20)
           and ((Galaxy.Constellations.IndexOf(Star.Constellation) >= 5)
               or (NextRandomUnitFloat(Galaxy.RandomState) >= 0.4))
@@ -645,7 +645,7 @@ begin
     for I := 0 to Galaxy.Constellations.Count - 1 do
     begin
       Constellation := Galaxy.Constellations[I];
-      if Constellation.SharesOutlineSegment(GetPlayer.HomePlanet.CurrentStar.Constellation) then
+      if Constellation.SharesOutlineSegment(LocalPlayer.HomePlanet.CurrentStar.Constellation) then
         Constellation.Visible := True
       else
         Constellation.Visible := False;
@@ -700,18 +700,18 @@ begin
     Stage := 14;
 
     NewGameGenerationStage := 5;
-    TRuins.Create.Init(rstRangerCenter, GetPlayer.CurrentStar, '');
-    TRuins.Create.Init(rstScienceBase, GetPlayer.CurrentStar, '');
-    TRuins.Create.Init(rstMedicalBase, GetPlayer.CurrentStar, '');
+    TRuins.Create.Init(rstRangerCenter, LocalPlayer.CurrentStar, '');
+    TRuins.Create.Init(rstScienceBase, LocalPlayer.CurrentStar, '');
+    TRuins.Create.Init(rstMedicalBase, LocalPlayer.CurrentStar, '');
     TRuins
         .Create
-        .Init(rstPirateBase, TObject(GetPlayer.CurrentStar.StarDistances[3].Star) as TStar, '');
+        .Init(rstPirateBase, TObject(LocalPlayer.CurrentStar.StarDistances[3].Star) as TStar, '');
     TRuins
         .Create
-        .Init(rstBusinessCenter, TObject(GetPlayer.CurrentStar.StarDistances[1].Star) as TStar, '');
+        .Init(rstBusinessCenter, TObject(LocalPlayer.CurrentStar.StarDistances[1].Star) as TStar, '');
     TRuins
         .Create
-        .Init(rstMilitaryBase, TObject(GetPlayer.CurrentStar.StarDistances[2].Star) as TStar, '');
+        .Init(rstMilitaryBase, TObject(LocalPlayer.CurrentStar.StarDistances[2].Star) as TStar, '');
     Galaxy.UpdateConstellationMilitaryStats;
     Stage := 15;
 
@@ -749,43 +749,43 @@ begin
     end;
     Stage := 18;
 
-    GetPlayer.CurrentPlanet := nil;
-    GetPlayer.DockedTo := nil;
-    for I := 0 to GetPlayer.CurrentStar.Ships.Count - 1 do
+    LocalPlayer.CurrentPlanet := nil;
+    LocalPlayer.DockedTo := nil;
+    for I := 0 to LocalPlayer.CurrentStar.Ships.Count - 1 do
     begin
-      Ship := GetPlayer.CurrentStar.Ships[I];
+      Ship := LocalPlayer.CurrentStar.Ships[I];
       if Ship.TypeId = Byte(rstRangerCenter) then
       begin
-        GetPlayer.DockedTo := Ship;
+        LocalPlayer.DockedTo := Ship;
         Break;
       end;
     end;
-    if GetPlayer.DockedTo = nil then
+    if LocalPlayer.DockedTo = nil then
     begin
       AppendLogLineThreadSafe(
           'Galaxy create exception, not found rc, seed = '
               + IntToStr(Integer(Galaxy.GenerationSeed))
       );
-      if GetPlayer.CurrentStar.ControlFaction <> sfDominators then
-        for I := 0 to GetPlayer.CurrentStar.Planets.Count - 1 do
-          if TPlanet(GetPlayer.CurrentStar.Planets[I]).OwnerId <> Byte(oiUninhabited) then
+      if LocalPlayer.CurrentStar.ControlFaction <> sfDominators then
+        for I := 0 to LocalPlayer.CurrentStar.Planets.Count - 1 do
+          if TPlanet(LocalPlayer.CurrentStar.Planets[I]).OwnerId <> Byte(oiUninhabited) then
           begin
-            GetPlayer.CurrentPlanet := GetPlayer.CurrentStar.Planets[I];
+            LocalPlayer.CurrentPlanet := LocalPlayer.CurrentStar.Planets[I];
             Break;
           end;
-      if GetPlayer.CurrentPlanet = nil then
-        for I := 0 to GetPlayer.CurrentStar.Planets.Count - 1 do
-          if TPlanet(GetPlayer.CurrentStar.Planets[I]).OwnerId = Byte(oiUninhabited) then
+      if LocalPlayer.CurrentPlanet = nil then
+        for I := 0 to LocalPlayer.CurrentStar.Planets.Count - 1 do
+          if TPlanet(LocalPlayer.CurrentStar.Planets[I]).OwnerId = Byte(oiUninhabited) then
           begin
-            GetPlayer.CurrentPlanet := GetPlayer.CurrentStar.Planets[I];
+            LocalPlayer.CurrentPlanet := LocalPlayer.CurrentStar.Planets[I];
             Break;
           end;
-      if GetPlayer.CurrentPlanet = nil then
-        GetPlayer.CurrentPlanet := GetPlayer.CurrentStar.Planets[0];
+      if LocalPlayer.CurrentPlanet = nil then
+        LocalPlayer.CurrentPlanet := LocalPlayer.CurrentStar.Planets[0];
     end;
     Galaxy.IronWill := NewGameGenerationThread.IronWill;
     for I := 0 to 1 do
-      Inc(GetPlayer.BaseSkills[StartingSkills[I]]);
+      Inc(LocalPlayer.BaseSkills[StartingSkills[I]]);
     for I := 0 to 1 do
     begin
       case StartingItemTypes[I] of
@@ -793,43 +793,43 @@ begin
         begin
           Item := TFuelTanks.Create;
           (Item as TFuelTanks)
-              .Init(Round(FuelTanksBaseSize * EquipmentSizeFactors[4]), 2, GetPlayer.OwnerId);
+              .Init(Round(FuelTanksBaseSize * EquipmentSizeFactors[4]), 2, LocalPlayer.OwnerId);
         end;
         44:
         begin
           Item := TEngine.Create;
           (Item as TEngine)
-              .Init(Round(EngineBaseSize * EquipmentSizeFactors[3]), 2, GetPlayer.OwnerId);
+              .Init(Round(EngineBaseSize * EquipmentSizeFactors[3]), 2, LocalPlayer.OwnerId);
         end;
         45:
         begin
           Item := TRadar.Create;
           (Item as TRadar)
-              .Init(Round(RadarBaseSize * EquipmentSizeFactors[3]), 2, GetPlayer.OwnerId);
+              .Init(Round(RadarBaseSize * EquipmentSizeFactors[3]), 2, LocalPlayer.OwnerId);
         end;
         46:
         begin
           Item := TScaner.Create;
           (Item as TScaner)
-              .Init(Round(ScannerBaseSize * EquipmentSizeFactors[4]), 2, GetPlayer.OwnerId);
+              .Init(Round(ScannerBaseSize * EquipmentSizeFactors[4]), 2, LocalPlayer.OwnerId);
         end;
         47:
         begin
           Item := TRepairRobot.Create;
           (Item as TRepairRobot)
-              .Init(Round(RepairRobotBaseSize * EquipmentSizeFactors[3]), 2, GetPlayer.OwnerId);
+              .Init(Round(RepairRobotBaseSize * EquipmentSizeFactors[3]), 2, LocalPlayer.OwnerId);
         end;
         48:
         begin
           Item := TCargoHook.Create;
           (Item as TCargoHook)
-              .Init(Round(CargoHookBaseSize * EquipmentSizeFactors[3]), 2, GetPlayer.OwnerId);
+              .Init(Round(CargoHookBaseSize * EquipmentSizeFactors[3]), 2, LocalPlayer.OwnerId);
         end;
         49:
         begin
           Item := TDefGenerator.Create;
           (Item as TDefGenerator)
-              .Init(Round(DefGeneratorBaseSize * EquipmentSizeFactors[3]), 2, GetPlayer.OwnerId);
+              .Init(Round(DefGeneratorBaseSize * EquipmentSizeFactors[3]), 2, LocalPlayer.OwnerId);
         end;
         50:
         begin
@@ -839,7 +839,7 @@ begin
                   t_Weapon1,
                   Round(WeaponInfos[Ord(t_Weapon1)].AverageSize * EquipmentSizeFactors[4]),
                   3,
-                  GetPlayer.OwnerId);
+                  LocalPlayer.OwnerId);
         end;
         51:
         begin
@@ -849,7 +849,7 @@ begin
                   t_Weapon2,
                   Round(WeaponInfos[Ord(t_Weapon2)].AverageSize * EquipmentSizeFactors[3]),
                   2,
-                  GetPlayer.OwnerId);
+                  LocalPlayer.OwnerId);
         end;
         52:
         begin
@@ -859,7 +859,7 @@ begin
                   t_Weapon3,
                   Round(WeaponInfos[Ord(t_Weapon3)].AverageSize * EquipmentSizeFactors[2]),
                   2,
-                  GetPlayer.OwnerId);
+                  LocalPlayer.OwnerId);
         end;
         53:
         begin
@@ -869,7 +869,7 @@ begin
                   t_Weapon4,
                   Round(WeaponInfos[Ord(t_Weapon4)].AverageSize * EquipmentSizeFactors[3]),
                   1,
-                  GetPlayer.OwnerId);
+                  LocalPlayer.OwnerId);
         end;
         54:
         begin
@@ -879,11 +879,11 @@ begin
                   t_Weapon5,
                   Round(WeaponInfos[Ord(t_Weapon5)].AverageSize * EquipmentSizeFactors[4]),
                   1,
-                  GetPlayer.OwnerId);
+                  LocalPlayer.OwnerId);
         end;
       else
         Item := TRadar.Create;
-        (Item as TRadar).Init(Round(RadarBaseSize * EquipmentSizeFactors[4]), 2, GetPlayer.OwnerId);
+        (Item as TRadar).Init(Round(RadarBaseSize * EquipmentSizeFactors[4]), 2, LocalPlayer.OwnerId);
       end;
       case Galaxy.DifficultyLevels[7] of
         0: Item.Improve(ikMajor);
@@ -891,24 +891,24 @@ begin
         2: Item.Improve(ikMinor);
       end;
       GetMem(Entry, SizeOf(Entry^));
-      GetPlayer.StorageEntries.Add(Entry);
-      if GetPlayer.DockedTo <> nil then
-        Entry.LocationOwner := GetPlayer.DockedTo
+      LocalPlayer.StorageEntries.Add(Entry);
+      if LocalPlayer.DockedTo <> nil then
+        Entry.LocationOwner := LocalPlayer.DockedTo
       else
-        Entry.LocationOwner := GetPlayer.CurrentPlanet;
+        Entry.LocationOwner := LocalPlayer.CurrentPlanet;
       Entry.Item := Item;
       Entry.SlotIndex := 0;
     end;
     Stage := 19;
 
     // Native code passes the last planet visited by the population loop above.
-    GetPlayer.ApplyCharacterPreset(
+    LocalPlayer.ApplyCharacterPreset(
         Planet,
         GalaxyDifficultyTuning[Galaxy.DifficultyLevels[1]].DifficultyValue18,
         CharacterPreset
     );
-    GetPlayer.RefreshStorageBubbles;
-    RunGlobalScriptsForContext(GetPlayer.CurrentStar, 0);
+    LocalPlayer.RefreshStorageBubbles;
+    RunGlobalScriptsForContext(LocalPlayer.CurrentStar, 0);
     LegacyGenerationRandom := False;
     NewGameGenerationStage := 8;
   except

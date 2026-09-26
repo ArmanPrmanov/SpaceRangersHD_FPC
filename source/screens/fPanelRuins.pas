@@ -88,7 +88,7 @@ end;
 procedure TfPanelRuins.OnOpen;
 begin
   with Screen.GetByName('PanelRuins') do
-    SetActive(GetPlayer.RuinsMode = 0);
+    SetActive(LocalPlayer.RuinsMode = 0);
 end;
 
 procedure TfPanelRuins.OnClose;
@@ -111,7 +111,7 @@ begin
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
-  if (GetPlayer.PendingDockDialogue > 1) and (RuinsTalkScreen = Screen) then
+  if (LocalPlayer.PendingDockDialogue > 1) and (RuinsTalkScreen = Screen) then
     Exit;
   if HasPendingScriptRequests then
     Exit;
@@ -125,13 +125,13 @@ begin
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
-  if (GetPlayer.PendingDockDialogue > 1) and (RuinsTalkScreen = Screen) then
+  if (LocalPlayer.PendingDockDialogue > 1) and (RuinsTalkScreen = Screen) then
     Exit;
-  if (GetPlayer.RuinsMode > 0) and (RuinsTalkScreen = Screen) then
+  if (LocalPlayer.RuinsMode > 0) and (RuinsTalkScreen = Screen) then
     Exit;
   if HasPendingScriptRequests then
     Exit;
-  if (GetPlayer.DockedTo.TypeId = Byte(rstBusinessCenter)) and (GetPlayer.DebtDefaultCount > 1) then
+  if (LocalPlayer.DockedTo.TypeId = Byte(rstBusinessCenter)) and (LocalPlayer.DebtDefaultCount > 1) then
     ShowMessageBoxGI(
         Screen,
         LocalizedColorText('FormRuins.BK.DebtNoAccess'),
@@ -150,13 +150,13 @@ begin
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
-  if (GetPlayer.PendingDockDialogue > 1) and (RuinsTalkScreen = Screen) then
+  if (LocalPlayer.PendingDockDialogue > 1) and (RuinsTalkScreen = Screen) then
     Exit;
-  if (GetPlayer.RuinsMode > 0) and (RuinsTalkScreen = Screen) then
+  if (LocalPlayer.RuinsMode > 0) and (RuinsTalkScreen = Screen) then
     Exit;
   if HasPendingScriptRequests then
     Exit;
-  if (GetPlayer.DockedTo.TypeId = Byte(rstBusinessCenter)) and (GetPlayer.DebtDefaultCount > 1) then
+  if (LocalPlayer.DockedTo.TypeId = Byte(rstBusinessCenter)) and (LocalPlayer.DebtDefaultCount > 1) then
     ShowMessageBoxGI(
         Screen,
         LocalizedColorText('FormRuins.BK.DebtNoAccess'),
@@ -175,13 +175,13 @@ begin
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
-  if (GetPlayer.PendingDockDialogue > 1) and (RuinsTalkScreen = Screen) then
+  if (LocalPlayer.PendingDockDialogue > 1) and (RuinsTalkScreen = Screen) then
     Exit;
-  if (GetPlayer.RuinsMode > 0) and (RuinsTalkScreen = Screen) then
+  if (LocalPlayer.RuinsMode > 0) and (RuinsTalkScreen = Screen) then
     Exit;
   if HasPendingScriptRequests then
     Exit;
-  if (GetPlayer.DockedTo.TypeId = Byte(rstBusinessCenter)) and (GetPlayer.DebtDefaultCount > 1) then
+  if (LocalPlayer.DockedTo.TypeId = Byte(rstBusinessCenter)) and (LocalPlayer.DebtDefaultCount > 1) then
     ShowMessageBoxGI(
         Screen,
         LocalizedColorText('FormRuins.BK.DebtNoAccess'),
@@ -200,9 +200,9 @@ begin
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
-  if (GetPlayer.PendingDockDialogue > 1) and (RuinsTalkScreen = Screen) then
+  if (LocalPlayer.PendingDockDialogue > 1) and (RuinsTalkScreen = Screen) then
     Exit;
-  if (GetPlayer.RuinsMode > 0) and (RuinsTalkScreen = Screen) then
+  if (LocalPlayer.RuinsMode > 0) and (RuinsTalkScreen = Screen) then
     Exit;
   if HasPendingScriptRequests then
     Exit;
@@ -250,7 +250,7 @@ begin
     Exit;
   if IsVirtualKeyDown(VK_CONTROL) or IsVirtualKeyDown(VK_SHIFT) or IsVirtualKeyDown(VK_MENU) then
     Exit;
-  if not GetPlayer.IsDockedToShip then
+  if not LocalPlayer.IsDockedToShip then
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;

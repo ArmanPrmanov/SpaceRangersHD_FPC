@@ -172,7 +172,7 @@ var
   SavedChaoticRandom: Boolean;
 begin
   Result := nil;
-  if (GetPlayer <> nil) and (PlayerArcadeShip <> nil) then
+  if (LocalPlayer <> nil) and (PlayerArcadeShip <> nil) then
     if RewardObject <> nil then
     begin
       if (RewardObject is TArtefact) and not Preview then
@@ -185,11 +185,11 @@ begin
     begin
       UsedSubportal := False;
       RepeatPenalty := 0;
-      if (GetPlayer.Order = soJumpHole)
-          and (GetPlayer.OrderTarget <> nil)
-          and (GetPlayer.OrderTarget is THole) then
+      if (LocalPlayer.Order = soJumpHole)
+          and (LocalPlayer.OrderTarget <> nil)
+          and (LocalPlayer.OrderTarget is THole) then
       begin
-        Hole := GetPlayer.OrderTarget as THole;
+        Hole := LocalPlayer.OrderTarget as THole;
         for Index := Galaxy.GalaxyEvents.Count - 1 downto 0 do
         begin
           Event := TGalaxyEvent(Galaxy.GalaxyEvents[Index]);
@@ -237,24 +237,24 @@ begin
       end;
       if (ArcadeKellerDefeats = 0)
           and not KellerPresent
-          and (GetPlayer.Order = soJumpHole)
+          and (LocalPlayer.Order = soJumpHole)
           and ((LivingEnemies = 0) or Preview)
-          and ((LivingEnemies + GetPlayer.BlackHoleKillCount < 20)
+          and ((LivingEnemies + LocalPlayer.BlackHoleKillCount < 20)
               or (RandomRange(0, 100) > RepeatPenalty + 30)) then
       begin
         while Reward = nil do
         begin
           Inc(Index);
           Reward := CreateRandomLootItem(ilpArcadeBattle, 6, AdvanceRandomSeed(RandomState));
-          if GetPlayer.HasMatchingArtefactOrCustomItem(Reward) and (Index < 5) then
+          if LocalPlayer.HasMatchingArtefactOrCustomItem(Reward) and (Index < 5) then
           begin
             Reward.Free;
             Reward := nil;
             Galaxy.NextItemId := SavedNextItemId;
           end
-          else if (GetPlayer.GetBaseCargoHookPower > 0)
-              and (GetPlayer.GetBaseCargoHookPower < Reward.Weight)
-              and (LivingEnemies + GetPlayer.BlackHoleKillCount < 5)
+          else if (LocalPlayer.GetBaseCargoHookPower > 0)
+              and (LocalPlayer.GetBaseCargoHookPower < Reward.Weight)
+              and (LivingEnemies + LocalPlayer.BlackHoleKillCount < 5)
               and (Index < 5) then
           begin
             Reward.Free;
@@ -265,7 +265,7 @@ begin
             Break;
         end;
         if Reward is TArtefactTranclucator then
-          (TObject((Reward as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip := GetPlayer;
+          (TObject((Reward as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip := LocalPlayer;
       end;
       RandomState := SavedRandomState;
       if Galaxy <> nil then
@@ -319,7 +319,7 @@ begin
     inherited ApplyDamage(Amount, Source, Disrupt);
     LastDamageTick := ArcadeTickCount;
     Inc(RecentHitCount);
-    if (GetPlayer <> nil)
+    if (LocalPlayer <> nil)
         and (Health <= 0)
         and (PlayerArcadeShip <> nil)
         and (Enemies.IndexOf(PlayerArcadeShip) < 0) then
@@ -331,7 +331,7 @@ begin
           Event.AddTextData(ScriptLabel);
         end;
     end
-    else if (GetPlayer <> nil)
+    else if (LocalPlayer <> nil)
         and (Health <= 0)
         and (PlayerArcadeShip <> nil)
         and (Enemies.IndexOf(PlayerArcadeShip) >= 0) then
@@ -343,17 +343,17 @@ begin
             and (TabShip(PlayerArcadeShip.Enemies[Index]).Health > 0) then
           Inc(LivingEnemies);
       RandomState := InitialRandomSeed;
-      if GetPlayer.Order = soJumpHole then
+      if LocalPlayer.Order = soJumpHole then
       begin
-        Inc(GetPlayer.BlackHoleKillCount);
+        Inc(LocalPlayer.BlackHoleKillCount);
         TryAddAchievementProgress('HOLEMAN', 1);
       end
       else
       begin
-        Inc(GetPlayer.HyperspaceKillCount);
+        Inc(LocalPlayer.HyperspaceKillCount);
         TryAddAchievementProgress('HOLEMAN', 1);
-        if GetPlayer.InHyperspace and (GetPlayer.OwnerId <> Byte(oiPirate)) then
-          GetPlayer.AddRankPoints(2);
+        if LocalPlayer.InHyperspace and (LocalPlayer.OwnerId <> Byte(oiPirate)) then
+          LocalPlayer.AddRankPoints(2);
       end;
       if (Galaxy <> nil) and (ScriptLabel <> '') then
       begin
@@ -365,31 +365,31 @@ begin
       begin
         if KellerArcadeShip = Self then
         begin
-          GetPlayer.ScriptItemsAct(satOnABItemDrop, Reward, nil, 0);
+          LocalPlayer.ScriptItemsAct(satOnABItemDrop, Reward, nil, 0);
           ArcadeKellerReward := Reward;
         end
         else
         begin
           ClearPlayerHoldEntries;
-          GetPlayer.ScriptItemsAct(satOnABItemDrop, Reward, nil, 0);
+          LocalPlayer.ScriptItemsAct(satOnABItemDrop, Reward, nil, 0);
           if Reward is TArtefact then
-            GetPlayer.Artefacts.Insert(0, Reward)
+            LocalPlayer.Artefacts.Insert(0, Reward)
           else
-            GetPlayer.Inventory.Add(Reward);
+            LocalPlayer.Inventory.Add(Reward);
         end;
         AddArcadeRewardToList(Reward);
       end
       else if RewardObject <> nil then
       begin
         ClearPlayerHoldEntries;
-        GetPlayer.ScriptItemsAct(satOnABItemDrop, RewardObject, nil, 0);
+        LocalPlayer.ScriptItemsAct(satOnABItemDrop, RewardObject, nil, 0);
         if RewardObject is TArtefact then
-          GetPlayer.Artefacts.Insert(0, RewardObject)
+          LocalPlayer.Artefacts.Insert(0, RewardObject)
         else
-          GetPlayer.Inventory.Add(RewardObject);
+          LocalPlayer.Inventory.Add(RewardObject);
         AddArcadeRewardToList(RewardObject);
         RewardObject := nil;
-        GetPlayer.RefreshDerivedStats(True);
+        LocalPlayer.RefreshDerivedStats(True);
       end
       else if ((LivingEnemies = 0)
               or ((LivingEnemies = 1) and (RandomRange(0, 100) * LuckScale > 50))
@@ -401,7 +401,7 @@ begin
             Galaxy.GetArcadeDropValueModifier
                 * RemapClamped(LivingEnemies, 0, 5, 1.56, 0.26)
                 * GalaxyDifficultyTuning[Galaxy.DifficultyLevels[7]].ArcadeRewardScale;
-        if GetPlayer.Order = soJumpHole then
+        if LocalPlayer.Order = soJumpHole then
         begin
           if LivingEnemies = 0 then
             RewardScale := RewardScale * 3
@@ -451,15 +451,15 @@ begin
           if Attempts > 10000 then
           begin
             ClearPlayerHoldEntries;
-            GetPlayer.ScriptItemsAct(satOnABItemDrop, Item, nil, 0);
-            GetPlayer.Inventory.Insert(1, Item);
-            GetPlayer.RefreshDerivedStats(True);
+            LocalPlayer.ScriptItemsAct(satOnABItemDrop, Item, nil, 0);
+            LocalPlayer.Inventory.Insert(1, Item);
+            LocalPlayer.RefreshDerivedStats(True);
             AddArcadeRewardToList(Item);
             Break;
           end;
-          if (GetPlayer.GetBaseCargoHookPower > 0)
-              and (GetPlayer.GetBaseCargoHookPower < Item.Weight)
-              and (GetPlayer.BlackHoleKillCount + GetPlayer.HyperspaceKillCount < 17) then
+          if (LocalPlayer.GetBaseCargoHookPower > 0)
+              and (LocalPlayer.GetBaseCargoHookPower < Item.Weight)
+              and (LocalPlayer.BlackHoleKillCount + LocalPlayer.HyperspaceKillCount < 17) then
           begin
             Item.Free;
             Galaxy.NextItemId := SavedNextItemId;
@@ -468,21 +468,21 @@ begin
           if ((Item.GetConditionAdjustedCost
                       < Max(
                           800,
-                          GetPlayer.Wealth
+                          LocalPlayer.Wealth
                               * RemapClamped(
                                   Attempts,
                                   0,
                                   500,
                                   0.01 * RewardScale,
                                   0.03 * RewardScale)))
-                  and ((Item.GetConditionAdjustedCost > GetPlayer.Wealth * 0.008 * RewardScale)
+                  and ((Item.GetConditionAdjustedCost > LocalPlayer.Wealth * 0.008 * RewardScale)
                       or (Attempts > 500)))
               <> False then
           begin
             ClearPlayerHoldEntries;
-            GetPlayer.ScriptItemsAct(satOnABItemDrop, Item, nil, 0);
-            GetPlayer.Inventory.Insert(1, Item);
-            GetPlayer.RefreshDerivedStats(True);
+            LocalPlayer.ScriptItemsAct(satOnABItemDrop, Item, nil, 0);
+            LocalPlayer.Inventory.Insert(1, Item);
+            LocalPlayer.RefreshDerivedStats(True);
             AddArcadeRewardToList(Item);
             Break;
           end;

@@ -214,7 +214,7 @@ begin
                   screenRuinsTalk,
                   screenInfo])
           and (PreviousScreenId = screenStarMap)
-          and (GetPlayer.RuinsMode = 0))
+          and (LocalPlayer.RuinsMode = 0))
       or ((CurrentScreenId in [screenStarMap, screenRuinsTalk])
           and (PreviousScreenId in [screenJump, screenArcadeBattle]))
       or ((CurrentScreenId = screenArcadeBattle) and (PreviousScreenId = screenStarMap)) then
@@ -285,8 +285,8 @@ begin
       or (FastTravelTransitions
           and (((RequestedScreenId = screenLoad) and (ScreenLoadMode = 2))
               or ((RequestedScreenId = screenJump)
-                  and (GetPlayer <> nil)
-                  and not GetPlayer.IsDockedToShip))) then
+                  and (LocalPlayer <> nil)
+                  and not LocalPlayer.IsDockedToShip))) then
     Exit;
   if not HasShutters then
     (BackgroundImage as TImageGI)
@@ -370,8 +370,8 @@ begin
   if FastTravelTransitions
       and (((RequestedScreenId = screenLoad) and (ScreenLoadMode = 2))
           or ((RequestedScreenId = screenJump)
-              and (GetPlayer <> nil)
-              and not GetPlayer.IsDockedToShip)) then
+              and (LocalPlayer <> nil)
+              and not LocalPlayer.IsDockedToShip)) then
   begin
     Screen.RequestClose(1);
     Exit;

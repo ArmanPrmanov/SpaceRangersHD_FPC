@@ -224,8 +224,8 @@ begin
     Stage := 2;
     ShipToInspect := ScannerTarget as TShip;
     Stage := 3;
-    if GetPlayer <> nil then
-      RunScriptItemsAct(GetPlayer, $10, ShipToInspect, nil, 0);
+    if LocalPlayer <> nil then
+      RunScriptItemsAct(LocalPlayer, $10, ShipToInspect, nil, 0);
     Stage := 4;
     RunScriptItemsAct(ShipToInspect, $18, nil, nil, 0);
     Stage := 5;
@@ -1583,7 +1583,7 @@ begin
       CancelCallbackTimer(HideItemTimer);
       HideItemTimer := nil;
     end;
-    if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
+    if (Galaxy <> nil) and not Galaxy.Destroying and (LocalPlayer <> nil) then
       RunItemInfoActionCode(Item, $31, ShipToInspect, nil, nil);
     if (Item.ItemType = t_Hull)
         and (ShipToInspect.TypeId <> stTranclucator)
@@ -1797,7 +1797,7 @@ begin
       .SetText(LocalizedText('Items.Goods.Text.' + IntToStr(Ord(ItemType) + 1)));
   (GetByName('InfoSize') as TLabelGI)
       .SetText(IntToStr(ShipToInspect.CargoGoods[Ord(ItemType)].Count));
-  if GetPlayer = ShipToInspect then
+  if LocalPlayer = ShipToInspect then
     (GetByName('InfoPrice') as TLabelGI)
         .SetText(IntToStr(ShipToInspect.CargoGoods[Ord(ItemType)].TotalCost))
   else
@@ -2074,14 +2074,14 @@ end;
 
 procedure TfScaner.SelectMusic;
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
   begin
     MusicManager.PlayCategory('Base');
     Exit;
   end;
   if MusicInSpaceEnabled then
   begin
-    if (GetPlayer.GetHull.CapitalShip = 1) and (RandomIntRange(0, 100) < 20) then
+    if (LocalPlayer.GetHull.CapitalShip = 1) and (RandomIntRange(0, 100) < 20) then
     begin
       StarMapScreen.BattleMusicSelected := True;
       MusicManager.PlayCategory('Destroyer');

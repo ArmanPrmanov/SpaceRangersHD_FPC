@@ -187,9 +187,9 @@ var
   Stats: TAchievementStats;
 begin
   Result := 0;
-  if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
+  if (Galaxy <> nil) and not Galaxy.Destroying and (LocalPlayer <> nil) then
   begin
-    Stats := GetPlayer.AchievementStats;
+    Stats := LocalPlayer.AchievementStats;
     if Key = 'ASTEROID' then
       Result := Stats.AsteroidsDestroyed
     else if Key = 'FRY' then
@@ -207,9 +207,9 @@ begin
     else if Key = 'DRAIN' then
       Result := Stats.DrainedHullPoints
     else if Key = 'BERTORSLAYER' then
-      Result := GetPlayer.DominatorKillsByType[Ord(ktBertor)]
+      Result := LocalPlayer.DominatorKillsByType[Ord(ktBertor)]
     else if Key = 'SIDECHANGER' then
-      Result := GetPlayer.SideChangeCount;
+      Result := LocalPlayer.SideChangeCount;
     if Result = StoredValue then
       Result := 0;
   end;
@@ -293,7 +293,7 @@ end;
 
 procedure TAchievementStats.CheckBomberAchievement(KillsThisTurn: Integer);
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     Exit;
   if Galaxy = nil then
     Exit;
@@ -312,11 +312,11 @@ begin
   FillChar(Present, 0, SizeOf(Present));
   LastAward := StrToInt(LookupLocalizedTextByKey('Reward.Count')) - 1;
   AllPresent := True;
-  if (GetPlayer <> nil) and (GetPlayer.AwardIds <> nil) then
+  if (LocalPlayer <> nil) and (LocalPlayer.AwardIds <> nil) then
   begin
-    for I := 0 to GetPlayer.AwardIds.Count - 1 do
+    for I := 0 to LocalPlayer.AwardIds.Count - 1 do
     begin
-      AwardId := Byte(GetPlayer.AwardIds[I]);
+      AwardId := Byte(LocalPlayer.AwardIds[I]);
       Present[AwardId] := True;
     end;
     for I := 0 to LastAward do
@@ -331,7 +331,7 @@ var
   I: Integer;
   Quest: PPlayerOldQuest;
 begin
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
     if LocalHuman.PlayerOldQuests <> nil then
       for I := 0 to LocalHuman.PlayerOldQuests.Count - 1 do
       begin
@@ -344,7 +344,7 @@ end;
 
 procedure TAchievementStats.CheckChampionVictoryAchievement(Score: Integer);
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (Score >= 50000) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (Score >= 50000) then
     TryUnlockAchievement('CHAMPION');
 end;
 
@@ -356,37 +356,37 @@ end;
 
 procedure TAchievementStats.CheckNoShotsArcadeVictoryAchievement;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) then
     TryUnlockAchievement('HOLEPEACE');
 end;
 
 procedure TAchievementStats.CheckMoneyAchievement;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (GetPlayer.Money >= 10000000) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (LocalPlayer.Money >= 10000000) then
     TryUnlockAchievement('MONEY');
 end;
 
 procedure TAchievementStats.CheckMasterAchievement;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (GetPlayer.CountWingmen >= 6) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (LocalPlayer.CountWingmen >= 6) then
     TryUnlockAchievement('MASTER');
 end;
 
 procedure TAchievementStats.CheckNodesAchievement;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (GetPlayer.BaseNodes >= 25000) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (LocalPlayer.BaseNodes >= 25000) then
     TryUnlockAchievement('NODES');
 end;
 
 procedure TAchievementStats.CheckLongGameVictoryAchievement(Score, FinishedTurn: Integer);
 begin
-  if (GetPlayer <> nil) and (Score >= 20000) and (FinishedTurn >= 36800) then
+  if (LocalPlayer <> nil) and (Score >= 20000) and (FinishedTurn >= 36800) then
     TryUnlockAchievement('DOLGOZHID');
 end;
 
 procedure TAchievementStats.CheckPacifistVictoryAchievement;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (GetPlayer.TotalShipKillCount = 0) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (LocalPlayer.TotalShipKillCount = 0) then
     TryUnlockAchievement('PEACELOVER');
 end;
 
@@ -412,10 +412,10 @@ end;
 
 procedure TAchievementStats.CheckFirstPlaceRatingAchievement;
 begin
-  if (GetPlayer <> nil)
+  if (LocalPlayer <> nil)
       and (Galaxy <> nil)
       and (Galaxy.CurrentTurn >= 300)
-      and (GetPlayer.PlaceInRating = 1) then
+      and (LocalPlayer.PlaceInRating = 1) then
     TryUnlockAchievement('RATING');
 end;
 
@@ -425,10 +425,10 @@ var
   Complete: Boolean;
 begin
   Complete := True;
-  if (GetPlayer <> nil) and (Galaxy <> nil) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) then
   begin
     for Skill := Low(TPilotSkill) to High(TPilotSkill) do
-      if GetPlayer.GetBaseSkillLevel(Skill) < 6 then
+      if LocalPlayer.GetBaseSkillLevel(Skill) < 6 then
         Complete := False;
     if Complete then
       TryUnlockAchievement('SKILL');
@@ -437,7 +437,7 @@ end;
 
 procedure TAchievementStats.CheckSpeedAchievement;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (GetPlayer.CalculateSpeed >= 2300) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (LocalPlayer.CalculateSpeed >= 2300) then
     TryUnlockAchievement('SPEED');
 end;
 
@@ -455,19 +455,19 @@ end;
 
 procedure TAchievementStats.CheckScienceAchievement;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (CompletedResearchPrograms >= 3) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (CompletedResearchPrograms >= 3) then
     TryUnlockAchievement('SCIENCE');
 end;
 
 procedure TAchievementStats.CheckBaronAchievement;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (GetPlayer.PirateRank = 7) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (LocalPlayer.PirateRank = 7) then
     TryUnlockAchievement('BARON');
 end;
 
 procedure TAchievementStats.CheckCommanderAchievement;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (GetPlayer.Rank = 7) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (LocalPlayer.Rank = 7) then
     TryUnlockAchievement('COMMANDOR');
 end;
 
@@ -478,7 +478,7 @@ var
   Planet: TPlanet;
 begin
   Count := 0;
-  if (GetPlayer = nil) or (Galaxy = nil) then
+  if (LocalPlayer = nil) or (Galaxy = nil) then
     Exit;
   for I := 0 to Galaxy.Stars.Count - 1 do
   begin
@@ -490,7 +490,7 @@ begin
         if Planet.OwnerId <> Byte(oiUninhabited) then
         begin
           Inc(Count);
-          if Planet.GetRelationLevelToShip(GetPlayer) > rlHostile then
+          if Planet.GetRelationLevelToShip(LocalPlayer) > rlHostile then
             Exit;
         end;
       end;
@@ -503,28 +503,28 @@ procedure TAchievementStats.CheckBestEquipmentAchievement;
 var
   I: Integer;
 begin
-  if (GetPlayer = nil) or (Galaxy = nil) then
+  if (LocalPlayer = nil) or (Galaxy = nil) then
     Exit;
-  if GetPlayer.GetHull.HasStandardStats then
+  if LocalPlayer.GetHull.HasStandardStats then
     Exit;
-  if (GetPlayer.GetFuelTanks = nil) or GetPlayer.GetFuelTanks.HasStandardStats then
+  if (LocalPlayer.GetFuelTanks = nil) or LocalPlayer.GetFuelTanks.HasStandardStats then
     Exit;
-  if (GetPlayer.GetEngine = nil) or GetPlayer.GetEngine.HasStandardStats then
+  if (LocalPlayer.GetEngine = nil) or LocalPlayer.GetEngine.HasStandardStats then
     Exit;
-  if (GetPlayer.GetRadar = nil) or GetPlayer.GetRadar.HasStandardStats then
+  if (LocalPlayer.GetRadar = nil) or LocalPlayer.GetRadar.HasStandardStats then
     Exit;
-  if (GetPlayer.GetScanner = nil) or GetPlayer.GetScanner.HasStandardStats then
+  if (LocalPlayer.GetScanner = nil) or LocalPlayer.GetScanner.HasStandardStats then
     Exit;
-  if (GetPlayer.GetRepairRobot = nil) or GetPlayer.GetRepairRobot.HasStandardStats then
+  if (LocalPlayer.GetRepairRobot = nil) or LocalPlayer.GetRepairRobot.HasStandardStats then
     Exit;
-  if (GetPlayer.GetCargoHook = nil) or GetPlayer.GetCargoHook.HasStandardStats then
+  if (LocalPlayer.GetCargoHook = nil) or LocalPlayer.GetCargoHook.HasStandardStats then
     Exit;
-  if (GetPlayer.GetDefGenerator = nil) or GetPlayer.GetDefGenerator.HasStandardStats then
+  if (LocalPlayer.GetDefGenerator = nil) or LocalPlayer.GetDefGenerator.HasStandardStats then
     Exit;
-  if GetPlayer.CountEquippedWeapons < 5 then
+  if LocalPlayer.CountEquippedWeapons < 5 then
     Exit;
   for I := 1 to 5 do
-    if GetPlayer.Weapons[I].HasStandardStats then
+    if LocalPlayer.Weapons[I].HasStandardStats then
       Exit;
   TryUnlockAchievement('BEST');
 end;
@@ -533,10 +533,10 @@ procedure TAchievementStats.CheckAllDiseasesAchievement;
 var
   I: Integer;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) then
   begin
     for I := 1 to 12 do
-      if GetPlayer.CaptainHealth[I].ApplicationCount = 0 then
+      if LocalPlayer.CaptainHealth[I].ApplicationCount = 0 then
         Exit;
     TryUnlockAchievement('ILL');
   end;
@@ -546,10 +546,10 @@ procedure TAchievementStats.CheckAllDrugsAchievement;
 var
   I: Integer;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) then
   begin
     for I := 13 to 24 do
-      if GetPlayer.CaptainHealth[I].ApplicationCount = 0 then
+      if LocalPlayer.CaptainHealth[I].ApplicationCount = 0 then
         Exit;
     TryUnlockAchievement('NARKOMAN');
   end;
@@ -557,13 +557,13 @@ end;
 
 procedure TAchievementStats.CheckScratchDamageAchievement(HitsReceived: Integer);
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (HitsReceived >= 20) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (HitsReceived >= 20) then
     TryUnlockAchievement('SCRATCHDAMAGE');
 end;
 
 procedure TAchievementStats.CheckStarFuelAchievement;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (StarFuelCollected >= 40) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (StarFuelCollected >= 40) then
     TryUnlockAchievement('SUNFUEL');
 end;
 
@@ -573,7 +573,7 @@ var
   Constellation: TConstellation;
   Year, Month, Day: Word;
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) then
   begin
     DecodeDate(GameTurnToDateTime(Galaxy.CurrentTurn - 300), Year, Month, Day);
     if Year > 3304 then
@@ -592,7 +592,7 @@ end;
 
 procedure TAchievementStats.CheckInvestorAchievement(Amount: Integer);
 begin
-  if (GetPlayer <> nil) and (Galaxy <> nil) and (Amount >= 300000) then
+  if (LocalPlayer <> nil) and (Galaxy <> nil) and (Amount >= 300000) then
     TryUnlockAchievement('INVESTOR');
 end;
 
@@ -602,19 +602,19 @@ var
   Ship: TShip;
   Star: TStar;
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     Exit;
   if Galaxy = nil then
     Exit;
   Count := 0;
-  Star := GetPlayer.CurrentStar;
+  Star := LocalPlayer.CurrentStar;
   for I := 0 to Star.Ships.Count - 1 do
   begin
     Ship := Star.Ships[I];
     if Ship.InNormalSpace
         and not Ship.IsHullDestroyed
         and (Ship is TTranclucator)
-        and ((Ship as TTranclucator).OwnerShip = GetPlayer) then
+        and ((Ship as TTranclucator).OwnerShip = LocalPlayer) then
       Inc(Count);
   end;
   if Count >= 10 then
@@ -674,7 +674,7 @@ begin
     Exit;
   if not Galaxy.CanRecordAchievements then
     Exit;
-  if (GetPlayer <> nil) and (GetPlayer.AwardedAchievementKeys.CountBlocks(Key) > 0) then
+  if (LocalPlayer <> nil) and (LocalPlayer.AwardedAchievementKeys.CountBlocks(Key) > 0) then
     Exit;
   if GetAvailableAchievementCount <= 0 then
     Exit;
@@ -688,8 +688,8 @@ begin
   else
     Result := False;
   end;
-  if Result and (GetPlayer <> nil) then
-    GetPlayer.AwardedAchievementKeys.AddChildBlock(Key);
+  if Result and (LocalPlayer <> nil) then
+    LocalPlayer.AwardedAchievementKeys.AddChildBlock(Key);
 end;
 
 function TryAddAchievementProgress(Key: WideString; Amount: Integer): Boolean;
@@ -703,7 +703,7 @@ begin
     Exit;
   if not Galaxy.CanRecordAchievements then
     Exit;
-  if (GetPlayer <> nil) and (GetPlayer.AwardedAchievementKeys.CountBlocks(Key) > 0) then
+  if (LocalPlayer <> nil) and (LocalPlayer.AwardedAchievementKeys.CountBlocks(Key) > 0) then
     Exit;
   if GetAvailableAchievementCount <= 0 then
     Exit;
@@ -724,8 +724,8 @@ begin
   end;
   FreeAchievementData(Data);
   Data := GetAchievementData(Key);
-  if (GetPlayer <> nil) and Data.Achieved then
-    GetPlayer.AwardedAchievementKeys.AddChildBlock(Key);
+  if (LocalPlayer <> nil) and Data.Achieved then
+    LocalPlayer.AwardedAchievementKeys.AddChildBlock(Key);
   FreeAchievementData(Data);
 end;
 
@@ -740,7 +740,7 @@ begin
     Exit;
   if not Galaxy.CanRecordAchievements then
     Exit;
-  if (GetPlayer <> nil) and (GetPlayer.AwardedAchievementKeys.CountBlocks(Key) > 0) then
+  if (LocalPlayer <> nil) and (LocalPlayer.AwardedAchievementKeys.CountBlocks(Key) > 0) then
     Exit;
   if GetAvailableAchievementCount <= 0 then
     Exit;
@@ -766,8 +766,8 @@ begin
   end;
   FreeAchievementData(Data);
   Data := GetAchievementData(Key);
-  if (GetPlayer <> nil) and Data.Achieved then
-    GetPlayer.AwardedAchievementKeys.AddChildBlock(Key);
+  if (LocalPlayer <> nil) and Data.Achieved then
+    LocalPlayer.AwardedAchievementKeys.AddChildBlock(Key);
   FreeAchievementData(Data);
 end;
 

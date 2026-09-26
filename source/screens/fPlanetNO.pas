@@ -270,15 +270,15 @@ begin
   LoadPanel.OnOpen;
   GetByName('MainPanel').KeyDownCallback := MainPanelKeyDown;
   with GetByName('PlanetBG') as TImageGI do
-    SetImagePath('GI,Bm.PlanetBG.' + GetPlayer.CurrentPlanet.Graphic.BackgroundGraph);
+    SetImagePath('GI,Bm.PlanetBG.' + LocalPlayer.CurrentPlanet.Graphic.BackgroundGraph);
   SelectedTrajectoryIndex := -1;
   MainPanel.RebuildMessageButtons(False);
   RefreshPlanetInfo;
   RefreshTextQuestPrompt;
   CloseResearchPanel;
   DispatchPendingScriptRequests;
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnEnteringForm, nil, nil, 0);
   aCalc.WaitForTurnCalculationUI;
 end;
 
@@ -286,13 +286,13 @@ procedure TfPlanetNO.OnClose;
 begin
   if RequestedScreenId <> screenLoad then
     aCalc.WaitForTurnCalculationUI;
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnLeavingForm, nil, nil, 0);
   CloseResearchPanel;
   MainPanel.OnClose;
   LoadPanel.OnClose;
-  if GetPlayer <> nil then
-    GetPlayer.RefreshStorageBubbles;
+  if LocalPlayer <> nil then
+    LocalPlayer.RefreshStorageBubbles;
   MainPanel.RefreshMoneyAndCargo;
   MainPanel.RebuildMessageButtons(False);
 end;
@@ -310,29 +310,29 @@ begin
   aCalc.WaitForTurnCalculationUI;
   if (PlanetHeldSatellite <> nil)
       and (PlanetHeldSatelliteOrigin = 0)
-      and (GetPlayer.GetCargoFreeSpace < PlanetHeldSatellite.Weight) then
+      and (LocalPlayer.GetCargoFreeSpace < PlanetHeldSatellite.Weight) then
   begin
     ShowMessageBoxGI(Self, LocalizedText('FormRuins.ShipOvercharging'), mbgCancel or mbgError);
     Exit;
   end;
-  if not GetPlayer.HasPositiveSpeed then
+  if not LocalPlayer.HasPositiveSpeed then
   begin
-    if GetPlayer.GetCargoFreeSpace < 0 then
+    if LocalPlayer.GetCargoFreeSpace < 0 then
       ShowMessageBoxGI(Self, LocalizedText('FormRuins.ShipOvercharging'), mbgCancel or mbgError)
-    else if GetPlayer.GetEngine = nil then
+    else if LocalPlayer.GetEngine = nil then
       ShowMessageBoxGI(Self, LocalizedText('FormRuins.NotEngine'), mbgCancel or mbgError)
-    else if GetPlayer.GetFuelTanks = nil then
+    else if LocalPlayer.GetFuelTanks = nil then
       ShowMessageBoxGI(Self, LocalizedText('FormRuins.NotFuelTank'), mbgCancel or mbgError);
     Exit;
   end;
-  if GetPlayer.HasSatelliteOnPlanet(GetPlayer.CurrentPlanet)
+  if LocalPlayer.HasSatelliteOnPlanet(LocalPlayer.CurrentPlanet)
       and (ShowMessageBoxGI(
               Self,
               FormatText1(
                   LanguageDataConfig.GetParamByPathOrMarker('FormPlanetNO.SatelliteInPlanet'),
                   '<color=255,240,100>',
                   '<Name>',
-                  GetPlayer.CurrentPlanet.Name
+                  LocalPlayer.CurrentPlanet.Name
               ),
               mbgOK or mbgCancel)
           <> mbgResultOK) then
@@ -346,10 +346,10 @@ begin
   SaveManagerReturnScreenId := FormToId(Self);
   SaveGameToFile(SaveManagerScreen.GetAutoSavePath, 'as');
   Takeoff(0);
-  StarMapScreen.SetMapCenterManually(TruncatePointF(GetPlayer.Position));
+  StarMapScreen.SetMapCenterManually(TruncatePointF(LocalPlayer.Position));
   CalculatePlayerStarTurnAndWait;
   if not ExitScreenLoop then
-    if GetPlayer = nil then
+    if LocalPlayer = nil then
     begin
       RequestedScreenId := screenGameEnd;
       RequestClose(1);
@@ -400,13 +400,13 @@ begin
         ReplaceColoredToken(
             LocalizedText('Planet.Civil.Info.TextNamePlanet'),
             '<Planet>',
-            GetPlayer.CurrentPlanet.Name,
+            LocalPlayer.CurrentPlanet.Name,
             InfoNameColorTag
         )
     );
   with GetByName('PanelInfo_Text') as TLabelGI do
   begin
-    SetText(GetPlayer.CurrentPlanet.GetInfoText(False));
+    SetText(LocalPlayer.CurrentPlanet.GetInfoText(False));
     Window.SetSize(
         Classes.Point(
             ClientSize.X + Window.WorkSubRect.Left + Window.WorkSubRect.Right,
@@ -420,7 +420,7 @@ begin
   with GetByName('PanelInfo_Image') as TGraphBufGI do
   begin
     SourceHasPerPixelAlpha := True;
-    GetPlayer.CurrentPlanet.Graphic.RenderToBuffer(Self, GraphBuf, False);
+    LocalPlayer.CurrentPlanet.Graphic.RenderToBuffer(Self, GraphBuf, False);
     if Cardinal(GraphBuf.Width) >= Cardinal(GraphBuf.Height) then
       GraphBuf.RescaleRgba(
           ClientSize.X,
@@ -463,13 +463,13 @@ begin
   Window := GetByName('QuestInfo') as TWindowGI;
   Quest := nil;
   Window.SetActive(False);
-  if (GetPlayer.CurrentPlanet.TextQuestId > -1) and (GetPlayer.Quests.Count > 0) then
-    for I := 0 to GetPlayer.Quests.Count - 1 do
+  if (LocalPlayer.CurrentPlanet.TextQuestId > -1) and (LocalPlayer.Quests.Count > 0) then
+    for I := 0 to LocalPlayer.Quests.Count - 1 do
     begin
-      Quest := PQuest(GetPlayer.Quests[I]);
+      Quest := PQuest(LocalPlayer.Quests[I]);
       if (Quest.QuestType = qtPlanetQuest)
           and (Quest.ObjectiveTarget is TPlanet)
-          and (GetPlayer.CurrentPlanet = (Quest.ObjectiveTarget as TPlanet))
+          and (LocalPlayer.CurrentPlanet = (Quest.ObjectiveTarget as TPlanet))
           and (LanguageDataConfig
                   .GetBlockByPath('PlanetQuest.PlanetQuest')
                   .CountParams(IntToStr(Quest.QuestNumber))
@@ -655,10 +655,10 @@ begin
   HoveringSurfaceLoot := False;
   with GetByName('PlanetImage') as TGraphBufGI do
   begin
-    Parts := CountDelimitedPartsW(GetPlayer.CurrentPlanet.Graphic.ImagePath, '.');
+    Parts := CountDelimitedPartsW(LocalPlayer.CurrentPlanet.Graphic.ImagePath, '.');
     LoadBitmapPathAsRgb(
         'Bm.PUMaps.'
-            + ExtractDelimitedPartW(GetPlayer.CurrentPlanet.Graphic.ImagePath, Parts - 1, '.')
+            + ExtractDelimitedPartW(LocalPlayer.CurrentPlanet.Graphic.ImagePath, Parts - 1, '.')
             + '?RGB'
     );
     if GiResourceVariant = 1 then
@@ -954,7 +954,7 @@ function TfPlanetNO.FindTrajectoryAtCursor: Integer;
 var
   I: Integer;
 begin
-  for I := 0 to GetPlayer.CurrentPlanet.ProbeOrbitCount - 1 do
+  for I := 0 to LocalPlayer.CurrentPlanet.ProbeOrbitCount - 1 do
     if IsCursorOverTrajectory(I) then
     begin
       Result := I;
@@ -989,22 +989,22 @@ var
   Entry: PPlanetSurfaceLootEntry;
   Cell: TPoint;
 begin
-  if GetPlayer.CurrentPlanet.SurfaceLootEntries <> nil then
+  if LocalPlayer.CurrentPlanet.SurfaceLootEntries <> nil then
   begin
     Cell := GetByName('PanelItems').ToLocalPoint(Point);
     Cell.X := Cell.X div GiScalePixelsEx(36, 28);
     Cell.Y := Cell.Y div GiScalePixelsEx(36, 28);
-    for I := 0 to GetPlayer.CurrentPlanet.SurfaceLootEntries.Count - 1 do
+    for I := 0 to LocalPlayer.CurrentPlanet.SurfaceLootEntries.Count - 1 do
     begin
-      Entry := GetPlayer.CurrentPlanet.SurfaceLootEntries[I];
+      Entry := LocalPlayer.CurrentPlanet.SurfaceLootEntries[I];
       if (Entry.GridX = Cell.X)
           and (Entry.GridY = Cell.Y)
           and (((Entry.TerrainKind = ptWater)
-                  and (GetPlayer.CurrentPlanet.WaterExplored >= Entry.SurfaceTileIndex))
+                  and (LocalPlayer.CurrentPlanet.WaterExplored >= Entry.SurfaceTileIndex))
               or ((Entry.TerrainKind = ptLand)
-                  and (GetPlayer.CurrentPlanet.LandExplored >= Entry.SurfaceTileIndex))
+                  and (LocalPlayer.CurrentPlanet.LandExplored >= Entry.SurfaceTileIndex))
               or ((Entry.TerrainKind = ptHill)
-                  and (GetPlayer.CurrentPlanet.HillExplored >= Entry.SurfaceTileIndex)))
+                  and (LocalPlayer.CurrentPlanet.HillExplored >= Entry.SurfaceTileIndex)))
           and not Entry.Unavailable then
       begin
         UpdateItemInfoPopup(Entry.Item);
@@ -1016,7 +1016,7 @@ begin
           with GetByName('W' + IntToStr(SelectedTrajectoryIndex)) as TImageGI do
             if (FindDeployedSatellite(SelectedTrajectoryIndex) <> nil)
                 and ((FindDeployedSatellite(SelectedTrajectoryIndex).BrokenFlag <> 0)
-                    or (GetPlayer.GetSatelliteExplorationTurns(
+                    or (LocalPlayer.GetSatelliteExplorationTurns(
                             FindDeployedSatellite(SelectedTrajectoryIndex))
                         = 0)) then
               SetImagePath(
@@ -1071,7 +1071,7 @@ begin
     with GetByName('W' + IntToStr(SelectedTrajectoryIndex)) as TImageGI do
       if (FindDeployedSatellite(SelectedTrajectoryIndex) <> nil)
           and ((FindDeployedSatellite(SelectedTrajectoryIndex).BrokenFlag <> 0)
-              or (GetPlayer.GetSatelliteExplorationTurns(
+              or (LocalPlayer.GetSatelliteExplorationTurns(
                       FindDeployedSatellite(SelectedTrajectoryIndex))
                   = 0)) then
         SetImagePath(
@@ -1114,19 +1114,19 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormPlanetNO.Caption'),
               '<Name>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               ''
           ));
   for I := 0 to 5 do
     with GetByName('W' + IntToStr(I)) as TImageGI do
     begin
-      SetActive(GetPlayer.CurrentPlanet.ProbeOrbitCount > I);
+      SetActive(LocalPlayer.CurrentPlanet.ProbeOrbitCount > I);
       if Active then
         if SelectedTrajectoryIndex = I then
           SetImagePath('GI,Bm.FormUnknown2.' + GiResourceSuffix + 'W' + IntToStr(I + 1) + 'A')
         else if (FindDeployedSatellite(I) <> nil)
             and ((FindDeployedSatellite(I).BrokenFlag <> 0)
-                or (GetPlayer.GetSatelliteExplorationTurns(FindDeployedSatellite(I)) = 0)) then
+                or (LocalPlayer.GetSatelliteExplorationTurns(FindDeployedSatellite(I)) = 0)) then
           SetImagePath('GI,Bm.FormUnknown2.' + GiResourceSuffix + 'W' + IntToStr(I + 1) + 'B')
         else
           SetImagePath('GI,Bm.FormUnknown2.' + GiResourceSuffix + 'W' + IntToStr(I + 1));
@@ -1139,35 +1139,35 @@ begin
     OldChild := Child;
     Child := TImageGI(Child.NextSibling);
     Entry := PPlanetSurfaceLootEntry(OldChild.UserValue);
-    if (GetPlayer.CurrentPlanet.SurfaceLootEntries = nil)
-        or (GetPlayer.CurrentPlanet.SurfaceLootEntries.IndexOf(Entry) < 0) then
+    if (LocalPlayer.CurrentPlanet.SurfaceLootEntries = nil)
+        or (LocalPlayer.CurrentPlanet.SurfaceLootEntries.IndexOf(Entry) < 0) then
     begin
       OldChild.Invalidate;
       OldChild.Free;
     end;
   end;
-  if GetPlayer.CurrentPlanet.SurfaceLootEntries <> nil then
-    for I := 0 to GetPlayer.CurrentPlanet.SurfaceLootEntries.Count - 1 do
+  if LocalPlayer.CurrentPlanet.SurfaceLootEntries <> nil then
+    for I := 0 to LocalPlayer.CurrentPlanet.SurfaceLootEntries.Count - 1 do
     begin
-      Entry := GetPlayer.CurrentPlanet.SurfaceLootEntries[I];
+      Entry := LocalPlayer.CurrentPlanet.SurfaceLootEntries[I];
       Undiscovered := False;
       if ((((Entry.TerrainKind = ptWater)
-                      and (GetPlayer.CurrentPlanet.WaterExplored >= Entry.SurfaceTileIndex))
+                      and (LocalPlayer.CurrentPlanet.WaterExplored >= Entry.SurfaceTileIndex))
                   or ((Entry.TerrainKind = ptLand)
-                      and (GetPlayer.CurrentPlanet.LandExplored >= Entry.SurfaceTileIndex))
+                      and (LocalPlayer.CurrentPlanet.LandExplored >= Entry.SurfaceTileIndex))
                   or ((Entry.TerrainKind = ptHill)
-                      and (GetPlayer.CurrentPlanet.HillExplored >= Entry.SurfaceTileIndex)))
+                      and (LocalPlayer.CurrentPlanet.HillExplored >= Entry.SurfaceTileIndex)))
               and not Entry.Unavailable)
-          or ((GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
+          or ((LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
               and (Entry.Item is TEquipmentWithActCode)
               and TEquipmentWithActCode(Entry.Item).DisplayAsArtefact) then
       begin
         if not (((Entry.TerrainKind = ptWater)
-                and (GetPlayer.CurrentPlanet.WaterExplored >= Entry.SurfaceTileIndex))
+                and (LocalPlayer.CurrentPlanet.WaterExplored >= Entry.SurfaceTileIndex))
             or ((Entry.TerrainKind = ptLand)
-                and (GetPlayer.CurrentPlanet.LandExplored >= Entry.SurfaceTileIndex))
+                and (LocalPlayer.CurrentPlanet.LandExplored >= Entry.SurfaceTileIndex))
             or ((Entry.TerrainKind = ptHill)
-                and (GetPlayer.CurrentPlanet.HillExplored >= Entry.SurfaceTileIndex))) then
+                and (LocalPlayer.CurrentPlanet.HillExplored >= Entry.SurfaceTileIndex))) then
           Undiscovered := True;
         Child := TImageGI(Panel.FirstChild);
         while Child <> nil do
@@ -1225,17 +1225,17 @@ begin
     OldChild := Child;
     Child := TImageGI(Child.NextSibling);
     Satellite := TSatellite(OldChild.UserValue);
-    if (GetPlayer.Satellites.IndexOf(Satellite) < 0)
-        or (GetPlayer.CurrentPlanet <> Satellite.TargetPlanet) then
+    if (LocalPlayer.Satellites.IndexOf(Satellite) < 0)
+        or (LocalPlayer.CurrentPlanet <> Satellite.TargetPlanet) then
     begin
       OldChild.Invalidate;
       OldChild.Free;
     end;
   end;
-  for I := 0 to GetPlayer.Satellites.Count - 1 do
+  for I := 0 to LocalPlayer.Satellites.Count - 1 do
   begin
-    Satellite := TSatellite(GetPlayer.Satellites[I]);
-    if GetPlayer.CurrentPlanet = Satellite.TargetPlanet then
+    Satellite := TSatellite(LocalPlayer.Satellites[I]);
+    if LocalPlayer.CurrentPlanet = Satellite.TargetPlanet then
     begin
       Child := TImageGI(Panel.FirstChild);
       while Child <> nil do
@@ -1296,7 +1296,7 @@ begin
   aCalc.WaitForTurnCalculationUI;
   for I := 0 to 5 do
   begin
-    InventorySatellite := GetPlayer.FindSatelliteByTrajectoryIndex(SatelliteInventoryPageStart + I);
+    InventorySatellite := LocalPlayer.FindSatelliteByTrajectoryIndex(SatelliteInventoryPageStart + I);
     with GetByName('Slot_' + IntToStr(I) + 'i') as TImageGI do
       if InventorySatellite = nil then
         SetImagePath('')
@@ -1309,13 +1309,13 @@ begin
   end;
   (GetByName('ButLeft') as TGraphButtonGI).SetDisabled(SatelliteInventoryPageStart <= 0);
   (GetByName('ButRight') as TGraphButtonGI)
-      .SetDisabled(GetPlayer.GetSatelliteTrajectoryIndexLimit < SatelliteInventoryPageStart + 6);
+      .SetDisabled(LocalPlayer.GetSatelliteTrajectoryIndexLimit < SatelliteInventoryPageStart + 6);
   (GetByName('WaterSpace') as TLabelGI)
       .SetText(
           ReplaceColoredToken(
               LocalizedColorText('FormPlanetNO.Space'),
               '<val>',
-              IntToStr(GetPlayer.CurrentPlanet.WaterTiles),
+              IntToStr(LocalPlayer.CurrentPlanet.WaterTiles),
               '<color=0,50,200>'
           ));
   (GetByName('LandSpace') as TLabelGI)
@@ -1323,7 +1323,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormPlanetNO.Space'),
               '<val>',
-              IntToStr(GetPlayer.CurrentPlanet.LandTiles),
+              IntToStr(LocalPlayer.CurrentPlanet.LandTiles),
               '<color=0,50,200>'
           ));
   (GetByName('HillSpace') as TLabelGI)
@@ -1331,7 +1331,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormPlanetNO.Space'),
               '<val>',
-              IntToStr(GetPlayer.CurrentPlanet.HillTiles),
+              IntToStr(LocalPlayer.CurrentPlanet.HillTiles),
               '<color=0,50,200>'
           ));
   (GetByName('WaterComplate') as TLabelGI)
@@ -1339,7 +1339,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormPlanetNO.Complate'),
               '<val>',
-              IntToStr(GetPlayer.CurrentPlanet.WaterExplored),
+              IntToStr(LocalPlayer.CurrentPlanet.WaterExplored),
               '<color=0,50,200>'
           ));
   (GetByName('LandComplate') as TLabelGI)
@@ -1347,7 +1347,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormPlanetNO.Complate'),
               '<val>',
-              IntToStr(GetPlayer.CurrentPlanet.LandExplored),
+              IntToStr(LocalPlayer.CurrentPlanet.LandExplored),
               '<color=0,50,200>'
           ));
   (GetByName('HillComplate') as TLabelGI)
@@ -1355,30 +1355,30 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormPlanetNO.Complate'),
               '<val>',
-              IntToStr(GetPlayer.CurrentPlanet.HillExplored),
+              IntToStr(LocalPlayer.CurrentPlanet.HillExplored),
               '<color=0,50,200>'
           ));
   WaterRate := 0;
   LandRate := 0;
   HillRate := 0;
-  for I := 0 to GetPlayer.Satellites.Count - 1 do
+  for I := 0 to LocalPlayer.Satellites.Count - 1 do
   begin
-    Satellite := TSatellite(GetPlayer.Satellites[I]);
-    if (GetPlayer.CurrentPlanet = Satellite.TargetPlanet) and (Satellite.BrokenFlag = 0) then
+    Satellite := TSatellite(LocalPlayer.Satellites[I]);
+    if (LocalPlayer.CurrentPlanet = Satellite.TargetPlanet) and (Satellite.BrokenFlag = 0) then
     begin
       WaterRate :=
           Min(
-              GetPlayer.CurrentPlanet.WaterTiles - GetPlayer.CurrentPlanet.WaterExplored,
+              LocalPlayer.CurrentPlanet.WaterTiles - LocalPlayer.CurrentPlanet.WaterExplored,
               WaterRate + Satellite.WaterExplorationRate
           );
       LandRate :=
           Min(
-              GetPlayer.CurrentPlanet.LandTiles - GetPlayer.CurrentPlanet.LandExplored,
+              LocalPlayer.CurrentPlanet.LandTiles - LocalPlayer.CurrentPlanet.LandExplored,
               LandRate + Satellite.LandExplorationRate
           );
       HillRate :=
           Min(
-              GetPlayer.CurrentPlanet.HillTiles - GetPlayer.CurrentPlanet.HillExplored,
+              LocalPlayer.CurrentPlanet.HillTiles - LocalPlayer.CurrentPlanet.HillExplored,
               HillRate + Satellite.HillExplorationRate
           );
     end;
@@ -1392,7 +1392,7 @@ begin
           Min(
               999,
               Ceil(
-                  (GetPlayer.CurrentPlanet.WaterTiles - GetPlayer.CurrentPlanet.WaterExplored)
+                  (LocalPlayer.CurrentPlanet.WaterTiles - LocalPlayer.CurrentPlanet.WaterExplored)
                       / WaterRate
               )
           );
@@ -1415,7 +1415,7 @@ begin
           Min(
               999,
               Ceil(
-                  (GetPlayer.CurrentPlanet.LandTiles - GetPlayer.CurrentPlanet.LandExplored)
+                  (LocalPlayer.CurrentPlanet.LandTiles - LocalPlayer.CurrentPlanet.LandExplored)
                       / LandRate
               )
           );
@@ -1438,7 +1438,7 @@ begin
           Min(
               999,
               Ceil(
-                  (GetPlayer.CurrentPlanet.HillTiles - GetPlayer.CurrentPlanet.HillExplored)
+                  (LocalPlayer.CurrentPlanet.HillTiles - LocalPlayer.CurrentPlanet.HillExplored)
                       / HillRate
               )
           );
@@ -1453,11 +1453,11 @@ begin
     end;
   end;
   GetByName('Light1')
-      .SetActive(GetPlayer.CurrentPlanet.WaterExplored >= GetPlayer.CurrentPlanet.WaterTiles);
+      .SetActive(LocalPlayer.CurrentPlanet.WaterExplored >= LocalPlayer.CurrentPlanet.WaterTiles);
   GetByName('Light2')
-      .SetActive(GetPlayer.CurrentPlanet.LandExplored >= GetPlayer.CurrentPlanet.LandTiles);
+      .SetActive(LocalPlayer.CurrentPlanet.LandExplored >= LocalPlayer.CurrentPlanet.LandTiles);
   GetByName('Light3')
-      .SetActive(GetPlayer.CurrentPlanet.HillExplored >= GetPlayer.CurrentPlanet.HillTiles);
+      .SetActive(LocalPlayer.CurrentPlanet.HillExplored >= LocalPlayer.CurrentPlanet.HillTiles);
 end;
 
 procedure TfPlanetNO.ScrollSatellitePageLeft(Sender: TObjectGI);
@@ -1472,7 +1472,7 @@ end;
 
 procedure TfPlanetNO.ScrollSatellitePageRight(Sender: TObjectGI);
 begin
-  if SatelliteInventoryPageStart + 6 <= GetPlayer.GetSatelliteTrajectoryIndexLimit then
+  if SatelliteInventoryPageStart + 6 <= LocalPlayer.GetSatelliteTrajectoryIndexLimit then
   begin
     Inc(SatelliteInventoryPageStart);
     RefreshResearchPanel;
@@ -1501,7 +1501,7 @@ begin
     for I := 0 to 5 do
       if SatelliteInventorySlots[I].ContainsPoint(Point) then
       begin
-        Item := GetPlayer.FindSatelliteByTrajectoryIndex(SatelliteInventoryPageStart + I);
+        Item := LocalPlayer.FindSatelliteByTrajectoryIndex(SatelliteInventoryPageStart + I);
         if Item <> nil then
         begin
           HideInfo := False;
@@ -1525,7 +1525,7 @@ var
   Item: TSatellite;
 begin
   aCalc.WaitForTurnCalculationUI;
-  Item := GetPlayer.FindSatelliteByTrajectoryIndex(SatelliteInventoryPageStart + Sender.UserValue);
+  Item := LocalPlayer.FindSatelliteByTrajectoryIndex(SatelliteInventoryPageStart + Sender.UserValue);
   if ((PlanetHeldSatellite = nil) and (Item <> nil)) or (PlanetHeldSatellite <> nil) then
   begin
     if ClickSatelliteSlot(SatelliteInventoryPageStart + Sender.UserValue) = ssTaken then
@@ -1544,7 +1544,7 @@ begin
     end;
   end;
   aCalc.WaitForTurnCalculationUI;
-  GetPlayer.RefreshStorageBubbles;
+  LocalPlayer.RefreshStorageBubbles;
   MainPanel.RefreshMoneyAndCargo;
   MainPanel.RebuildMessageButtons(False);
 end;
@@ -1556,16 +1556,16 @@ var
   Cell: TPoint;
   Outcome: Integer;
 begin
-  if GetPlayer.CurrentPlanet.SurfaceLootEntries <> nil then
-    for I := 0 to GetPlayer.CurrentPlanet.SurfaceLootEntries.Count - 1 do
+  if LocalPlayer.CurrentPlanet.SurfaceLootEntries <> nil then
+    for I := 0 to LocalPlayer.CurrentPlanet.SurfaceLootEntries.Count - 1 do
     begin
-      Entry := GetPlayer.CurrentPlanet.SurfaceLootEntries[I];
+      Entry := LocalPlayer.CurrentPlanet.SurfaceLootEntries[I];
       if ((Entry.TerrainKind = ptWater)
-              and (GetPlayer.CurrentPlanet.WaterExplored >= Entry.SurfaceTileIndex))
+              and (LocalPlayer.CurrentPlanet.WaterExplored >= Entry.SurfaceTileIndex))
           or ((Entry.TerrainKind = ptLand)
-              and (GetPlayer.CurrentPlanet.LandExplored >= Entry.SurfaceTileIndex))
+              and (LocalPlayer.CurrentPlanet.LandExplored >= Entry.SurfaceTileIndex))
           or ((Entry.TerrainKind = ptHill)
-              and (GetPlayer.CurrentPlanet.HillExplored >= Entry.SurfaceTileIndex)) then
+              and (LocalPlayer.CurrentPlanet.HillExplored >= Entry.SurfaceTileIndex)) then
         if not Entry.Unavailable then
         begin
           Cell := GetByName('PanelItems').ToLocalPoint(Point);
@@ -1573,7 +1573,7 @@ begin
           Cell.Y := Cell.Y div GiScalePixelsEx(36, 28);
           if (Entry.GridX = Cell.X) and (Entry.GridY = Cell.Y) then
           begin
-            if GetPlayer.GetCargoFreeSpace < Entry.Item.Weight then
+            if LocalPlayer.GetCargoFreeSpace < Entry.Item.Weight then
             begin
               MainPanel.FlashCargoWarning;
               Exit;
@@ -1604,7 +1604,7 @@ begin
     UpdateActionCursor(False);
     RefreshResearchPanel;
     PostMouseMoveMessage;
-    GetPlayer.RefreshStorageBubbles;
+    LocalPlayer.RefreshStorageBubbles;
     MainPanel.RefreshMoneyAndCargo;
     MainPanel.RebuildMessageButtons(False);
   end;
@@ -1670,10 +1670,10 @@ begin
     Result := nil;
     Exit;
   end;
-  for I := 0 to GetPlayer.Satellites.Count - 1 do
+  for I := 0 to LocalPlayer.Satellites.Count - 1 do
   begin
-    Result := TSatellite(GetPlayer.Satellites[I]);
-    if (GetPlayer.CurrentPlanet = Result.TargetPlanet)
+    Result := TSatellite(LocalPlayer.Satellites[I]);
+    if (LocalPlayer.CurrentPlanet = Result.TargetPlanet)
         and (Result.TrajectoryIndex = TrajectoryIndex) then
       Exit;
   end;
@@ -1685,8 +1685,8 @@ var
   I: Integer;
 begin
   Result := 0;
-  for I := 0 to GetPlayer.Satellites.Count - 1 do
-    if TSatellite(GetPlayer.Satellites[I]).TargetPlanet = GetPlayer.CurrentPlanet then
+  for I := 0 to LocalPlayer.Satellites.Count - 1 do
+    if TSatellite(LocalPlayer.Satellites[I]).TargetPlanet = LocalPlayer.CurrentPlanet then
       Inc(Result);
 end;
 
@@ -1701,7 +1701,7 @@ begin
   while Control <> nil do
   begin
     Satellite := TSatellite(Control.UserValue);
-    if GetPlayer.Satellites.IndexOf(Satellite) >= 0 then
+    if LocalPlayer.Satellites.IndexOf(Satellite) >= 0 then
       Control.SetPosition(AdvanceTrajectoryPoint(Satellite.TrajectoryIndex, Control.LocalPosition));
     Control := Control.NextSibling;
   end;
@@ -1768,8 +1768,8 @@ begin
         ShowGoodsInfoPopup(Item as TGoods)
       else
       begin
-        if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
-          RunItemInfoActionCode(Item, satOnShowingItemInfo, nil, GetPlayer.CurrentPlanet, nil);
+        if (Galaxy <> nil) and not Galaxy.Destroying and (LocalPlayer <> nil) then
+          RunItemInfoActionCode(Item, satOnShowingItemInfo, nil, LocalPlayer.CurrentPlanet, nil);
         Equipment := Item as TEquipment;
         ItemInfoWindow.SetActive(True);
         with ItemInfoImage do
@@ -1780,7 +1780,7 @@ begin
           SetPosition(SubtractPoints(ShipScreen.ItemImageCenter, GetVisualCenter));
         end;
         ItemInfoNameLabel.SetText(WrapTextInColor(Equipment.GetDisplayName, InfoNameColorTag));
-        ItemInfoTextLabel.SetText(Equipment.GetInfoText('<color=255,240,100>', GetPlayer));
+        ItemInfoTextLabel.SetText(Equipment.GetInfoText('<color=255,240,100>', LocalPlayer));
         ItemInfoSizeLabel.SetText(IntToStr(Equipment.Weight));
         ItemInfoCostLabel.SetText(IntToStr(Equipment.Cost));
         with ItemInfoRaceIcon do
@@ -1908,7 +1908,7 @@ begin
   begin
     SetImagePath(
         GetFactionEmblemPath(
-            OwnerInfo[Integer(RaceToOwner(GetPlayer.PilotRace)) and $7F].InternalName
+            OwnerInfo[Integer(RaceToOwner(LocalPlayer.PilotRace)) and $7F].InternalName
         )
     );
     SetImageKindX(ikxCenter);
@@ -2025,13 +2025,13 @@ begin
     MusicManager.RequestFadeOut;
     Exit;
   end;
-  if GetPlayer.CurrentPlanet <> nil then
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+  if LocalPlayer.CurrentPlanet <> nil then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
     begin
-      if not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+      if not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
         MusicManager.PlayCategory(
             'Nation.'
-                + OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and $7F]
+                + OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and $7F]
                     .InternalName
                 + 'Pirate'
         )
@@ -2040,7 +2040,7 @@ begin
     end
     else
       MusicManager
-          .PlayCategory('Nation.' + OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].InternalName);
+          .PlayCategory('Nation.' + OwnerInfo[LocalPlayer.CurrentPlanet.OwnerId].InternalName);
 end;
 
 procedure LinkRecoveredTypes;

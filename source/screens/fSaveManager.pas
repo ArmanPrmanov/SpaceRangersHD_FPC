@@ -512,11 +512,11 @@ begin
     begin
       if SelectedSlot = SlotIndex then
       begin
-        (GetByName('Slot' + IntToStr(SlotIndex) + 'Captain') as TLabelGI).SetText(GetPlayer.Name);
+        (GetByName('Slot' + IntToStr(SlotIndex) + 'Captain') as TLabelGI).SetText(LocalPlayer.Name);
         (GetByName('Slot' + IntToStr(SlotIndex) + 'Turn') as TLabelGI)
             .SetText(FormatGameTurnDate(Galaxy.CurrentTurn));
         (GetByName('Slot' + IntToStr(SlotIndex) + 'Money') as TLabelGI)
-            .SetText(IntToStr(GetPlayer.Money));
+            .SetText(IntToStr(LocalPlayer.Money));
       end
       else
       begin
@@ -909,57 +909,57 @@ end;
 
 function TfSaveManager.BuildCurrentSaveDescription: WideString;
 begin
-  if GetPlayer.RuinsMode = 0 then
+  if LocalPlayer.RuinsMode = 0 then
   begin
-    if GetPlayer.CurrentPlanet <> nil then
+    if LocalPlayer.CurrentPlanet <> nil then
     begin
-      if GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+      if LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
       begin
         Result := LocalizedText('FormSaveManager.SaveInShip');
-        Result := ReplaceAllWideString(Result, '<ShipName>', GetPlayer.CurrentPlanet.Name);
+        Result := ReplaceAllWideString(Result, '<ShipName>', LocalPlayer.CurrentPlanet.Name);
       end
       else
       begin
         Result := LocalizedText('FormSaveManager.SaveInPlanet');
-        Result := ReplaceAllWideString(Result, '<Planet>', GetPlayer.CurrentPlanet.Name);
+        Result := ReplaceAllWideString(Result, '<Planet>', LocalPlayer.CurrentPlanet.Name);
       end;
     end
-    else if GetPlayer.DockedTo <> nil then
+    else if LocalPlayer.DockedTo <> nil then
     begin
       Result := LocalizedText('FormSaveManager.SaveInShip');
-      Result := ReplaceAllWideString(Result, '<ShipName>', GetPlayer.DockedTo.GetFullName(' '));
+      Result := ReplaceAllWideString(Result, '<ShipName>', LocalPlayer.DockedTo.GetFullName(' '));
     end
     else
       Result := LocalizedText('FormSaveManager.SaveInSpace');
   end
   else
   begin
-    if GetPlayer.RuinsSavedPlanet <> nil then
+    if LocalPlayer.RuinsSavedPlanet <> nil then
     begin
-      if GetPlayer.RuinsSavedPlanet.IsMainPiratePlanet then
+      if LocalPlayer.RuinsSavedPlanet.IsMainPiratePlanet then
       begin
         Result := LocalizedText('FormSaveManager.SaveInShip');
-        Result := ReplaceAllWideString(Result, '<ShipName>', GetPlayer.RuinsSavedPlanet.Name);
+        Result := ReplaceAllWideString(Result, '<ShipName>', LocalPlayer.RuinsSavedPlanet.Name);
       end
       else
       begin
         Result := LocalizedText('FormSaveManager.SaveInPlanet');
-        Result := ReplaceAllWideString(Result, '<Planet>', GetPlayer.RuinsSavedPlanet.Name);
+        Result := ReplaceAllWideString(Result, '<Planet>', LocalPlayer.RuinsSavedPlanet.Name);
       end;
     end
-    else if GetPlayer.RuinsSavedDockedTo <> nil then
+    else if LocalPlayer.RuinsSavedDockedTo <> nil then
     begin
       Result := LocalizedText('FormSaveManager.SaveInShip');
       Result :=
-          ReplaceAllWideString(Result, '<ShipName>', GetPlayer.RuinsSavedDockedTo.GetFullName(' '));
+          ReplaceAllWideString(Result, '<ShipName>', LocalPlayer.RuinsSavedDockedTo.GetFullName(' '));
     end
     else
       Result := LocalizedText('FormSaveManager.SaveInSpace');
   end;
-  Result := ReplaceAllWideString(Result, '<Star>', GetPlayer.CurrentStar.Name);
+  Result := ReplaceAllWideString(Result, '<Star>', LocalPlayer.CurrentStar.Name);
   Result :=
-      ReplaceAllWideString(Result, '<Constellation>', GetPlayer.CurrentStar.Constellation.GetName);
-  Result := ReplaceAllWideString(Result, '<Player>', GetPlayer.Name);
+      ReplaceAllWideString(Result, '<Constellation>', LocalPlayer.CurrentStar.Constellation.GetName);
+  Result := ReplaceAllWideString(Result, '<Player>', LocalPlayer.Name);
 end;
 
 function TfSaveManager.BuildUniqueSavePath(
@@ -1144,12 +1144,12 @@ begin
   if SaveManagerMode = smmSave then
   begin
     New(NewSlot);
-    if GetPlayer.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.OwnerId = Byte(oiPirate) then
       NewSlot.RaceName :=
           OwnerInfo[Ord(oiPirate)].InternalName
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.PilotRace)) and $7F].InternalName
     else
-      NewSlot.RaceName := OwnerInfo[GetPlayer.OwnerId].InternalName;
+      NewSlot.RaceName := OwnerInfo[LocalPlayer.OwnerId].InternalName;
   end;
   try
     FindData.dwFileAttributes := FILE_ATTRIBUTE_NORMAL;

@@ -298,7 +298,7 @@ begin
     MusicManager.RequestFadeOut;
   MainPanel.OnOpen;
   LoadPanel.OnOpen;
-  if GetPlayer.IsOnPlanet then
+  if LocalPlayer.IsOnPlanet then
   begin
     PlanetPanel.OnOpen;
     PlanetPanel.Show;
@@ -311,7 +311,7 @@ begin
     StationPanel.Show;
   end;
   with GetByName('ButFormClose') as TGraphButtonGI do
-    if GetPlayer.IsOnPlanet then
+    if LocalPlayer.IsOnPlanet then
       UpCallback := PlanetPanel.PlanetClicked
     else
       UpCallback := StationPanel.ServicesClicked;
@@ -359,35 +359,35 @@ begin
   GetByName('PanelSearch').SetActive(SearchMode);
   with GetByName('BGCity2') as TImageGI do
   begin
-    SetActive(GetPlayer.IsDockedToShip and (GetPlayer.DockedTo.TypeId = Byte(rstMilitaryBase)));
+    SetActive(LocalPlayer.IsDockedToShip and (LocalPlayer.DockedTo.TypeId = Byte(rstMilitaryBase)));
     if Active then
     begin
-      SetImagePath('GAI,' + GetPlayer.CurrentStar.GetBackgroundImagePath(I));
+      SetImagePath('GAI,' + LocalPlayer.CurrentStar.GetBackgroundImagePath(I));
       GaiImageControl.LoadFrameSequenceFromText('[50,0-0]');
       SetImageKindX(ikxCenter);
       SetImageKindY(ikyCenter);
     end;
   end;
   with GetByName('BGCity') as TImageGI do
-    if GetPlayer.IsOnPlanet then
+    if LocalPlayer.IsOnPlanet then
     begin
       SetActive(True);
       (FindByNameRecursive('BGCity') as TImageGI)
-          .SetImagePath(GetPlayer.CurrentPlanet.GetGovernmentBackgroundGraph);
+          .SetImagePath(LocalPlayer.CurrentPlanet.GetGovernmentBackgroundGraph);
     end
-    else if GetPlayer.IsDockedToShip then
+    else if LocalPlayer.IsDockedToShip then
     begin
       SetActive(True);
-      if GetPlayer.DockedTo.TypeNameOverrideKey <> WideString('') then
+      if LocalPlayer.DockedTo.TypeNameOverrideKey <> WideString('') then
       begin
-        Path := 'Bm.FormRuins.' + GiResourceSuffix + GetPlayer.DockedTo.TypeNameOverrideKey + 'bg';
+        Path := 'Bm.FormRuins.' + GiResourceSuffix + LocalPlayer.DockedTo.TypeNameOverrideKey + 'bg';
         if CacheDataRoot.FileExistsByPath(Path) then
           SetImagePath('GI,' + Path)
         else
           SetImagePath(
               'GI,Bm.FormRuins.'
                   + GiResourceSuffix
-                  + ShipTypeNames[GetPlayer.DockedTo.TypeId].Name
+                  + ShipTypeNames[LocalPlayer.DockedTo.TypeId].Name
                   + 'bg'
           );
       end
@@ -395,7 +395,7 @@ begin
         SetImagePath(
             'GI,Bm.FormRuins.'
                 + GiResourceSuffix
-                + ShipTypeNames[GetPlayer.DockedTo.TypeId].Name
+                + ShipTypeNames[LocalPlayer.DockedTo.TypeId].Name
                 + 'bg'
         );
     end
@@ -411,20 +411,20 @@ begin
   RefreshNewsAnimation(nil);
   SetFocusedControl(nil);
   ShowNews;
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnEnteringForm, nil, nil, 0);
   aCalc.WaitForTurnCalculationUI;
 end;
 
 procedure TfInfo.OnClose;
 begin
   aCalc.WaitForTurnCalculationUI;
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnLeavingForm, nil, nil, 0);
   InfoPanel.FreeOwnedChildren;
   MainPanel.OnClose;
   LoadPanel.OnClose;
-  if (GetPlayer <> nil) and GetPlayer.IsOnPlanet then
+  if (LocalPlayer <> nil) and LocalPlayer.IsOnPlanet then
     PlanetPanel.OnClose
   else
     StationPanel.OnClose;
@@ -520,33 +520,33 @@ end;
 
 procedure TfInfo.EndTurnClicked(Sender: TObjectGI);
 begin
-  if (GetPlayer = nil) or (GetPlayer.QueuedTravelTarget <> nil) then
+  if (LocalPlayer = nil) or (LocalPlayer.QueuedTravelTarget <> nil) then
     Exit;
-  if GetPlayer.IsDockedToShip
-      and (GetPlayer.DockedTo.TypeId = Byte(rstDominion))
-      and (GetPlayer.DockedTo.Order = soTeleport)
-      and (Cardinal(GetPlayer.DockedTo.OrderStateData) > 0)
-      and not GetPlayer.DockedTo.InHyperspace then
+  if LocalPlayer.IsDockedToShip
+      and (LocalPlayer.DockedTo.TypeId = Byte(rstDominion))
+      and (LocalPlayer.DockedTo.Order = soTeleport)
+      and (Cardinal(LocalPlayer.DockedTo.OrderStateData) > 0)
+      and not LocalPlayer.DockedTo.InHyperspace then
   begin
     RuinsTalkScreen.DepartWithStation(1);
     Exit;
   end;
-  if GetPlayer.IsDockedToShip
-      and (GetPlayer.DockedTo.TypeId = Byte(rstDominion))
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> nil)
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> GetPlayer.CurrentStar)
-      and ((GetPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
+  if LocalPlayer.IsDockedToShip
+      and (LocalPlayer.DockedTo.TypeId = Byte(rstDominion))
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> nil)
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> LocalPlayer.CurrentStar)
+      and ((LocalPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
   begin
     RuinsTalkScreen.DepartWithStation(1);
     Exit;
   end;
-  if GetPlayer.IsDockedToShip
-      and (GetPlayer.DockedTo.TypeId = Byte(rstMilitaryBase))
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> nil)
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> GetPlayer.CurrentStar)
-      and ((GetPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
+  if LocalPlayer.IsDockedToShip
+      and (LocalPlayer.DockedTo.TypeId = Byte(rstMilitaryBase))
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> nil)
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> LocalPlayer.CurrentStar)
+      and ((LocalPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
   begin
-    if GetPlayer.Speed <= 0 then
+    if LocalPlayer.Speed <= 0 then
       RuinsTalkScreen.DepartWithStation(1)
     else
       StationPanel.TakeOffForStationTravel;
@@ -1210,14 +1210,14 @@ begin
     MusicManager.RequestFadeOut;
     Exit;
   end;
-  if GetPlayer.IsOnPlanet then
+  if LocalPlayer.IsOnPlanet then
   begin
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
     begin
-      if not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+      if not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
         MusicManager.PlayCategory(
             'Nation.'
-                + OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and $7F]
+                + OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and $7F]
                     .InternalName
                 + 'Pirate'
         )
@@ -1226,25 +1226,25 @@ begin
     end
     else
       MusicManager
-          .PlayCategory('Nation.' + OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].InternalName);
+          .PlayCategory('Nation.' + OwnerInfo[LocalPlayer.CurrentPlanet.OwnerId].InternalName);
   end
-  else if GetPlayer.IsDockedToShip then
+  else if LocalPlayer.IsDockedToShip then
   begin
     if not MusicInPlanetEnabled then
     begin
       MusicManager.RequestFadeOut;
       Exit;
     end;
-    if GetPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
+    if LocalPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
               + 'Pirate'
       )
     else
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
       );
   end;
 end;
@@ -1596,7 +1596,7 @@ var
                   + '<td='
                   + IntToStr(GiScalePixels(205))
                   + '><align=right>'
-                  + WrapTextInColor(IntToStr(GetPlayer.ShopGoodsPurchasePrice(Good, Station)), '')
+                  + WrapTextInColor(IntToStr(LocalPlayer.ShopGoodsPurchasePrice(Good, Station)), '')
                   + '</align>';
           GoodsText :=
               GoodsText
@@ -1610,7 +1610,7 @@ var
                   + '<td='
                   + IntToStr(GiScalePixels(255))
                   + '><align=right>'
-                  + WrapTextInColor(IntToStr(GetPlayer.ShopGoodsSellPrice(Good, Station)), '')
+                  + WrapTextInColor(IntToStr(LocalPlayer.ShopGoodsSellPrice(Good, Station)), '')
                   + '</align>';
         end;
         Description := Description + GoodsText;
@@ -1731,7 +1731,7 @@ var
                     + '<td='
                     + IntToStr(GiScalePixels(205))
                     + '><align=right>'
-                    + WrapTextInColor(IntToStr(GetPlayer.ShopGoodsPurchasePrice(Good, Planet)), '')
+                    + WrapTextInColor(IntToStr(LocalPlayer.ShopGoodsPurchasePrice(Good, Planet)), '')
                     + '</align>';
             GoodsText :=
                 GoodsText
@@ -1745,7 +1745,7 @@ var
                     + '<td='
                     + IntToStr(GiScalePixels(255))
                     + '><align=right>'
-                    + WrapTextInColor(IntToStr(GetPlayer.ShopGoodsSellPrice(Good, Planet)), '')
+                    + WrapTextInColor(IntToStr(LocalPlayer.ShopGoodsSellPrice(Good, Planet)), '')
                     + '</align>';
           end;
         end;
@@ -1793,7 +1793,7 @@ var
               Description :=
                   Description + #13#10 + LocalizedText('FormInfo.StarInfo.ControlledByDominators');
           end;
-        if GetPlayer.CurrentStar <> Value then
+        if LocalPlayer.CurrentStar <> Value then
         begin
           Description := Description + #13#10 + LocalizedText('FormInfo.StarInfo.RelativeLocation');
           Description :=
@@ -1807,12 +1807,12 @@ var
                           Round(
                               PointDistance(
                                   (Value as TStar).Position,
-                                  GetPlayer.CurrentStar.Position
+                                  LocalPlayer.CurrentStar.Position
                               )
                           )
                       ));
           Bearing :=
-              Round(PointBearingDegrees((Value as TStar).Position, GetPlayer.CurrentStar.Position));
+              Round(PointBearingDegrees((Value as TStar).Position, LocalPlayer.CurrentStar.Position));
           Bearing := Bearing + 180 - 15;
           if Bearing >= 360 then
             Dec(Bearing, 360);
@@ -2055,7 +2055,7 @@ var
           Exit;
         if (RangeFilter <> 0)
             and (RangeFilter
-                < Round(PointDistance(CandidateStar.Position, GetPlayer.CurrentStar.Position))) then
+                < Round(PointDistance(CandidateStar.Position, LocalPlayer.CurrentStar.Position))) then
           Exit;
         AddInfoSearchResult(Value);
       end;
@@ -2091,7 +2091,7 @@ var
                   < Round(
                       PointDistance(
                           CandidatePlanet.CurrentStar.Position,
-                          GetPlayer.CurrentStar.Position
+                          LocalPlayer.CurrentStar.Position
                       ))) then
             Exit;
           if (ConstellationFilter <> WideString(''))
@@ -2131,7 +2131,7 @@ var
                 < Round(
                     PointDistance(
                         CandidateStation.CurrentStar.Position,
-                        GetPlayer.CurrentStar.Position
+                        LocalPlayer.CurrentStar.Position
                     ))) then
           Exit;
         if (ConstellationFilter <> WideString(''))
@@ -2321,7 +2321,7 @@ begin
     SetDisabled(False);
   with GetByName('ButNext') as TGraphButtonGI do
     SetDisabled(True);
-  if GetPlayer.Money < 3 then
+  if LocalPlayer.Money < 3 then
   begin
     ClearInfoContents;
     AddInfoText(
@@ -2516,12 +2516,12 @@ begin
       begin
         if ResultCount >= GetSearchResultLimit then
           Break;
-        Star := TObject(GetPlayer.CurrentStar.StarDistances[I].Star) as TStar;
+        Star := TObject(LocalPlayer.CurrentStar.StarDistances[I].Star) as TStar;
         if (Star.Id = 71) or (Star.Id = 72) then
           Continue;
         if (RangeFilter <> 0)
             and (RangeFilter
-                < Round(PointDistance(Star.Position, GetPlayer.CurrentStar.Position))) then
+                < Round(PointDistance(Star.Position, LocalPlayer.CurrentStar.Position))) then
           Continue;
         if Star.Status.CustomFaction = WideString('') then
         begin
@@ -2539,9 +2539,9 @@ begin
                 if ((MinGoodsCount = 0) or (Planet.Goods[Good].Count >= MinGoodsCount))
                     and GoodsSelected[Good]
                     and ((MaxBuyPrice = 0)
-                        or (GetPlayer.ShopGoodsPurchasePrice(Good, Planet) <= MaxBuyPrice))
+                        or (LocalPlayer.ShopGoodsPurchasePrice(Good, Planet) <= MaxBuyPrice))
                     and ((MinSellPrice = 0)
-                        or (GetPlayer.ShopGoodsSellPrice(Good, Planet) >= MinSellPrice)) then
+                        or (LocalPlayer.ShopGoodsSellPrice(Good, Planet) >= MinSellPrice)) then
                 begin
                   Heading :=
                       Heading
@@ -2580,7 +2580,7 @@ begin
                           + IntToStr(GiScalePixels(205))
                           + '><align=right>'
                           + WrapTextInColor(
-                              IntToStr(GetPlayer.ShopGoodsPurchasePrice(Good, Planet)),
+                              IntToStr(LocalPlayer.ShopGoodsPurchasePrice(Good, Planet)),
                               '')
                           + '</align>';
                   Heading :=
@@ -2596,7 +2596,7 @@ begin
                           + IntToStr(GiScalePixels(255))
                           + '><align=right>'
                           + WrapTextInColor(
-                              IntToStr(GetPlayer.ShopGoodsSellPrice(Good, Planet)),
+                              IntToStr(LocalPlayer.ShopGoodsSellPrice(Good, Planet)),
                               '')
                           + '</align>';
                 end;
@@ -2656,9 +2656,9 @@ begin
                   if ((MinGoodsCount = 0) or (Station.ShopGoods[Good].Count >= MinGoodsCount))
                       and GoodsSelected[Good]
                       and ((MaxBuyPrice = 0)
-                          or (GetPlayer.ShopGoodsPurchasePrice(Good, Station) <= MaxBuyPrice))
+                          or (LocalPlayer.ShopGoodsPurchasePrice(Good, Station) <= MaxBuyPrice))
                       and ((MinSellPrice = 0)
-                          or (GetPlayer.ShopGoodsSellPrice(Good, Station) >= MinSellPrice)) then
+                          or (LocalPlayer.ShopGoodsSellPrice(Good, Station) >= MinSellPrice)) then
                   begin
                     Heading :=
                         Heading
@@ -2693,7 +2693,7 @@ begin
                             + IntToStr(GiScalePixels(205))
                             + '><align=right>'
                             + WrapTextInColor(
-                                IntToStr(GetPlayer.ShopGoodsPurchasePrice(Good, Station)),
+                                IntToStr(LocalPlayer.ShopGoodsPurchasePrice(Good, Station)),
                                 '')
                             + '</align>';
                     Heading :=
@@ -2709,7 +2709,7 @@ begin
                             + IntToStr(GiScalePixels(255))
                             + '><align=right>'
                             + WrapTextInColor(
-                                IntToStr(GetPlayer.ShopGoodsSellPrice(Good, Station)),
+                                IntToStr(LocalPlayer.ShopGoodsSellPrice(Good, Station)),
                                 '')
                             + '</align>';
                   end;
@@ -2775,7 +2775,7 @@ begin
     end;
     for I := 0 to Galaxy.Stars.Count - 1 do
     begin
-      Star := TObject(GetPlayer.CurrentStar.StarDistances[I].Star) as TStar;
+      Star := TObject(LocalPlayer.CurrentStar.StarDistances[I].Star) as TStar;
       if Star.Constellation.Id <> 20 then
       begin
         if SelectedSearchCategory = 0 then
@@ -2800,7 +2800,7 @@ begin
             end
             else
               CheckInfoSearchResult(Ship);
-            if (GetPlayer.DockedTo = Ship) and (LocalHuman.TemporaryShopSlots <> nil) then
+            if (LocalPlayer.DockedTo = Ship) and (LocalHuman.TemporaryShopSlots <> nil) then
             begin
               for ItemIndex := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
               begin
@@ -2848,8 +2848,8 @@ begin
             CheckInfoSearchResult(Planet);
           if Planet.IsCoalitionOwned or (Planet.OwnerId = Byte(oiPirate)) then
           begin
-            if (GetPlayer.CurrentPlanet <> nil)
-                and (GetPlayer.CurrentPlanet = Planet)
+            if (LocalPlayer.CurrentPlanet <> nil)
+                and (LocalPlayer.CurrentPlanet = Planet)
                 and (LocalHuman.TemporaryShopSlots <> nil) then
             begin
               for ItemIndex := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
@@ -3046,9 +3046,9 @@ end;
 function TfInfo.IsAtBusinessCenter: Boolean;
 begin
   Result := False;
-  if (GetPlayer <> nil)
-      and (GetPlayer.DockedTo <> nil)
-      and (GetPlayer.DockedTo.TypeId = Byte(rstRangerCenter)) then
+  if (LocalPlayer <> nil)
+      and (LocalPlayer.DockedTo <> nil)
+      and (LocalPlayer.DockedTo.TypeId = Byte(rstRangerCenter)) then
     Result := True;
 end;
 
@@ -3388,9 +3388,9 @@ end;
 
 function TfInfo.GetSearchResultLimit: Integer;
 begin
-  if (GetPlayer <> nil)
-      and (GetPlayer.DockedTo <> nil)
-      and (GetPlayer.DockedTo.TypeId = Byte(rstRangerCenter)) then
+  if (LocalPlayer <> nil)
+      and (LocalPlayer.DockedTo <> nil)
+      and (LocalPlayer.DockedTo.TypeId = Byte(rstRangerCenter)) then
     Result := MaxSearchResult
   else
     Result := 30;

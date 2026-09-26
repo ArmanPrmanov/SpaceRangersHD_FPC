@@ -670,14 +670,14 @@ begin
         Health := Min(MaxHealth, Health + Round(RegenerationHealthPerTick * RegenerationRate / 10));
     end;
     if (Self = PlayerArcadeShip) and (TickCounter mod 10 = 0) then
-      if GetPlayer <> nil then
-        if GetPlayer.CountActiveArtefacts(Ord(t_ArtefactDroid)) > 0 then
+      if LocalPlayer <> nil then
+        if LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactDroid)) > 0 then
           Health :=
               Min(
                   MaxHealth,
                   Health
                       + RegenerationHealthPerTick
-                          * GetPlayer.CountActiveArtefacts(Ord(t_ArtefactDroid))
+                          * LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactDroid))
               );
     if (BonusTicks[abkInvisibility] > 0) and (RevealTicks > 0) then
       Dec(RevealTicks);

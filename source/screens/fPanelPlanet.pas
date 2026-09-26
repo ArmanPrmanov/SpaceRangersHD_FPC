@@ -102,10 +102,10 @@ begin
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
-  if (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) = rlHostile)
+  if (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) = rlHostile)
       and (GovernmentScreen = Screen) then
     Exit;
-  if (GetPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
+  if (LocalPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
     Exit;
   if HasPendingScriptRequests then
     Exit;
@@ -119,23 +119,23 @@ begin
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
-  if (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) = rlHostile)
+  if (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) = rlHostile)
       and (GovernmentScreen = Screen) then
     Exit;
-  if (GetPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
+  if (LocalPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
     Exit;
   if HasPendingScriptRequests then
     Exit;
-  if (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) <= rlBad)
-      and not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+  if (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) <= rlBad)
+      and not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
   begin
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
       ShowMessageBoxGI(
           Screen,
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPiratePlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -146,7 +146,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -165,23 +165,23 @@ begin
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
-  if (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) = rlHostile)
+  if (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) = rlHostile)
       and (GovernmentScreen = Screen) then
     Exit;
-  if (GetPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
+  if (LocalPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
     Exit;
   if HasPendingScriptRequests then
     Exit;
-  if (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) <= rlBad)
-      and not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+  if (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) <= rlBad)
+      and not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
   begin
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
       ShowMessageBoxGI(
           Screen,
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPiratePlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -192,7 +192,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -211,10 +211,10 @@ begin
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
-  if (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) = rlHostile)
+  if (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) = rlHostile)
       and (GovernmentScreen = Screen) then
     Exit;
-  if (GetPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
+  if (LocalPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
     Exit;
   if HasPendingScriptRequests then
     Exit;
@@ -228,23 +228,23 @@ begin
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
-  if (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) = rlHostile)
+  if (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) = rlHostile)
       and (GovernmentScreen = Screen) then
     Exit;
-  if (GetPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
+  if (LocalPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
     Exit;
   if HasPendingScriptRequests then
     Exit;
-  if (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) <= rlBad)
-      and not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+  if (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) <= rlBad)
+      and not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
   begin
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
       ShowMessageBoxGI(
           Screen,
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPiratePlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -255,7 +255,7 @@ begin
           ReplaceColoredToken(
               LocalizedColorText('FormShip.SellOrBuyInPlanetAndBadRelations'),
               '<Planet>',
-              GetPlayer.CurrentPlanet.Name,
+              LocalPlayer.CurrentPlanet.Name,
               '<color=255,240,100>'
           ),
           mbgCancel or mbgWarning
@@ -274,10 +274,10 @@ begin
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;
-  if (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) = rlHostile)
+  if (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) = rlHostile)
       and (GovernmentScreen = Screen) then
     Exit;
-  if (GetPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
+  if (LocalPlayer.PendingDockDialogue > 1) and (GovernmentScreen = Screen) then
     Exit;
   if HasPendingScriptRequests then
     Exit;
@@ -291,7 +291,7 @@ begin
     Exit;
   if IsVirtualKeyDown(VK_CONTROL) or IsVirtualKeyDown(VK_SHIFT) or IsVirtualKeyDown(VK_MENU) then
     Exit;
-  if not GetPlayer.IsOnPlanet then
+  if not LocalPlayer.IsOnPlanet then
     Exit;
   if (ActiveLoadPanel <> nil) and ActiveLoadPanel.IsAnimatingShutters then
     Exit;

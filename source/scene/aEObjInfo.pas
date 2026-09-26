@@ -194,7 +194,7 @@ begin
       Planets[Index].Population := Planet.Population;
       Planets[Index].Economy := Planet.Economy;
       Planets[Index].Government := Planet.Government;
-      Planets[Index].Relation := Planet.GetRelationLevelToShip(GetPlayer);
+      Planets[Index].Relation := Planet.GetRelationLevelToShip(LocalPlayer);
       Planets[Index].UnexploredWater := Planet.WaterTiles - Planet.WaterExplored;
       Planets[Index].UnexploredLand := Planet.LandTiles - Planet.LandExplored;
       Planets[Index].UnexploredHills := Planet.HillTiles - Planet.HillExplored;
@@ -210,11 +210,11 @@ begin
       Ships[Index].Name := Ship.Name;
       Ships[Index].OutsideNormalSpace := not Ship.InNormalSpace;
       Stage := 20;
-      if GetPlayer <> Ship then
+      if LocalPlayer <> Ship then
       begin
         Stage := 21;
         Ships[Index].FullName := WrapTextInColor(Ship.GetFullName(' '), InfoNameColorTag);
-        if (Ship <> nil) and (GetPlayer = Ship.PartnerShip) then
+        if (Ship <> nil) and (LocalPlayer = Ship.PartnerShip) then
           Ships[Index].FullName :=
               Ships[Index].FullName
                   + #13#10
@@ -252,7 +252,7 @@ begin
       Ships[Index].HullCapacity := Ship.GetHull.Weight;
       Ships[Index].HullPoints := Ship.GetHull.HullPoints;
       Ships[Index].HullFragility := Ship.GetHull.GetFragilityFactor(NoDamageFlags);
-      if GetPlayer.CanResolveObjectWithScanner(Ship) or (GetPlayer = Ship) then
+      if LocalPlayer.CanResolveObjectWithScanner(Ship) or (LocalPlayer = Ship) then
         Ships[Index].ScannerResolved := True
       else
         Ships[Index].ScannerResolved := False;
@@ -260,15 +260,15 @@ begin
       Ships[Index].RepairPoints := -1;
       Ships[Index].DamageText := WrapTextInColor('???', '');
       Ships[Index].DefenseText := IntToStr(Integer(Ship.GetDefensePercent) and $7F) + '%';
-      if GetPlayer.CanResolveObjectWithScanner(Ship)
-          or (GetPlayer = Ship)
-          or (GetPlayer = Ship.PartnerShip)
+      if LocalPlayer.CanResolveObjectWithScanner(Ship)
+          or (LocalPlayer = Ship)
+          or (LocalPlayer = Ship.PartnerShip)
           or (Ship.TypeId = stTranclucator) then
       begin
         Stage := 25;
         Ships[Index].DefenseText :=
             Ships[Index].DefenseText + ' + ' + WrapTextInColor(IntToStr(Ship.GetArmor), '');
-        if GetPlayer.HasScannerArtefact(Ship) then
+        if LocalPlayer.HasScannerArtefact(Ship) then
         begin
           if Ship.GetRepairRobot <> nil then
             Ships[Index].RepairPoints := Ship.CalculateRepairPoints(Ship.GetRepairRobot)
@@ -278,10 +278,10 @@ begin
           Ships[Index].DefenseText := Ship.GetManeuverabilitySummary + Ships[Index].DefenseText;
         end;
       end;
-      if not GetPlayer.HasScannerArtefact(Ship) then
+      if not LocalPlayer.HasScannerArtefact(Ship) then
         Ships[Index].DamageText := '';
       Stage := 26;
-      Relation := Ship.GetRelationLevelToShip(GetPlayer);
+      Relation := Ship.GetRelationLevelToShip(LocalPlayer);
       Ships[Index].Relation := Relation;
       if Relation <> rlHostile then
         if Ship is TRuins then
@@ -290,23 +290,23 @@ begin
             begin
               Relation :=
                   RelationValueToLevel(
-                      Byte(Ship.RangerRelations[Galaxy.Rangers.IndexOf(GetPlayer)])
+                      Byte(Ship.RangerRelations[Galaxy.Rangers.IndexOf(LocalPlayer)])
                   );
               if Relation <> rlHostile then
                 Ships[Index].Relation := Relation;
             end;
       Stage := 27;
-      if (GetPlayer <> Ship)
+      if (LocalPlayer <> Ship)
           and not (Ship is TRuins)
-          and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
-          and GetPlayer.CanResolveObjectWithScanner(Ship) then
-        Ships[Index].WinChance := Integer(GetPlayer.GetWinChancePercent(Ship)) and $7F
+          and (LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
+          and LocalPlayer.CanResolveObjectWithScanner(Ship) then
+        Ships[Index].WinChance := Integer(LocalPlayer.GetWinChancePercent(Ship)) and $7F
       else
         Ships[Index].WinChance := -1;
       Stage := 28;
       Ships[Index].PortraitImage := Ship.GetShipPortraitImagePath;
       Stage := 29;
-      if not GetPlayer.HasScannerArtefact(Ship) then
+      if not LocalPlayer.HasScannerArtefact(Ship) then
         Ships[Index].CombatStatusText := Ship.GetCombatStatusDescription(StatusCount, False)
       else
         Ships[Index].CombatStatusText := Ship.GetCombatStatusDescription(StatusCount, True);

@@ -246,7 +246,7 @@ begin
   SecondaryPreview := nil;
   GameState := nil;
   Films := nil;
-  if (Galaxy <> nil) and (GetPlayer <> nil) then
+  if (Galaxy <> nil) and (LocalPlayer <> nil) then
   begin
     FilmEntry := nil;
     AutoName := SaveManagerScreen.GetAutoSavePath;
@@ -260,15 +260,15 @@ begin
       Header.AddWideStringZ('v' + IntToStr(CurrentSaveVersion));
       Header.AddWideStringZ(Description);
       Header.AddWideStringZ(IntToStr(Galaxy.CurrentTurn));
-      Header.AddWideStringZ(IntToStr(GetPlayer.Money));
-      Header.AddWideStringZ(GetPlayer.Name);
-      if GetPlayer.OwnerId = Byte(oiPirate) then
+      Header.AddWideStringZ(IntToStr(LocalPlayer.Money));
+      Header.AddWideStringZ(LocalPlayer.Name);
+      if LocalPlayer.OwnerId = Byte(oiPirate) then
         Header.AddWideStringZ(
             OwnerInfo[Ord(oiPirate)].InternalName
-                + OwnerInfo[Integer(RaceToOwner(GetPlayer.PilotRace)) and $7F].InternalName
+                + OwnerInfo[Integer(RaceToOwner(LocalPlayer.PilotRace)) and $7F].InternalName
         )
       else
-        Header.AddWideStringZ(OwnerInfo[GetPlayer.OwnerId].InternalName);
+        Header.AddWideStringZ(OwnerInfo[LocalPlayer.OwnerId].InternalName);
       Header.AddWideStringZ('EZ');
       Preview := TBufEC.Create;
       if SavePreviewGraph <> nil then
@@ -298,7 +298,7 @@ begin
         Message.SaveToBuffer(GameState);
         Message := Message.Next;
       end;
-      LocalHuman.PlayerHoldShip := GetPlayer;
+      LocalHuman.PlayerHoldShip := LocalPlayer;
       RefreshPlayerHoldView(False);
       Count := LocalHuman.PlayerHoldEntries.Count;
       GameState.AddWideChar(WideChar(Count));
@@ -583,8 +583,8 @@ begin
     if Loop is TfShip2 then
       (Loop as TfShip2).ReturnSelectedHoldEntry;
   end;
-  if (GetPlayer.IsOnPlanet and (GetPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
-      or (GetPlayer.IsDockedToShip and (GetPlayer.DockedTo is TRuins)) then
+  if (LocalPlayer.IsOnPlanet and (LocalPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
+      or (LocalPlayer.IsDockedToShip and (LocalPlayer.DockedTo is TRuins)) then
     RestoreTemporaryShopStock;
   Count := CountPersistentPlayerMessages;
   MemorySnapshotBuffer.AddIntegerValue(Count);
@@ -595,7 +595,7 @@ begin
     Message := Message.Next;
   end;
   MemorySnapshotBuffer.AddDWord(LocalHuman.ShownPlayerTips);
-  LocalHuman.PlayerHoldShip := GetPlayer;
+  LocalHuman.PlayerHoldShip := LocalPlayer;
   RefreshPlayerHoldView(False);
   Count := LocalHuman.PlayerHoldEntries.Count;
   MemorySnapshotBuffer.AddWideChar(WideChar(Count));
@@ -692,16 +692,16 @@ begin
       Loop.RequestClose(1);
       ReopenScreen := False;
     end
-    else if (Loop is TfShip2) and not GetPlayer.InNormalSpace then
+    else if (Loop is TfShip2) and not LocalPlayer.InNormalSpace then
       Loop.RequestClose(1)
-    else if (Loop is TfGalaxy2) and not GetPlayer.InNormalSpace then
+    else if (Loop is TfGalaxy2) and not LocalPlayer.InNormalSpace then
       Loop.RequestClose(1)
-    else if (Loop is TfShip2) and GetPlayer.InNormalSpace then
+    else if (Loop is TfShip2) and LocalPlayer.InNormalSpace then
     begin
       RequestedScreenId := ShipReturnScreenId;
       Loop.RequestClose(1);
     end
-    else if (Loop is TfGalaxy2) and GetPlayer.InNormalSpace then
+    else if (Loop is TfGalaxy2) and LocalPlayer.InNormalSpace then
     begin
       RequestedScreenId := GalaxyReturnScreenId;
       Loop.RequestClose(1);
@@ -735,7 +735,7 @@ begin
     end
     else if Loop is TfLoad then
     begin
-      if GetPlayer.InNormalSpace then
+      if LocalPlayer.InNormalSpace then
       begin
         RequestedScreenId := screenStarMap;
         StarMapScreen.ResumeMode := smrOrders;
@@ -748,7 +748,7 @@ begin
       Loop.RequestClose(1);
       ReopenScreen := False;
     end
-    else if GetPlayer.InNormalSpace
+    else if LocalPlayer.InNormalSpace
         and ((Loop is TfHangar)
             or (Loop is TfPlanet)
             or (Loop is TfPlanetNO)
@@ -772,25 +772,25 @@ begin
         Loop.RequestClose(1);
       ReopenScreen := False;
     end
-    else if (GetPlayer.IsOnPlanet or GetPlayer.IsDockedToShip) and (Loop is TfStarMap) then
+    else if (LocalPlayer.IsOnPlanet or LocalPlayer.IsDockedToShip) and (Loop is TfStarMap) then
     begin
       Loop.RequestClose(1);
-      if GetPlayer.IsOnPlanet and (GetPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited)) then
+      if LocalPlayer.IsOnPlanet and (LocalPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited)) then
         RequestedScreenId := screenPlanetNO
-      else if GetPlayer.IsOnPlanet and (GetPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited)) then
+      else if LocalPlayer.IsOnPlanet and (LocalPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited)) then
         RequestedScreenId := screenPlanet
-      else if GetPlayer.IsDockedToShip then
+      else if LocalPlayer.IsDockedToShip then
         RequestedScreenId := screenRuinsTalk;
     end
-    else if GetPlayer.InHyperspace
-        and (GetPlayer.Order = soJumpHole)
+    else if LocalPlayer.InHyperspace
+        and (LocalPlayer.Order = soJumpHole)
         and ((Loop is TfStarMap) or (Loop is TfAB)) then
     begin
       RequestedScreenId := screenMainMenu;
       Loop.RequestClose(1);
       ReopenScreen := False;
     end
-    else if GetPlayer.InHyperspace and (GetPlayer.Order = soJump) and (Loop is TfStarMap) then
+    else if LocalPlayer.InHyperspace and (LocalPlayer.Order = soJump) and (Loop is TfStarMap) then
     begin
       RequestedScreenId := screenJump;
       Loop.RequestClose(1);
@@ -803,8 +803,8 @@ begin
     else if Loop is TfJump then
       JumpScreen.RestoreOrdersOnArrival := True;
   end;
-  if (GetPlayer.IsOnPlanet and (GetPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
-      or (GetPlayer.IsDockedToShip and (GetPlayer.DockedTo is TRuins)) then
+  if (LocalPlayer.IsOnPlanet and (LocalPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
+      or (LocalPlayer.IsDockedToShip and (LocalPlayer.DockedTo is TRuins)) then
     BuildTemporaryShopSlotGrid;
   if ReopenScreen then
     (TObject(RegisteredScreens[Ord(CurrentScreenId)]) as TMessageLoopGI).OnOpen;

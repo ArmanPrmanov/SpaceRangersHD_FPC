@@ -169,8 +169,8 @@ var
 begin
   if (Item is TEquipment)
       and (Item.ItemType in [t_FuelTanks..t_DefGenerator])
-      and (GetPlayer <> nil)
-      and GetPlayer.IsHealthEffectActive(3) then
+      and (LocalPlayer <> nil)
+      and LocalPlayer.IsHealthEffectActive(3) then
   begin
     Owner := Item.OwnerId;
     Item.OwnerId := Byte(oiDominator);
@@ -312,7 +312,7 @@ begin
     MusicManager.RequestFadeOut;
   MainPanel.OnOpen;
   LoadPanel.OnOpen;
-  if GetPlayer.IsOnPlanet then
+  if LocalPlayer.IsOnPlanet then
   begin
     PlanetPanel.OnOpen;
     PlanetPanel.Show;
@@ -325,42 +325,42 @@ begin
     StationPanel.Show;
   end;
   with GetByName('ButFormClose') as TGraphButtonGI do
-    if GetPlayer.IsOnPlanet then
+    if LocalPlayer.IsOnPlanet then
       UpCallback := PlanetPanel.PlanetClicked
-    else if GetPlayer.IsDockedToShip then
+    else if LocalPlayer.IsDockedToShip then
       UpCallback := StationPanel.ServicesClicked;
   with GetByName('BGCity2') as TImageGI do
   begin
-    SetActive(GetPlayer.IsDockedToShip and (GetPlayer.DockedTo.TypeId = Byte(rstMilitaryBase)));
+    SetActive(LocalPlayer.IsDockedToShip and (LocalPlayer.DockedTo.TypeId = Byte(rstMilitaryBase)));
     if Active then
     begin
-      SetImagePath('GAI,' + GetPlayer.CurrentStar.GetBackgroundImagePath(Size));
+      SetImagePath('GAI,' + LocalPlayer.CurrentStar.GetBackgroundImagePath(Size));
       GaiImageControl.LoadFrameSequenceFromText('[50,0-0]');
       SetImageKindX(ikxCenter);
       SetImageKindY(ikyCenter);
     end;
   end;
   with GetByName('BGCity') as TImageGI do
-    if GetPlayer.IsOnPlanet then
+    if LocalPlayer.IsOnPlanet then
     begin
       SetActive(True);
       (FindByNameRecursive('BGCity') as TImageGI)
-          .SetImagePath(GetPlayer.CurrentPlanet.GetGovernmentBackgroundGraph);
+          .SetImagePath(LocalPlayer.CurrentPlanet.GetGovernmentBackgroundGraph);
     end
-    else if GetPlayer.IsDockedToShip then
+    else if LocalPlayer.IsDockedToShip then
     begin
       SetActive(True);
-      if GetPlayer.DockedTo.TypeNameOverrideKey <> '' then
+      if LocalPlayer.DockedTo.TypeNameOverrideKey <> '' then
       begin
         BackgroundPath :=
-            'Bm.FormRuins.' + GiResourceSuffix + GetPlayer.DockedTo.TypeNameOverrideKey + 'bg';
+            'Bm.FormRuins.' + GiResourceSuffix + LocalPlayer.DockedTo.TypeNameOverrideKey + 'bg';
         if CacheDataRoot.FileExistsByPath(BackgroundPath) then
           SetImagePath('GI,' + BackgroundPath)
         else
           SetImagePath(
               'GI,Bm.FormRuins.'
                   + GiResourceSuffix
-                  + ShipTypeNames[GetPlayer.DockedTo.TypeId].Name
+                  + ShipTypeNames[LocalPlayer.DockedTo.TypeId].Name
                   + 'bg'
           );
       end
@@ -368,7 +368,7 @@ begin
         SetImagePath(
             'GI,Bm.FormRuins.'
                 + GiResourceSuffix
-                + ShipTypeNames[GetPlayer.DockedTo.TypeId].Name
+                + ShipTypeNames[LocalPlayer.DockedTo.TypeId].Name
                 + 'bg'
         );
     end
@@ -376,10 +376,10 @@ begin
       SetActive(False);
   with GetByName('BGImageRace') as TImageGI do
   begin
-    if GetPlayer.IsOnPlanet then
-      Owner := RaceToOwner(GetPlayer.CurrentPlanet.RaceId)
-    else if GetPlayer.IsDockedToShip then
-      Owner := GetPlayer.DockedTo.OwnerId
+    if LocalPlayer.IsOnPlanet then
+      Owner := RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)
+    else if LocalPlayer.IsDockedToShip then
+      Owner := LocalPlayer.DockedTo.OwnerId
     else
       Owner := 0;
     SetActive(True);
@@ -401,7 +401,7 @@ begin
   GetByName('PII').SetActive(False);
   ClearGoodsControls;
   ReturnShopStock;
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
     EnterEquipmentShop;
   OpenShopStock;
   BuildGoodsControls;
@@ -424,8 +424,8 @@ var
   I, Count: Integer;
 begin
   aCalc.WaitForTurnCalculationUI;
-  if GetPlayer <> nil then
-    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
+  if LocalPlayer <> nil then
+    RunScriptItemsAct(LocalPlayer, satOnLeavingForm, nil, nil, 0);
   if LocalHuman.TemporaryShopSlots <> nil then
   begin
     Count := LocalHuman.TemporaryShopSlots.Count;
@@ -482,7 +482,7 @@ begin
   ReturnShopStock;
   MainPanel.OnClose;
   LoadPanel.OnClose;
-  if (GetPlayer <> nil) and GetPlayer.IsOnPlanet then
+  if (LocalPlayer <> nil) and LocalPlayer.IsOnPlanet then
     PlanetPanel.OnClose
   else
     StationPanel.OnClose;
@@ -565,12 +565,12 @@ begin
                 Max(
                     1,
                     Cost
-                        - GetPlayer.GetHull.CalculateResaleValue(
-                            GetPlayer.GetEffectiveSkillLevel(psTrading))
+                        - LocalPlayer.GetHull.CalculateResaleValue(
+                            LocalPlayer.GetEffectiveSkillLevel(psTrading))
                 );
-          if (GetPlayer.Money < Cost)
+          if (LocalPlayer.Money < Cost)
               or ((Slot.Item.ItemType <> t_Hull)
-                  and (GetPlayer.GetCargoFreeSpace < Slot.Item.Weight)) then
+                  and (LocalPlayer.GetCargoFreeSpace < Slot.Item.Weight)) then
             SetImagePath('GI,Bm.FormShop2.' + GiResourceSuffix + 'SlotBorderH')
           else
             SetImagePath('GI,Bm.FormShop2.' + GiResourceSuffix + 'SlotBorderN');
@@ -778,35 +778,35 @@ end;
 
 procedure TfEquipmentShop.EndTurnClicked(Sender: TObjectGI);
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     Exit;
-  if GetPlayer.QueuedTravelTarget <> nil then
+  if LocalPlayer.QueuedTravelTarget <> nil then
     Exit;
-  if GetPlayer.IsDockedToShip
-      and (GetPlayer.DockedTo.TypeId = Byte(rstDominion))
-      and (GetPlayer.DockedTo.Order = soTeleport)
-      and (Cardinal(GetPlayer.DockedTo.OrderStateData) > 0)
-      and not GetPlayer.DockedTo.InHyperspace then
+  if LocalPlayer.IsDockedToShip
+      and (LocalPlayer.DockedTo.TypeId = Byte(rstDominion))
+      and (LocalPlayer.DockedTo.Order = soTeleport)
+      and (Cardinal(LocalPlayer.DockedTo.OrderStateData) > 0)
+      and not LocalPlayer.DockedTo.InHyperspace then
   begin
     RuinsTalkScreen.DepartWithStation(1);
     Exit;
   end;
-  if GetPlayer.IsDockedToShip
-      and (GetPlayer.DockedTo.TypeId = Byte(rstDominion))
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> nil)
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> GetPlayer.CurrentStar)
-      and ((GetPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
+  if LocalPlayer.IsDockedToShip
+      and (LocalPlayer.DockedTo.TypeId = Byte(rstDominion))
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> nil)
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> LocalPlayer.CurrentStar)
+      and ((LocalPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
   begin
     RuinsTalkScreen.DepartWithStation(1);
     Exit;
   end;
-  if GetPlayer.IsDockedToShip
-      and (GetPlayer.DockedTo.TypeId = Byte(rstMilitaryBase))
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> nil)
-      and ((GetPlayer.DockedTo as TRuins).FlyToStar <> GetPlayer.CurrentStar)
-      and ((GetPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
+  if LocalPlayer.IsDockedToShip
+      and (LocalPlayer.DockedTo.TypeId = Byte(rstMilitaryBase))
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> nil)
+      and ((LocalPlayer.DockedTo as TRuins).FlyToStar <> LocalPlayer.CurrentStar)
+      and ((LocalPlayer.DockedTo as TRuins).FlyDate <= Galaxy.CurrentTurn) then
   begin
-    if GetPlayer.Speed <= 0 then
+    if LocalPlayer.Speed <= 0 then
     begin
       RuinsTalkScreen.DepartWithStation(1);
       Exit;
@@ -866,8 +866,8 @@ begin
     SetCursorActive(True);
   end;
   aCalc.WaitForTurnCalculationUI;
-  if GetPlayer.IsOnPlanet then
-    if GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) = rlHostile then
+  if LocalPlayer.IsOnPlanet then
+    if LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) = rlHostile then
     begin
       RequestedScreenId := screenGovernment;
       RequestClose(1);
@@ -1026,20 +1026,20 @@ begin
   begin
     aCalc.WaitForTurnCalculationUI;
     Galaxy.PendingEquipmentPurchasePrice := Slot.Item.GetConditionAdjustedCost;
-    GetPlayer.GetCargoFreeSpace;
+    LocalPlayer.GetCargoFreeSpace;
     if (Slot.Item is THull)
-        and (GetPlayer.Money < Galaxy.PendingEquipmentPurchasePrice)
-        and (GetPlayer.GetHull.ScriptItem = nil)
-        and (GetPlayer.GetHull.NoDropFlag = 0) then
+        and (LocalPlayer.Money < Galaxy.PendingEquipmentPurchasePrice)
+        and (LocalPlayer.GetHull.ScriptItem = nil)
+        and (LocalPlayer.GetHull.NoDropFlag = 0) then
       Galaxy.PendingEquipmentPurchasePrice :=
           Max(
               1,
               Galaxy.PendingEquipmentPurchasePrice
-                  - GetPlayer.GetHull.CalculateResaleValue(
-                      GetPlayer.GetEffectiveSkillLevel(psTrading))
+                  - LocalPlayer.GetHull.CalculateResaleValue(
+                      LocalPlayer.GetEffectiveSkillLevel(psTrading))
           );
     aCalc.WaitForTurnCalculationUI;
-    if GetPlayer.Money < Galaxy.PendingEquipmentPurchasePrice then
+    if LocalPlayer.Money < Galaxy.PendingEquipmentPurchasePrice then
     begin
       SoundManager.PlaySound('Sound.NoMoney');
       if Slot.Item is THull then
@@ -1049,17 +1049,17 @@ begin
                 LanguageDataConfig.GetParamByPathOrMarker('FormShop.NoMoney'),
                 '<color=255,240,100>',
                 '<Money>',
-                IntToWideString(Galaxy.PendingEquipmentPurchasePrice - GetPlayer.Money)
+                IntToWideString(Galaxy.PendingEquipmentPurchasePrice - LocalPlayer.Money)
             ),
             mbgCancel or mbgError
         );
       aCalc.WaitForTurnCalculationUI;
       MainPanel.FlashMoneyWarning;
-      if not (Slot.Item is THull) and (GetPlayer.CargoFreeSpace < Slot.Item.Weight) then
+      if not (Slot.Item is THull) and (LocalPlayer.CargoFreeSpace < Slot.Item.Weight) then
         MainPanel.FlashCargoWarning;
       aCalc.WaitForTurnCalculationUI;
     end
-    else if not (Slot.Item is THull) and (GetPlayer.CargoFreeSpace < Slot.Item.Weight) then
+    else if not (Slot.Item is THull) and (LocalPlayer.CargoFreeSpace < Slot.Item.Weight) then
     begin
       SoundManager.PlaySound('Sound.NoSize');
       MainPanel.FlashCargoWarning;
@@ -1069,7 +1069,7 @@ begin
     begin
       if Slot.Item is THull then
       begin
-        if Slot.Item.GetConditionAdjustedCost <= GetPlayer.Money then
+        if Slot.Item.GetConditionAdjustedCost <= LocalPlayer.Money then
         begin
           if ShowMessageBoxGI(
                   Self,
@@ -1179,12 +1179,12 @@ begin
                     Max(
                         1,
                         Cost
-                            - GetPlayer.GetHull.CalculateResaleValue(
-                                GetPlayer.GetEffectiveSkillLevel(psTrading))
+                            - LocalPlayer.GetHull.CalculateResaleValue(
+                                LocalPlayer.GetEffectiveSkillLevel(psTrading))
                     );
-              if (GetPlayer.Money < Cost)
+              if (LocalPlayer.Money < Cost)
                   or ((Slot.Item.ItemType <> t_Hull)
-                      and (GetPlayer.CargoFreeSpace < Slot.Item.Weight)) then
+                      and (LocalPlayer.CargoFreeSpace < Slot.Item.Weight)) then
                 SetImagePath('GI,Bm.FormShop2.' + GiResourceSuffix + 'SlotBorderH')
               else
                 SetImagePath('GI,Bm.FormShop2.' + GiResourceSuffix + 'SlotBorderN');
@@ -1298,7 +1298,7 @@ begin
       );
     end;
     MainPanel.SlideMessagesOut;
-    if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
+    if (Galaxy <> nil) and not Galaxy.Destroying and (LocalPlayer <> nil) then
       ShowShopItemInfo(Item);
     if Item.ItemType = t_Hull then
     begin
@@ -1548,14 +1548,14 @@ begin
   Series := dsBlazer;
   HullKind := Hull.HullType;
   if (Hull.OwnerShip <> nil)
-      and (GetPlayer = Hull.OwnerShip)
-      and GetPlayer.ChameleonActive
-      and (GetPlayer.ChameleonVisualType in [0..7])
-      and (GetPlayer.ChameleonVisualType <> 0) then
+      and (LocalPlayer = Hull.OwnerShip)
+      and LocalPlayer.ChameleonActive
+      and (LocalPlayer.ChameleonVisualType in [0..7])
+      and (LocalPlayer.ChameleonVisualType <> 0) then
   begin
     HullKind := 6;
-    DisplayKind := GetPlayer.ChameleonVisualType;
-    Series := GetPlayer.ChameleonSeries;
+    DisplayKind := LocalPlayer.ChameleonVisualType;
+    Series := LocalPlayer.ChameleonSeries;
   end;
   if (Hull.OwnerShip <> nil) and (TObject(Hull.OwnerShip) is TKling) then
   begin
@@ -1774,14 +1774,14 @@ begin
     MusicManager.RequestFadeOut;
     Exit;
   end;
-  if GetPlayer.IsOnPlanet then
+  if LocalPlayer.IsOnPlanet then
   begin
-    if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
     begin
-      if not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+      if not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
         MusicManager.PlayCategory(
             'Nation.'
-                + OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and $7F]
+                + OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and $7F]
                     .InternalName
                 + 'Pirate'
         )
@@ -1790,22 +1790,22 @@ begin
     end
     else
       MusicManager
-          .PlayCategory('Nation.' + OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].InternalName);
+          .PlayCategory('Nation.' + OwnerInfo[LocalPlayer.CurrentPlanet.OwnerId].InternalName);
   end
-  else if GetPlayer.IsDockedToShip then
+  else if LocalPlayer.IsDockedToShip then
   begin
     if not MusicInPlanetEnabled then
       MusicManager.RequestFadeOut
-    else if GetPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
+    else if LocalPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
               + 'Pirate'
       )
     else
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
       );
   end;
 end;

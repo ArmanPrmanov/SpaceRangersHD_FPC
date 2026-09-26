@@ -236,8 +236,8 @@ begin
   if AuxRenderBuffer.GetPixels = nil then
     CaptureScreenBackground(True, 0);
   (GetByName('BGBuf') as TGraphBufGI).BindExternalGraphBuf(AuxRenderBuffer);
-  if (GetPlayer <> nil) and not CapturePreviewOnOpen then
-    RunScriptItemsAct(GetPlayer, satOnEnteringForm, nil, nil, 0);
+  if (LocalPlayer <> nil) and not CapturePreviewOnOpen then
+    RunScriptItemsAct(LocalPlayer, satOnEnteringForm, nil, nil, 0);
   MainPanel.OnOpen;
   (GetByName('PM_Ship') as TGraphButtonGI).SetHitTestDisabled(True);
   (GetByName('PM_Gal') as TGraphButtonGI).SetHitTestDisabled(True);
@@ -249,7 +249,7 @@ begin
   CreateMarkerMode := False;
   CreateMarkerButton.SetImageNormalPath(CreateMarkerImagePath);
   CreateMarkerButton.SetImageNormalActivePath(CreateMarkerActiveImagePath);
-  GetPlayer.RefreshDerivedStats(True);
+  LocalPlayer.RefreshDerivedStats(True);
   Points := nil;
   HideBuffer.LoadBitmapPathAsRgba('Bm.FormGalaxy2.' + GiResourceSuffix + 'img?RGBA');
   if GiResourceVariant = 2 then
@@ -506,7 +506,7 @@ begin
         if (BlazerShip <> nil) and (BlazerShip.CurrentStar = Star) and BlazerShip.InNormalSpace then
         begin
           if CanRevealBossPresence(BlazerShip)
-              and GetPlayer.CanResolveObjectWithScanner(BlazerShip) then
+              and LocalPlayer.CanResolveObjectWithScanner(BlazerShip) then
           begin
             if Length(BossText) > 0 then
               BossText := BossText + '-';
@@ -519,7 +519,7 @@ begin
         if (KellerShip <> nil) and (KellerShip.CurrentStar = Star) and KellerShip.InNormalSpace then
         begin
           if CanRevealBossPresence(KellerShip)
-              and GetPlayer.CanResolveObjectWithScanner(KellerShip) then
+              and LocalPlayer.CanResolveObjectWithScanner(KellerShip) then
           begin
             if Length(BossText) > 0 then
               BossText := BossText + '-';
@@ -533,7 +533,7 @@ begin
         if (TerronShip <> nil) and (TerronShip.CurrentStar = Star) and TerronShip.InNormalSpace then
         begin
           if CanRevealBossPresence(TerronShip)
-              and GetPlayer.CanResolveObjectWithScanner(TerronShip) then
+              and LocalPlayer.CanResolveObjectWithScanner(TerronShip) then
           begin
             if Length(BossText) > 0 then
               BossText := BossText + '-';
@@ -689,7 +689,7 @@ begin
   end;
   with GetByName('PathCurPos') as TgaiGI do
   begin
-    SetPosition(GalaxyPointToMapPoint(GetPlayer.CurrentStar.Position));
+    SetPosition(GalaxyPointToMapPoint(LocalPlayer.CurrentStar.Position));
     SetOrigin(HalfPoint(ClientSize));
     SetActive(True);
     RestartPlayback;
@@ -697,33 +697,33 @@ begin
   Points := nil;
   with GetByName('JampMaxShr') as TCircleGI do
   begin
-    SetCenter(GalaxyPointToMapPoint(GetPlayer.CurrentStar.Position));
-    if (GetPlayer.GetFuelTanks = nil)
-        or not GetPlayer.CanUseEquipmentTech(GetPlayer.GetFuelTanks) then
+    SetCenter(GalaxyPointToMapPoint(LocalPlayer.CurrentStar.Position));
+    if (LocalPlayer.GetFuelTanks = nil)
+        or not LocalPlayer.CanUseEquipmentTech(LocalPlayer.GetFuelTanks) then
       SetRadius(1)
     else
-      SetRadius(GalaxyDistanceToMapDistance(GetPlayer.JumpRange));
+      SetRadius(GalaxyDistanceToMapDistance(LocalPlayer.JumpRange));
     if ViewMode in [0, 3] then
       SetRadius(1000);
   end;
   with GetByName('JampMaxColor') as TCircleGI do
   begin
-    SetCenter(ToAbsolutePoint(GalaxyPointToMapPoint(GetPlayer.CurrentStar.Position)));
-    if (GetPlayer.GetFuelTanks = nil)
-        or not GetPlayer.CanUseEquipmentTech(GetPlayer.GetFuelTanks) then
+    SetCenter(ToAbsolutePoint(GalaxyPointToMapPoint(LocalPlayer.CurrentStar.Position)));
+    if (LocalPlayer.GetFuelTanks = nil)
+        or not LocalPlayer.CanUseEquipmentTech(LocalPlayer.GetFuelTanks) then
       SetRadius(1)
     else
-      SetRadius(GalaxyDistanceToMapDistance(GetPlayer.JumpRange));
+      SetRadius(GalaxyDistanceToMapDistance(LocalPlayer.JumpRange));
     if ViewMode in [0, 3] then
       SetRadius(1000);
   end;
   with GetByName('RadarDetect') as TCircleGI do
   begin
-    if (GetPlayer.GetRadar <> nil)
-        and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactRadar)) > 0) then
+    if (LocalPlayer.GetRadar <> nil)
+        and (LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactRadar)) > 0) then
     begin
       SetActive(True);
-      SetCenter(ToAbsolutePoint(GalaxyPointToMapPoint(GetPlayer.CurrentStar.Position)));
+      SetCenter(ToAbsolutePoint(GalaxyPointToMapPoint(LocalPlayer.CurrentStar.Position)));
       SetRadius(GalaxyDistanceToMapDistance(GetRadarSummaryRadius));
     end
     else
@@ -750,7 +750,7 @@ begin
     DrawQueuedUpdateRects;
     First :=
         SubtractPoints(
-            MapPanel.ToAbsolutePoint(GalaxyPointToMapPoint(GetPlayer.CurrentStar.Position)),
+            MapPanel.ToAbsolutePoint(GalaxyPointToMapPoint(LocalPlayer.CurrentStar.Position)),
             Classes.Point(
                 SecondarySavePreviewGraph.Width shr 1,
                 SecondarySavePreviewGraph.Height shr 1
@@ -803,8 +803,8 @@ procedure TfGalaxy2.OnClose;
 begin
   inherited OnClose;
   aCalc.WaitForTurnCalculationUI;
-  if (GetPlayer <> nil) and not CapturePreviewOnOpen then
-    RunScriptItemsAct(GetPlayer, satOnLeavingForm, nil, nil, 0);
+  if (LocalPlayer <> nil) and not CapturePreviewOnOpen then
+    RunScriptItemsAct(LocalPlayer, satOnLeavingForm, nil, nil, 0);
   CapturePreviewOnOpen := False;
   if JumpAnimationTimer <> nil then
   begin
@@ -872,10 +872,10 @@ var
   First, Second: TPointF;
 begin
   Result := False;
-  if (GetPlayer.GetRadar <> nil) and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactRadar)) > 0) then
+  if (LocalPlayer.GetRadar <> nil) and (LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactRadar)) > 0) then
   begin
     First := Star.Position;
-    Second := GetPlayer.CurrentStar.Position;
+    Second := LocalPlayer.CurrentStar.Position;
     if GetRadarSummaryRadius < Round(Sqrt(Sqr(First.X - Second.X) + Sqr(First.Y - Second.Y))) then
       Exit;
     Result := True;
@@ -884,7 +884,7 @@ end;
 
 function TfGalaxy2.GetRadarSummaryRadius: Integer;
 begin
-  Result := Round(GetPlayer.GetRadarRange / 150);
+  Result := Round(LocalPlayer.GetRadarRange / 150);
 end;
 
 function TfGalaxy2.MapPointToGalaxyPoint(Point: TPoint): TPointF;
@@ -934,13 +934,13 @@ begin
   ClearJumpPath;
   with GetByName('PathCurPos') as TgaiGI do
   begin
-    SetPosition(GalaxyPointToMapPoint(GetPlayer.CurrentStar.Position));
+    SetPosition(GalaxyPointToMapPoint(LocalPlayer.CurrentStar.Position));
     SetOrigin(HalfPoint(ClientSize));
     SetActive(True);
     RestartPlayback;
   end;
   (GetByName('Distance') as TLabelGI).SetText('');
-  if (GetPlayer.CurrentStar <> SelectedJumpStar) and (SelectedJumpStar <> nil) then
+  if (LocalPlayer.CurrentStar <> SelectedJumpStar) and (SelectedJumpStar <> nil) then
   begin
     with GetByName('PathDesPos') as TgaiGI do
     begin
@@ -950,7 +950,7 @@ begin
       RestartPlayback;
     end;
     First := PointToPointF(GalaxyPointToMapPoint(SelectedJumpStar.Position));
-    Second := PointToPointF(GalaxyPointToMapPoint(GetPlayer.CurrentStar.Position));
+    Second := PointToPointF(GalaxyPointToMapPoint(LocalPlayer.CurrentStar.Position));
     if Abs(First.X - Second.X) < Abs(First.Y - Second.Y) then
       UseY := True
     else
@@ -1057,30 +1057,30 @@ begin
     if RouteStars.Count <= 0 then
     begin
       First := SelectedJumpStar.Position;
-      Second := GetPlayer.CurrentStar.Position;
+      Second := LocalPlayer.CurrentStar.Position;
       with GetByName('Distance') as TLabelGI do
       begin
         ImageSize := GalaxyPointToMapPoint(SelectedJumpStar.Position);
         SetPosition(Classes.Point(ImageSize.X + 15, ImageSize.Y - ClientSize.Y div 2));
         JumpDistance := Round(Sqrt(Sqr(First.X - Second.X) + Sqr(First.Y - Second.Y)));
-        if GetPlayer.GetJumpRange < JumpDistance then
+        if LocalPlayer.GetJumpRange < JumpDistance then
           Reachable := ViewMode in [0, 3];
         SetText(IntToStr(JumpDistance));
       end;
     end
     else
     begin
-      First := GetPlayer.CurrentStar.Position;
+      First := LocalPlayer.CurrentStar.Position;
       Second := SelectedJumpStar.Position;
       TotalDistance := Round(Sqrt(Sqr(First.X - Second.X) + Sqr(First.Y - Second.Y)));
-      if GetPlayer.GetJumpRange < TotalDistance then
+      if LocalPlayer.GetJumpRange < TotalDistance then
         Reachable := ViewMode in [0, 3];
       First := Second;
       for I := 0 to RouteStars.Count - 1 do
       begin
         Second := TStar(RouteStars[I]).Position;
         JumpDistance := Round(Sqrt(Sqr(First.X - Second.X) + Sqr(First.Y - Second.Y)));
-        if GetPlayer.GetJumpRange < JumpDistance then
+        if LocalPlayer.GetJumpRange < JumpDistance then
           Reachable := ViewMode in [0, 3];
         TotalDistance := TotalDistance + JumpDistance;
         First := Second;
@@ -1132,7 +1132,7 @@ begin
   MapPanel.MouseMoveCallback := MapMouseMove;
   MapPanel.RightButtonDownCallback := MapRightButtonDown;
   MapPanel.RightButtonUpCallback := MapButtonUp;
-  SelectedJumpStar := GetPlayer.CurrentStar;
+  SelectedJumpStar := LocalPlayer.CurrentStar;
   RebuildJumpPath;
 end;
 
@@ -1157,16 +1157,16 @@ begin
     MouseLeaveCallback := JumpMouseLeave;
   end;
   MapPanel.LeftButtonDoubleClickCallback := MapDoubleClick;
-  if (GetPlayer.Order = soJump) and (GetPlayer.OrderTarget is TStar) then
-    SelectedJumpStar := GetPlayer.OrderTarget as TStar
+  if (LocalPlayer.Order = soJump) and (LocalPlayer.OrderTarget is TStar) then
+    SelectedJumpStar := LocalPlayer.OrderTarget as TStar
   else
-    SelectedJumpStar := GetPlayer.CurrentStar;
+    SelectedJumpStar := LocalPlayer.CurrentStar;
   RebuildJumpPath;
   JumpButton.SetDisabled(
       (SelectedJumpStar = nil)
-          or (GetPlayer.CurrentStar = SelectedJumpStar)
+          or (LocalPlayer.CurrentStar = SelectedJumpStar)
           or (ViewMode = 1)
-          or GetPlayer.NoJump
+          or LocalPlayer.NoJump
   );
 end;
 
@@ -1215,7 +1215,7 @@ begin
     end;
   end;
   if (SelectedJumpStar <> nil)
-      and (GetPlayer.CurrentStar <> SelectedJumpStar)
+      and (LocalPlayer.CurrentStar <> SelectedJumpStar)
       and (CreateMarkerMode
           or IsVirtualKeyDown(VK_CONTROL)
           or IsVirtualKeyDown(VK_SHIFT)
@@ -1241,13 +1241,13 @@ begin
     if BestDistance < (GalaxySizeY * 0.1) * (GalaxySizeY * 0.1) then
       SelectedJumpStar := Selected
     else
-      SelectedJumpStar := GetPlayer.CurrentStar;
+      SelectedJumpStar := LocalPlayer.CurrentStar;
     RebuildJumpPath;
     JumpButton.SetDisabled(
         (SelectedJumpStar = nil)
-            or (GetPlayer.CurrentStar = SelectedJumpStar)
+            or (LocalPlayer.CurrentStar = SelectedJumpStar)
             or (ViewMode = 1)
-            or GetPlayer.NoJump
+            or LocalPlayer.NoJump
     );
   end;
 end;
@@ -1297,7 +1297,7 @@ end;
 procedure TfGalaxy2.MapDoubleClick(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
 begin
   if ViewMode in [0, 2, 3] then
-    if not GetPlayer.NoJump then
+    if not LocalPlayer.NoJump then
       JumpClicked(nil);
 end;
 
@@ -1311,21 +1311,21 @@ var
   First, Second: TPointF;
   Hole: THole;
 begin
-  if (GetPlayer.CurrentStar = SelectedJumpStar) or (SelectedJumpStar = nil) then
+  if (LocalPlayer.CurrentStar = SelectedJumpStar) or (SelectedJumpStar = nil) then
     Exit;
   if ViewMode = 2 then
   begin
-    if GetPlayer.Speed <= 0 then
+    if LocalPlayer.Speed <= 0 then
     begin
       ShowMessageBoxGI(Self, LocalizedColorText('Help.Speed0'), mbgCancel or mbgError);
       Exit;
     end;
-    if not GetPlayer.HasPositiveSpeed then
+    if not LocalPlayer.HasPositiveSpeed then
       Exit;
     First := SelectedJumpStar.Position;
-    Second := GetPlayer.CurrentStar.Position;
+    Second := LocalPlayer.CurrentStar.Position;
     aCalc.WaitForTurnCalculationUI;
-    if GetPlayer.JumpRange < Round(Sqrt(Sqr(First.X - Second.X) + Sqr(First.Y - Second.Y))) then
+    if LocalPlayer.JumpRange < Round(Sqrt(Sqr(First.X - Second.X) + Sqr(First.Y - Second.Y))) then
     begin
       OrderNone;
       aCalc.WaitForTurnCalculationUI;
@@ -1364,7 +1364,7 @@ begin
     SetPendingFollowTarget(nil);
   end;
   aCalc.WaitForTurnCalculationUI;
-  SpaceViewPosition := GetPlayer.Position;
+  SpaceViewPosition := LocalPlayer.Position;
   RequestedScreenId := screenStarMap;
   RequestClose(1);
 end;
@@ -1377,13 +1377,13 @@ begin
     Exit;
   if ViewMode = 2 then
   begin
-    if (GetPlayer.CurrentStar = SelectedJumpStar) or (SelectedJumpStar = nil) then
+    if (LocalPlayer.CurrentStar = SelectedJumpStar) or (SelectedJumpStar = nil) then
       Exit;
-    if not GetPlayer.HasPositiveSpeed then
+    if not LocalPlayer.HasPositiveSpeed then
       Exit;
     First := SelectedJumpStar.Position;
-    Second := GetPlayer.CurrentStar.Position;
-    if GetPlayer.JumpRange < Round(Sqrt(Sqr(First.X - Second.X) + Sqr(First.Y - Second.Y))) then
+    Second := LocalPlayer.CurrentStar.Position;
+    if LocalPlayer.JumpRange < Round(Sqrt(Sqr(First.X - Second.X) + Sqr(First.Y - Second.Y))) then
       Exit;
   end;
   JumpDestinationLabel.SetText(
@@ -1423,8 +1423,8 @@ var
   CustomInfo: TCustomSystemInfo;
   Value: WideString;
 begin
-  if (Star <> nil) and (GetPlayer <> nil) then
-    RunScriptItemsAct(GetPlayer, satOnShowingStarInfo, Star, nil, 0);
+  if (Star <> nil) and (LocalPlayer <> nil) then
+    RunScriptItemsAct(LocalPlayer, satOnShowingStarInfo, Star, nil, 0);
   if StarInfoHideTimer <> nil then
   begin
     CancelCallbackTimer(StarInfoHideTimer);
@@ -1771,7 +1771,7 @@ begin
         IconX := NameWidth + 5 + RowHeight + 5 + 1;
         with TImageGI.Create(Owner) do
         begin
-          case Integer((TObject(Objects[I]) as TPlanet).GetRelationLevelToShip(GetPlayer))
+          case Integer((TObject(Objects[I]) as TPlanet).GetRelationLevelToShip(LocalPlayer))
               and $7F of
             0: SetImagePath('GI,Bm.FormGalaxy2.Face4');
             1: SetImagePath('GI,Bm.FormGalaxy2.Face3');
@@ -1919,7 +1919,7 @@ begin
     Result := False;
     Exit;
   end;
-  if (GetPlayer.GetScanner = nil) or (GetPlayer.GetScanner.BrokenFlag <> 0) then
+  if (LocalPlayer.GetScanner = nil) or (LocalPlayer.GetScanner.BrokenFlag <> 0) then
   begin
     Result := False;
     Exit;
@@ -1929,7 +1929,7 @@ begin
     Result := True;
     Exit;
   end;
-  TechLevel := GetPlayer.GetScanner.TechLevel;
+  TechLevel := LocalPlayer.GetScanner.TechLevel;
   Result := True;
   if (BlazerShip = Ship) and (TechLevel < 7) then
   begin
@@ -1977,7 +1977,7 @@ var
   begin
     if Ship.InHyperspace then
       Exit;
-    if not GetPlayer.CanResolveObjectWithScanner(Ship) or not CanRevealBossPresence(Ship) then
+    if not LocalPlayer.CanResolveObjectWithScanner(Ship) or not CanRevealBossPresence(Ship) then
     begin
       Inc(UnknownCount);
       Exit;
@@ -2014,14 +2014,14 @@ var
         stRanger:
           if TRanger(Ship).ExcludedFromRating or Ship.HasScriptStateText then
           begin
-            if ((GetPlayer = Ship) or (GetPlayer = Ship.PartnerShip))
-                and (GetPlayer.OwnerId = Byte(oiPirate)) then
+            if ((LocalPlayer = Ship) or (LocalPlayer = Ship.PartnerShip))
+                and (LocalPlayer.OwnerId = Byte(oiPirate)) then
               Inc(ScriptedPirates)
             else
               Inc(ScriptedCoalition);
           end
-          else if ((GetPlayer = Ship) or (GetPlayer = Ship.PartnerShip))
-              and (GetPlayer.OwnerId = Byte(oiPirate)) then
+          else if ((LocalPlayer = Ship) or (LocalPlayer = Ship.PartnerShip))
+              and (LocalPlayer.OwnerId = Byte(oiPirate)) then
             Inc(RoleCounts[11])
           else
             Inc(RoleCounts[0]);
@@ -2387,13 +2387,13 @@ begin
   JumpLightImages[1].SetActive(False);
   JumpLightImages[2].SetActive(False);
   if not JumpButton.Disabled
-      and (GetPlayer.CurrentStar <> SelectedJumpStar)
+      and (LocalPlayer.CurrentStar <> SelectedJumpStar)
       and (SelectedJumpStar <> nil)
-      and GetPlayer.HasPositiveSpeed then
+      and LocalPlayer.HasPositiveSpeed then
   begin
     First := SelectedJumpStar.Position;
-    Second := GetPlayer.CurrentStar.Position;
-    if GetPlayer.JumpRange < Round(Sqrt(Sqr(First.X - Second.X) + Sqr(First.Y - Second.Y))) then
+    Second := LocalPlayer.CurrentStar.Position;
+    if LocalPlayer.JumpRange < Round(Sqrt(Sqr(First.X - Second.X) + Sqr(First.Y - Second.Y))) then
       Exit;
     Inc(JumpLightTick);
     LightIndex := (JumpLightTick div 5) mod 3;
@@ -2405,18 +2405,18 @@ end;
 
 procedure TfGalaxy2.SelectMusic;
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     MusicManager.PlayCategory('Base')
-  else if GetPlayer.IsOnPlanet then
+  else if LocalPlayer.IsOnPlanet then
   begin
     if not MusicInPlanetEnabled then
       MusicManager.RequestFadeOut
-    else if GetPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
+    else if LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPirate) then
     begin
-      if not GetPlayer.CurrentPlanet.IsMainPiratePlanet then
+      if not LocalPlayer.CurrentPlanet.IsMainPiratePlanet then
         MusicManager.PlayCategory(
             'Nation.'
-                + OwnerInfo[Integer(RaceToOwner(GetPlayer.CurrentPlanet.RaceId)) and $7F]
+                + OwnerInfo[Integer(RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)) and $7F]
                     .InternalName
                 + 'Pirate'
         )
@@ -2425,29 +2425,29 @@ begin
     end
     else
       MusicManager
-          .PlayCategory('Nation.' + OwnerInfo[GetPlayer.CurrentPlanet.OwnerId].InternalName);
+          .PlayCategory('Nation.' + OwnerInfo[LocalPlayer.CurrentPlanet.OwnerId].InternalName);
   end
-  else if GetPlayer.IsDockedToShip then
+  else if LocalPlayer.IsDockedToShip then
   begin
     if not MusicInPlanetEnabled then
       MusicManager.RequestFadeOut
-    else if GetPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
+    else if LocalPlayer.DockedTo.TypeId in [Ord(rstPirateBase), Ord(rstDominion)] then
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
               + 'Pirate'
       )
     else
       MusicManager.PlayCategory(
           'Nation.'
-              + OwnerInfo[Integer(RaceToOwner(GetPlayer.DockedTo.PilotRace)) and $7F].InternalName
+              + OwnerInfo[Integer(RaceToOwner(LocalPlayer.DockedTo.PilotRace)) and $7F].InternalName
       );
   end
-  else if GetPlayer.InNormalSpace then
+  else if LocalPlayer.InNormalSpace then
   begin
     if MusicInSpaceEnabled then
     begin
-      if (GetPlayer.GetHull.CapitalShip = 1) and (RandomIntRange(0, 100) < 20) then
+      if (LocalPlayer.GetHull.CapitalShip = 1) and (RandomIntRange(0, 100) < 20) then
       begin
         StarMapScreen.BattleMusicSelected := True;
         MusicManager.PlayCategory('Destroyer');

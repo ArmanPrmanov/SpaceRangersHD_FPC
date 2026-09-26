@@ -353,7 +353,7 @@ begin
       DateSlideProgress := 0;
     RefreshDate;
   end;
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
   begin
     if MoneyWarningActive and ((MoneyWarningTicks and 1) = 0) then
     begin
@@ -366,8 +366,8 @@ begin
       Screen.GetByName('PM_WarningMoney').SetActive(False);
       (Screen.GetByName('PM_Money') as TLabelGI).SetTextColor(CurrentDateColor);
     end;
-    (Screen.GetByName('PM_Money') as TLabelGI).SetText(WideString(IntToStr(GetPlayer.Money)));
-    FreeSpace := GetPlayer.GetCargoFreeSpace;
+    (Screen.GetByName('PM_Money') as TLabelGI).SetText(WideString(IntToStr(LocalPlayer.Money)));
+    FreeSpace := LocalPlayer.GetCargoFreeSpace;
     if (CargoWarningActive and ((CargoWarningTicks and 1) = 0))
         or ((FreeSpace < 0) and not CargoWarningActive) then
     begin
@@ -478,19 +478,19 @@ begin
     Exit;
   if HasPendingScriptRequests then
     Exit;
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     Exit;
-  if (GetPlayer.CurrentPlanet <> nil) and (GetPlayer.CurrentPlanet.OwnerId = Byte(oiDominator)) then
+  if (LocalPlayer.CurrentPlanet <> nil) and (LocalPlayer.CurrentPlanet.OwnerId = Byte(oiDominator)) then
     Exit;
-  if GetPlayer.QueuedTravelTarget <> nil then
+  if LocalPlayer.QueuedTravelTarget <> nil then
     Exit;
-  if GetPlayer.RuinsMode <> 0 then
+  if LocalPlayer.RuinsMode <> 0 then
     Exit;
   if Screen.ParentLoop <> nil then
     Exit;
-  if (GetPlayer <> nil)
-      and (GetPlayer.CurrentPlanet <> nil)
-      and (GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) = rlHostile) then
+  if (LocalPlayer <> nil)
+      and (LocalPlayer.CurrentPlanet <> nil)
+      and (LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) = rlHostile) then
   begin
     if Screen <> GovernmentScreen then
     begin
@@ -507,7 +507,7 @@ begin
     CalculatePlayerStarTurnAndWait;
     if ExitScreenLoop then
       Exit;
-    if GetPlayer <> nil then
+    if LocalPlayer <> nil then
     begin
       Inc(Galaxy.CurrentTurn);
       RefreshEndTurnButton;
@@ -516,9 +516,9 @@ begin
       CalculateGalaxyTurnAndWait;
     end;
   end;
-  if (GetPlayer = nil)
-      or ((GetPlayer.CurrentPlanet <> nil)
-          and (GetPlayer.CurrentPlanet.OwnerId = Byte(oiDominator))) then
+  if (LocalPlayer = nil)
+      or ((LocalPlayer.CurrentPlanet <> nil)
+          and (LocalPlayer.CurrentPlanet.OwnerId = Byte(oiDominator))) then
   begin
     ReportPlanetCaptured;
     RequestedScreenId := screenGameEnd;
@@ -527,14 +527,14 @@ begin
   else
   begin
     PostMouseMoveMessage;
-    if (GetPlayer.PendingDockDialogue > 0) and (GetPlayer.DockedTo <> nil) then
+    if (LocalPlayer.PendingDockDialogue > 0) and (LocalPlayer.DockedTo <> nil) then
     begin
       RequestedScreenId := screenRuinsTalk;
       TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
     end
-    else if (GetPlayer.PendingDockDialogue > 0)
-        and (GetPlayer.CurrentPlanet <> nil)
-        and (GetPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited)) then
+    else if (LocalPlayer.PendingDockDialogue > 0)
+        and (LocalPlayer.CurrentPlanet <> nil)
+        and (LocalPlayer.CurrentPlanet.OwnerId <> Byte(oiUninhabited)) then
     begin
       RequestedScreenId := screenGovernment;
       TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
@@ -585,8 +585,8 @@ begin
   end;
   aCalc.WaitForTurnCalculationUI;
   ShipScreen.Flag3BC := Changed;
-  if GetPlayer.IsOnPlanet and (Screen <> GovernmentScreen) then
-    if GetPlayer.CurrentPlanet.GetRelationLevelToShip(GetPlayer) = rlHostile then
+  if LocalPlayer.IsOnPlanet and (Screen <> GovernmentScreen) then
+    if LocalPlayer.CurrentPlanet.GetRelationLevelToShip(LocalPlayer) = rlHostile then
     begin
       RequestedScreenId := screenGovernment;
       Screen.RequestClose(1);
@@ -979,10 +979,10 @@ begin
       Button.LeaveSound := 'Sound.ButtonInfoLeave';
       Button.ClickSound := 'Sound.ButtonInfoClick';
       if (MessageEntry.Kind = 1)
-          and (GetPlayer <> nil)
-          and ((Integer(MessageEntry.Targets[0].ShipId) = GetPlayer.Id)
-              or (Integer(MessageEntry.Targets[1].ShipId) = GetPlayer.Id)
-              or (Integer(MessageEntry.Targets[2].ShipId) = GetPlayer.Id)) then
+          and (LocalPlayer <> nil)
+          and ((Integer(MessageEntry.Targets[0].ShipId) = LocalPlayer.Id)
+              or (Integer(MessageEntry.Targets[1].ShipId) = LocalPlayer.Id)
+              or (Integer(MessageEntry.Targets[2].ShipId) = LocalPlayer.Id)) then
         MessageEntry.Kind := 10;
       if (MessageEntry.Kind in [0, 6]) and not MessageEntry.WasRead then
       begin
@@ -1353,7 +1353,7 @@ begin
     for Attempts := 0 to High(Targets) do
       Targets[Attempts] := MessageEntry.Targets[Attempts];
     // CHANGE: ENHANCEMENT - Center and ping the destination of the clicked bookmark.
-    if ResolveSearchBookmarkTarget(MessageEntry, GetPlayer.CurrentStar, BookmarkTarget) then
+    if ResolveSearchBookmarkTarget(MessageEntry, LocalPlayer.CurrentStar, BookmarkTarget) then
     begin
       FillChar(Targets, SizeOf(Targets), 0);
       Targets[0] := BookmarkTarget;
@@ -1403,7 +1403,7 @@ begin
           Ship := TObject(Galaxy.IdToShip(DisplayedShipId, False)) as TShip;
           if (Ship <> nil)
               and Ship.InNormalSpace
-              and (Ship.CurrentStar = GetPlayer.CurrentStar) then
+              and (Ship.CurrentStar = LocalPlayer.CurrentStar) then
           begin
             StarMapScreen.SetMapCenterManually(TruncatePointF(Ship.Position));
             StarMapScreen.AddMapAnimation(Ship.Position, 'Bm.SI.' + GiResourceSuffix + 'Ring', 0);
@@ -1427,7 +1427,7 @@ begin
         if StarMapScreen.Mode = smmOrders then
         begin
           Planet := TObject(Galaxy.IdToPlanet(DisplayedPlanetId, False)) as TPlanet;
-          if (Planet <> nil) and (Planet.CurrentStar = GetPlayer.CurrentStar) then
+          if (Planet <> nil) and (Planet.CurrentStar = LocalPlayer.CurrentStar) then
           begin
             StarMapScreen.SetMapCenterManually(TruncatePointF(Planet.GetPosition));
             StarMapScreen

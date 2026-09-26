@@ -308,7 +308,7 @@ begin
       Track.PlanetInfo.Population := Planet.Population;
       Track.PlanetInfo.Economy := Planet.Economy;
       Track.PlanetInfo.Government := Planet.Government;
-      Track.PlanetInfo.Relation := Planet.GetRelationLevelToShip(GetPlayer);
+      Track.PlanetInfo.Relation := Planet.GetRelationLevelToShip(LocalPlayer);
       Track.PlanetInfo.Faction := Planet.GetFactionResourceName;
       Track.PlanetInfo.UnexploredWater := Planet.WaterTiles - Planet.WaterExplored;
       Track.PlanetInfo.UnexploredLand := Planet.LandTiles - Planet.LandExplored;
@@ -373,7 +373,7 @@ begin
                 + IntToStr(Ship.GetArmor);
         Track.ShipInfo.DamageText := Ship.GetWeaponDamageSummary;
         Track.ShipInfo.HullFragility := Ship.GetHull.GetFragilityFactor([]);
-        Track.ShipInfo.Relation := Ship.GetRelationLevelToShip(GetPlayer);
+        Track.ShipInfo.Relation := Ship.GetRelationLevelToShip(LocalPlayer);
         Track.ShipInfo.CombatStatusText := Ship.GetCombatStatusDescription(StatusCount, True);
         Track.ShipInfo.CombatStatusCount := StatusCount;
         Track.Portrait := Ship.GetShipPortraitImagePath;

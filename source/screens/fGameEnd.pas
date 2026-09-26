@@ -256,8 +256,8 @@ begin
     BackgroundTimer := ScheduleCallbackTimer(40, 40, ScrollBackground);
   ScrollBackground(nil, 0);
   SelectMusic;
-  if GetPlayer <> nil then
-    ScoreScreen.RecordPlayerResult((GetPlayer <> nil) and (Session.GameEndReason <> 2) and not CustomLoss);
+  if LocalPlayer <> nil then
+    ScoreScreen.RecordPlayerResult((LocalPlayer <> nil) and (Session.GameEndReason <> 2) and not CustomLoss);
   Score := ScoreScreen.Entries[ScoreScreen.SelectedIndex];
   DefaultLoss := (Session.GameEndReason <= 4) and not CustomWin and (CustomPicture = '');
   GetByName('Maloc').SetActive((Score.PilotRace = Byte(oiMaloc)) and DefaultLoss);
@@ -374,29 +374,29 @@ begin
       if DeathCause = 'PlanetCaptured' then
       begin
         Text := PickLocalizedTextVariant('FormGameEnd.LossInPlanet', Random(100000));
-        if (GetPlayer <> nil) and (GetPlayer.CurrentPlanet <> nil) then
+        if (LocalPlayer <> nil) and (LocalPlayer.CurrentPlanet <> nil) then
         begin
-          if (GetPlayer.CurrentPlanet.CustomFaction <> '')
+          if (LocalPlayer.CurrentPlanet.CustomFaction <> '')
               and (LocalizedColorText(
-                      'FormGameEnd.LossInPlanet' + GetPlayer.CurrentPlanet.CustomFaction)
+                      'FormGameEnd.LossInPlanet' + LocalPlayer.CurrentPlanet.CustomFaction)
                   <> '') then
             Text :=
                 PickLocalizedTextVariant(
-                    'FormGameEnd.LossInPlanet' + GetPlayer.CurrentPlanet.CustomFaction,
+                    'FormGameEnd.LossInPlanet' + LocalPlayer.CurrentPlanet.CustomFaction,
                     Random(100000)
                 )
-          else if (GetPlayer.CurrentPlanet.CurrentStar.Status.CustomFaction <> '')
+          else if (LocalPlayer.CurrentPlanet.CurrentStar.Status.CustomFaction <> '')
               and (LocalizedColorText(
                       'FormGameEnd.LossInPlanet'
-                          + GetPlayer.CurrentPlanet.CurrentStar.Status.CustomFaction)
+                          + LocalPlayer.CurrentPlanet.CurrentStar.Status.CustomFaction)
                   <> '') then
             Text :=
                 PickLocalizedTextVariant(
                     'FormGameEnd.LossInPlanet'
-                        + GetPlayer.CurrentPlanet.CurrentStar.Status.CustomFaction,
+                        + LocalPlayer.CurrentPlanet.CurrentStar.Status.CustomFaction,
                     Random(100000)
                 );
-          ReplaceTextToken(Text, '<Planet>', GetPlayer.CurrentPlanet.Name, '<color=255,240,100>');
+          ReplaceTextToken(Text, '<Planet>', LocalPlayer.CurrentPlanet.Name, '<color=255,240,100>');
         end
         else
           ReplaceTextToken(Text, '<Planet>', '', '');

@@ -1145,8 +1145,8 @@ begin
           Ship.SetSize(PEFilmSizeCommand(Command).Size);
           if (ShipTail = 2)
               or ((ShipTail = 1)
-                  and (GetPlayer <> nil)
-                  and (GetPlayer.Id = Integer(PEFilmObjectCommand(Command).Obj.ObjectId))) then
+                  and (LocalPlayer <> nil)
+                  and (LocalPlayer.Id = Integer(PEFilmObjectCommand(Command).Obj.ObjectId))) then
             Ship.SetTailMode(PEFilmSizeCommand(Command).TailMode)
           else
             Ship.SetTailMode(0);
@@ -1220,8 +1220,8 @@ begin
               ErrorStep := 4;
               if ((ShipTail <> 2)
                       and ((ShipTail <> 1)
-                          or (GetPlayer = nil)
-                          or (GetPlayer.Id <> Integer(PEFilmObjectCommand(Command).Obj.ObjectId))))
+                          or (LocalPlayer = nil)
+                          or (LocalPlayer.Id <> Integer(PEFilmObjectCommand(Command).Obj.ObjectId))))
                   or (TailMode <= 0) then
                 SetTailMode(0);
             end;

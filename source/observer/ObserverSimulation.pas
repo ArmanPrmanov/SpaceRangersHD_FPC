@@ -37,7 +37,7 @@ procedure ParkObserverPlayer;
 var
   P: TPlayer;
 begin
-  P := GetPlayer;
+  P := LocalPlayer;
   if (P = nil) or (LocalHuman.PlayerStar = nil) then
     raise Exception.Create('Observer requires a campaign save with a player.');
   if Galaxy.StasisModEnabled = 1 then
@@ -60,7 +60,7 @@ begin
   StartPlayerStarTurnCalculation;
   WaitForTurnCalculation;
   RaisePendingWorkerError;
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     raise Exception.Create('The player no longer exists.');
   StartGalaxyTurnCalculation;
   WaitForTurnCalculation;

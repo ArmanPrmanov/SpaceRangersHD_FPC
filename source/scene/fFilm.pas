@@ -239,7 +239,7 @@ begin
   StopButton.UpCallback := PlayStopClicked;
   TurnSlider.SetRange(0, FilmHistory.GetCount - 1);
   TurnSlider.PositionChangedCallback := TurnSliderChanged;
-  GetByName('MapPanelA').SetActive((GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(1));
+  GetByName('MapPanelA').SetActive((LocalPlayer <> nil) and LocalPlayer.IsHealthEffectActive(1));
   SelectHistoryEntry(FilmHistory.GetCount - 1, True);
   CopyLiveVisualStateToFilm;
   AdvanceOneStep;
@@ -549,7 +549,7 @@ begin
   PreloadedFilm.StarGenerationSeed := 0;
   TurnSlider.SetPositionInternal(Index);
   DateLabel.SetText(Galaxy.FormatTurnDate(CurrentFilm.Turn));
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
   begin
     SpaceProcess.RadarCenter := MakePointF(0, 0);
     SpaceProcess.RadarRange := CurrentFilm.RadarRange;
@@ -566,8 +566,8 @@ begin
   SpaceProcess.Space.MinimapScale := 0.0000001;
   SpaceProcess.BindMinimap(MapPanel);
   SpaceProcess.Space.MinimapScale := MapPanel.ClientSize.X / CurrentFilm.MapDiameter;
-  if GetPlayer <> nil then
-    if GetPlayer.IsHealthEffectActive(1) then
+  if LocalPlayer <> nil then
+    if LocalPlayer.IsHealthEffectActive(1) then
       SpaceProcess.Space.AlphaShift := 2;
   SpaceProcess.Space.CreateMinimapViewport;
   StepIndex := 0;
@@ -921,8 +921,8 @@ procedure TfFilm.SelectMusic;
 begin
   if MusicInSpaceEnabled then
   begin
-    if (GetPlayer <> nil)
-        and (GetPlayer.GetHull.CapitalShip = 1)
+    if (LocalPlayer <> nil)
+        and (LocalPlayer.GetHull.CapitalShip = 1)
         and (RandomIntRange(0, 100) < 20) then
     begin
       StarMapScreen.BattleMusicSelected := True;

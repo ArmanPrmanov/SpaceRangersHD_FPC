@@ -111,7 +111,7 @@ begin
         if (Self is TabShip) and (Source is TabShip) then
           if (Source as TabShip).Enemies.IndexOf(Self) < 0 then
             Amount := Amount div 4;
-    if (PlayerArcadeShip = Self) and (GetPlayer <> nil) then
+    if (PlayerArcadeShip = Self) and (LocalPlayer <> nil) then
     begin
       if ArcadeAutopilotEnabled then
         Amount := Round(Amount * 0.7);
@@ -119,7 +119,7 @@ begin
         Amount :=
             Round(
                 RemapClamped(
-                        GetPlayer.BlackHoleKillCount + GetPlayer.HyperspaceKillCount,
+                        LocalPlayer.BlackHoleKillCount + LocalPlayer.HyperspaceKillCount,
                         5,
                         70,
                         0.1,
@@ -286,7 +286,7 @@ begin
   begin
     Inc(KellerBreakupTicks);
     if (KellerBreakupTicks > 150)
-        and (GetPlayer <> nil)
+        and (LocalPlayer <> nil)
         and (KellerShip <> nil)
         and (PlayerArcadeShip <> nil)
         and (PlayerArcadeShip.Health > 0)

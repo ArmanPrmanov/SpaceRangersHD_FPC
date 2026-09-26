@@ -454,18 +454,18 @@ begin
   else
     ActiveArcadeRequestShips := nil;
   if (Galaxy <> nil)
-      and (GetPlayer <> nil)
+      and (LocalPlayer <> nil)
       and (ActiveArcadeRequest = nil)
       and not Galaxy.IsChaoticRandomEnabled then
   begin
-    if GetPlayer.TransitOriginStar <> nil then
+    if LocalPlayer.TransitOriginStar <> nil then
       InitialRandomSeed :=
-          GetPlayer.TransitOriginStar.GenerationSeed
-              * GetPlayer.CurrentStar.GenerationSeed
+          LocalPlayer.TransitOriginStar.GenerationSeed
+              * LocalPlayer.CurrentStar.GenerationSeed
               * (Galaxy.CurrentTurn div 77 + 1783)
     else
       InitialRandomSeed :=
-          GetPlayer.CurrentStar.GenerationSeed * (Galaxy.CurrentTurn div 77 + 1783);
+          LocalPlayer.CurrentStar.GenerationSeed * (Galaxy.CurrentTurn div 77 + 1783);
     RandomSeed := InitialRandomSeed;
   end
   else
@@ -476,10 +476,10 @@ begin
   ArcadeKellerEncounter := False;
   ArcadeMapViewPosition := Classes.Point(0, 0);
   DefeatCountdownTicks := 150;
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
   begin
     DepartureTurn := Galaxy.CurrentTurn;
-    ArrivalTurn := DepartureTurn + (GetPlayer.OrderStateData and $FFFF);
+    ArrivalTurn := DepartureTurn + (LocalPlayer.OrderStateData and $FFFF);
   end;
   GetByName('LInfo').SetActive(False);
   ShipPath := TSPath.Create;
@@ -496,8 +496,8 @@ begin
   ArcadeSpaceProcess.ActionColor := 0;
   ArcadeSpaceProcess.OpenSpace(WorldPanel, Self);
   ArcadeSpaceProcess.Space.AlphaShift := 0;
-  if GetPlayer <> nil then
-    if GetPlayer.IsHealthEffectActive(1) then
+  if LocalPlayer <> nil then
+    if LocalPlayer.IsHealthEffectActive(1) then
       ArcadeSpaceProcess.Space.AlphaShift := 2;
   SkipSavedPixelRestore := True;
   StarField.Stars.Clear;
@@ -513,7 +513,7 @@ begin
   WorldLines.SetActive(True);
   WorldCenterX := MapPanel.ClientSize.X div 2;
   WorldCenterY := MapPanel.ClientSize.Y div 2;
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
   begin
     RetainSpaceObject(
         PlayerVisual,
@@ -523,17 +523,17 @@ begin
   end
   else
   begin
-    if GetPlayer.Graphic is TShip2SE then
+    if LocalPlayer.Graphic is TShip2SE then
       RetainSpaceObject(
           PlayerVisual,
-          CreateSpaceObjectByName('Ship2', GetPlayer.Graphic.GraphKey, Classes.Point(0, 0))
+          CreateSpaceObjectByName('Ship2', LocalPlayer.Graphic.GraphKey, Classes.Point(0, 0))
       )
     else
       RetainSpaceObject(
           PlayerVisual,
-          CreateSpaceObjectByName('Ruins', GetPlayer.Graphic.GraphKey, Classes.Point(0, 0))
+          CreateSpaceObjectByName('Ruins', LocalPlayer.Graphic.GraphKey, Classes.Point(0, 0))
       );
-    PlayerVisual.SetSize(Classes.Point(GetPlayer.Graphic.Size.X, GetPlayer.Graphic.Size.Y));
+    PlayerVisual.SetSize(Classes.Point(LocalPlayer.Graphic.Size.X, LocalPlayer.Graphic.Size.Y));
   end;
   PlayerVisual.SetAlpha(255);
   if PlayerVisual is TShip2SE then
@@ -548,25 +548,25 @@ begin
   Ship := TabShipAI.Create;
   ab_Object_Add(Ship);
   PlayerArcadeShip := Ship;
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     Ship.CreateShipVisual('Ship.People.Ranger', 64)
   else
   begin
-    if GetPlayer.Graphic is TRuinsSE then
-      Ship.CreateRuinsVisual(GetPlayer.Graphic.GraphKey, GetPlayer.Graphic.Size.X)
+    if LocalPlayer.Graphic is TRuinsSE then
+      Ship.CreateRuinsVisual(LocalPlayer.Graphic.GraphKey, LocalPlayer.Graphic.Size.X)
     else if GiResourceVariant = 2 then
-      Ship.CreateShipVisual(GetPlayer.Graphic.GraphKey, GetPlayer.Graphic.Size.X)
+      Ship.CreateShipVisual(LocalPlayer.Graphic.GraphKey, LocalPlayer.Graphic.Size.X)
     else
       Ship.CreateShipVisual(
-          GetPlayer.Graphic.GraphKey,
-          Round((GetPlayer.Graphic.Size.X shl 10) / 800)
+          LocalPlayer.Graphic.GraphKey,
+          Round((LocalPlayer.Graphic.Size.X shl 10) / 800)
       );
-    RunScriptItemsAct(GetPlayer, $37, Ship, nil, 0);
+    RunScriptItemsAct(LocalPlayer, $37, Ship, nil, 0);
   end;
   Ship.MaxSpeed := 11;
   Ship.TurnSpeed := PlayerInitialTurnSpeed;
   Ship.Thrust := 0;
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
   begin
     Ship.MaxHealth := 1000;
     Ship.Health := 1000;
@@ -587,8 +587,8 @@ begin
   end
   else
   begin
-    Ship.MaxHealth := GetPlayer.GetHull.Weight;
-    Ship.Health := GetPlayer.GetHull.HullPoints;
+    Ship.MaxHealth := LocalPlayer.GetHull.Weight;
+    Ship.Health := LocalPlayer.GetHull.HullPoints;
     for Index := 0 to 4 do
       CampaignWeapons[Index] := nil;
     SyncWeaponInventory;
@@ -598,7 +598,7 @@ begin
     Ship.SecondaryWeapon := -1;
     NormalizeWeaponSelection;
   end;
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
   begin
     Ship := TabShipAI.Create;
     ab_Object_Add(Ship);
@@ -662,30 +662,30 @@ begin
     PlayerArcadeShip.AddEnemy(ShipX0);
     PlayerArcadeShip.AddEnemy(ShipX1);
   end;
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     ABSpaceBuild(RandomIntRange(3, 8), HeadingDegreesToRadians(RandomRange(0, 355)))
   else if ActiveArcadeRequest <> nil then
     ABSpaceBuild(1, HeadingDegreesToRadians(RandomRange(0, 355)))
-  else if GetPlayer.Order = soJumpHole then
+  else if LocalPlayer.Order = soJumpHole then
   begin
-    if GetPlayer.TransitOriginStar <> nil then
+    if LocalPlayer.TransitOriginStar <> nil then
       ABSpaceBuild(
           1,
           HeadingDegreesToRadians(
               PointBearingDegrees(
-                  GetPlayer.TransitOriginStar.Position,
-                  GetPlayer.CurrentStar.Position
+                  LocalPlayer.TransitOriginStar.Position,
+                  LocalPlayer.CurrentStar.Position
               )
           )
       )
     else
       ABSpaceBuild(1, 0);
   end
-  else if GetPlayer.TransitOriginStar <> nil then
+  else if LocalPlayer.TransitOriginStar <> nil then
     ABSpaceBuild(
         Round(
             RemapClamped(
-                PointDistance(GetPlayer.CurrentStar.Position, GetPlayer.TransitOriginStar.Position),
+                PointDistance(LocalPlayer.CurrentStar.Position, LocalPlayer.TransitOriginStar.Position),
                 10,
                 GalaxySizeY div 2,
                 3,
@@ -694,8 +694,8 @@ begin
         ),
         HeadingDegreesToRadians(
             PointBearingDegrees(
-                GetPlayer.TransitOriginStar.Position,
-                GetPlayer.CurrentStar.Position
+                LocalPlayer.TransitOriginStar.Position,
+                LocalPlayer.CurrentStar.Position
             )
         )
     )
@@ -718,9 +718,9 @@ begin
   CacheLoader := nil;
   if Galaxy <> nil then
     aCalc.WaitForTurnCalculationUI;
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
   begin
-    RunGlobalScripts(GetPlayer.CurrentStar, 2);
+    RunGlobalScripts(LocalPlayer.CurrentStar, 2);
     CacheLoader := TCacheLoader.Create;
   end;
   if Galaxy <> nil then
@@ -728,8 +728,8 @@ begin
     aCalc.WaitForTurnCalculationUI;
     aCalc.WaitForTurnCalculationUI;
   end;
-  if (GetPlayer = nil)
-      or (GetPlayer.Order = soJumpHole)
+  if (LocalPlayer = nil)
+      or (LocalPlayer.Order = soJumpHole)
       or (ActiveArcadeRequest <> nil)
       or ((Galaxy <> nil) and not Galaxy.IsOldHyperspaceEnabled) then
   begin
@@ -860,7 +860,7 @@ begin
   if ((VirtualKey = VK_ESCAPE) or (VirtualKey = VK_SPACE))
       and (VictoryPanel.Active or DefeatPanel.Active) then
   begin
-    if (GetPlayer <> nil) and (GetPlayer.GetHull.HullPoints > 0) and VictoryPanel.Active then
+    if (LocalPlayer <> nil) and (LocalPlayer.GetHull.HullPoints > 0) and VictoryPanel.Active then
     begin
       if ShowMessageBoxGI(
               Self,
@@ -868,7 +868,7 @@ begin
               mbgOK or mbgCancel or mbgQuestion)
           = mbgResultOK then
       begin
-        if (GetPlayer.Order = soJumpHole) or (ActiveArcadeRequest <> nil) then
+        if (LocalPlayer.Order = soJumpHole) or (ActiveArcadeRequest <> nil) then
           BeginBattleExit
         else
           BeginMapTransition;
@@ -890,7 +890,7 @@ begin
       SetActive(not Active);
   if IsVirtualKeyDown(VK_CONTROL) and IsVirtualKeyDown(VK_SHIFT) and IsVirtualKeyDown(VK_MENU) then
   begin
-    if (VirtualKey = Ord('K')) and (GetPlayer = nil) and (PlayerArcadeShip <> nil) then
+    if (VirtualKey = Ord('K')) and (LocalPlayer = nil) and (PlayerArcadeShip <> nil) then
       for Index := 0 to PlayerArcadeShip.Enemies.Count - 1 do
         TabShip(PlayerArcadeShip.Enemies[Index])
             .ApplyDamage(TabShip(PlayerArcadeShip.Enemies[Index]).Health, nil, False);
@@ -934,7 +934,7 @@ begin
   end
   else if (VirtualKey = Ord('C')) and (ArcadeViewMode = 2) and (NextArcadeSpace = nil) then
     ArcadeMapViewPosition := TruncatePointF(PlayerMapPosition)
-  else if (VirtualKey = Ord('Q')) and (GetPlayer = nil) then
+  else if (VirtualKey = Ord('Q')) and (LocalPlayer = nil) then
   begin
     ab_Weapon_Initialize(@PlayerArcadeShip.Weapons[0], 50);
     PlayerArcadeShip.Weapons[0].SlotData := 0;
@@ -949,7 +949,7 @@ begin
     NormalizeWeaponSelection;
     UpdateWeaponPanel;
   end
-  else if (VirtualKey = Ord('W')) and (GetPlayer = nil) then
+  else if (VirtualKey = Ord('W')) and (LocalPlayer = nil) then
   begin
     ab_Weapon_Initialize(@PlayerArcadeShip.Weapons[0], 55);
     PlayerArcadeShip.Weapons[0].SlotData := 0;
@@ -964,7 +964,7 @@ begin
     NormalizeWeaponSelection;
     UpdateWeaponPanel;
   end
-  else if (VirtualKey = Ord('E')) and (GetPlayer = nil) then
+  else if (VirtualKey = Ord('E')) and (LocalPlayer = nil) then
   begin
     ab_Weapon_Initialize(@PlayerArcadeShip.Weapons[0], 60);
     PlayerArcadeShip.Weapons[0].SlotData := 0;
@@ -1180,11 +1180,11 @@ begin
       and (CargoPickupItem.BonusKind < 0)
       and (PlayerArcadeShip <> nil)
       and (PlayerArcadeShip.Health > 0)
-      and (GetPlayer <> nil)
-      and (GetPlayer.CargoFreeSpace >= CargoPickupItem.Item.Weight)
+      and (LocalPlayer <> nil)
+      and (LocalPlayer.CargoFreeSpace >= CargoPickupItem.Item.Weight)
       and (PlayerArcadeShip.DistanceTo(CargoPickupItem) < ManualCargoPickupDistance)
-      and GetPlayer.IsEquipmentUsable(GetPlayer.GetCargoHook)
-      and (GetPlayer.CalculateCargoHookPower(GetPlayer.GetCargoHook)
+      and LocalPlayer.IsEquipmentUsable(LocalPlayer.GetCargoHook)
+      and (LocalPlayer.CalculateCargoHookPower(LocalPlayer.GetCargoHook)
           >= CargoPickupItem.Item.Weight) then
   begin
     PickUpItem(CargoPickupItem);
@@ -1418,10 +1418,10 @@ begin
           Break;
         end;
       end;
-      if GetPlayer <> nil then
+      if LocalPlayer <> nil then
       begin
-        Item := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Value - 1) as TWeapon;
-        if GetPlayer.GetSlotCount(sskWeapon) <= Value - 1 then
+        Item := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Value - 1) as TWeapon;
+        if LocalPlayer.GetSlotCount(sskWeapon) <= Value - 1 then
           Button.SetImageDisabledPath(
               'GI,Bm.FormAB2.' + GiResourceSuffix + 'W' + IntToStr(Value) + 'H'
           )
@@ -1429,7 +1429,7 @@ begin
           Button.SetImageDisabledPath(
               'GI,Bm.FormAB2.' + GiResourceSuffix + 'W' + IntToStr(Value) + 'E'
           )
-        else if not GetPlayer.IsEquipmentUsable(Item) then
+        else if not LocalPlayer.IsEquipmentUsable(Item) then
           Button.SetImageDisabledPath(
               'GI,Bm.FormAB2.' + GiResourceSuffix + 'W' + IntToStr(Value) + 'R'
           );
@@ -1439,13 +1439,13 @@ begin
       WeaponSecondaryImages[Value - 1].SetActive(False);
       with WeaponIcons[Value - 1] do
       begin
-        if (GetPlayer <> nil)
-            and (GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Value - 1) <> nil) then
+        if (LocalPlayer <> nil)
+            and (LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), Value - 1) <> nil) then
         begin
           WeaponIcons[Value - 1].SetActive(True);
           SetImagePath(
               'GI,'
-                  + GetPlayer
+                  + LocalPlayer
                       .FindEquippedItemInSlot(Ord(t_Weapon1), Value - 1)
                       .GetBitmapResourceName
                   + 's'
@@ -1476,10 +1476,10 @@ begin
       WeaponButtons[SlotIndex].HelpCallback := UpdateHelp;
       if WeaponButtons[SlotIndex].UserState = 0 then
         WeaponButtons[SlotIndex].UserState := PtrInt(TImageGI.Create(WeaponButtons[SlotIndex]));
-      if (GetPlayer <> nil)
-          and (GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), SlotIndex) <> nil) then
+      if (LocalPlayer <> nil)
+          and (LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), SlotIndex) <> nil) then
       begin
-        Item := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), SlotIndex) as TWeapon;
+        Item := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), SlotIndex) as TWeapon;
         MicroModule := Item.MicroModuleIndex;
         Item.MicroModuleIndex := 0;
         WeaponName := Item.GetShortName;
@@ -1779,7 +1779,7 @@ begin
           PlayerArcadeShip.Weapons[Index].SlotData xor EquipmentSecondaryFireFlag;
       if Galaxy <> nil then
         aCalc.WaitForTurnCalculationUI;
-      if GetPlayer <> nil then
+      if LocalPlayer <> nil then
         SetArcadeWeaponSlotData(
             PlayerArcadeShip.Weapons[Index].SlotData and EquipmentSlotIndexMask,
             PlayerArcadeShip.Weapons[Index].SlotData
@@ -2252,9 +2252,9 @@ begin
     Space.Danger := 0;
   end;
   Other := nil;
-  if (GetPlayer <> nil)
-      and (GetPlayer.Order = soJumpHole)
-      and ((GetPlayer.OrderTarget as THole).HoleType = 4)
+  if (LocalPlayer <> nil)
+      and (LocalPlayer.Order = soJumpHole)
+      and ((LocalPlayer.OrderTarget as THole).HoleType = 4)
       and (Galaxy.KellerLeaveTurn = 0)
       and (KellerShip <> nil)
       and KellerShip.InHyperspace
@@ -2286,11 +2286,11 @@ begin
       Space.Color34 := (ArcadeMapPalette[Space.AppearanceIndex * 6 + 5] and $FFFFFF) or $80000000;
       if Space = Other then
         Space.PopulateKellerEncounter
-      else if (GetPlayer <> nil)
-          and (GetPlayer.Order = soJumpHole)
+      else if (LocalPlayer <> nil)
+          and (LocalPlayer.Order = soJumpHole)
           and (ActiveArcadeRequest = nil) then
         Space.PopulateHoleEncounter
-      else if (GetPlayer <> nil) and (ActiveArcadeRequest <> nil) then
+      else if (LocalPlayer <> nil) and (ActiveArcadeRequest <> nil) then
         Space.PopulateScriptedEncounter
       else
         Space.PopulateObjects;
@@ -2310,7 +2310,7 @@ begin
           (StartArcadeSpace.MapPosition.X + EndArcadeSpace.MapPosition.X) div 2,
           (StartArcadeSpace.MapPosition.Y + EndArcadeSpace.MapPosition.Y) div 2
       );
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
   begin
     if KellerArcadeShip <> nil then
       MapBackgroundPath := 'Bm.FormAB2.2bg3'
@@ -2340,9 +2340,9 @@ begin
       Changed := False;
       Retry := False;
       Selected := nil;
-      if (KellerArcadeShip <> nil) and (GetPlayer <> nil) then
+      if (KellerArcadeShip <> nil) and (LocalPlayer <> nil) then
         Space.MapPath := 'ABMap.map_boss'
-      else if (GetPlayer <> nil) and (ActiveArcadeRequest <> nil) then
+      else if (LocalPlayer <> nil) and (ActiveArcadeRequest <> nil) then
         Space.MapPath := ActiveArcadeRequest.MapName
       else
       begin
@@ -2542,7 +2542,7 @@ begin
   PauseButton.SetActive(ArcadePaused);
   ab_StopLine_Clear;
   ab_StopPoint_Clear;
-  if (GetPlayer <> nil)
+  if (LocalPlayer <> nil)
       and CampaignTransitionStarted
       and CampaignLoadStarted
       and not CampaignLoadFinished then
@@ -2571,11 +2571,11 @@ begin
   GetByName('PRight').SetActive(False);
   HideObjectInfo;
   CancelCargoPickup;
-  HasEnemies := GetPlayer = nil;
+  HasEnemies := LocalPlayer = nil;
   ArcadeViewMode := 3;
   StarField.SetViewPosition(MakePointF(0, 0));
   ClearShipPath;
-  if (GetPlayer <> nil)
+  if (LocalPlayer <> nil)
       and CampaignTransitionStarted
       and CampaignLoadStarted
       and not CampaignLoadFinished then
@@ -2669,13 +2669,13 @@ begin
     ColorData := Pointer(PInteger(PtrUInt(ColorData) + 12)^+PtrUInt(ColorData));
   end;
   ArcadeKellerEncounter :=
-      (GetPlayer <> nil)
-          and (GetPlayer.Order = soJumpHole)
-          and ((GetPlayer.OrderTarget as THole).HoleType = 4)
+      (LocalPlayer <> nil)
+          and (LocalPlayer.Order = soJumpHole)
+          and ((LocalPlayer.OrderTarget as THole).HoleType = 4)
           and (Galaxy.KellerLeaveTurn = 0)
           and (KellerShip <> nil)
           and (Galaxy.KellerMissionState in [4, 5]);
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
   begin
     for Index := 0 to CurrentArcadeSpace.Objects.Count - 1 do
     begin
@@ -2756,7 +2756,7 @@ begin
         Wall.MaxHealth := 1000000;
         Wall.CollisionRadius := 0;
       end
-      else if (GetPlayer <> nil) and (GetPlayer.Order = soJumpHole) then
+      else if (LocalPlayer <> nil) and (LocalPlayer.Order = soJumpHole) then
         Wall.MaxHealth := Zone.BarrierHealth
       else
         Wall.MaxHealth := Zone.BarrierHealth;
@@ -2914,11 +2914,11 @@ begin
   Obj := nil;
   try
     if Galaxy <> nil then
-      if (GetPlayer = nil) or (GetPlayer.GetHull.HullPoints <= 0) then
+      if (LocalPlayer = nil) or (LocalPlayer.GetHull.HullPoints <= 0) then
       begin
-        if GetPlayer <> nil then
+        if LocalPlayer <> nil then
           DismissScoreScreen;
-        while GetPlayer <> nil do
+        while LocalPlayer <> nil do
           SysUtils.Sleep(1);
         RequestedScreenId := screenGameEnd;
         if UpdateTimer <> nil then
@@ -2944,7 +2944,7 @@ begin
       ab_Item_Update;
     end;
     Stage := 2;
-    if (GetPlayer <> nil) and ((PlayerArcadeShip = nil) or (PlayerArcadeShip.Health <= 0)) then
+    if (LocalPlayer <> nil) and ((PlayerArcadeShip = nil) or (PlayerArcadeShip.Health <= 0)) then
     begin
       Stage := 3;
       if DefeatCountdownTicks <= 0 then
@@ -2969,7 +2969,7 @@ begin
         CloseVictory(nil, 0);
     end
     else if (Galaxy = nil)
-        and (GetPlayer = nil)
+        and (LocalPlayer = nil)
         and ((PlayerArcadeShip = nil) or (PlayerArcadeShip.Health <= 0)) then
     begin
       Stage := 4;
@@ -3127,7 +3127,7 @@ begin
         end;
       end;
       if (CurrentArcadeSpace = EndArcadeSpace)
-          and (GetPlayer <> nil)
+          and (LocalPlayer <> nil)
           and CampaignLoadFinished
           and CampaignTransitionStarted
           and (CampaignLoadProgress >= 1) then
@@ -3146,9 +3146,9 @@ begin
           and not CampaignLoadFinished
           and (ArcadeViewMode = 2) then
         BeginBattleExit;
-      if (ArcadeViewMode = 5) and (GetPlayer <> nil) and not CampaignTransitionStarted then
+      if (ArcadeViewMode = 5) and (LocalPlayer <> nil) and not CampaignTransitionStarted then
         FinishCampaignTransition;
-      if (GetPlayer <> nil) and CampaignTransitionStarted and not CampaignLoadStarted then
+      if (LocalPlayer <> nil) and CampaignTransitionStarted and not CampaignLoadStarted then
       begin
         Stage := 12;
         CampaignLoadStarted := True;
@@ -3167,7 +3167,7 @@ begin
           CampaignLoadProgress := 1;
         end;
       end;
-      if GetPlayer <> nil then
+      if LocalPlayer <> nil then
         if CampaignTransitionStarted then
           if CampaignLoadStarted then
             if not CampaignLoadFinished then
@@ -3291,14 +3291,14 @@ begin
           Obj := Obj.Next;
       end;
       Stage := 24;
-      if (GetPlayer <> nil)
+      if (LocalPlayer <> nil)
           and (PlayerArcadeShip <> nil)
           and (PlayerArcadeShip.Health > 0)
           and TabShipAI(PlayerArcadeShip).InsideCurrentZone
           and (TabShipAI(PlayerArcadeShip).CurrentZone.Kind in [2..4]) then
       begin
         NextArcadeSpace := nil;
-        if GetPlayer.Order = soJumpHole then
+        if LocalPlayer.Order = soJumpHole then
           BeginBattleExit
         else
         begin
@@ -3483,7 +3483,7 @@ begin
     if ArcadeViewMode = 0 then
       UpdateWeaponHighlights(False);
     Stage := 36;
-    if (ArcadeViewMode = 2) and (GetPlayer <> nil) then
+    if (ArcadeViewMode = 2) and (LocalPlayer <> nil) then
     begin
       DateLabel := GetByName('Turn') as TLabelGI;
       CameraPos.X := EndArcadeSpace.MapPosition.X - StartArcadeSpace.MapPosition.X;
@@ -3521,11 +3521,11 @@ var
   Position, PreviousPosition: TPoint;
   CursorX, CursorY: SmallInt;
 begin
-  if (Galaxy <> nil) and ((GetPlayer = nil) or (GetPlayer.GetHull.HullPoints <= 0)) then
+  if (Galaxy <> nil) and ((LocalPlayer = nil) or (LocalPlayer.GetHull.HullPoints <= 0)) then
   begin
-    if GetPlayer <> nil then
+    if LocalPlayer <> nil then
       DismissScoreScreen;
-    while GetPlayer <> nil do
+    while LocalPlayer <> nil do
       SysUtils.Sleep(1);
     RequestedScreenId := screenGameEnd;
     RequestClose(1);
@@ -3569,16 +3569,16 @@ end;
 
 procedure TfAB.FinishCampaignTransition;
 begin
-  if (Galaxy <> nil) and ((GetPlayer = nil) or (GetPlayer.GetHull.HullPoints <= 0)) then
+  if (Galaxy <> nil) and ((LocalPlayer = nil) or (LocalPlayer.GetHull.HullPoints <= 0)) then
   begin
     if UpdateTimer <> nil then
     begin
       CancelCallbackTimer(UpdateTimer);
       UpdateTimer := nil;
     end;
-    if GetPlayer <> nil then
+    if LocalPlayer <> nil then
       DismissScoreScreen;
-    while GetPlayer <> nil do
+    while LocalPlayer <> nil do
       SysUtils.Sleep(1);
     RequestedScreenId := screenGameEnd;
     RequestClose(1);
@@ -3592,10 +3592,10 @@ begin
     begin
       if TurnCalculationPhase = tcpGalaxyFinished then
         QueuePlayerStarTurnCalculation
-      else if ((GetPlayer.Order <> soJump) and (GetPlayer.Order <> soJumpHole))
-          or ((GetPlayer.Order = soJumpHole) and (GetPlayer.OrderStateData = -65536)) then
+      else if ((LocalPlayer.Order <> soJump) and (LocalPlayer.Order <> soJumpHole))
+          or ((LocalPlayer.Order = soJumpHole) and (LocalPlayer.OrderStateData = -65536)) then
       begin
-        StarMapScreen.SetMapCenterManually(TruncatePointF(GetPlayer.Position));
+        StarMapScreen.SetMapCenterManually(TruncatePointF(LocalPlayer.Position));
         StarMapScreen.ResumeMode := smrTurnFilm;
         CampaignTransitionStarted := True;
         QueueGalaxyTurnCalculation;
@@ -3603,7 +3603,7 @@ begin
       else
       begin
         HyperspaceStep(True);
-        Galaxy.GenerateSpaceBackground(GetPlayer.CurrentStar.BackgroundImage);
+        Galaxy.GenerateSpaceBackground(LocalPlayer.CurrentStar.BackgroundImage);
         QueueGalaxyTurnCalculation;
       end;
     end;
@@ -3843,7 +3843,7 @@ var
   end; // Native unused four-byte slot before the temporary point records.
 begin
   if (PlayerArcadeShip = nil)
-      or ((GetPlayer <> nil) and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactScaner)) <= 0))
+      or ((LocalPlayer <> nil) and (LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactScaner)) <= 0))
       or (ExitCode <> 0)
       or (ArcadeViewMode = 5) then
   begin
@@ -3921,8 +3921,8 @@ begin
               SetDepth(1);
             end;
           end;
-          if (GetPlayer <> nil)
-              and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) <= 0) then
+          if (LocalPlayer <> nil)
+              and (LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) <= 0) then
             if EnemyRewardIcons[Index] <> nil then
             begin
               EnemyRewardIcons[Index].Free;
@@ -3930,8 +3930,8 @@ begin
               EnemyRewardBackdrops[Index].Free;
               EnemyRewardBackdrops[Index] := nil;
             end;
-          if (GetPlayer <> nil)
-              and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
+          if (LocalPlayer <> nil)
+              and (LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0)
               and (EnemyRewardIcons[Index] = nil) then
           begin
             EnemyRewardBackdrops[Index] := TImageGI.Create(MapPanel);
@@ -4072,7 +4072,7 @@ begin
           begin
             with EnemyRewardIcons[Index] as TImageGI do
             begin
-              if GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) <= 0 then
+              if LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) <= 0 then
               begin
                 EnemyRewardIcons[Index].Free;
                 EnemyRewardIcons[Index] := nil;
@@ -4586,7 +4586,7 @@ begin
     aCalc.WaitForTurnCalculationUI;
     aCalc.WaitForTurnCalculationUI;
     HullPoints := 0;
-    if GetPlayer <> nil then
+    if LocalPlayer <> nil then
       HullPoints := PlayerArcadeShip.Health;
     ScriptedBattle := ActiveArcadeRequest <> nil;
     Survivors := nil;
@@ -4633,13 +4633,13 @@ begin
   else if InfoObject <> Space then
   begin
     InfoObject := Space;
-    if (GetPlayer <> nil) and ((StartArcadeSpace = Space) or (EndArcadeSpace = Space)) then
+    if (LocalPlayer <> nil) and ((StartArcadeSpace = Space) or (EndArcadeSpace = Space)) then
     begin
       GetByName('InfoStar').SetActive(True);
       if StartArcadeSpace = Space then
-        Star := GetPlayer.TransitOriginStar
+        Star := LocalPlayer.TransitOriginStar
       else
-        Star := GetPlayer.CurrentStar;
+        Star := LocalPlayer.CurrentStar;
       (GetByName('InfoStarName') as TLabelGI)
           .SetText(WrapTextInColor(Star.Name, '<color=255,240,100>'));
       with GetByName('InfoStarImage') as TGraphBufGI do
@@ -4829,7 +4829,7 @@ begin
         if Obj is TabShipAI then
           Inc(ShipCount);
       end;
-      if (GetPlayer <> nil) and (GetPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0) then
+      if (LocalPlayer <> nil) and (LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactAnalyzer)) > 0) then
         Text := IntToStr(ShipCount)
       else
         Text := LocalizedColorText('FormAB.Unknow');
@@ -4901,12 +4901,12 @@ begin
   end
   else
   begin
-    if (GetPlayer <> nil)
-        and (GetPlayer.CargoFreeSpace >= Item.Item.Weight)
+    if (LocalPlayer <> nil)
+        and (LocalPlayer.CargoFreeSpace >= Item.Item.Weight)
         and (PlayerArcadeShip.DistanceTo(Item) < ManualCargoPickupDistance)
-        and (GetPlayer.CargoFreeSpace >= Item.Item.Weight)
-        and GetPlayer.IsEquipmentUsable(GetPlayer.GetCargoHook)
-        and (GetPlayer.CalculateCargoHookPower(GetPlayer.GetCargoHook) >= Item.Item.Weight) then
+        and (LocalPlayer.CargoFreeSpace >= Item.Item.Weight)
+        and LocalPlayer.IsEquipmentUsable(LocalPlayer.GetCargoHook)
+        and (LocalPlayer.CalculateCargoHookPower(LocalPlayer.GetCargoHook) >= Item.Item.Weight) then
     begin
       if not IsCursorImageSelected('Take') then
         SetCursorByName('Take');
@@ -4914,7 +4914,7 @@ begin
     else if not IsCursorImageSelected('Main') then
       SetCursorByName('Main');
     Instance := Item.Item;
-    if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
+    if (Galaxy <> nil) and not Galaxy.Destroying and (LocalPlayer <> nil) then
     begin
       if Instance.ScriptItem <> nil then
         TScriptItem(Instance.ScriptItem).RunActionCode(satOnShowingItemInfo, nil, nil, nil, 0);
@@ -5083,7 +5083,7 @@ end;
 procedure TfAB.OpenShipEquipment(Sender: TObjectGI);
 begin
   if (ArcadeViewMode <> 5)
-      and (GetPlayer <> nil)
+      and (LocalPlayer <> nil)
       and (PlayerArcadeShip <> nil)
       and (PlayerArcadeShip.Health > 0) then
   begin
@@ -5148,11 +5148,11 @@ begin
   begin
     SaveWeaponInventory;
     PlayerArcadeShip.WeaponCount := 0;
-    SlotCount := GetPlayer.GetSlotCount(sskWeapon);
+    SlotCount := LocalPlayer.GetSlotCount(sskWeapon);
     for SlotIndex := 0 to SlotCount - 1 do
     begin
-      Item := GetPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), SlotIndex) as TWeapon;
-      if GetPlayer.IsEquipmentUsable(Item) then
+      Item := LocalPlayer.FindEquippedItemInSlot(Ord(t_Weapon1), SlotIndex) as TWeapon;
+      if LocalPlayer.IsEquipmentUsable(Item) then
       begin
         if (CampaignWeapons[PlayerArcadeShip.WeaponCount] <> Item)
             or (PlayerArcadeShip.Weapons[PlayerArcadeShip.WeaponCount].SlotData
@@ -5196,9 +5196,9 @@ begin
   if Instance is TArtefact then
   begin
     (Instance as TEquipment).EquippedFlag := 0;
-    GetPlayer.Artefacts.Add(Instance);
+    LocalPlayer.Artefacts.Add(Instance);
     if Instance is TArtefactTranclucator then
-      (TObject((Instance as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip := GetPlayer;
+      (TObject((Instance as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip := LocalPlayer;
   end
   else if Instance is TCountableItem then
   begin
@@ -5206,10 +5206,10 @@ begin
     (Instance as TEquipment).EquippedFlag := 0;
     Index := 0;
     Other := nil;
-    Count := GetPlayer.Inventory.Count;
+    Count := LocalPlayer.Inventory.Count;
     while Index < Count do
     begin
-      Other := GetPlayer.Inventory[Index];
+      Other := LocalPlayer.Inventory[Index];
       if (Instance as TCountableItem).CanMerge(Other) then
         Break;
       Inc(Index);
@@ -5220,26 +5220,26 @@ begin
       Instance.Free;
     end
     else
-      GetPlayer.Inventory.Add(Instance);
+      LocalPlayer.Inventory.Add(Instance);
   end
   else if Instance is TEquipment then
   begin
     (Instance as TEquipment).EquippedFlag := 0;
-    GetPlayer.Inventory.Add(Instance);
+    LocalPlayer.Inventory.Add(Instance);
   end
   else if Instance is TGoods then
   begin
     Inc(
-        GetPlayer.CargoGoods[Ord((Instance as TGoods).ItemType)].Count,
+        LocalPlayer.CargoGoods[Ord((Instance as TGoods).ItemType)].Count,
         (Instance as TGoods).Quantity
     );
     Inc(
-        GetPlayer.CargoGoods[Ord((Instance as TGoods).ItemType)].TotalCost,
+        LocalPlayer.CargoGoods[Ord((Instance as TGoods).ItemType)].TotalCost,
         (Instance as TGoods).Cost
     );
     Instance.Free;
   end;
-  GetPlayer.RefreshDerivedStats(True);
+  LocalPlayer.RefreshDerivedStats(True);
   if Galaxy <> nil then
     aCalc.WaitForTurnCalculationUI;
 end;
@@ -5351,7 +5351,7 @@ begin
       )
   );
   GetByName('PanelWinHide').SetActive(True);
-  if (GetPlayer <> nil) and (PlayerArcadeShip <> nil) and not PlayerArcadeShip.HasFiredWeapon then
+  if (LocalPlayer <> nil) and (PlayerArcadeShip <> nil) and not PlayerArcadeShip.HasFiredWeapon then
   begin
     aCalc.WaitForTurnCalculationUI;
     CheckNoShotsArcadeVictory;
