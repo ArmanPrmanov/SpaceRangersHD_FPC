@@ -306,7 +306,10 @@ Decided with the project owner. Later versions may revisit any row.
 | Hyperspace arcade and black holes. | Solo instance, local to the human who entered. Because the day waits for everyone, the others wait until that human finishes and presses end turn. Shared instances are a future version. |
 | Robot battles. | Already automatic victories, so nothing to sync. |
 | PvP. | Allowed. A friendly-fire switch in the settings menu turns it off and on at any time during the game; the host owns the switch. |
-| Game end. | Coalition victory is shared. A destroyed human respawns at the nearest planet. What they lose on death is to be tuned later. |
+| Game end. | Coalition victory is shared. A destroyed human respawns at the nearest planet. They lose nothing for now; tuning comes later. |
+| A quest script ends the game. | It ends the game for the script's human only. |
+| NPC catch-up. | Unseen NPC rangers keep pace with the host human's rating, wealth and rank. |
+| Dominators spare the start. | Only the host human's starting star, as in single player. |
 | Cheats. | Enabled for everyone. Cheat commands carry the actor, and the host sees which humans have used which cheats. |
 | Mods. | Same mod set on every machine, enforced by the data hash in `Hello`. |
 | Balance. | No scaling with player count. Quest supply, economies and war pacing stay as in single player. |
