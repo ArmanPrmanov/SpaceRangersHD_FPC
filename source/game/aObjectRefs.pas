@@ -372,6 +372,7 @@ type
     destructor Destroy; override;
     procedure ResolveCell(Cell: TVarEC);
     procedure ResolveArray(Variables: TVarArrayEC);
+    procedure SkipLoaderBindings(Script: TScript);
   end;
 
 constructor TReferenceResolver.Create;
@@ -410,6 +411,42 @@ begin
         end;
         Exit;
       end;
+end;
+
+// CHANGE: BUGFIX - The script loader itself points the variables named after a script's
+// stars, planets, items and places at the loaded objects. Their values are new addresses,
+// and one that equals an old address in the table was pointed at another object.
+procedure TReferenceResolver.SkipLoaderBindings(Script: TScript);
+var
+  I, J: Integer;
+  Star: TScriptStar;
+
+  procedure Skip(const Name: WideString);
+  var
+    Cell: TVarEC;
+  begin
+    if Name = '' then
+      Exit;
+    Cell := Script.InitCode.LocalVar.GetVarNE(Name);
+    if (Cell <> nil) and (Visited.IndexOf(Cell) < 0) then
+      Visited.Add(Cell);
+  end;
+
+begin
+  if (Script.InitCode = nil) or (Script.InitCode.LocalVar = nil) then
+    Exit;
+  for I := 0 to Script.Stars.Count - 1 do
+  begin
+    Star := TScriptStar(Script.Stars[I]);
+    Skip(Star.Name);
+    if Star.Planets <> nil then
+      for J := 0 to High(Star.Planets) do
+        Skip(Star.Planets[J].Name);
+  end;
+  for I := 0 to Script.Items.Count - 1 do
+    Skip(TScriptItem(Script.Items[I]).Name);
+  for I := 0 to Script.Places.Count - 1 do
+    Skip(TScriptPlace(Script.Places[I]).Name);
 end;
 
 procedure TReferenceResolver.ResolveArray(Variables: TVarArrayEC);
@@ -504,6 +541,8 @@ begin
     CollectObjectIdentities;
     for I := 0 to IdentityCount - 1 do
       Resolver.Objects.Add(AnsiString(Identities[I].Key), Pointer(Identities[I].Address));
+    for I := 0 to Galaxy.Scripts.Count - 1 do
+      Resolver.SkipLoaderBindings(TScript(Galaxy.Scripts[I]));
     Resolver.ResolveArray(Session.SharedScriptVariables);
     for I := 0 to Galaxy.Scripts.Count - 1 do
     begin
