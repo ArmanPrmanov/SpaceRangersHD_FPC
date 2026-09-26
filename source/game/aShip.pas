@@ -10883,7 +10883,7 @@ begin
     if Planet <> nil then
     begin
       Item := TTreasureMap.Create;
-      (Item as TTreasureMap).Init(Planet, Self);
+      (Item as TTreasureMap).Init(Planet, Self, Finder);
       Inventory.Add(Item);
       DropCarriedItemAsMovingLoot(Item);
       Result := True;

@@ -1089,12 +1089,13 @@ begin
             + #13#10
   else
     Result := Result + LocalizedText('Items.Weapon.Missile.TextNoTarget') + #13#10;
+  // CHANGE: CLEANUP - Info text for the screen: what the human at this machine can scan.
   if OwnerShip <> nil then
-    if GetPlayer.HasScannerArtefact(OwnerShip) then
+    if LocalPlayer.HasScannerArtefact(OwnerShip) then
     begin
-      if GetPlayer.CanResolveObjectWithScanner(OwnerShip)
-          or (GetPlayer = OwnerShip)
-          or (GetPlayer = OwnerShip.PartnerShip)
+      if LocalPlayer.CanResolveObjectWithScanner(OwnerShip)
+          or (LocalPlayer = OwnerShip)
+          or (LocalPlayer = OwnerShip.PartnerShip)
           or (OwnerShip.TypeId = stTranclucator) then
       begin
         SpeedText := IntToStr(Round(Speed));

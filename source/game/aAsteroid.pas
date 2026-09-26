@@ -55,7 +55,9 @@ uses
   EC_Str,
   EC_Mem,
   aConst,
+  aHuman,
   aPlayer,
+  aSession,
   aShip,
   GR_Main;
 const
@@ -171,8 +173,10 @@ begin
   Velocity.Y := -Cos(Angle) * Speed;
   MineralCount := NextRandomIntRange(20, 99, CurrentStar.RandomState);
   if Galaxy <> nil then
-    if GetPlayer <> nil then
-      if (GetPlayer.CurrentStar <> CurrentStar) or not GetPlayer.InNormalSpace then
+    // CHANGE: CLEANUP - A sibling spawns only where no human's ranger sees the star's
+    // space. Native asked this of the one player.
+    if Session.Humans.Count > 0 then
+      if not StarHasHumanInSpace(CurrentStar) then
         if (Galaxy.GodModEnabled = 2)
             and (NextRandomIntRange(0, 100, CurrentStar.RandomState) > 50) then
           SpawnSiblingAsteroidInCurrentStar;

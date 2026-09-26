@@ -629,11 +629,14 @@ begin
       PurchasedTotalCost := 0;
     end;
   RefreshDerivedStats(True);
-  if GetPlayer = Destination then
-    GetPlayer.RefreshStorageBubbles;
+  if IsHuman(Destination) then
+    TPlayer(Destination).RefreshStorageBubbles;
 end;
 
 // The +0 index/pointer expressions below preserve native DCC32 argument scheduling.
+// CHANGE: CLEANUP - The cargo goes to the owner's storage. Only a human deploys a
+// tranclucator (the ship screen), so a flying one's owner is a human's ranger; native used
+// the one player.
 procedure TTranclucator.StoreUnequippedCargoAt(Location: TObject);
 var
   Good: Byte;
@@ -649,7 +652,7 @@ begin
       Item := TEquipment(Inventory[I + 0]);
       if Item.EquippedFlag = 0 then
       begin
-        GetPlayer.AddItemToPlayerStorage(Item, Location, -1);
+        OwnerShip.AddItemToPlayerStorage(Item, Location, -1);
         Inventory.Delete(Inventory.IndexOf(Pointer(PAnsiChar(Item) + 0)));
       end;
     end;
@@ -658,28 +661,28 @@ begin
       Artefact := TArtefact(Artefacts[I + 0]);
       if Artefact.EquippedFlag = 0 then
       begin
-        GetPlayer.AddItemToPlayerStorage(Artefact, Location, -1);
+        OwnerShip.AddItemToPlayerStorage(Artefact, Location, -1);
         Artefacts.Delete(Artefacts.IndexOf(Pointer(PAnsiChar(Artefact) + 0)));
       end;
     end;
     for Good := 0 to 7 do
       with CargoGoods[Good] do
       begin
-        GetPlayer.AddGoodsToPlayerStorage(Good, Count, TotalCost, Location, -1);
+        OwnerShip.AddGoodsToPlayerStorage(Good, Count, TotalCost, Location, -1);
         Count := 0;
         TotalCost := 0;
         PurchasedCount := 0;
         PurchasedTotalCost := 0;
       end;
     RefreshDerivedStats(True);
-    GetPlayer.RefreshStorageBubbles;
+    TPlayer(OwnerShip).RefreshStorageBubbles;
   end;
 end;
 
 function TTranclucator.UnloadCargoForPlayerOwner: Boolean;
 begin
   Result := False;
-  if (OwnerShip <> nil) and (GetPlayer <> nil) and (GetPlayer = OwnerShip) then
+  if IsHuman(OwnerShip) then
   begin
     if IsOnPlanet then
     begin
@@ -709,10 +712,7 @@ var
   Distance, BestDistance: Double;
 begin
   Result := False;
-  if (OwnerShip <> nil)
-      and (GetPlayer <> nil)
-      and (GetPlayer = OwnerShip)
-      and HasLooseNonScriptItemsOrGoods then
+  if IsHuman(OwnerShip) and HasLooseNonScriptItemsOrGoods then
   begin
     BestDistance := 10000;
     Location := nil;
@@ -721,7 +721,7 @@ begin
       begin
         Planet := TPlanet(CurrentStar.Planets[I]);
         if (Planet.OwnerId in [Ord(oiMaloc)..Ord(oiGaal), Ord(oiPirate)])
-            and (Planet.GetRelationLevelToShip(GetPlayer) >= rlNormal) then
+            and (Planet.GetRelationLevelToShip(OwnerShip) >= rlNormal) then
         begin
           Distance := PointDistance(Position, Planet.GetPosition);
           if BestDistance >= Distance then
@@ -736,7 +736,7 @@ begin
       begin
         Ship := TShip(CurrentStar.Ships[I]);
         if (Ship is TRuins)
-            and (Ship.GetRelationLevelToShip(GetPlayer) >= rlNormal)
+            and (Ship.GetRelationLevelToShip(OwnerShip) >= rlNormal)
             and Ship.CanDock(Self) then
         begin
           Distance := PointDistance(Position, Ship.Position);
@@ -799,10 +799,12 @@ begin
     Artefact := TArtefactTranclucator.Create;
     Artefact.InitTranclucator(GetHull.OwnerId, OwnerShip, Self);
     OwnerShip.AddItemToPlayerStorage(Artefact, Location, -1);
-    GetPlayer.RefreshStorageBubbles;
+    // CHANGE: CLEANUP - The owner, a human's ranger (see StoreUnequippedCargoAt). Native used
+    // the one player.
+    TPlayer(OwnerShip).RefreshStorageBubbles;
     OwnerShip.RefreshDerivedStats(True);
     ScriptItemsAct($2E, Artefact, Location, 0);
-    GetPlayer.ScriptItemsAct($2E, Artefact, Location, 0);
+    OwnerShip.ScriptItemsAct($2E, Artefact, Location, 0);
     Result := True;
   end;
 end;
@@ -1043,7 +1045,7 @@ begin
           end;
         end;
     end;
-    if GetPlayer.CurrentStar = CurrentStar then
+    if StarHasHuman(CurrentStar) then
       for I := 0 to CurrentStar.Asteroids.Count - 1 do
       begin
         Asteroid := TAsteroid(CurrentStar.Asteroids[I]);

@@ -2761,6 +2761,8 @@ begin
   begin
     Result := ReplaceAllWideString(Result, '<br>', #13#10);
     Result := ReplaceAllWideString(Result, '<ll>', #13#10' '#13#10);
+    // HUMANS: <Player> in text the simulation builds for a human who is not the local one:
+    // whose name, and how does the text learn which human it is for?
     if GetPlayer <> nil then
       Result :=
           ReplaceAllWideString(
@@ -2787,6 +2789,8 @@ begin
   begin
     Result := ReplaceAllWideString(Result, '<br>', #13#10);
     Result := ReplaceAllWideString(Result, '<ll>', #13#10' '#13#10);
+    // HUMANS: <Player> in text the simulation builds for a human who is not the local one:
+    // whose name, and how does the text learn which human it is for?
     if GetPlayer <> nil then
       Result :=
           ReplaceAllWideString(
@@ -2805,6 +2809,8 @@ begin
   begin
     Text := ReplaceAllWideString(Text, '<br>', #13#10);
     Text := ReplaceAllWideString(Text, '<ll>', #13#10' '#13#10);
+    // HUMANS: <Player> in text the simulation builds for a human who is not the local one:
+    // whose name, and how does the text learn which human it is for?
     if GetPlayer <> nil then
       Text :=
           ReplaceAllWideString(
@@ -2823,6 +2829,8 @@ begin
   begin
     Text := ReplaceAllWideString(Text, '<br>', #13#10);
     Text := ReplaceAllWideString(Text, '<ll>', #13#10' '#13#10);
+    // HUMANS: <Player> in text the simulation builds for a human who is not the local one:
+    // whose name, and how does the text learn which human it is for?
     if GetPlayer <> nil then
       Text :=
           ReplaceAllWideString(

@@ -3809,7 +3809,8 @@ begin
                   IntToStr(
                       Module.CalculateNodeExchangeValue(
                           NodeExchangeLowPriorityCost,
-                          NodeExchangeMediumPriorityCost
+                          NodeExchangeMediumPriorityCost,
+                          LocalPlayer.DockedTo
                       )
                   ));
       Inc(Count);
@@ -3852,7 +3853,8 @@ begin
                 IntToStr(
                     Module.CalculateNodeExchangeValue(
                         NodeExchangeLowPriorityCost,
-                        NodeExchangeMediumPriorityCost
+                        NodeExchangeMediumPriorityCost,
+                        LocalPlayer.DockedTo
                     )
                 )
             ),

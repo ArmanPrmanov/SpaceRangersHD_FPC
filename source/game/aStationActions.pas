@@ -1078,7 +1078,7 @@ begin
     RaiseWideMessage(
         'Косяк: TfRuinsTalk.I_GiveNodOk [FId = ' + IntToStr(Cardinal(ModuleId)) + ']'
     );
-  Value := Module.CalculateNodeExchangeValue(IntArg(Command, 1), IntArg(Command, 2));
+  Value := Module.CalculateNodeExchangeValue(IntArg(Command, 1), IntArg(Command, 2), P.DockedTo);
   StationText := Module.GetHighlightedName;
   StationAmount := Value;
   P.Inventory.Delete(P.Inventory.IndexOf(Module));

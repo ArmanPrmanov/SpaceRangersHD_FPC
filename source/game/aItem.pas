@@ -543,9 +543,11 @@ type
     function GetInfoText(ColorTag: WideString; Ship: Pointer): WideString; override;
     function GetDescriptionText: WideString; override;
     function GetBitmapResourceName: WideString; override;
-    procedure Init(Planet: Pointer; Victim: Pointer);
+    // CHANGE: CLEANUP - Finder is the human's ranger the map is for. Native built the preview
+    // for the one player.
+    procedure Init(Planet: Pointer; Victim: Pointer; Finder: Pointer);
     function GetTargetPlanetName: WideString;
-    function BuildPreviewTable(PageIndex: Integer; Planet: Pointer): WideString;
+    function BuildPreviewTable(PageIndex: Integer; Planet: Pointer; Finder: Pointer): WideString;
   end;
   TMicroModule = class(TEquipment)
     procedure SaveToBuffer(Buffer: TBufEC); override;
@@ -556,9 +558,12 @@ type
     function GetBitmapResourceName: WideString; override;
     procedure Init(ModuleIndex: Integer);
     function GetPlainName: WideString;
+    // CHANGE: CLEANUP - Station is the station the human who offers the module is docked at;
+    // its id seeds the value. Native used the one player's.
     function CalculateNodeExchangeValue(
         LowPriorityOfferCost: Integer;
-        MediumPriorityOfferCost: Integer
+        MediumPriorityOfferCost: Integer;
+        Station: Pointer
     ): Integer;
     function GetHighlightedName: WideString;
     function CanInstallOn(Item: TEquipment): Boolean;
@@ -743,7 +748,10 @@ end;
 
 destructor TItem.Destroy;
 begin
-  if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) and (ScriptItem <> nil) then
+  if (Galaxy <> nil)
+      and not Galaxy.Destroying
+      and (Session.Humans.Count > 0)
+      and (ScriptItem <> nil) then
     TScriptItem(ScriptItem).RunActionCode(satOnItemDestroy, nil, nil, nil, 0);
   Id := 0;
   // CHANGE: BUGFIX - Scripts must not see a later object at this address as this item.
@@ -1065,7 +1073,7 @@ begin
     Exit;
   if (Item is TUselessItem) and (TUselessItem(Item).ConfigBlockName = 'ExampleAsteroid') then
     Exit;
-  if GetPlayer <> Owner then
+  if not IsHuman(Owner) then
   begin
     if (Item.ScriptItem <> nil) and (TScriptItem(Item.ScriptItem).Name <> '') then
       Exit;
@@ -1399,7 +1407,7 @@ end;
 procedure TEquipment.Equip;
 begin
   EquippedFlag := 1;
-  if (Galaxy = nil) or Galaxy.Destroying or (GetPlayer = nil) then
+  if (Galaxy = nil) or Galaxy.Destroying or (Session.Humans.Count = 0) then
     Exit;
   if ScriptItem <> nil then
     TScriptItem(ScriptItem).RunActionCode(satOnItemEquip, nil, nil, nil, 0);
@@ -1410,7 +1418,7 @@ end;
 procedure TEquipment.Unequip;
 begin
   EquippedFlag := 0;
-  if (Galaxy = nil) or Galaxy.Destroying or (GetPlayer = nil) then
+  if (Galaxy = nil) or Galaxy.Destroying or (Session.Humans.Count = 0) then
     Exit;
   if ScriptItem <> nil then
     TScriptItem(ScriptItem).RunActionCode(satOnItemDeEquip, nil, nil, nil, 0);
@@ -1502,14 +1510,16 @@ begin
     Prefix := #13#10
   else
     Prefix := '';
-  if (GetPlayer <> nil) and not GetPlayer.CanUseEquipmentTech(Self) then
+  // CHANGE: CLEANUP - Text for the screen: whether the human at this machine can use and
+  // repair the item.
+  if (LocalPlayer <> nil) and not LocalPlayer.CanUseEquipmentTech(Self) then
   begin
     Result :=
         WrapTextInColor(Prefix + LocalizedText('Items.Equpments.CanNotBeUsed'), '<color=255,0,0>');
     Exit;
   end;
-  if (GetPlayer <> nil)
-      and not GetPlayer.CanRepairEquipmentTech(Self)
+  if (LocalPlayer <> nil)
+      and not LocalPlayer.CanRepairEquipmentTech(Self)
       and (BrokenFlag <> 0)
       and not (ItemType in [t_FuelTanks..t_Engine]) then
   begin
@@ -1576,7 +1586,7 @@ begin
         )
   else
     Result := '';
-  if (GetPlayer <> nil) and not GetPlayer.CanRepairEquipmentTech(Self) then
+  if (LocalPlayer <> nil) and not LocalPlayer.CanRepairEquipmentTech(Self) then
   begin
     if not PrefixNewLine then
       Result := '';
@@ -5628,7 +5638,7 @@ end;
 
 destructor TUselessItem.Destroy;
 begin
-  if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
+  if (Galaxy <> nil) and not Galaxy.Destroying and (Session.Humans.Count > 0) then
     RunItemConfigActionCode(Self, satOnItemDestroy, nil, nil, nil, 0);
   inherited Destroy;
 end;
@@ -6107,7 +6117,7 @@ begin
     Result := 'Bm.Items.' + GiResourceSuffix + 'Satellite' + IntToStr(SatelliteTypeId) + '_';
 end;
 
-procedure TTreasureMap.Init(Planet: Pointer; Victim: Pointer);
+procedure TTreasureMap.Init(Planet: Pointer; Victim: Pointer; Finder: Pointer);
 begin
   ItemType := t_TreasureMap;
   Weight := 1;
@@ -6118,8 +6128,8 @@ begin
   else
     SourceShipName := (TObject(Victim) as TShip).GetFullName(' ');
   TargetPlanet := Planet;
-  PreviewTablePage1 := BuildPreviewTable(1, Planet);
-  PreviewTablePage2 := BuildPreviewTable(2, Planet);
+  PreviewTablePage1 := BuildPreviewTable(1, Planet, Finder);
+  PreviewTablePage2 := BuildPreviewTable(2, Planet, Finder);
   EquippedFlag := 0;
   Repair;
 end;
@@ -6193,7 +6203,11 @@ begin
   Result := (TObject(TargetPlanet) as TPlanet).Name;
 end;
 
-function TTreasureMap.BuildPreviewTable(PageIndex: Integer; Planet: Pointer): WideString;
+function TTreasureMap.BuildPreviewTable(
+    PageIndex: Integer;
+    Planet: Pointer;
+    Finder: Pointer
+): WideString;
 var
   I, Number: Integer;
   Entry: PPlanetSurfaceLootEntry;
@@ -6294,7 +6308,7 @@ begin
         begin
           Entry := World.SurfaceLootEntries[I];
           if Entry.Item <> nil then
-            if GetPlayer.CanAccessSurfaceLootItem(Entry.Item)
+            if TPlayer(Finder).CanAccessSurfaceLootItem(Entry.Item)
                 and not (Entry.Item is TGoods)
                 and not (Entry.Item is TCistern) then
             begin
@@ -6839,7 +6853,8 @@ end;
 
 function TMicroModule.CalculateNodeExchangeValue(
     LowPriorityOfferCost,
-    MediumPriorityOfferCost: Integer
+    MediumPriorityOfferCost: Integer;
+    Station: Pointer
 ): Integer;
 begin
   Result := 0;
@@ -6852,7 +6867,7 @@ begin
         SeededRandomIntRange(
             Round(Result * 0.8),
             Round(Result * 1.2),
-            Result + GetPlayer.DockedTo.Id
+            Result + TShip(Station).Id
         );
     Result := RoundAndTruncateToHundreds(Result / 1.5);
   end;
@@ -6865,7 +6880,7 @@ begin
         SeededRandomIntRange(
             Round(Result * 0.8),
             Round(Result * 1.2),
-            Result + GetPlayer.DockedTo.Id
+            Result + TShip(Station).Id
         );
     Result := RoundAndTruncateToHundreds(Min(LowPriorityOfferCost div 2, Result / 1.5));
   end;
@@ -6878,7 +6893,7 @@ begin
         SeededRandomIntRange(
             Round(Result * 0.8),
             Round(Result * 1.2),
-            Result + GetPlayer.DockedTo.Id
+            Result + TShip(Station).Id
         );
     Result := RoundAndTruncateToTens(Min(MediumPriorityOfferCost div 2, Result / 1.5));
   end;
@@ -7116,7 +7131,7 @@ end;
 
 destructor TArtefact.Destroy;
 begin
-  if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) then
+  if (Galaxy <> nil) and not Galaxy.Destroying and (Session.Humans.Count > 0) then
     RunItemConfigActionCode(Self, satOnItemDestroy, nil, nil, nil, 0);
   inherited Destroy;
 end;
@@ -7507,6 +7522,8 @@ begin
       MaxCost := 2500;
     end;
   end;
+  // HUMANS: An artefact's weight scales with the one player's hull. Whose hull when there
+  // are several humans, and for an artefact no human is looking at?
   if GetPlayer <> nil then
     Inc(
         Weight,
@@ -8004,6 +8021,8 @@ begin
   else if ItemType = t_Hull then
   begin
     Item := CreateItemByType(ItemType);
+    // HUMANS: A default hull (set-up blocks, scripts) takes the one player's race, and a
+    // default satellite its owner. Whose, when there are several humans?
     THull(Item).Init(250, 1, RaceToOwner(GetPlayer.PilotRace), 0, -1, False);
     Result := Item;
   end
@@ -8022,6 +8041,7 @@ begin
         t_MicroModule: TMicroModule(Item).Init(1);
         t_Cistern: TCistern(Item).Init(10, 10, 6);
         t_Satellite:
+          // HUMANS: As the default hull above: whose owner, when there are several humans?
           TSatellite(Item)
               .InitGenerated(
                   1,
