@@ -113,11 +113,32 @@ def check_replay(args, binary: Path, log: Path) -> tuple[bool, list[str]]:
     return passed, [summary, *notes]
 
 
+def check_session(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """One human: session flags set by command, and a cheat on record, survive a save.
+
+    The probe (--sim-session-probe) sets them before the round trip, so the save carries the
+    per-human block although the game has one human.
+    """
+    code, output = simulate(
+        binary, args.game_dir, save, ["--sim-roundtrip", "--sim-session-probe", "--sim-humans-dump"]
+    )
+    roundtrip = [line for line in output.splitlines() if line.startswith("roundtrip ")]
+    flags = "state session textquests-off=1 friendly-fire=0" in output.splitlines()
+    if code != 0 or not roundtrip or any("=ok" not in line for line in roundtrip) or not flags:
+        return False, "session flags failed:" + output_tail(output)
+    return True, "session flags and cheats survive a save"
+
+
 def check_humans(args, binary: Path, save: Path, count: int) -> tuple[bool, str]:
-    """Play with extra humans: no crash, a clean round trip, the same hashes twice."""
+    """Play with extra humans: no crash, a clean round trip, the same hashes twice.
+
+    Before each round trip the probe gives every human, script and one event state that a
+    load without the per-human save block would lose; the round trip compares it field by
+    field (roundtrip humans=...), besides the state hash, which covers the block.
+    """
     options = [
         f"--sim-humans={count}", "--sim-roundtrip", f"--sim-turns={HUMAN_TURNS}", "--sim-hash",
-        f"--sim-seed={args.seed}",
+        f"--sim-seed={args.seed}", "--sim-session-probe",
     ]  # fmt: skip
     runs = []
     for _ in range(2):
@@ -186,6 +207,10 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     notes.append(note)
     if not passed_log:
         return False, notes
+
+    passed_session, note = check_session(args, binary, save)
+    notes.append(note)
+    passed = passed and passed_session
 
     for count in HUMAN_COUNTS:
         passed_humans, note = check_humans(args, binary, save, count)

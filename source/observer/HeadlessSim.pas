@@ -20,6 +20,11 @@ type
     ReloadAt: Integer;
     // The number of humans; the save's human is the first and the others join (0: as saved).
     Humans: Integer;
+    // Before each round trip, give the session, the humans, the scripts and an event state
+    // that a load without the per-human save block would lose (ProbeSession).
+    SessionProbe: Boolean;
+    // Print the per-human state at the end (DescribeHumans).
+    HumansDump: Boolean;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 implementation
@@ -34,10 +39,16 @@ uses
   aGalaxy,
   aGalaxyEvent,
   aGalaxyStruct,
+  aHold,
   aHuman,
   aPlanet,
   aPlayer,
+  aPlayerActions,
   aObjectRefs,
+  aRanger,
+  aScript,
+  aShip,
+  aShopStock,
   aSaveLoad,
   aSession,
   SaveTrace,
@@ -224,6 +235,190 @@ begin
   Event.Free;
 end;
 
+function TextHash(const Text: WideString): AnsiString;
+begin
+  Result := IntToHex(HashBytes(PByte(PWideChar(Text)), Length(Text) * SizeOf(WideChar)), 8);
+end;
+
+function ShipIdOf(Ship: TObject): Integer;
+begin
+  if Ship = nil then
+    Result := 0
+  else
+    Result := TShip(Ship).Id;
+end;
+
+// One line for the session flags, one per human with the state the save keeps for it, one
+// per script with the human it is bound to, and one per event that names a human. The local
+// human's automatic control, dialogue count, broken equipment and weapon panel are in no
+// save, only in checkpoints, so they are left out for that human.
+procedure DescribeHumans(Lines: TStrings);
+var
+  I, J: Integer;
+  Human: THuman;
+  Line, Part: AnsiString;
+  Message: TMessagePlayer;
+  OldQuest: PPlayerOldQuest;
+  Slot: TShopStockSlot;
+  Entry: TPlayerHoldUnit;
+  Event: TGalaxyEvent;
+begin
+  Lines.Add(
+      Format(
+          'session textquests-off=%d friendly-fire=%d',
+          [Ord(Session.TextQuestsDisabled), Ord(Session.FriendlyFireEnabled)]
+      )
+  );
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    Line := Format('human %d id=%d local=%d', [I, Human.Id, Ord(Human = LocalHuman)]);
+    if Human.PlayerStar <> nil then
+      Line := Line + Format(' star=%d', [Human.PlayerStar.Id])
+    else
+      Line := Line + ' star=0';
+    Line := Line + Format(
+        ' follow=%d tips=%d',
+        [ShipIdOf(Human.PendingPlayerFollowTarget), Human.ShownPlayerTips]
+    );
+    if Human <> LocalHuman then
+      Line := Line + Format(
+          ' auto=%d broken=%d dialogues=%d panel=%d',
+          [Ord(Human.PlayerAutomaticControl), Ord(Human.PlayerEquipmentBrokenThisTurn),
+              Human.PlayerDialogueRequestCount, Ord(Human.StarMapWeaponPanelOpen)]
+      );
+    Part := '';
+    for J := 0 to 8 do
+      Part := Part + IntToStr(Human.HangarShipIds[J]) + ',';
+    Line := Line + ' hangar=' + Part;
+    Part := '';
+    if Human.PlayerHoldEntries <> nil then
+      for J := 0 to Human.PlayerHoldEntries.Count - 1 do
+      begin
+        Entry := TPlayerHoldUnit(Human.PlayerHoldEntries[J]);
+        Part := Part + Format('%d:%d:%d,', [Ord(Entry.Kind), Entry.GoodsIndex, Entry.ItemId]);
+      end;
+    Line := Line + ' hold=' + Part;
+    Part := '';
+    Message := Human.FirstPersistentPlayerMessage;
+    while Message <> nil do
+    begin
+      // A load renews the local human's storage bubbles (TPlayer.RefreshStorageBubbles),
+      // which dates them to the loaded day.
+      if Human = LocalHuman then
+        Part := Part + Format('%s:%d:', [TextHash(Message.Key), Message.Kind])
+      else
+        Part := Part + Format('%s:%d:%d:', [TextHash(Message.Key), Message.Kind, Message.Turn]);
+      Part := Part + Format('%s:%d,', [TextHash(Message.Text), Ord(Message.WasRead)]);
+      Message := Message.Next;
+    end;
+    Line := Line + ' bubbles=' + Part;
+    Part := '';
+    if Human.PlayerOldQuests <> nil then
+      for J := 0 to Human.PlayerOldQuests.Count - 1 do
+      begin
+        OldQuest := PPlayerOldQuest(Human.PlayerOldQuests[J]);
+        if OldQuest.Planet <> nil then
+          Part := Part + IntToStr(OldQuest.Planet.Id);
+        Part := Part + Format(
+            ':%d:%d:%s:%d:%d,',
+            [Ord(OldQuest.QuestType), OldQuest.QuestNumber, TextHash(OldQuest.Description),
+                Ord(OldQuest.Successful), Ord(OldQuest.Declined)]
+        );
+      end;
+    Line := Line + ' quests=' + Part;
+    Part := '';
+    if Human.TemporaryShopSlots <> nil then
+    begin
+      if Human.TemporaryShopPlanet <> nil then
+        Part := Format('planet %d:', [Human.TemporaryShopPlanet.Id])
+      else if Human.TemporaryShopStation <> nil then
+        Part := Format('station %d:', [Human.TemporaryShopStation.Id]);
+      for J := 0 to Human.TemporaryShopSlots.Count - 1 do
+      begin
+        Slot := TShopStockSlot(Human.TemporaryShopSlots[J]);
+        Part := Part + Format('%d.%d', [Slot.GridPoint.X, Slot.GridPoint.Y]);
+        if Slot.Item <> nil then
+          Part := Part + Format('=%d/%d', [Slot.Item.Id, Ord(Slot.Item.ItemType)]);
+        Part := Part + ',';
+      end;
+    end;
+    Line := Line + ' shop=' + Part;
+    Part := IntToStr(Human.CheatPoints) + ':';
+    for J := 0 to High(Human.UsedCheats) do
+      Part := Part + UTF8Encode(Human.UsedCheats[J]) + ',';
+    Line := Line + ' cheats=' + Part;
+    Lines.Add(Line);
+  end;
+  for I := 0 to Galaxy.Scripts.Count - 1 do
+    Lines.Add(
+        Format(
+            'script %d %s human=%d',
+            [I, UTF8Encode(TScript(Galaxy.Scripts[I]).ScriptFileName),
+                TScript(Galaxy.Scripts[I]).HumanId]
+        )
+    );
+  for I := 0 to Galaxy.GalaxyEvents.Count - 1 do
+  begin
+    Event := TGalaxyEvent(Galaxy.GalaxyEvents[I]);
+    if Event.HumanId <> -1 then
+      Lines.Add(
+          Format('event %d %s human=%d', [I, UTF8Encode(Event.EventType), Event.HumanId])
+      );
+  end;
+end;
+
+// Gives the session, the humans, the scripts and an event state that a load without the
+// per-human save block would lose: the flags, set by command, a cheat for every human, the
+// other humans' THuman state with a shop for those who are landed, scripts bound to every
+// human in turn, and the last event bound to the last human.
+procedure ProbeSession;
+var
+  I: Integer;
+  Human: THuman;
+  OldQuest: PPlayerOldQuest;
+  Entry: TPlayerHoldUnit;
+begin
+  SetSessionFlagValue(SessionFlagTextQuestsDisabled, True);
+  SetSessionFlagValue(SessionFlagFriendlyFire, False);
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    Human.RecordCheat('Probe' + WideString(IntToStr(Human.Id)), I + 1);
+    if Human = LocalHuman then
+      Continue;
+    Human.PendingPlayerFollowTarget := LocalPlayer;
+    Human.PlayerAutomaticControl := True;
+    Human.PlayerEquipmentBrokenThisTurn := True;
+    Human.PlayerDialogueRequestCount := 3;
+    Human.ShownPlayerTips := Cardinal(Human.Id) xor $5A5A;
+    Human.StarMapWeaponPanelOpen := True;
+    Human.HangarShipIds[4] := Human.Id;
+    if Human.PlayerHoldEntries = nil then
+      InitializePlayerHoldView(Human);
+    Entry := TPlayerHoldUnit.Create;
+    Entry.Kind := phkGoods;
+    Entry.GoodsIndex := 2;
+    Human.PlayerHoldEntries.Add(Entry);
+    Human.AddOrUpdateBubble(0, Galaxy.CurrentTurn, 'Probe ' + WideString(IntToStr(I)), 'probe');
+    New(OldQuest);
+    OldQuest.Planet := Human.Player.CurrentPlanet;
+    OldQuest.QuestType := qtPlanetQuest;
+    OldQuest.QuestNumber := I;
+    OldQuest.Description := 'Probe';
+    OldQuest.Successful := True;
+    OldQuest.Declined := False;
+    Human.PlayerOldQuests.Add(OldQuest);
+    if Human.Player.CurrentPlanet <> nil then
+      BuildTemporaryShopSlotGrid(Human);
+  end;
+  for I := 0 to Galaxy.Scripts.Count - 1 do
+    TScript(Galaxy.Scripts[I]).HumanId := Session.Humans[I mod Session.Humans.Count].Id;
+  if Galaxy.GalaxyEvents.Count > 0 then
+    TGalaxyEvent(Galaxy.GalaxyEvents.Last).HumanId :=
+        Session.Humans[Session.Humans.Count - 1].Id;
+end;
+
 // Save, load that save, and compare the state before and after in hashable
 // form. A save made by the game can differ from its re-save, because loading
 // recomputes derived values such as the average ranger capital, so the
@@ -232,7 +427,11 @@ function CheckRoundTrip(const DumpDirectory: AnsiString; Seed: Cardinal): Boolea
 var
   Before, After, FirstState, FirstFilms, SecondState, SecondFilms: TBufEC;
   First, Second: AnsiString;
+  HumansBefore, HumansAfter: TStringList;
+  I: Integer;
 begin
+  HumansBefore := TStringList.Create;
+  HumansAfter := TStringList.Create;
   Before := nil;
   After := nil;
   FirstState := TBufEC.Create;
@@ -244,9 +443,12 @@ begin
   try
     Before := SerializeGalaxyState;
     SaveUnchanged(First);
+    // As saved: saving puts the local human's hold in order first.
+    DescribeHumans(HumansBefore);
     LoadSave(First, Seed);
     DropSaveLoadedEvent;
     After := SerializeGalaxyState;
+    DescribeHumans(HumansAfter);
     SaveUnchanged(Second);
     ReadSavePayloads(First, FirstState, FirstFilms);
     ReadSavePayloads(Second, SecondState, SecondFilms);
@@ -254,7 +456,26 @@ begin
     DumpBuffer(DumpDirectory, 'roundtrip-after.bin', After);
     Result := ComparePayload('galaxy', Before, After);
     Result := ComparePayload('films', FirstFilms, SecondFilms) and Result;
+    // The per-human state field by field: the state hash leaves out what only the screens
+    // use, and the local human's state that the save keeps outside the galaxy.
+    I := 0;
+    while (I < HumansBefore.Count) and (I < HumansAfter.Count)
+        and (HumansBefore[I] = HumansAfter[I]) do
+      Inc(I);
+    if (I = HumansBefore.Count) and (I = HumansAfter.Count) then
+      Emit(Format('roundtrip humans=ok lines=%d', [HumansBefore.Count]))
+    else
+    begin
+      Result := False;
+      Emit(Format('roundtrip humans=diff line=%d', [I]));
+      if I < HumansBefore.Count then
+        Emit('  expected ' + HumansBefore[I]);
+      if I < HumansAfter.Count then
+        Emit('  actual   ' + HumansAfter[I]);
+    end;
   finally
+    HumansBefore.Free;
+    HumansAfter.Free;
     DeleteFile(First);
     DeleteFile(Second);
     Before.Free;
@@ -310,6 +531,23 @@ begin
   Emit(Format('reloaded day=%d', [Galaxy.CurrentTurn]));
 end;
 
+procedure EmitHumans(const Options: TSimulationOptions);
+var
+  Lines: TStringList;
+  I: Integer;
+begin
+  if not Options.HumansDump then
+    Exit;
+  Lines := TStringList.Create;
+  try
+    DescribeHumans(Lines);
+    for I := 0 to Lines.Count - 1 do
+      Emit('state ' + Lines[I]);
+  finally
+    Lines.Free
+  end;
+end;
+
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 var
   Turn: Integer;
@@ -320,6 +558,8 @@ begin
   Emit(Format('sim save=%s seed=%d day=%d', [Options.SavePath, Options.Seed, Galaxy.CurrentTurn]));
   if Options.RoundTrip then
   begin
+    if Options.SessionProbe then
+      ProbeSession;
     if not CheckRoundTrip(Options.DumpDirectory, Options.Seed) then
       Result := 1;
     // Simulate from the save itself, not from its round-tripped copy.
@@ -330,7 +570,10 @@ begin
     end;
   end;
   if Options.Turns <= 0 then
+  begin
+    EmitHumans(Options);
     Exit;
+  end;
   ParkObserverPlayer;
   CurrentScreenId := screenPlanet;
   RequestedScreenId := screenNone;
@@ -346,8 +589,11 @@ begin
   end;
   // A game that has run turns holds script references made during play, which
   // a round trip from the save alone does not exercise.
+  if Options.RoundTrip and Options.SessionProbe then
+    ProbeSession;
   if Options.RoundTrip and not CheckRoundTrip(Options.DumpDirectory, Options.Seed) then
     Result := 1;
+  EmitHumans(Options);
   Emit(
       Format(
           'done turns=%d day=%d humans=%d',

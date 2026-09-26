@@ -193,6 +193,10 @@ begin
     // CHANGE: ENHANCEMENT - Add humans to test more than one (ROADMAP.md, Phase 4).
     else if Pos('--sim-humans=', Argument) = 1 then
       Simulation.Humans := StrToInt(Copy(Argument, 14, MaxInt))
+    else if Argument = '--sim-session-probe' then
+      Simulation.SessionProbe := True
+    else if Argument = '--sim-humans-dump' then
+      Simulation.HumansDump := True
     else if Pos('--sim-reload-at=', Argument) = 1 then
       Simulation.ReloadAt := StrToInt(Copy(Argument, 17, MaxInt))
     else if Pos('--sim-dump=', Argument) = 1 then

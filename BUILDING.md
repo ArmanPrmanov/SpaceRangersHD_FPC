@@ -164,6 +164,12 @@ hashes every turn, since hashing runs the save writer and must change nothing. T
 of address; `unresolved` counts references it could not name. `--sim-dump`
 writes each hashed state so two runs can be diffed.
 
+`--sim-humans=N` adds humans until there are N. The round trip also compares
+each human's state, the script bindings and the session flags field by field
+(`roundtrip humans=ok`). `--sim-session-probe` sets that state before each round trip,
+so that the per-human save block has something to carry, and `--sim-humans-dump`
+prints it at the end (`state ...` lines).
+
 `python tools/check_layers.py` fails when a unit under `source/game`, `source/core` or
 `source/script` uses a unit under `source/screens`, `source/ui` or `source/arcade`
 (minigames), or a root global (`Globals`, `GlobalsV`, `GR_Main`) that
