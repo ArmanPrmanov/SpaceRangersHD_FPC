@@ -141,6 +141,11 @@ function StarHasHuman(Star: TStar; Excluded: TObject = nil): Boolean;
 function StarHasHumanInSpace(Star: TStar): Boolean;
 // Whether some human's ranger still has hull points. The day stops when none does.
 function HasLivingHuman: Boolean;
+// Whether Station is some human's ruins proxy: the station a human's ranger docks at to
+// reach its storage, which is not a station of the galaxy. It asks every TPlayer in
+// Galaxy.Rangers, not Session.Humans, because a joining human creates its proxy before it is
+// added to the list.
+function IsRuinsProxy(Station: TObject): Boolean;
 // Whether Star is some human's PlayerStar. Those stars run their day in the player-star
 // job, each with a film, and the galaxy job leaves them out (ROADMAP.md, Phase 4).
 function IsFilmedStar(Star: TStar): Boolean;
@@ -237,6 +242,21 @@ begin
     if (Player <> nil) and (Player.GetHull.HullPoints > 0) then
       Exit(True);
   end;
+  Result := False;
+end;
+
+function IsRuinsProxy(Station: TObject): Boolean;
+var
+  I: Integer;
+  Ranger: TObject;
+begin
+  if (Station <> nil) and (Galaxy <> nil) and (Galaxy.Rangers <> nil) then
+    for I := 0 to Galaxy.Rangers.Count - 1 do
+    begin
+      Ranger := TObject(Galaxy.Rangers[I]);
+      if (Ranger is TPlayer) and (TPlayer(Ranger).RuinsProxy = Station) then
+        Exit(True);
+    end;
   Result := False;
 end;
 

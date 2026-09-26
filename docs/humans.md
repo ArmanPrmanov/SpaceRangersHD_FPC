@@ -36,6 +36,7 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
 | `FilmHuman(Star)` | the human whose view the star's shared film follows (radar range, film path, camera): the local human when it is in the star, else the first human there; nil when none is |
 | `HasLivingHuman` | whether some human's ranger still has hull points; the day stops when none does |
 | `FindHuman(Id)` | the human with that id, or nil |
+| `IsRuinsProxy(Station)` | whether a station is some human's ruins proxy, the storage station that is not part of the galaxy |
 | `Human.AddOrUpdateBubble(...)` etc. | that human's message bubbles; the `Globals` functions of the old names are the local human's |
 | `JoinHuman(Planet, Name, Preset)` | adds a human landed at a planet |
 

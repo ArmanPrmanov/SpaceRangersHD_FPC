@@ -163,10 +163,13 @@ type
     procedure RepairShipEquipment(Ship: TShip);
     function GetNodeSaleBatchSize: Integer;
     function FindPirateBaseWithNodes: TRuins;
+    // CHANGE: CLEANUP - Asker is the human's ranger the chain is offered to; its random state
+    // picks the rare offers. Native used the one player's.
     function SelectServiceMicroModule(
         Kind: Integer;
         Index: Integer;
-        InvertRarity: Boolean
+        InvertRarity: Boolean;
+        Asker: TShip
     ): Integer;
   end;
 const
@@ -306,7 +309,7 @@ begin
     SatelliteOffer.Free;
     SatelliteOffer := nil;
   end;
-  if not Galaxy.Destroying and (GetPlayer <> nil) and (GetPlayer.RuinsProxy <> Self) then
+  if not Galaxy.Destroying and (Session.Humans.Count > 0) and not IsRuinsProxy(Self) then
   begin
     Event := AddGalaxyEvent('RuinsDestroyed');
     Event.AddData(TypeId);
@@ -333,6 +336,7 @@ var
   Weapon: TWeapon;
   Hook: TCargoHook;
   EquipmentOwner: Byte;
+  HumanNear: Boolean;
   procedure SelectStationName(
       Config: TBlockParEC
   ); // @addr $714148 @ida "void __usercall $name(TBlockParEC *Config@<eax>, void *ParentFrame@<^0>);" @stackpop 0 @calls "0x714525,0x714554"
@@ -395,7 +399,15 @@ begin
   CurrentStar.Ships.Add(Self);
   HomePlanet := nil;
   CurrentPlanet := nil;
-  if (Galaxy.CurrentTurn < 300) and (GetPlayer.CurrentStar.Constellation = Star.Constellation) then
+  // CHANGE: CLEANUP - Early stations in the constellation of some human's ranger take the
+  // first race. Native asked this of the one player.
+  HumanNear := False;
+  if Galaxy.CurrentTurn < 300 then
+    for I := 0 to Session.Humans.Count - 1 do
+      if (Session.Humans[I].Player <> nil)
+          and (Session.Humans[I].Player.CurrentStar.Constellation = Star.Constellation) then
+        HumanNear := True;
+  if HumanNear then
     PilotRace := StationPilotRaces[TypeId, 0]
   else if NextRandomUnitFloat(RandomState) < 0.5 then
     PilotRace := StationPilotRaces[TypeId, 0]
@@ -421,7 +433,7 @@ begin
   end;
   GenerateCombatSkills;
   RefreshCurrentStanding;
-  if (GetPlayer <> nil) and (GetPlayer.RuinsProxy <> Self) then
+  if (Session.Humans.Count > 0) and not IsRuinsProxy(Self) then
   begin
     Event := AddGalaxyEvent('RuinsCreated');
     Event.AddData(Ord(StationType));
@@ -666,7 +678,7 @@ begin
       Item.SaveToBlock(ShopBlock.AddBlockByPath(Text));
     end;
   end
-  else if (GetPlayer.DockedTo = Self) and (LocalHuman.TemporaryShopSlots <> nil) then
+  else if (LocalPlayer.DockedTo = Self) and (LocalHuman.TemporaryShopSlots <> nil) then
     for I := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
     begin
       Slot := TShopStockSlot(LocalHuman.TemporaryShopSlots[I]);
@@ -678,12 +690,14 @@ begin
       end;
     end;
   ShopBlock.AddParam('AddItem', '');
+  // HUMANS: per-human save block (item 5). The editable save block holds the local human's
+  // shop and storage, as it holds the local player.
   with Block.AddBlockByPath('Storage') do
   begin
-    for I := 0 to GetPlayer.StorageEntries.Count - 1 do
-      if PStorageEntry(GetPlayer.StorageEntries[I]).LocationOwner = Self then
+    for I := 0 to LocalPlayer.StorageEntries.Count - 1 do
+      if PStorageEntry(LocalPlayer.StorageEntries[I]).LocationOwner = Self then
       begin
-        Item := PStorageEntry(GetPlayer.StorageEntries[I]).Item;
+        Item := PStorageEntry(LocalPlayer.StorageEntries[I]).Item;
         Text := 'ItemId' + IntToStr(Int64(Cardinal(Item.Id)));
         Item.SaveToBlock(AddBlockByPath(Text));
       end;
@@ -723,7 +737,7 @@ begin
       Item.LoadFromBlock(ShopBlock.GetBlockByPath(Text));
     end;
   end
-  else if (GetPlayer.DockedTo = Self) and (LocalHuman.TemporaryShopSlots <> nil) then
+  else if (LocalPlayer.DockedTo = Self) and (LocalHuman.TemporaryShopSlots <> nil) then
     for I := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
     begin
       Slot := TShopStockSlot(LocalHuman.TemporaryShopSlots[I]);
@@ -759,12 +773,14 @@ begin
         Break;
       end;
   end;
+  // HUMANS: per-human save block (item 5). The editable save block holds the local human's
+  // shop and storage, as it holds the local player.
   with Block.GetBlockByPath('Storage') do
   begin
-    for I := 0 to GetPlayer.StorageEntries.Count - 1 do
-      if PStorageEntry(GetPlayer.StorageEntries[I]).LocationOwner = Self then
+    for I := 0 to LocalPlayer.StorageEntries.Count - 1 do
+      if PStorageEntry(LocalPlayer.StorageEntries[I]).LocationOwner = Self then
       begin
-        Item := PStorageEntry(GetPlayer.StorageEntries[I]).Item;
+        Item := PStorageEntry(LocalPlayer.StorageEntries[I]).Item;
         Text := 'ItemId' + IntToStr(Int64(Cardinal(Item.Id)));
         Item.LoadFromBlock(GetBlockByPath(Text));
       end;
@@ -782,10 +798,10 @@ begin
             begin
               New(Entry);
               Entry.LocationOwner := Self;
-              Entry.SlotIndex := GetPlayer.FindNextStorageSlot(Self);
+              Entry.SlotIndex := LocalPlayer.FindNextStorageSlot(Self);
               Entry.Item := Item;
-              GetPlayer.StorageEntries.Add(Entry);
-              GetPlayer.RefreshStorageBubbles;
+              LocalPlayer.StorageEntries.Add(Entry);
+              LocalPlayer.RefreshStorageBubbles;
             end;
           end;
           Break;
@@ -900,6 +916,8 @@ begin
         if Galaxy.HasUnresolvedDominatorSeries([dsBlazer, dsKeller, dsTerron])
             and (Galaxy.CurrentTurn mod 60 = 0)
             and (DaysSincePlayerSeen > 30)
+            // HUMANS: The reserve's cap follows the one player's experience. Whose, when there
+            // are several humans: the most experienced, or the one who visits?
             and (NodeReserve < Max(500, GetPlayer.TotalExperience div 10))
             and (NodeReserve
                 < 200
@@ -1190,6 +1208,8 @@ begin
           );
     until (Attempts > 20)
         or (CountEquipmentShopItems(Kind) < TQuotas(StationEquipmentOfferQuotas[TypeId])[Kind]);
+    // HUMANS: The shared stock is generated for the one player's ship (its slots and hull).
+    // For whose ship, when there are several humans?
     Item := GenerateEquipmentOffer(GetPlayer, Planet, Kind);
     if Item <> nil then
     begin
@@ -1524,7 +1544,7 @@ begin
     Weapon := Weapons[I];
     Weapon.Target := nil;
   end;
-  if (GetPlayer.CurrentStar = CurrentStar)
+  if StarHasHuman(CurrentStar)
       or (NextRandomUnitFloat(RandomState) > 0.7)
       or Galaxy.IsFullStationTargetingEnabled
       or (CurrentStar.ControlFaction = sfDominators)
@@ -1574,8 +1594,7 @@ begin
       end;
   end;
   if (CurrentStar.Items.Count < 10)
-      and (GetPlayer.CurrentStar = CurrentStar)
-      and GetPlayer.InNormalSpace then
+      and StarHasHumanInSpace(CurrentStar) then
     for I := 0 to CurrentStar.Asteroids.Count - 1 do
     begin
       Asteroid := TAsteroid(CurrentStar.Asteroids[I]);
@@ -1668,6 +1687,8 @@ end;
 procedure TRuins.TryAbductDepartingShip(Ship: TShip);
 var
   Candidate: TNormalShip;
+  Defended: Boolean;
+  I: Integer;
 begin
   if CurrentStar.Dominion <> Self then
     Exit;
@@ -1694,11 +1715,16 @@ begin
     Exit;
   if Candidate.CurrentStanding in [ssPiratePassive..ssPirateMilitary] then
     Exit;
-  if (GetPlayer <> nil)
-      and (GetPlayer.QuestTargetDefendShip = Candidate)
-      and (NextRandomIntRange(1, 100, RandomState) > 70) then
+  // CHANGE: CLEANUP - A ship some human defends for a quest is spared by the same one draw.
+  // Native asked this of the one player.
+  Defended := False;
+  for I := 0 to Session.Humans.Count - 1 do
+    if (Session.Humans[I].Player <> nil)
+        and (Session.Humans[I].Player.QuestTargetDefendShip = Candidate) then
+      Defended := True;
+  if Defended and (NextRandomIntRange(1, 100, RandomState) > 70) then
     Exit;
-  if GetPlayer = Candidate then
+  if IsHuman(Candidate) then
   begin
     if Galaxy.CurrentTurn
         < 200 / GalaxyDifficultyTuning[Galaxy.DifficultyLevels[7]].GoodsEventDurationFactor
@@ -1985,7 +2011,7 @@ end;
 function TRuins.RelationToRanger(Ranger: Pointer): Byte;
 begin
   Result := Byte(RangerRelations[Galaxy.Rangers.IndexOf(TObject(Ranger) as TRanger)]);
-  if not NoLanding or (GetPlayer <> Ranger) then
+  if not NoLanding or not IsHuman(Ranger) then
     Result := Max(50, Result);
 end;
 
@@ -2466,7 +2492,7 @@ begin
         if Buyer.CanGenerateSpecialHullModule then
           ModuleIndex := SelectHullOfferSpecialMicroModule(Result, Planet);
         if (Buyer.GetHull.SpecialModuleIndex > 0)
-            and (GetPlayer <> Buyer)
+            and not IsHuman(Buyer)
             and (ModuleIndex < 0) then
           ModuleIndex := Buyer.GetHull.SpecialModuleIndex - 1;
         if ModuleIndex >= 0 then
@@ -2510,7 +2536,7 @@ begin
     Flagship := (Buyer is TWarrior) and ((Buyer as TWarrior).WarriorType = wtFlagship);
     if Flagship then
       HullType := htFlagship;
-    if (GetPlayer = Buyer)
+    if IsHuman(Buyer)
         or (Buyer.GetHull.HullType = htSpecial)
         or (Buyer.GetHull.HullType = HullType) then
     begin
@@ -2584,7 +2610,7 @@ begin
         end;
       end;
       Owner := PickRandomEquipmentOwner(RandomState);
-      if (Buyer.GetHull.OwnerId = Owner) or (GetPlayer = Buyer) then
+      if (Buyer.GetHull.OwnerId = Owner) or IsHuman(Buyer) then
       begin
         Result := THull.Create;
         Series := -1;
@@ -2622,7 +2648,7 @@ begin
               Result.PirateBuilt
           );
         if (Buyer.GetHull.SpecialModuleIndex > 0)
-            and (GetPlayer <> Buyer)
+            and not IsHuman(Buyer)
             and (ModuleIndex < 0) then
           ModuleIndex := Buyer.GetHull.SpecialModuleIndex - 1;
         if ModuleIndex >= 0 then
@@ -2732,7 +2758,7 @@ begin
   begin
     if not (ItemType in [Ord(t_FuelTanks), Ord(t_Engine)])
         and (Buyer.GetSlotCountForItemType(ItemType) = 0)
-        and (GetPlayer <> Buyer) then
+        and not IsHuman(Buyer) then
       Exit;
     MinLevel := 1;
     MaxLevel := Planet.InventionLevels[EquipmentInventionIndices[ItemType]];
@@ -2950,7 +2976,9 @@ begin
   EquipmentFactor := 1;
   // Keep the native byte load followed by signed extension under DCC32 O-.
   if TypeId = Byte(rstMilitaryBase) then
-    EquipmentFactor := RemapClamped(ShortInt(GetPlayer.Rank * 1), 0, 7, 0.9, 0.2);
+    // CHANGE: CLEANUP - Ship's rank: only humans repair at stations (their commands and
+    // screens pass their ranger). Native used the one player's.
+    EquipmentFactor := RemapClamped(ShortInt(TPlayer(Ship).Rank * 1), 0, 7, 0.9, 0.2);
   if TypeId = Byte(rstPirateBase) then
     EquipmentFactor := 0.84;
   for I := 0 to Ship.Inventory.Count - 1 do
@@ -3051,13 +3079,17 @@ begin
   Result := nil;
 end;
 
-function TRuins.SelectServiceMicroModule(Kind, Index: Integer; InvertRarity: Boolean): Integer;
+function TRuins.SelectServiceMicroModule(
+    Kind, Index: Integer;
+    InvertRarity: Boolean;
+    Asker: TShip
+): Integer;
 var
   ChainIndex: Integer;
   Rare: Boolean;
 begin
   ChainIndex := Index + 2;
-  Rare := ((Cardinal(Galaxy.CurrentTurn) + GetPlayer.RandomState) mod 33 = 0) <> InvertRarity;
+  Rare := ((Cardinal(Galaxy.CurrentTurn) + Asker.RandomState) mod 33 = 0) <> InvertRarity;
   case Kind of
     2:
       if Rare then

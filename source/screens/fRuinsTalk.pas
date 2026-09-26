@@ -3453,7 +3453,7 @@ begin
   for I := 0 to 50 do
   begin
     NodeExchangeLowPriorityModule :=
-        TRuins(LocalPlayer.DockedTo).SelectServiceMicroModule(2, I, False);
+        TRuins(LocalPlayer.DockedTo).SelectServiceMicroModule(2, I, False, LocalPlayer);
     if LocalPlayer.NeedsMicroModule(NodeExchangeLowPriorityModule + 1) then
       Break;
   end;
@@ -3492,7 +3492,7 @@ begin
   for I := 0 to 50 do
   begin
     NodeExchangeMediumPriorityModule :=
-        TRuins(LocalPlayer.DockedTo).SelectServiceMicroModule(1, I, False);
+        TRuins(LocalPlayer.DockedTo).SelectServiceMicroModule(1, I, False, LocalPlayer);
     if LocalPlayer.NeedsMicroModule(NodeExchangeMediumPriorityModule + 1) then
       Break;
   end;
@@ -3539,7 +3539,7 @@ begin
   for I := 0 to 50 do
   begin
     NodeExchangeHighPriorityModule :=
-        TRuins(LocalPlayer.DockedTo).SelectServiceMicroModule(0, I, False);
+        TRuins(LocalPlayer.DockedTo).SelectServiceMicroModule(0, I, False, LocalPlayer);
     if LocalPlayer.NeedsMicroModule(NodeExchangeHighPriorityModule + 1) then
       Break;
   end;

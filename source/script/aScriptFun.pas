@@ -12969,6 +12969,7 @@ var
   Station: TRuins;
   Kind, Index: Integer;
   InvertRarity: Boolean;
+  Player: TPlayer;
 begin
   if High(av) < 2 then
     raise Exception.Create('Error.Script RuinsMicromoduleChain');
@@ -12977,12 +12978,13 @@ begin
     raise Exception.Create('Error.Script RuinsMicromoduleChain - not a ruins');
   Station := TRuins(Obj);
   Kind := av[2].GetInt;
+  Player := GetPlayer;
   if High(av) = 2 then
   begin
     for Index := 0 to 50 do
     begin
-      av[0].SetInt(Station.SelectServiceMicroModule(Kind, Index, False));
-      if GetPlayer.NeedsMicroModule(av[0].GetInt + 1) then
+      av[0].SetInt(Station.SelectServiceMicroModule(Kind, Index, False, Player));
+      if Player.NeedsMicroModule(av[0].GetInt + 1) then
         Break;
     end;
   end
@@ -12993,7 +12995,7 @@ begin
       InvertRarity := av[4].GetInt <> 0
     else
       InvertRarity := False;
-    av[0].SetInt(Station.SelectServiceMicroModule(Kind, Index, InvertRarity));
+    av[0].SetInt(Station.SelectServiceMicroModule(Kind, Index, InvertRarity, Player));
   end;
 end;
 procedure SF_DomikKilledInCurSystem(av: array of TVarEC; code: TCodeEC);
