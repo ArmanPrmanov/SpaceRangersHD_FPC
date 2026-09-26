@@ -3653,6 +3653,13 @@ var
 begin
   if High(av) <> 2 then
     raise Exception.Create('Error.Script ItemInStar');
+  // CHANGE: BUGFIX - A stale reference (see TVarEC.StaleReference) names no item or
+  // place; reading it would read whatever memory now lies at that address.
+  if av[1].StaleReference or av[2].StaleReference then
+  begin
+    av[0].SetInt(0);
+    Exit;
+  end;
   Obj := TObject(av[1].GetDword);
   if Obj is TScriptItem then
     Item := TScriptItem(Obj).Item

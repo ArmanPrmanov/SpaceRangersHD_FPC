@@ -16,12 +16,16 @@ procedure CollectObjectIdentities;
 // loaded copy, and leaves them indexed.
 procedure ListIdentifiedObjects(List: TList);
 // The key of the object at Value, '' for a plain number, or 'unresolved' for a
-// large value that names no collected object (counted in UnresolvedObjectCount).
-function ObjectIdentity(Value: PtrUInt): WideString;
+// large value that names no collected object or is stale (counted in
+// UnresolvedObjectCount).
+function ObjectIdentity(Value: PtrUInt; Stale: Boolean): WideString;
 // Called around TGalaxy.SaveToBuffer and TGalaxy.LoadFromBuffer.
 procedure BeginObjectReferenceSave;
 procedure EndObjectReferenceSave(Buffer: TBufEC);
 procedure ResolveLoadedObjectReferences(Buffer: TBufEC);
+// Marks every script variable that holds Instance's address stale (see
+// TVarEC.StaleReference). Called when Instance is freed.
+procedure MarkScriptReferencesStale(Instance: TObject);
 // The galaxy as TGalaxy.SaveToBuffer writes it, with objects named by key instead of
 // address, and its hash. The buffer can be hashed or compared, never loaded. Safe to call
 // from the UI and the turn thread; the calls take turns.
@@ -272,11 +276,16 @@ begin
   Result := -1;
 end;
 
-function ObjectIdentity(Value: PtrUInt): WideString;
+function ObjectIdentity(Value: PtrUInt; Stale: Boolean): WideString;
 var
   Index: Integer;
 begin
-  Index := FindIdentity(Value);
+  // CHANGE: BUGFIX - A stale value names no object, even when a new object now
+  // happens to live at that address.
+  if Stale then
+    Index := -1
+  else
+    Index := FindIdentity(Value);
   if Index >= 0 then
     Exit(Identities[Index].Key);
   // A large value that names no known object is a number or a stale address
@@ -290,14 +299,17 @@ end;
 // Records one saved script dword. The save keeps only the low 32 bits, so a
 // value whose truncation matches another saved value with a different meaning
 // is marked ambiguous and left unresolved on load.
-procedure RecordSavedReference(Value: PtrUInt);
+procedure RecordSavedReference(Value: PtrUInt; Stale: Boolean);
 var
   I, Index: Integer;
   Key: WideString;
 begin
   if Value < MinimumObjectAddress then
     Exit;
-  Index := FindIdentity(Value);
+  if Stale then
+    Index := -1
+  else
+    Index := FindIdentity(Value);
   if Index >= 0 then
     Key := Identities[Index].Key
   else
@@ -393,6 +405,7 @@ begin
         if Instance <> nil then
         begin
           Cell.DwordValue := PtrUInt(Instance);
+          Cell.StaleReference := False;
           Inc(Resolved);
         end;
         Exit;
@@ -502,6 +515,48 @@ begin
     end;
   finally
     Resolver.Free;
+  end;
+end;
+
+// CHANGE: BUGFIX - Scripts keep objects in variables after the objects are freed
+// (PC_fem_rangers keeps quest_item after the item is destroyed). An object
+// allocated later at the same address would take its place: in ItemIn and in the
+// state hash, so the game depended on heap addresses.
+procedure MarkStaleCells(Variables: TVarArrayEC; Value: PtrUInt; Depth: Integer);
+var
+  I: Integer;
+  Cell: TVarEC;
+begin
+  if (Variables = nil) or (Depth > 8) then
+    Exit;
+  for I := 0 to Variables.Count - 1 do
+  begin
+    Cell := Variables.GetItemNE(I);
+    if Cell = nil then
+      Continue;
+    if Cell.Kind = vkArray then
+      MarkStaleCells(Cell.ArrayValue, Value, Depth + 1)
+    else if ((Cell.Kind = vkDword) and (Cell.DwordValue = Value))
+        or ((Cell.Kind = vkInt) and (PtrUInt(Cell.IntValue) = Value)) then
+      Cell.StaleReference := True;
+  end;
+end;
+
+procedure MarkScriptReferencesStale(Instance: TObject);
+var
+  I: Integer;
+  Script: TScript;
+begin
+  if (Galaxy = nil) or Galaxy.Destroying or (Galaxy.Scripts = nil) then
+    Exit;
+  MarkStaleCells(Session.SharedScriptVariables, PtrUInt(Instance), 0);
+  for I := 0 to Galaxy.Scripts.Count - 1 do
+  begin
+    Script := TScript(Galaxy.Scripts[I]);
+    if Script.InitCode <> nil then
+      MarkStaleCells(Script.InitCode.LocalVar, PtrUInt(Instance), 0);
+    if Script.TurnCode <> nil then
+      MarkStaleCells(Script.TurnCode.LocalVar, PtrUInt(Instance), 0);
   end;
 end;
 

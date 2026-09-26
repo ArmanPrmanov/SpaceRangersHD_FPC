@@ -689,6 +689,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   SaveTrace,
+  aObjectRefs,
   aSession,
   SimEvents,
   aHuman,
@@ -745,6 +746,8 @@ begin
   if (Galaxy <> nil) and not Galaxy.Destroying and (GetPlayer <> nil) and (ScriptItem <> nil) then
     TScriptItem(ScriptItem).RunActionCode(satOnItemDestroy, nil, nil, nil, 0);
   Id := 0;
+  // CHANGE: BUGFIX - Scripts must not see a later object at this address as this item.
+  MarkScriptReferencesStale(Self);
   if ScriptItem <> nil then
   begin
     (ScriptItem as TScriptItem).Item := nil;

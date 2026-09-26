@@ -171,6 +171,12 @@ type
     ClassValue: TCodeEC;
     ArrayValue: TVarArrayEC;
     RefValue: TVarEC;
+    // CHANGE: BUGFIX - Set when the value is an address that names no live object:
+    // a large dword read from a save (from the saving process, or a large number)
+    // or the address of a freed object (aObjectRefs.MarkScriptReferencesStale). A
+    // later object can get the same address, so it must never be taken for it.
+    // Any new value clears it; copying the value copies it.
+    StaleReference: Boolean;
     constructor Create(InitialKind: TVarKind);
     destructor Destroy; override;
     procedure ConvertToKind(NewKind: TVarKind);
@@ -558,9 +564,9 @@ procedure InvokeNativeScriptFunction(Cell: TVarEC; av: array of TVarEC; Code: TC
 
 // Optional host snapshot encoding; nil preserves the ordinary save format.
 var
-  SnapshotObjectIdentity: function(Value: PtrUInt): WideString;
+  SnapshotObjectIdentity: function(Value: PtrUInt; Stale: Boolean): WideString;
   // CHANGE: BUGFIX - Sees every saved dword so the save can name object addresses by id.
-  SavedObjectReference: procedure(Value: PtrUInt);
+  SavedObjectReference: procedure(Value: PtrUInt; Stale: Boolean);
 implementation
 uses
   EC_Str,
@@ -1220,6 +1226,7 @@ end;
 
 procedure TVarEC.ConvertToKind(NewKind: TVarKind);
 begin
+  StaleReference := False;
   if FunctionValue <> nil then
   begin
     FunctionValue.Free;
@@ -1416,6 +1423,7 @@ end;
 
 procedure TVarEC.ResetKind(NewKind: TVarKind);
 begin
+  StaleReference := False;
   if FunctionValue <> nil then
   begin
     FunctionValue.Free;
@@ -1468,6 +1476,7 @@ begin
   Kind := Source.Kind;
   IntValue := Source.IntValue;
   DwordValue := Source.DwordValue;
+  StaleReference := Source.StaleReference;
   FloatValue := Source.FloatValue;
   StringValue := Source.StringValue;
   ExternFunValue := Source.ExternFunValue;
@@ -1780,6 +1789,7 @@ end;
 
 procedure TVarEC.SetInt(Value: Integer);
 begin
+  StaleReference := False;
   if Kind = vkEmpty then
   begin
     ResetKind(vkInt);
@@ -1815,6 +1825,7 @@ end;
 
 procedure TVarEC.SetDword(Value: PtrUInt);
 begin
+  StaleReference := False;
   if Kind = vkEmpty then
   begin
     ResetKind(vkDword);
@@ -1859,6 +1870,7 @@ end;
 
 procedure TVarEC.SetFloat(Value: Double);
 begin
+  StaleReference := False;
   if Kind = vkEmpty then
   begin
     ResetKind(vkFloat);
@@ -1894,6 +1906,7 @@ end;
 
 procedure TVarEC.SetString(const Value: WideString);
 begin
+  StaleReference := False;
   if Kind = vkEmpty then
   begin
     ResetKind(vkString);
@@ -1929,6 +1942,7 @@ end;
 
 procedure TVarEC.SetExternFun(Value: Pointer);
 begin
+  StaleReference := False;
   if Kind = vkEmpty then
   begin
     ResetKind(vkExternFun);
@@ -1964,6 +1978,7 @@ end;
 
 procedure TVarEC.SetFunction(Value: TCodeEC);
 begin
+  StaleReference := False;
   if Kind = vkEmpty then
   begin
   end
@@ -1997,6 +2012,7 @@ end;
 
 procedure TVarEC.SetClass(Value: TCodeEC);
 begin
+  StaleReference := False;
   if Kind = vkEmpty then
   begin
     ResetKind(vkClass);
@@ -2032,6 +2048,7 @@ end;
 
 procedure TVarEC.SetArray(Value: TVarArrayEC);
 begin
+  StaleReference := False;
   if Kind = vkEmpty then
   begin
     ResetKind(vkArray);
@@ -2067,6 +2084,7 @@ end;
 
 procedure TVarEC.SetRef(Value: TVarEC);
 begin
+  StaleReference := False;
   if Kind = vkEmpty then
   begin
     ResetKind(vkRef);
@@ -2773,6 +2791,9 @@ begin
   end
   else
     raise ExceptionExpressionEC.Create('OAssume');
+  // CHANGE: BUGFIX - A copied stale reference stays stale.
+  if (Dest.Kind in [vkInt, vkDword]) and (Source.Resolve <> nil) then
+    Dest.StaleReference := Source.Resolve.StaleReference;
 end;
 
 function TVarEC.EqualsValue(Other: TVarEC): Boolean;
@@ -2849,10 +2870,10 @@ var
   ObjectKey: WideString;
 begin
   if (Kind = vkDword) and Assigned(SavedObjectReference) then
-    SavedObjectReference(DwordValue);
+    SavedObjectReference(DwordValue, StaleReference);
   if (Kind = vkDword) and Assigned(SnapshotObjectIdentity) then
   begin
-    ObjectKey := SnapshotObjectIdentity(DwordValue);
+    ObjectKey := SnapshotObjectIdentity(DwordValue, StaleReference);
     if ObjectKey <> '' then
     begin
       Buffer.AddWideStringZ(Name);
@@ -2917,6 +2938,10 @@ begin
   else if Kind = vkDword then
   begin
     DwordValue := Buffer.GetUInt32;
+    // CHANGE: BUGFIX - A saved address belongs to the process that saved it. The
+    // load's object reference table (aObjectRefs) or a new value clears this.
+    // $10000 is aObjectRefs.MinimumObjectAddress.
+    StaleReference := DwordValue >= $10000;
   end
   else if Kind = vkFloat then
   begin

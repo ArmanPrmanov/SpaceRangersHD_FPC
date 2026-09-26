@@ -4207,6 +4207,15 @@ begin
     Buffer.AddWideStringZ(EtherIds.GetTextAt(I));
 end;
 
+// CHANGE: BUGFIX - A saved address belongs to the process that saved it; mark it
+// stale (TVarEC.StaleReference) until the load names its object or a script sets it.
+procedure LoadSavedDword(Cell: TVarEC; Value: Cardinal);
+begin
+  Cell.SetDword(Value);
+  if Cell.Resolve <> nil then
+    Cell.Resolve.StaleReference := Value >= $10000;
+end;
+
 procedure TScript.LoadState(Buffer: TBufEC; Galaxy: TGalaxy);
 var
   I, J, K, Count, SubCount, StateIndex: Integer;
@@ -4269,7 +4278,7 @@ begin
     else if Kind = vkInt then
       Cell.SetInt(Buffer.GetInt32)
     else if Kind = vkDword then
-      Cell.SetDword(Buffer.GetUInt32)
+      LoadSavedDword(Cell, Buffer.GetUInt32)
     else if Kind = vkFloat then
       Cell.SetFloat(Buffer.GetDouble)
     else if Kind = vkString then
@@ -4332,7 +4341,7 @@ begin
     else if Kind = vkInt then
       Cell.SetInt(Buffer.GetInt32)
     else if Kind = vkDword then
-      Cell.SetDword(Buffer.GetUInt32)
+      LoadSavedDword(Cell, Buffer.GetUInt32)
     else if Kind = vkFloat then
       Cell.SetFloat(Buffer.GetDouble)
     else if Kind = vkString then
