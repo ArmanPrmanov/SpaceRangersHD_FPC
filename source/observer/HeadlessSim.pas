@@ -28,6 +28,8 @@ type
     // Destroy the local human's ranger and the last human's before this turn and report how
     // they respawn (KillHumans; 0: never).
     KillHumansAt: Integer;
+    // Two humans in one star fight, with friendly fire on and then off (RunPvp).
+    Pvp: Boolean;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 implementation
@@ -58,6 +60,9 @@ uses
   aSession,
   SaveTrace,
   ThreadCalc,
+  aMissile,
+  WorkerErrors,
+  ObserverHooks,
   ObserverSimulation;
 
 var
@@ -638,6 +643,233 @@ begin
   end;
 end;
 
+var
+  // The two humans of RunPvp, and what the attacker's hits on the target did.
+  PvpAttacker, PvpTarget: TPlayer;
+  PvpHits, PvpDamage: Integer;
+
+// Counts the weapon and missile hits of PvpAttacker on PvpTarget (ObserverHit).
+procedure RecordPvpHit(
+    Star, Source, Target, Weapon: TObject;
+    Damage: Integer;
+    Color: Cardinal;
+    Kind: Integer
+);
+begin
+  if Source is TMissile then
+    Source := TMissile(Source).OwnerShip;
+  if (Kind in [0, 1]) and (Source = PvpAttacker) and (Target = PvpTarget) then
+  begin
+    Inc(PvpHits);
+    if Damage > 0 then
+      Inc(PvpDamage, Damage);
+  end;
+end;
+
+// A human's command, as that human's machine would send it.
+procedure SubmitAs(Player: TPlayer; var Command: TPlayerCommand);
+begin
+  Command.Actor := Cardinal(Player.Id);
+  SubmitCommand(Command);
+end;
+
+// The weapons of Attacker aimed at Target.
+function CountWeaponsAt(Attacker, Target: TShip): Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 1 to Attacker.WeaponCount do
+    if TObject(Attacker.Weapons[I].Target) = Target then
+      Inc(Result);
+end;
+
+// One day in space, as the star map's end turn runs it for the local human.
+procedure SimulateSpaceDay;
+begin
+  ApplyPendingOrders;
+  BeginSpaceDay;
+  StartPlayerStarTurnCalculation;
+  WaitForTurnCalculation;
+  RaisePendingWorkerError;
+  if (LocalPlayer <> nil) and not LocalPlayer.InHyperspace then
+  begin
+    StartGalaxyTurnCalculation;
+    WaitForTurnCalculation;
+    RaisePendingWorkerError;
+  end;
+end;
+
+// Humans as targets (ROADMAP.md, Phase 4, item 8). The local human (the attacker) and a
+// second human, who joins at a planet in its star, take off, and the attacker orders an auto
+// battle on the other. With friendly fire on, its hits must do damage. Then friendly fire goes
+// off by command: the attack order must be gone at once, new attack orders refused, and neither
+// the attacker's weapons (aimed by hand every day, as a target left from before would be) nor a
+// direct hit may do damage. The other humans, up to Options.Humans, join elsewhere.
+function RunPvp(const Options: TSimulationOptions): Integer;
+const
+  MaximumDays = 12;
+  OffDays = 3;
+var
+  Planet: TPlanet;
+  Star: TStar;
+  I, Day, Direct, InRange: Integer;
+  Command: TPlayerCommand;
+  Color: Cardinal;
+  Flags: Dword;
+begin
+  Result := 0;
+  PvpAttacker := LocalPlayer;
+  if (PvpAttacker = nil) or PvpAttacker.InHyperspace or (PvpAttacker.WeaponCount = 0) then
+  begin
+    Emit('pvp skipped: the local human is in hyperspace or has no weapons');
+    Exit;
+  end;
+  Star := PvpAttacker.CurrentStar;
+  Planet := nil;
+  for I := 0 to Star.Planets.Count - 1 do
+    if TPlanet(Star.Planets[I]).OwnerId <= Byte(oiGaal) then
+    begin
+      Planet := TPlanet(Star.Planets[I]);
+      Break;
+    end;
+  if Planet = nil then
+  begin
+    Emit('pvp skipped: no inhabited planet in the star');
+    Exit;
+  end;
+  PvpTarget := JoinHuman(Planet, 'Target', 2).Player;
+  JoinHumans(Options.Humans);
+  Emit(
+      Format(
+          'pvp attacker=%d target=%d star=%d humans=%d',
+          [PvpAttacker.Id, PvpTarget.Id, Star.Id, Session.Humans.Count]
+      )
+  );
+  ObserverHit := @RecordPvpHit;
+  try
+    if not PvpAttacker.InNormalSpace then
+    begin
+      Command := NewCommand(ckTakeoff);
+      AddInt(Command, tfEndAutomaticControl);
+      SubmitAs(PvpAttacker, Command);
+    end;
+    Command := NewCommand(ckTakeoff);
+    AddInt(Command, tfEndAutomaticControl);
+    SubmitAs(PvpTarget, Command);
+    // Both leave the planets; an auto battle needs both in space.
+    SimulateSpaceDay;
+    // Friendly fire on, the default: the attack goes ahead.
+    Command := NewCommand(ckOrderAutoBattle);
+    AddRef(Command, PvpTarget);
+    SubmitAs(PvpAttacker, Command);
+    Emit(
+        Format(
+            'pvp on order=%d select=%d',
+            [Ord(LocalHuman.PendingPlayerFollowTarget = PvpTarget),
+                Ord(PvpAttacker.CanSelectShipTarget(PvpTarget))]
+        )
+    );
+    PvpHits := 0;
+    PvpDamage := 0;
+    Day := 0;
+    while (Day < MaximumDays) and (PvpDamage = 0) and (HumanOf(PvpTarget) <> nil) do
+    begin
+      SimulateSpaceDay;
+      Inc(Day);
+    end;
+    Emit(
+        Format(
+            'pvp friendly-fire=1 days=%d hits=%d damage=%d target-hull=%d/%d',
+            [Day, PvpHits, PvpDamage, PvpTarget.GetHull.HullPoints, PvpTarget.GetHull.Weight]
+        )
+    );
+    if (PvpDamage = 0) or (HumanOf(PvpTarget) = nil) then
+    begin
+      Emit('pvp failed: no damage with friendly fire on');
+      Exit(1);
+    end;
+    // Friendly fire off, by command: the attack order goes at once.
+    PvpTarget.GetHull.HullPoints := PvpTarget.GetHull.Weight;
+    SetSessionFlagValue(SessionFlagFriendlyFire, False);
+    Emit(
+        Format(
+            'pvp off order=%d weapons=%d follow-mode=%d',
+            [Ord(LocalHuman.PendingPlayerFollowTarget <> nil),
+                CountWeaponsAt(PvpAttacker, PvpTarget), PvpAttacker.OrderStateData]
+        )
+    );
+    // New attack orders are refused.
+    Command := NewCommand(ckOrderAutoBattle);
+    AddRef(Command, PvpTarget);
+    SubmitAs(PvpAttacker, Command);
+    Command := NewCommand(ckSetWeaponTarget);
+    AddRef(Command, PvpTarget);
+    AddInt(Command, 1);
+    SubmitAs(PvpAttacker, Command);
+    Command := NewCommand(ckOrderFollow);
+    AddRef(Command, PvpTarget);
+    AddInt(Command, 1);
+    SubmitAs(PvpAttacker, Command);
+    Emit(
+        Format(
+            'pvp refused order=%d weapons=%d select=%d follow-mode=%d',
+            [Ord(LocalHuman.PendingPlayerFollowTarget <> nil),
+                CountWeaponsAt(PvpAttacker, PvpTarget),
+                Ord(PvpAttacker.CanSelectShipTarget(PvpTarget)), PvpAttacker.OrderStateData]
+        )
+    );
+    if (LocalHuman.PendingPlayerFollowTarget <> nil)
+        or (CountWeaponsAt(PvpAttacker, PvpTarget) > 0)
+        or PvpAttacker.CanSelectShipTarget(PvpTarget)
+        or (PvpAttacker.OrderStateData <> 0) then
+    begin
+      Emit('pvp failed: an attack order on a human stands with friendly fire off');
+      Exit(1);
+    end;
+    // The attacker stays close (the follow order above) and aims by hand every day.
+    PvpHits := 0;
+    PvpDamage := 0;
+    InRange := 0;
+    for Day := 1 to OffDays do
+    begin
+      if HumanOf(PvpTarget) = nil then
+        Break;
+      for I := 1 to PvpAttacker.WeaponCount do
+      begin
+        PvpAttacker.Weapons[I].Target := PvpTarget;
+        if PointDistanceSquared(PvpAttacker.Position, PvpTarget.Position)
+            <= Sqr(PvpAttacker.GetWeaponRange(PvpAttacker.Weapons[I])) then
+          Inc(InRange);
+      end;
+      SimulateSpaceDay;
+    end;
+    // A direct hit, as splash damage around another target lands.
+    Direct := PvpTarget.ApplyWeaponHit(PvpAttacker, PvpAttacker.Weapons[1], -1, Color, Flags, 1, 0);
+    Emit(
+        Format(
+            'pvp friendly-fire=0 days=%d in-range=%d hits=%d damage=%d direct=%d target-hull=%d/%d',
+            [OffDays, InRange, PvpHits, PvpDamage, Direct, PvpTarget.GetHull.HullPoints,
+                PvpTarget.GetHull.Weight]
+        )
+    );
+    if (PvpHits > 0) or (Direct <> 0) then
+    begin
+      Emit('pvp failed: a human hurt another with friendly fire off');
+      Exit(1);
+    end;
+    // Out of range, the days above would show nothing.
+    if InRange = 0 then
+    begin
+      Emit('pvp failed: the attacker never had the target in range');
+      Exit(1);
+    end;
+    Emit('pvp ok');
+  finally
+    ObserverHit := nil;
+  end;
+end;
+
 procedure EmitHumans(const Options: TSimulationOptions);
 var
   Lines: TStringList;
@@ -662,6 +894,12 @@ var
 begin
   Result := 0;
   LoadSave(Options.SavePath, Options.Seed);
+  if Options.Pvp then
+  begin
+    Result := RunPvp(Options);
+    Emit(Format('done pvp humans=%d', [Session.Humans.Count]));
+    Exit;
+  end;
   JoinHumans(Options.Humans);
   Emit(Format('sim save=%s seed=%d day=%d', [Options.SavePath, Options.Seed, Galaxy.CurrentTurn]));
   if Options.RoundTrip then

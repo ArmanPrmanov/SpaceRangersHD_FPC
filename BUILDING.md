@@ -170,6 +170,11 @@ each human's state, the script bindings and the session flags field by field
 so that the per-human save block has something to carry, and `--sim-humans-dump`
 prints it at the end (`state ...` lines).
 
+`--sim-pvp` tests humans as targets instead of running turns: a second human joins
+in the local human's star, and the local one attacks it with friendly fire on and
+then off (`pvp ...` lines, ending in `pvp ok` or `pvp failed: ...`). With
+`--sim-humans=N` the other humans join elsewhere.
+
 `python tools/check_layers.py` fails when a unit under `source/game`, `source/core` or
 `source/script` uses a unit under `source/screens`, `source/ui` or `source/arcade`
 (minigames), or a root global (`Globals`, `GlobalsV`, `GR_Main`) that

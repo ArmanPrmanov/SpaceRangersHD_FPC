@@ -200,6 +200,34 @@ def check_humans(args, binary: Path, save: Path, count: int) -> tuple[bool, str]
     )
 
 
+def check_pvp(args, binary: Path, save: Path, count: int) -> tuple[bool, str]:
+    """Humans as targets (ROADMAP.md, Phase 4, item 8), with `count` humans.
+
+    The local human attacks a second human in its star (--sim-pvp): with friendly fire on its
+    hits must do damage; after the SetSessionFlag command turns it off, the attack order must be
+    gone, new ones refused, and no hit may do damage, from the weapons or a direct hit. The run
+    reports "pvp ok" or "pvp failed: ...". Twice, with the same lines.
+    """
+    runs = []
+    for _ in range(2):
+        code, output = simulate(
+            binary, args.game_dir, save, [f"--sim-humans={count}", "--sim-pvp", f"--sim-seed={args.seed}"]
+        )
+        lines = [line.strip() for line in output.splitlines() if line.startswith("pvp ")]
+        if any(line.startswith("pvp skipped") for line in lines):
+            return True, f"{count} humans pvp: " + lines[-1]
+        if code != 0 or "pvp ok" not in lines:
+            return False, f"{count} humans pvp failed:" + output_tail(output)
+        runs.append(lines)
+    if runs[0] != runs[1]:
+        return False, f"{count} humans pvp nondeterministic: " + first_divergence(runs[0], runs[1])
+    fire = next(line for line in runs[0] if line.startswith("pvp friendly-fire=1 "))
+    return True, (
+        f"{count} humans pvp: damage with friendly fire on ({fire.split()[3]}), "
+        "none and orders refused with it off"
+    )
+
+
 def turn_lines(output: str) -> list[str]:
     return [line.strip() for line in output.splitlines() if line.startswith("turn ")]
 
@@ -262,6 +290,9 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
         passed_humans, note = check_humans(args, binary, save, count)
         notes.append(note)
         passed = passed and passed_humans
+        passed_pvp, note = check_pvp(args, binary, save, count)
+        notes.append(note)
+        passed = passed and passed_pvp
 
     golden = GOLDEN / target_name() / f"{save_digest(save)}.txt"
     header = f"# {save.name}: {args.turns} turns, seed {args.seed}"
