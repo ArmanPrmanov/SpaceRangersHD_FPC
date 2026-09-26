@@ -4870,9 +4870,10 @@ begin
     if Companion <> nil then
       NotifyCompanionDeath(Companion);
     CurrentStar.UpdateControlFaction;
-    // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs on the player,
-    // and native code updates Self's relations and archives Self's quests: which human runs it?
-    GetPlayer.ProcessShipDestructionQuests(Self);
+    // ProcessShipDestructionQuests walks every ranger's quests itself (ROADMAP.md, Phase 4/6,
+    // item 10); one call covers every human, so the guard is only that a human exists.
+    if HostHuman <> nil then
+      HostHuman.Player.ProcessShipDestructionQuests(Self);
     if (NextRandomUnitFloat(RandomState) < 0.5) and not HasScriptStateText then
     begin
       Cistern := TCistern.Create;
@@ -6327,10 +6328,10 @@ begin
         Companion := CompanionHuman(Self);
         if Companion <> nil then
           NotifyCompanionDeath(Companion);
-        // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs on the
-        // player, and native code updates Self's relations and archives Self's quests: which
-        // human runs it?
-        GetPlayer.ProcessShipDestructionQuests(Self);
+        // ProcessShipDestructionQuests walks every ranger's quests itself (ROADMAP.md, Phase
+        // 4/6, item 10); one call covers every human, so the guard is only that a human exists.
+        if HostHuman <> nil then
+          HostHuman.Player.ProcessShipDestructionQuests(Self);
       end
       else
       begin
@@ -6450,12 +6451,12 @@ begin
         and ((KellerShip = Self)
             or ((Session.Humans.Count > 0) and not StarHasHuman(CurrentStar))) then
       GetHull.HullPoints := Damage + 1;
-    // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs on the player,
-    // and native code updates Self's relations and archives Self's quests: which human runs it?
-    if (GetHull.HullPoints <= Damage) and (GetPlayer <> nil) then
+    // ProcessShipDestructionQuests walks every ranger's quests itself (ROADMAP.md, Phase 4/6,
+    // item 10); one call covers every human, so the guard is only that a human exists.
+    if (GetHull.HullPoints <= Damage) and (HostHuman <> nil) then
     begin
       ScriptItemsAct(satOnDeath, SourceShip, ExplodingObject, 0);
-      GetPlayer.ProcessShipDestructionQuests(Self);
+      HostHuman.Player.ProcessShipDestructionQuests(Self);
       if SourceShip <> nil then
       begin
         if SourceShip is TNormalShip then
@@ -6522,12 +6523,12 @@ begin
     GetHull.HullPoints := Max(GetHull.HullPoints - Round(Damage), 0);
     if (GetHull.HullPoints <= 0) and (Self is TKling) and ((Self as TKling).KlingType = ktBoss) then
       GetHull.HullPoints := 1;
-    // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs on the player,
-    // and native code updates Self's relations and archives Self's quests: which human runs it?
-    if (GetHull.HullPoints <= 0) and (GetPlayer <> nil) then
+    // ProcessShipDestructionQuests walks every ranger's quests itself (ROADMAP.md, Phase 4/6,
+    // item 10); one call covers every human, so the guard is only that a human exists.
+    if (GetHull.HullPoints <= 0) and (HostHuman <> nil) then
     begin
       ScriptItemsAct(satOnDeath, nil, CurrentStar, 0);
-      GetPlayer.ProcessShipDestructionQuests(Self);
+      HostHuman.Player.ProcessShipDestructionQuests(Self);
       // CHANGE: CLEANUP - Every human who drove this ship into the star counts it; the
       // achievement is the local human's.
       for HumanIndex := 0 to Session.Humans.Count - 1 do

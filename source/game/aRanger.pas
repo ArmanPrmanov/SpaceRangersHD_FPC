@@ -6962,19 +6962,19 @@ begin
           and (Quest.QuestType = qtDefendSystem)
           and ((Quest.ObjectiveTarget as TStar) = Ship.CurrentStar) then
       begin
-        if (Quest.Planet <> nil) and (Quest.Planet.GetRelationLevelToShip(Self) > rlBad) then
+        if (Quest.Planet <> nil) and (Quest.Planet.GetRelationLevelToShip(Ranger) > rlBad) then
           Quest.Planet.SetRelationLevelToRanger(Ranger, rlBad);
         { Native assumes Planet is present after the guarded update above. }
         if (Quest.Planet.OwnerId = Byte(oiPirate))
             and (MainPiratePlanet <> nil)
-            and (MainPiratePlanet.GetRelationLevelToShip(Self) > rlBad) then
+            and (MainPiratePlanet.GetRelationLevelToShip(Ranger) > rlBad) then
         begin
-          if MainPiratePlanet.GetRelationLevelToShip(Self) = rlNormal then
-            MainPiratePlanet.SetRelationLevelToRanger(Self, rlBad);
-          if MainPiratePlanet.GetRelationLevelToShip(Self) = rlGood then
-            MainPiratePlanet.SetRelationLevelToRanger(Self, rlNormal);
-          if MainPiratePlanet.GetRelationLevelToShip(Self) >= rlExcellent then
-            MainPiratePlanet.SetRelationLevelToRanger(Self, rlGood);
+          if MainPiratePlanet.GetRelationLevelToShip(Ranger) = rlNormal then
+            MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlBad);
+          if MainPiratePlanet.GetRelationLevelToShip(Ranger) = rlGood then
+            MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlNormal);
+          if MainPiratePlanet.GetRelationLevelToShip(Ranger) >= rlExcellent then
+            MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlGood);
         end;
         if IsHuman(Ranger) then
         begin
@@ -6999,9 +6999,12 @@ begin
           );
           AddHumanBubble(Ranger, Text);
         end;
-        { The original calls these on Self, even while iterating another ranger's quests. }
+        // CHANGE: BUGFIX - Native called these on Self while iterating another ranger's
+        // quests; harmless with one player (Self was always Ranger), wrong once several
+        // humans can each hold quests (ROADMAP.md, Phase 4/6, item 10). Ranger.ArchiveQuest
+        // archives Ranger's own quest list, not the caller's.
         PublishQuestStatus(Quest, -1);
-        ArchiveQuest(J);
+        Ranger.ArchiveQuest(J);
       end;
       { Native continues reading Quest after that archive; retain the original ordering. }
       if (Ship.TypeId in [stRanger..stPirate])
@@ -7010,19 +7013,19 @@ begin
       begin
         if not Quest.Successful then
         begin
-          if (Quest.Planet <> nil) and (Quest.Planet.GetRelationLevelToShip(Self) > rlBad) then
+          if (Quest.Planet <> nil) and (Quest.Planet.GetRelationLevelToShip(Ranger) > rlBad) then
             Quest.Planet.SetRelationLevelToRanger(Ranger, rlBad);
           { Native assumes Planet is present after the guarded update above. }
           if (Quest.Planet.OwnerId = Byte(oiPirate))
               and (MainPiratePlanet <> nil)
-              and (MainPiratePlanet.GetRelationLevelToShip(Self) > rlBad) then
+              and (MainPiratePlanet.GetRelationLevelToShip(Ranger) > rlBad) then
           begin
-            if MainPiratePlanet.GetRelationLevelToShip(Self) = rlNormal then
-              MainPiratePlanet.SetRelationLevelToRanger(Self, rlBad);
-            if MainPiratePlanet.GetRelationLevelToShip(Self) = rlGood then
-              MainPiratePlanet.SetRelationLevelToRanger(Self, rlNormal);
-            if MainPiratePlanet.GetRelationLevelToShip(Self) >= rlExcellent then
-              MainPiratePlanet.SetRelationLevelToRanger(Self, rlGood);
+            if MainPiratePlanet.GetRelationLevelToShip(Ranger) = rlNormal then
+              MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlBad);
+            if MainPiratePlanet.GetRelationLevelToShip(Ranger) = rlGood then
+              MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlNormal);
+            if MainPiratePlanet.GetRelationLevelToShip(Ranger) >= rlExcellent then
+              MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlGood);
           end;
           if IsHuman(Ranger) then
           begin
@@ -7043,13 +7046,13 @@ begin
             AddHumanBubble(Ranger, Text);
           end;
           PublishQuestStatus(Quest, -1);
-          ArchiveQuest(J);
+          Ranger.ArchiveQuest(J);
         end
         else
         begin
           Quest.SpecialCompletionText := Ranger.BuildQuestText(Quest^, qtkProtectedShipLost);
           Quest.ObjectiveTarget := nil;
-          RefreshPlayerQuestTargets;
+          Ranger.RefreshPlayerQuestTargets;
         end;
       end;
     end;
@@ -7075,7 +7078,7 @@ begin
         PublishQuestStatus(Quest, 0);
         Quest.ObjectiveTarget := nil;
         Ship.DestroyQueued := True;
-        RefreshPlayerQuestTargets;
+        Ranger.RefreshPlayerQuestTargets;
       end;
     end;
   end;

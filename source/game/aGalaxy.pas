@@ -15006,11 +15006,11 @@ begin
         begin
           Ship.ScriptItemsAct(satOnDeath, nil, nil, 0);
           Ship.GetHull.HullPoints := 0;
-          // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs on the
-          // player, and native code also updates that ranger's relations and archives its quests:
-          // which human runs it?
-          if GetPlayer <> nil then
-            GetPlayer.ProcessShipDestructionQuests(Ship);
+          // ProcessShipDestructionQuests walks every ranger's quests itself (ROADMAP.md,
+          // Phase 4/6, item 10); one call covers every human, so the guard is only that a
+          // human exists.
+          if HostHuman <> nil then
+            HostHuman.Player.ProcessShipDestructionQuests(Ship);
           Ship.RefreshDerivedStats(True);
           if RecordFilm and (Ship.FilmObject <> nil) then
           begin
@@ -15185,11 +15185,11 @@ begin
                       Ship.GetHull.HullPoints := 0;
                       Self.ClearShipReferences(Ship);
                       Ship.ScriptItemsAct(satOnDeath, Ship, Ship, 0);
-                      // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs
-                      // on the player, and native code also updates that ranger's relations and
-                      // archives its quests: which human runs it?
-                      if GetPlayer <> nil then
-                        GetPlayer.ProcessShipDestructionQuests(Ship);
+                      // ProcessShipDestructionQuests walks every ranger's quests itself
+                      // (ROADMAP.md, Phase 4/6, item 10); one call covers every human, so the
+                      // guard is only that a human exists.
+                      if HostHuman <> nil then
+                        HostHuman.Player.ProcessShipDestructionQuests(Ship);
                       for CandidateIndex := 0 to (Self.Ships.Count - 1) do
                       begin
                         OwnerShip := Self.Ships[CandidateIndex];
@@ -15691,11 +15691,10 @@ begin
       begin
         Ship.ScriptItemsAct(satOnDeath, nil, nil, 0);
         Ship.GetHull.HullPoints := 0;
-        // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs on the player,
-        // and native code also updates that ranger's relations and archives its quests: which human
-        // runs it?
-        if Ship.IsHullDestroyed and (GetPlayer <> nil) then
-          GetPlayer.ProcessShipDestructionQuests(Ship);
+        // ProcessShipDestructionQuests walks every ranger's quests itself (ROADMAP.md, Phase
+        // 4/6, item 10); one call covers every human, so the guard is only that a human exists.
+        if Ship.IsHullDestroyed and (HostHuman <> nil) then
+          HostHuman.Player.ProcessShipDestructionQuests(Ship);
         Ship.RefreshDerivedStats(True);
         if RecordFilm
             and ((Ship.FilmObject <> nil)
@@ -15864,11 +15863,11 @@ begin
         Ship.GetHull.HullPoints := 0;
         if Ship.IsHullDestroyed then
         begin
-          // HUMANS: ProcessShipDestructionQuests walks every ranger's quests but runs on the
-          // player, and native code also updates that ranger's relations and archives its quests:
-          // which human runs it?
-          if GetPlayer <> nil then
-            GetPlayer.ProcessShipDestructionQuests(Ship);
+          // ProcessShipDestructionQuests walks every ranger's quests itself (ROADMAP.md,
+          // Phase 4/6, item 10); one call covers every human, so the guard is only that a
+          // human exists.
+          if HostHuman <> nil then
+            HostHuman.Player.ProcessShipDestructionQuests(Ship);
           // CHANGE: ENHANCEMENT - Every human's death is recorded; with one human it is the game
           // over, as native records it (TShip.RecordHumanDeath).
           if IsHuman(Ship) then
