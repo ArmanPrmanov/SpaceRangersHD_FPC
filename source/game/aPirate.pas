@@ -241,6 +241,7 @@ begin
   SelectUniqueName(ModShipNameConfig);
   if Length(GetName) = 0 then
     SelectUniqueName(LanguageDataConfig.GetBlock('ShipName'));
+  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
   if GetPlayer <> nil then
   begin
     Rank := NextRandomIntRange(0, GetPlayer.Rank, RandomState);
@@ -1101,6 +1102,7 @@ var
   Award: Byte;
   ProgressFactor, StrengthFactor: Double;
 begin
+  // HUMANS: Which human does NPC catch-up follow: the leading one, the nearest, or each?
   if (DaysSincePlayerSeen >= 60) and (GetPlayer <> nil) then
     if (OwnerId = Byte(oiPirate)) and (PirateType <> 0) then
     begin
@@ -1377,7 +1379,7 @@ begin
     Result :=
         (GetHull.HullPoints < GetHull.Weight * 0.2)
             or ((EnemyShip <> nil)
-                and ((EnemyShip.OrderTarget = Self) or (GetPlayer = EnemyShip))
+                and ((EnemyShip.OrderTarget = Self) or IsHuman(EnemyShip))
                 and AcceptsRansomDemandFrom(EnemyShip));
     if not Result then
     begin
@@ -1453,7 +1455,7 @@ begin
           Round(Max(100, RemapClamped(GetHull.HullPoints, 0, GetHull.Weight, HighOffer, LowOffer)));
       Ship := EnemyShip;
       Accepted := Ship.BuildTrucePaymentResponse(Self, Response, Amount);
-      if (GetPlayer <> Ship) and (GetPlayer.CurrentStar = CurrentStar) then
+      if StarHasHuman(CurrentStar, Ship) then
         NotifyTruceOffer(Ship, Response, Amount);
       if Accepted and RecomputeFearState then
         TryOfferRansomToPursuer;
@@ -1491,6 +1493,7 @@ var
     I: Integer;
     Ship: TShip;
     Text: WideString;
+    Player: TPlayer;
   begin
     PrisonTermRemaining := NextRandomIntRange(61, 140, RandomState);
     CurrentSystemKills.Normal := 0;
@@ -1524,10 +1527,15 @@ var
     );
     ReplaceTextToken(Text, '<Name>', GetName, '<color=255,240,100>');
     ReplaceTextToken(Text, '<FullName>', GetFullName(' '), '<color=255,240,100>');
-    if (GetPlayer.CurrentStar = CurrentStar)
-        and GetPlayer.InNormalSpace
-        and (Galaxy.CoalitionDefeatedTurn = 0) then
-      AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, Text, '');
+    // CHANGE: CLEANUP - Every human in the star's space sees the arrest. Native told the one
+    // player.
+    if Galaxy.CoalitionDefeatedTurn = 0 then
+      for I := 0 to Session.Humans.Count - 1 do
+      begin
+        Player := Session.Humans[I].Player;
+        if (Player <> nil) and (Player.CurrentStar = CurrentStar) and Player.InNormalSpace then
+          Session.Humans[I].AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
+      end;
   end;
 begin
   Result := False;
@@ -1702,11 +1710,7 @@ begin
           and ((Item.ItemType <> t_Minerals) or not IsRecentlyDroppedItem(Item))
           and ((Item.ScriptItem = nil) or (TScriptItem(Item.ScriptItem).Name = ''))
           and not CanCargoHookHandleItem(Item, Self) then
-        if (GetPlayer.CurrentStar <> CurrentStar)
-            or (GetRelationLevelToShip(GetPlayer) <= rlBad)
-            or (PointDistance(GetPlayer.Position, Item.Position) >= 600)
-            or ((NextRandomUnitFloat(RandomState) <= 0.2)
-                and (PointDistance(GetPlayer.Position, Item.Position) >= 200)) then
+        if not IsItemKeptForHuman(Item, False, 600, 0.2) then
           if CanSafelyDetonateItem(Item) then
             for J := 1 to WeaponCount do
             begin
@@ -1729,9 +1733,28 @@ end;
 procedure TPirate.SelectEnemyShipInStar;
 var
   I: Integer;
-  Ship, PreviousEnemy: TShip;
+  Ship, PreviousEnemy, Defended: TShip;
   Chance, BestChance, Distance, BestDistance: Double;
   PriorityTargetFound: Boolean;
+  Player: TPlayer;
+  // CHANGE: CLEANUP - Whether Candidate is some human's quest target to kill or to defend.
+  // Native asked the one player.
+  function IsHumanQuestTarget(Candidate: TShip; QuestType: TQuestType): Boolean;
+  var
+    HumanIndex: Integer;
+    Ranger: TPlayer;
+  begin
+    for HumanIndex := 0 to Session.Humans.Count - 1 do
+    begin
+      Ranger := Session.Humans[HumanIndex].Player;
+      if Ranger = nil then
+        Continue;
+      if ((QuestType = qtKillShip) and (Ranger.QuestTargetKillShip = Candidate))
+          or ((QuestType = qtDefendShip) and (Ranger.QuestTargetDefendShip = Candidate)) then
+        Exit(True);
+    end;
+    Result := False;
+  end;
 begin
   if ((GetCargoHook <> nil) or (PirateType <> 0))
       and ((EnemyShip = nil)
@@ -1739,18 +1762,26 @@ begin
           or ((EnemyShip.ConsecutiveDockedDays > 3) and (PirateType <> 0)))
       and (UsableWeaponCount <> 0) then
   begin
-    if GetPlayer.QuestTargetDefendShip <> nil then
+    // CHANGE: CLEANUP - A pirate goes for the ship a human is to defend, first human first.
+    // Native asked the one player.
+    for I := 0 to Session.Humans.Count - 1 do
+    begin
+      Player := Session.Humans[I].Player;
+      if (Player = nil) or (Player.QuestTargetDefendShip = nil) then
+        Continue;
+      Defended := Player.QuestTargetDefendShip;
       if (PirateType = 0)
-          and (GetPlayer.QuestTargetDefendShip.CurrentStar = CurrentStar)
-          and (GetPlayer.QuestTargetDefendShip <> Self)
-          and GetPlayer.QuestTargetDefendShip.InNormalSpace
-          and (GetPlayer.QuestTargetDefendShip <> TruceShip)
-          and (GetPlayer.QuestTargetDefendShip.ScriptShip = nil) then
+          and (Defended.CurrentStar = CurrentStar)
+          and (Defended <> Self)
+          and Defended.InNormalSpace
+          and (Defended <> TruceShip)
+          and (Defended.ScriptShip = nil) then
       begin
-        EnemyShip := GetPlayer.QuestTargetDefendShip;
+        EnemyShip := Defended;
         AssignWeaponTargetsInStar;
         Exit;
       end;
+    end;
     PriorityTargetFound := False;
     if PirateType = 0 then
     begin
@@ -1767,9 +1798,9 @@ begin
             or not Ship.InNormalSpace
             or (TruceShip = Ship)
             or (Ship.TruceShip = Self)
-            or ((GetPlayer = Ship) and (GetPlayer.TruceShip = Self))
+            or (IsHuman(Ship) and (Ship.TruceShip = Self))
             or (Ship.LiberationGroup <> nil)
-            or (GetPlayer.QuestTargetKillShip = Ship)
+            or IsHumanQuestTarget(Ship, qtKillShip)
             or ((Ship.TypeId in [Ord(rstRangerCenter)..Ord(rstCustomStation)])
                 and ((OwnerId <> Byte(oiPirate))
                     or (CurrentStar.Battle = 0)
@@ -1805,7 +1836,7 @@ begin
                 and not Ship.AbductedByPirateClan then
               Continue;
             Chance := ChanceToWin(Ship);
-            if GetPlayer = Ship then
+            if IsHuman(Ship) then
             begin
               if (Galaxy.CurrentTurn
                       < 100
@@ -1821,7 +1852,7 @@ begin
                   Chance
                       * GalaxyDifficultyTuning[Galaxy.DifficultyLevels[7]].GoodsEventDurationFactor;
             end
-            else if GetPlayer.QuestTargetDefendShip = Ship then
+            else if IsHumanQuestTarget(Ship, qtDefendShip) then
               Chance := Chance * 5;
             if (Chance < 0.3) and (StrengthInAverageRanger < 0.7) then
               Continue;
@@ -1836,14 +1867,14 @@ begin
             if (Chance < 3.5) and (Ship.TypeId = stPirate) then
               Continue;
             if not IsTargetStillPursuable(Ship)
-                and (GetPlayer <> Ship)
-                and (GetPlayer.QuestTargetDefendShip <> Ship) then
+                and not IsHuman(Ship)
+                and not IsHumanQuestTarget(Ship, qtDefendShip) then
               Continue;
             if Chance > BestChance then
             begin
               EnemyShip := Ship;
               BestChance := Chance;
-              if GetPlayer = EnemyShip then
+              if IsHuman(EnemyShip) then
                 Break;
             end;
           end;
@@ -1923,7 +1954,7 @@ begin
         and ((RelationToShip(Ship) < 10)
             or (NextRandomIntRange(1, 100, RandomState) <= Aggression + 100))
         and ((not (Ship is TPirate)
-                and (GetPlayer <> Ship)
+                and not IsHuman(Ship)
                 and ((Ship.OwnerId <> Byte(oiPirate)) or not (Ship is TNormalShip)))
             or (((Ship.OwnerId <> Byte(oiPirate))
                     or (Ship.PilotRace <> PilotRace)
@@ -2004,7 +2035,7 @@ end;
 
 procedure TPirate.ReactToExtortionDemand(Ranger: Pointer);
 begin
-  if (GetPlayer = Ranger) or (NextRandomUnitFloat(RandomState) < 0.05) then
+  if IsHuman(TObject(Ranger)) or (NextRandomUnitFloat(RandomState) < 0.05) then
   begin
     ChangeRelationToRanger(Ranger, -15);
     HomePlanet.ChangeRelationToRanger(Ranger, -1);
@@ -2026,7 +2057,7 @@ var
     OtherShip.SetMoney(OtherShip.Money + DemandedAmount);
     SetMoney(Money - DemandedAmount);
     OtherShip.TruceWithShip(Self);
-    if GetPlayer = OtherShip then
+    if IsHuman(OtherShip) then
     begin
       LastPlayerExtortionTurn := Galaxy.CurrentTurn;
       Event := AddGalaxyEvent('PlayerExtortsMoney');
@@ -2044,13 +2075,13 @@ begin
   NextDemandTurn := LastPlayerExtortionTurn + 30;
   if OtherShip is TRanger then
     ReactToExtortionDemand(OtherShip);
-  if (GetPlayer <> OtherShip) and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
+  if not IsHuman(OtherShip) and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
     EnemyShip := OtherShip;
   if OtherShip.TruceShip = Self then
     Response := LookupVisibleTalkText('Talk.Money.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and PlayerExtortionPactActive then
+  else if IsHuman(OtherShip) and PlayerExtortionPactActive then
     Response := LookupVisibleTalkText('Talk.Money.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
+  else if IsHuman(OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
     Response := LookupVisibleTalkText('Talk.Money.WeAlreadyHavePact', OtherShip)
   else if UnknownVirtualC0(OtherShip) or not AcceptsRansomDemandFrom(OtherShip) then
     Response := LookupVisibleTalkText('Talk.Money.' + GetTypeNameKey + 'No', OtherShip)
@@ -2116,7 +2147,7 @@ var
         Break;
     end;
     OtherShip.TruceWithShip(Self);
-    if GetPlayer = OtherShip then
+    if IsHuman(OtherShip) then
     begin
       LastPlayerExtortionTurn := Galaxy.CurrentTurn;
       Event := AddGalaxyEvent('PlayerExtortsGoods');
@@ -2132,17 +2163,17 @@ var
   end;
 begin
   Result := False;
-  Forced := (GetPlayer = OtherShip) and OtherShip.IsHealthEffectActive(14);
+  Forced := IsHuman(OtherShip) and OtherShip.IsHealthEffectActive(14);
   NextDemandTurn := LastPlayerExtortionTurn + 30;
   if OtherShip is TRanger then
     ReactToExtortionDemand(OtherShip);
-  if (GetPlayer <> OtherShip) and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
+  if not IsHuman(OtherShip) and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
     EnemyShip := OtherShip;
   if OtherShip.TruceShip = Self then
     Response := LookupVisibleTalkText('Talk.Goods.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and PlayerExtortionPactActive then
+  else if IsHuman(OtherShip) and PlayerExtortionPactActive then
     Response := LookupVisibleTalkText('Talk.Goods.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
+  else if IsHuman(OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
     Response := LookupVisibleTalkText('Talk.Goods.WeAlreadyHavePact', OtherShip)
   else if UnknownVirtualC0(OtherShip) or not (AcceptsRansomDemandFrom(OtherShip) or Forced) then
     Response := LookupVisibleTalkText('Talk.Goods.' + GetTypeNameKey + 'No', OtherShip)
@@ -2154,7 +2185,7 @@ begin
   begin
     Response := LookupVisibleTalkText('Talk.Goods.' + GetTypeNameKey + 'Ok', OtherShip);
     DropDemand;
-    if GetPlayer = OtherShip then
+    if IsHuman(OtherShip) then
       PlayerExtortionPactActive := True;
     Result := True;
   end;
@@ -2204,19 +2235,19 @@ begin
     Result := False;
     Exit;
   end;
-  if (GetPlayer = PartnerShip) and (GetPlayer.CurrentStar = CurrentStar) then
+  if IsHuman(PartnerShip) and (PartnerShip.CurrentStar = CurrentStar) then
   begin
     Response := LookupVisibleTalkText('Talk.Pirate.TalkWithParent', OtherShip);
-    Result := GetPlayer.BuildTrucePaymentResponse(OtherShip, Response, OfferedAmount);
+    Result := PartnerShip.BuildTrucePaymentResponse(OtherShip, Response, OfferedAmount);
     Exit;
   end;
   Result := False;
   NextDemandTurn := LastPlayerExtortionTurn + 30;
   if OtherShip.TruceShip = Self then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and PlayerExtortionPactActive then
+  else if IsHuman(OtherShip) and PlayerExtortionPactActive then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
-  else if (GetPlayer = OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
+  else if IsHuman(OtherShip) and (Galaxy.CurrentTurn < NextDemandTurn) then
     Response := LookupVisibleTalkText('Talk.Truce.WeAlreadyHavePact', OtherShip)
   else if (OwnerId = Byte(oiPirate))
       and (OtherShip is TNormalShip)
@@ -2342,8 +2373,9 @@ begin
     Result := True;
     SetMoney(Money + PaymentAmount);
     OtherShip.SetMoney(OtherShip.Money - PaymentAmount);
-    if GetPlayer = OtherShip then
-      GetPlayer.AchievementStats.CheckMasterAchievement;
+    // CHANGE: CLEANUP - Achievements belong to the human at this machine.
+    if OtherShip = LocalPlayer then
+      TPlayer(OtherShip).AchievementStats.CheckMasterAchievement;
   end
   else
     Result := False;
@@ -2371,9 +2403,11 @@ begin
             '<Partner>',
             (PartnerShip as TRanger).Name
         )
+  // CHANGE: CLEANUP - The pirate rank is that of OtherShip, the human asking; only humans ask
+  // a pirate. Native read the one player's.
   else if ((OtherShip is TPlayer)
           and (TPlayer(OtherShip).GetMaxPiratePartners <= TPlayer(OtherShip).PiratePartners.Count))
-      or ((OwnerId = Byte(oiPirate)) and (GetPlayer.PirateRank < PirateRank)) then
+      or ((OwnerId = Byte(oiPirate)) and (TNormalShip(OtherShip).PirateRank < PirateRank)) then
     Response := LookupVisibleTalkText('Talk.Pirate.NeedPirate', OtherShip)
   else if (OtherShip is TRanger)
       and (OtherShip.GetEffectiveSkillLevel(psLeadership)
@@ -2398,7 +2432,7 @@ var
       Result := False
     else if CanContactShip(PartnerShip) then
       Result := True
-    else if not PartnerShip.NoTalk or (GetPlayer <> PartnerShip) then
+    else if not PartnerShip.NoTalk or not IsHuman(PartnerShip) then
       Result := False
     else
     begin
@@ -2406,6 +2440,16 @@ var
       Result := CanContactShip(PartnerShip);
       PartnerShip.NoTalk := True;
     end;
+  end;
+  // CHANGE: CLEANUP - Self leaves the pirate partners of every human. Native left the one
+  // player's; only the leader's list holds Self.
+  procedure LeaveHumanPartners;
+  var
+    HumanIndex: Integer;
+  begin
+    for HumanIndex := 0 to Session.Humans.Count - 1 do
+      if Session.Humans[HumanIndex].Player <> nil then
+        Session.Humans[HumanIndex].Player.PiratePartners.Remove(Self);
   end;
 begin
   if PartnerShip <> nil then
@@ -2416,7 +2460,7 @@ begin
         Leader := PartnerShip;
         if (Order = soFollowShip) and (OrderTarget = PartnerShip) then
           OrderNone(False);
-        GetPlayer.PiratePartners.Remove(Self);
+        LeaveHumanPartners;
         PartnerShip := nil;
         NotifyPiratePartnershipExpired(Leader);
       end;
@@ -2428,7 +2472,7 @@ begin
         Leader := PartnerShip;
         if (Order = soFollowShip) and (OrderTarget = PartnerShip) then
           OrderNone(False);
-        GetPlayer.PiratePartners.Remove(Self);
+        LeaveHumanPartners;
         PartnerShip := nil;
         NotifyPiratePartnerRelationBreak(Leader);
       end;
@@ -2442,12 +2486,15 @@ begin
         Leader := PartnerShip;
         if (Order = soFollowShip) and (OrderTarget = PartnerShip) then
           OrderNone(False);
-        GetPlayer.PiratePartners.Remove(Self);
+        LeaveHumanPartners;
         PartnerShip := nil;
         NotifyPiratePartnerRebellion(Leader);
       end;
     end
     else if CanNotifyPartner then
+      // HUMANS: A pirate an NPC leads, which scripts can set up, leaves when the one player
+      // has more pirate partners than it may. Whose count decides with several humans: the
+      // leader's when it is a human, and whose for an NPC leader?
       if GetPlayer.GetMaxDominionShips < GetPlayer.PiratePartners.Count then
       begin
         Longest := PartnershipDaysRemaining;
@@ -2459,7 +2506,7 @@ begin
           Leader := PartnerShip;
           if (Order = soFollowShip) and (OrderTarget = PartnerShip) then
             OrderNone(False);
-          GetPlayer.PiratePartners.Remove(Self);
+          LeaveHumanPartners;
           PartnerShip := nil;
           NotifyPiratePartnerRatingBreak(Leader);
         end;
@@ -3087,8 +3134,8 @@ begin
     CurrentStanding := ssCustom
   else if StandingMode <> ssmFixed then
   begin
-    if (GetPlayer <> nil) and (GetPlayer = PartnerShip) then
-      Owner := GetPlayer.OwnerId
+    if IsHuman(PartnerShip) then
+      Owner := PartnerShip.OwnerId
     else
       Owner := OwnerId;
     if IsInPrison or ((PirateType = 0) and (Owner <> 7)) then
