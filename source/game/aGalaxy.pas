@@ -831,6 +831,7 @@ uses
   SimEvents,
   aPirate,
   aEFilm,
+  aStarFilms,
   SE_Hole,
   SE_Process,
   SE_Ship2,
@@ -929,6 +930,7 @@ begin
     PrimaryFilm.Clear;
   if SecondaryFilm <> nil then
     SecondaryFilm.Clear;
+  FreeStarFilms;
   ClearPersistentPlayerMessages;
   JumpGates := TList.Create;
   NextConstellationId := 1;
@@ -1075,6 +1077,7 @@ begin
     PrimaryFilm.Clear;
   if SecondaryFilm <> nil then
     SecondaryFilm.Clear;
+  FreeStarFilms;
   SpaceBackgroundEntries := nil;
   GalaxyEvents.Free;
   GalaxyEvents := nil;
@@ -2741,7 +2744,8 @@ begin
       begin
 
         Star := TStar(Stars[I]);
-        if (GetPlayer = nil) or (GetPlayer.CurrentStar <> Star) then
+        // CHANGE: ENHANCEMENT - Every star that holds a human ran in the player-star job.
+        if not StarHasHuman(Star) then
           Star.NextDay(False);
       end;
       if (GetPlayer = nil) or (GetPlayer.GetHull.HullPoints <= 0) then

@@ -86,6 +86,7 @@ type
     TalkResponse: Byte;
     TalkText: WideString;
     TalkAmount: Integer;
+    destructor Destroy; override;
     // The message bubbles, under PersistentPlayerMessageLock. SkipLock means the caller
     // holds it. Globals has the same functions for the local human.
     procedure ClearBubbles;
@@ -132,6 +133,11 @@ function HumanOf(Ship: TObject): THuman;
 function IsHuman(Ship: TObject): Boolean; inline;
 // Whether a human's ranger is in Star, in normal space, docked or landed.
 function StarHasHuman(Star: TStar): Boolean;
+// Whether Star is some human's PlayerStar. Those stars run their day in the player-star
+// job, each with a film, and the galaxy job leaves them out (ROADMAP.md, Phase 4).
+function IsFilmedStar(Star: TStar): Boolean;
+// The filmed stars, in galaxy order.
+procedure CollectFilmedStars(Stars: TList);
 // The human with this id, or nil.
 function FindHuman(Id: Integer): THuman;
 // Makes Player a human. The first human is the local one.
@@ -190,6 +196,30 @@ begin
       Exit(True);
   end;
   Result := False;
+end;
+
+function IsFilmedStar(Star: TStar): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+    if Session.Humans[I].PlayerStar = Star then
+      Exit(True);
+  Result := False;
+end;
+
+procedure CollectFilmedStars(Stars: TList);
+var
+  I: Integer;
+  Star: TStar;
+begin
+  Stars.Clear;
+  for I := 0 to Galaxy.Stars.Count - 1 do
+  begin
+    Star := TStar(Galaxy.Stars[I]);
+    if IsFilmedStar(Star) then
+      Stars.Add(Star);
+  end;
 end;
 
 function FindHuman(Id: Integer): THuman;
@@ -596,6 +626,13 @@ begin
   finally
     PersistentPlayerMessageLock.Leave;
   end;
+end;
+
+destructor THuman.Destroy;
+begin
+  if PersistentPlayerMessageLock <> nil then
+    ClearBubbles;
+  inherited Destroy;
 end;
 
 function ActorHuman(const Command: TPlayerCommand): THuman;

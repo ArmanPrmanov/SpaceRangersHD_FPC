@@ -3507,8 +3507,8 @@ begin
     if Ship.DockedTo = Self then
     begin
       Ship.TransferToStar(Star);
-      if GetPlayer = Ship then
-        LocalHuman.PlayerStar := Star;
+      if IsHuman(Ship) then
+        HumanOf(Ship).PlayerStar := Star;
     end;
     Dec(I);
   end;

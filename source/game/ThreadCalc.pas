@@ -56,7 +56,10 @@ uses
   GR_Main,
   aGalaxy,
   aPlayer,
-  aShip;
+  aShip,
+  aEFilm,
+  aStarFilms,
+  Classes;
 procedure StartJob(Job: TTurnCalculationJob);
 begin
   if Assigned(TurnJobHook) then
@@ -88,25 +91,73 @@ begin
   if (Session.TurnCalculationThread <> nil) and Session.TurnCalculationThread.IsRunning then
     Session.TurnCalculationThread.WaitForIdle(INFINITE);
 end;
+// CHANGE: ENHANCEMENT - Every star that holds a human runs its day in the player-star job,
+// with a film of its own (ROADMAP.md, Phase 4). The local human's star records into
+// PrimaryFilm as before; the others record into aStarFilms.
+function FilmOfStar(Star: TStar): TEFilm;
+begin
+  if Star = LocalHuman.PlayerStar then
+    Result := PrimaryFilm
+  else
+    Result := StarFilm(Star);
+end;
+
+// Whether Star's day is recorded: a human there is in normal space, taking off, or just
+// entering hyperspace.
+function StarRecordsFilm(Star: TStar): Boolean;
+var
+  I: Integer;
+  Human: THuman;
+  P: TPlayer;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    P := Human.Player;
+    if (Human.PlayerStar = Star)
+        and (P <> nil)
+        and (P.InNormalSpace
+            or ((P.Order = soTakeoff) and ((P.CurrentPlanet <> nil) or (P.DockedTo <> nil)))
+            or (P.InHyperspace and (Cardinal(P.OrderStateData and $FFFF) <= 1))) then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
 procedure ProcessPlayerStarTurn;
 var
-  RecordFilm: Boolean;
-  Stage: Integer;
+  RecordFilm, LocalRecordFilm: Boolean;
+  Stage, I: Integer;
+  Stars: TList;
+  Star: TStar;
+  SavedFilm: TEFilm;
 begin
   Stage := 0;
+  Stars := TList.Create;
   try
-    if not Session.PlayerStarDayPrepared then
-      PrimaryFilm.Clear;
-    Stage := 1;
-    RecordFilm :=
-        GetPlayer.InNormalSpace
-            or ((GetPlayer.Order = soTakeoff)
-                and ((GetPlayer.CurrentPlanet <> nil) or (GetPlayer.DockedTo <> nil)))
-            or (GetPlayer.InHyperspace and (Cardinal(GetPlayer.OrderStateData and $FFFF) <= 1));
-    LocalHuman.PlayerStar.NextDay(RecordFilm);
+    CollectFilmedStars(Stars);
+    KeepStarFilms(Stars);
+    LocalRecordFilm := False;
+    for I := 0 to Stars.Count - 1 do
+    begin
+      Star := TStar(Stars[I]);
+      SavedFilm := PrimaryFilm;
+      PrimaryFilm := FilmOfStar(Star);
+      try
+        if not Session.PlayerStarDayPrepared then
+          PrimaryFilm.Clear;
+        Stage := 1;
+        RecordFilm := StarRecordsFilm(Star);
+        if Star = LocalHuman.PlayerStar then
+          LocalRecordFilm := RecordFilm;
+        Star.NextDay(RecordFilm);
+      finally
+        PrimaryFilm := SavedFilm;
+      end;
+    end;
     Stage := 2;
     if Galaxy.StasisModEnabled <> 1 then
-      Galaxy.CompleteDay(RecordFilm);
+      Galaxy.CompleteDay(LocalRecordFilm);
     Stage := 3;
     Galaxy.TransferShipsInTransit;
     Stage := 4;
@@ -119,6 +170,39 @@ begin
       NotifyTurnFailed;
       raise Exception.Create('Error in procedure ThCa label = ' + IntToStr(Stage));
     end;
+  end;
+  Stars.Free;
+end;
+
+// Prepares the next day of every filmed star while the last one's film plays.
+procedure PrepareFilmedStars;
+var
+  I: Integer;
+  Stars: TList;
+  Star: TStar;
+  SavedFilm: TEFilm;
+begin
+  Stars := TList.Create;
+  try
+    CollectFilmedStars(Stars);
+    KeepStarFilms(Stars);
+    // The local film is cleared even when no star is filmed, as before.
+    PrimaryFilm.Clear;
+    for I := 0 to Stars.Count - 1 do
+    begin
+      Star := TStar(Stars[I]);
+      SavedFilm := PrimaryFilm;
+      PrimaryFilm := FilmOfStar(Star);
+      try
+        PrimaryFilm.Clear;
+        if Galaxy.StasisModEnabled <> 1 then
+          Star.PrepareNextDay;
+      finally
+        PrimaryFilm := SavedFilm;
+      end;
+    end;
+  finally
+    Stars.Free;
   end;
 end;
 // CHANGE: ENHANCEMENT - Mark the turn job for the debug thread check.
@@ -155,7 +239,7 @@ begin
     TurnCalculationPhase := tcpGalaxyRunning;
     if Galaxy.StasisModEnabled <> 1 then
       try
-        if (GetPlayer <> nil) and GetPlayer.InNormalSpace then
+        if (LocalPlayer <> nil) and LocalPlayer.InNormalSpace then
         begin
           StartTick := timeGetTime;
           Galaxy.NextDay;
@@ -221,9 +305,7 @@ begin
     TurnCalculationPhase := tcpPlayerStarPreparationRunning;
     Session.PlayerStarDayPrepared := True;
     try
-      PrimaryFilm.Clear;
-      if Galaxy.StasisModEnabled <> 1 then
-        LocalHuman.PlayerStar.PrepareNextDay;
+      PrepareFilmedStars;
     except
       on E: Exception do
       begin

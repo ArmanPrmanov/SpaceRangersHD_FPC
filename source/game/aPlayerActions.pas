@@ -881,9 +881,9 @@ var
 begin
   P := Actor(Command);
   Galaxy.ClearJumpGates;
-  PreviousStar := LocalHuman.PlayerStar;
-  LocalHuman.PlayerStar := P.CurrentStar;
-  LocalHuman.PlayerStar.RebuildShipMovementPaths;
+  PreviousStar := ActorHuman(Command).PlayerStar;
+  ActorHuman(Command).PlayerStar := P.CurrentStar;
+  ActorHuman(Command).PlayerStar.RebuildShipMovementPaths;
   PreviousStar.RebuildShipMovementPaths;
   if (Cardinal(P.OrderStateData) and $FFFF) = 1 then
   begin

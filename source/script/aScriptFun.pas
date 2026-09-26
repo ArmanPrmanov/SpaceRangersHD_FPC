@@ -13052,10 +13052,10 @@ begin
   if (TShip(av[1].GetDword) = GetPlayer) and (LocalHuman.TemporaryShopSlots <> nil) then
     RestoreTemporaryShopStock;
   TShip(av[1].GetDword).TransferToStar(TStar(av[2].GetDword));
-  if TShip(av[1].GetDword) = GetPlayer then
+  if IsHuman(TShip(av[1].GetDword)) then
   begin
-    LocalHuman.PlayerStar := GetPlayer.CurrentStar;
-    LocalHuman.PlayerStar.RefreshMovementStepParameters;
+    HumanOf(TShip(av[1].GetDword)).PlayerStar := TShip(av[1].GetDword).CurrentStar;
+    HumanOf(TShip(av[1].GetDword)).PlayerStar.RefreshMovementStepParameters;
   end;
 end;
 procedure SF_IsFilm(av: array of TVarEC; code: TCodeEC);

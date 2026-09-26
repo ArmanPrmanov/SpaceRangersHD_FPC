@@ -140,6 +140,7 @@ procedure ReleaseSpaceObject(var Obj: TObjectSE);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aStarFilms,
   Math,
   Windows,
   SysUtils,
@@ -197,6 +198,7 @@ begin
     PrimaryFilm.ReleaseObjectReferences(Self);
   if SecondaryFilm <> nil then
     SecondaryFilm.ReleaseObjectReferences(Self);
+  ReleaseStarFilmReferences(Self);
   if TrailingFilmEffects <> nil then
     TrailingFilmEffects.ReleaseObjectReferences(Self);
   inherited Destroy;
