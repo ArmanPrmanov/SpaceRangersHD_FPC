@@ -3090,7 +3090,7 @@ var
 // Moved from TfShip2.StorageToShipClicked.
 procedure ExecuteTakeAllFromStorage(const Command: TPlayerCommand);
 begin
-  StorageMoved := LocalHuman.PlayerHoldShip.RetrieveStoredItems(GetLocalStorageOwner);
+  StorageMoved := LocalHuman.PlayerHoldShip.RetrieveStoredItems(GetLocalStorageOwner, Actor(Command));
 end;
 
 function TakeAllFromStorage: Boolean;
@@ -3102,7 +3102,7 @@ end;
 // Moved from TfShip2.ShipToStorageClicked.
 procedure ExecutePutAllIntoStorage(const Command: TPlayerCommand);
 begin
-  StorageMoved := LocalHuman.PlayerHoldShip.StoreLooseInventoryAt(GetLocalStorageOwner);
+  StorageMoved := LocalHuman.PlayerHoldShip.StoreLooseInventoryAt(GetLocalStorageOwner, Actor(Command));
 end;
 
 function PutAllIntoStorage: Boolean;

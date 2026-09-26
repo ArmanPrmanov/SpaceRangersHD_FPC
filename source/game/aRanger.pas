@@ -1273,7 +1273,7 @@ begin
     if GetRadarRange < PointDistance(Position, (Instance as TShip).Position) then
       Result := (Instance as TShip).GetName
     else
-      Result := (Instance as TShip).GetSpaceInfoText;
+      Result := (Instance as TShip).GetSpaceInfoText(Self);
   end
   else if Instance is TAsteroid then
   begin
