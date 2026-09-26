@@ -30,6 +30,13 @@ type
     ApplyEditableSaveOnLoad: Boolean;
     GameEndReason: Integer;
     ForcedPlanetQuestId: Integer;
+    // CHANGE: ENHANCEMENT - Session flags (ROADMAP.md, Phase 4, item 10, and Phase 6). They
+    // are part of the saved session (aHumanSave) and change only through the SetSessionFlag
+    // command (aPlayerActions), so every machine sees a change at the same point.
+    // Text quests are not offered while this is set; multiplayer sets it.
+    TextQuestsDisabled: Boolean;
+    // Whether a human may attack another human. The host owns the switch.
+    FriendlyFireEnabled: Boolean;
     UselessItemRemainsCount: Integer;
     // Whether the player star's day has been prepared ahead of the turn.
     PlayerStarDayPrepared: Boolean;
@@ -55,10 +62,41 @@ type
     ScriptUiRequestEvent: Cardinal;
     ScriptUiAbortEvent: Cardinal;
   end;
+const
+  // The flags SetSessionFlag takes. The values are part of the command log format.
+  SessionFlagTextQuestsDisabled = 0;
+  SessionFlagFriendlyFire = 1;
 var
   Session: TSessionState;
+// Puts the session flags back to their defaults, as for a new game.
+procedure ResetSessionFlags;
+// Whether every session flag has its default value.
+function SessionFlagsAreDefault: Boolean;
+// Sets one flag; an unknown Flag changes nothing.
+procedure SetSessionFlag(Flag: Integer; Value: Boolean);
 implementation
+
+procedure ResetSessionFlags;
+begin
+  Session.TextQuestsDisabled := False;
+  Session.FriendlyFireEnabled := True;
+end;
+
+function SessionFlagsAreDefault: Boolean;
+begin
+  Result := not Session.TextQuestsDisabled and Session.FriendlyFireEnabled;
+end;
+
+procedure SetSessionFlag(Flag: Integer; Value: Boolean);
+begin
+  case Flag of
+    SessionFlagTextQuestsDisabled: Session.TextQuestsDisabled := Value;
+    SessionFlagFriendlyFire: Session.FriendlyFireEnabled := Value;
+  end;
+end;
+
 initialization
   Session.ForcedPlanetQuestId := -1;
   Session.ScriptDialogIndex := -1;
+  ResetSessionFlags;
 end.

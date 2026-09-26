@@ -6062,7 +6062,9 @@ begin
     FirstStar := 10;
     if Session.ForcedPlanetQuestId >= 0 then
       FirstStar := 0;
-    if not HasQuestOfType(qtPlanetQuest) then
+    // CHANGE: ENHANCEMENT - No text quest is offered while the session disables them
+    // (ROADMAP.md, Phase 6: text quests are off in multiplayer).
+    if not HasQuestOfType(qtPlanetQuest) and not Session.TextQuestsDisabled then
       if (Session.ForcedPlanetQuestId >= 0)
           or (FractionalQuotient(
                   CurrentPlanet.GenerationSeed,

@@ -50,6 +50,7 @@ const
   ckBeginTerronTransformation = 39;
   ckFinishTerronTransformation = 40;
   ckDismissScoreScreen = 41;
+  ckSetSessionFlag = 42;
 type
   TSlotList = array of Integer;
 procedure AddWeaponSlot(var Slots: TSlotList; Slot: Integer);
@@ -152,6 +153,8 @@ procedure FinishTerronTransformation;
 // The jump screen or the arcade battle no longer shows the dead player's ship; the turn
 // thread, waiting in the player ship's release, goes on.
 procedure DismissScoreScreen;
+// Sets a session flag (aSession: SessionFlagTextQuestsDisabled, SessionFlagFriendlyFire).
+procedure SetSessionFlagValue(Flag: Integer; Value: Boolean);
 var
   // The days to land that the last PreparePlayerPath found, for the star map.
   PreparedLandingTurns: Integer;
@@ -1053,6 +1056,24 @@ begin
   SubmitCommand(NewCommand(ckDismissScoreScreen));
 end;
 
+// CHANGE: ENHANCEMENT - A session flag changes as a command, so every machine sees the change
+// at the same point (ROADMAP.md, Phase 4, item 10). The host owns the switches; Phase 5
+// decides which machine may send this.
+procedure ExecuteSetSessionFlag(const Command: TPlayerCommand);
+begin
+  SetSessionFlag(IntArg(Command, 0), IntArg(Command, 1) <> 0);
+end;
+
+procedure SetSessionFlagValue(Flag: Integer; Value: Boolean);
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckSetSessionFlag);
+  AddInt(Command, Flag);
+  AddInt(Command, Ord(Value));
+  SubmitCommand(Command);
+end;
+
 initialization
   RegisterCommand(ckParkPlayer, 'ParkPlayer', @ExecuteParkPlayer);
   RegisterCommand(ckPruneMessages, 'PruneMessages', @ExecutePruneMessages);
@@ -1100,4 +1121,5 @@ initialization
       @ExecuteFinishTerronTransformation
   );
   RegisterCommand(ckDismissScoreScreen, 'DismissScoreScreen', @ExecuteDismissScoreScreen);
+  RegisterCommand(ckSetSessionFlag, 'SetSessionFlag', @ExecuteSetSessionFlag);
 end.

@@ -9,10 +9,31 @@ uses
   Types,
   EC_Buf,
   aCommands,
+  aPlayerActions,
+  aSession,
   TestSupport;
 
 const
   ckTestMove = 1023;
+
+// The session flags and their defaults. Executing the command needs a human, so the
+// headless runner tests it (--sim-session-probe).
+procedure RunSessionFlagTests;
+begin
+  ResetSessionFlags;
+  Check(SessionFlagsAreDefault, 'session flags start at their defaults');
+  Check(Session.FriendlyFireEnabled, 'friendly fire is on by default');
+  Check(not Session.TextQuestsDisabled, 'text quests are on by default');
+  SetSessionFlag(SessionFlagFriendlyFire, False);
+  Check(not Session.FriendlyFireEnabled, 'the flag turns friendly fire off');
+  Check(not SessionFlagsAreDefault, 'a changed flag is not the default');
+  SetSessionFlag(SessionFlagTextQuestsDisabled, True);
+  Check(Session.TextQuestsDisabled, 'the flag disables text quests');
+  SetSessionFlag(99, True);
+  ResetSessionFlags;
+  Check(SessionFlagsAreDefault, 'reset restores the defaults');
+  CheckText('SetSessionFlag', WideString(CommandKindName(ckSetSessionFlag)), 'flag command name');
+end;
 
 procedure RunCommandTests;
 var
@@ -73,6 +94,7 @@ begin
   end;
   CheckText('TestMove', WideString(CommandKindName(ckTestMove)), 'command kind name');
   CheckText('Command1022', WideString(CommandKindName(1022)), 'unregistered kind name');
+  RunSessionFlagTests;
 end;
 
 end.
