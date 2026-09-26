@@ -589,31 +589,38 @@ end;
 // Moved from TfTalk.CodeMsgOut.
 procedure ExecuteTalkShipAuxiliaryCode(const Command: TPlayerCommand);
 var
-  H: THuman;
+  H, SavedHuman: THuman;
   Binding: TScriptShip;
 begin
   H := ActorHuman(Command);
   Binding := TScriptShip(H.TalkShip.ScriptShip);
+  // CHANGE: ENHANCEMENT - The code runs for its script's human (docs/humans.md, Scripts).
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(Binding.Script.HumanId);
   try
-    Binding.State.AuxiliaryCode.Run(ScriptProcess);
-  except
-    on E: Exception do
-      // A UI break (EBreakMessageGI, a UI unit's class) only stops the code.
-      if not E.ClassNameIs('EBreakMessageGI') then
-      begin
-        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-        LogScriptCallHistory;
-        raise Exception.Create(
-            AnsiString(
-                'Error in CodeMsgOut code of script '
-                    + CurrentScript.ScriptFileName
-                    + ' (state #'
-                    + Binding.Ship.GetFullName(' ')
-                    + ' '
-                    + Binding.State.Name
-                    + ')'
-            ));
-      end;
+    try
+      Binding.State.AuxiliaryCode.Run(ScriptProcess);
+    except
+      on E: Exception do
+        // A UI break (EBreakMessageGI, a UI unit's class) only stops the code.
+        if not E.ClassNameIs('EBreakMessageGI') then
+        begin
+          AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+          LogScriptCallHistory;
+          raise Exception.Create(
+              AnsiString(
+                  'Error in CodeMsgOut code of script '
+                      + CurrentScript.ScriptFileName
+                      + ' (state #'
+                      + Binding.Ship.GetFullName(' ')
+                      + ' '
+                      + Binding.State.Name
+                      + ')'
+              ));
+        end;
+    end;
+  finally
+    ScriptHuman := SavedHuman;
   end;
 end;
 
@@ -641,12 +648,20 @@ end;
 procedure ExecuteRunInjectedAnswerAction(const Command: TPlayerCommand);
 var
   Injection: PScriptDialogInjection;
+  SavedHuman: THuman;
 begin
   Injection := InjectionArg(Command, 0);
   if Injection.ActionCode <> '' then
   begin
     CurrentScript := Injection.ActionScript;
-    ExecuteScriptText(Injection.ActionCode, CurrentScript.InitCode.LocalVar);
+    // CHANGE: ENHANCEMENT - The code runs for its script's human (docs/humans.md, Scripts).
+    SavedHuman := ScriptHuman;
+    ScriptHuman := BoundHuman(CurrentScript.HumanId);
+    try
+      ExecuteScriptText(Injection.ActionCode, CurrentScript.InitCode.LocalVar);
+    finally
+      ScriptHuman := SavedHuman;
+    end;
   end;
 end;
 

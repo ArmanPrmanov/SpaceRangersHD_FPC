@@ -29,7 +29,7 @@ SIMULATION = ("game", "core", "script")
 CLASSES = {
     "unclassified": r"\bGetPlayer\b",
     "local": r"\bLocal(?:Player|Human)\b",
-    "actor": r"\bActor(?:Human)?\(|\bActingHuman\b|\bScriptHuman\b|\bBoundHuman\b",
+    "actor": r"\bActor(?:Human)?\(|\bActingHuman\b|\bScriptHuman\b|\bScriptPlayer\b|\bBoundHuman\b|\bDefaultScriptHuman\b",
     "each": r"\bSession\.Humans\b|\bForEachHuman\b",
     "any": r"\b(?:IsHuman|StarHasHuman|StarHasHumanInSpace|HumanOf|FindHuman|NearestHuman|IsRuinsProxy|HasLivingHuman|IsFilmedStar|FilmHuman)\(",
 }

@@ -908,7 +908,7 @@ begin
         CharacterPreset
     );
     LocalPlayer.RefreshStorageBubbles;
-    RunGlobalScriptsForContext(LocalPlayer.CurrentStar, 0);
+    RunGlobalScriptsForContext(LocalPlayer.CurrentStar, 0, LocalHuman);
     LegacyGenerationRandom := False;
     NewGameGenerationStage := 8;
   except

@@ -347,6 +347,9 @@ type
     GroupRelations: array of TScriptGroupRelation;
     AnchorPlanet: TPlanet;
     EtherIds: TStringsEC;
+    // CHANGE: ENHANCEMENT - The id of the human the script is bound to (ROADMAP.md, Phase 4,
+    // item 4): its code runs with BoundHuman(HumanId) as ScriptHuman. -1 until it is bound.
+    HumanId: Integer;
     constructor Create;
     destructor Destroy; override;
     procedure Clear;
@@ -535,12 +538,22 @@ procedure CompleteQueuedVideo(Status: Integer);
 procedure LogScriptStepCount(ExpressionCount: Integer);
 procedure InitializeScriptEngine;
 procedure FinalizeScriptEngine;
-procedure RunGlobalScriptsForContext(Star: TStar; RunFrom: Integer);
-function TryStartScriptByName(AnchorStar: TStar; AnchorPlanet: TPlanet; Name: WideString): Boolean;
+// About is the THuman the start is about: the one arriving in Star or landing there (a
+// TObject: this interface cannot use aHuman without a unit cycle). A started script binds
+// to the human of the script code that starts it, else ActingHuman, else About, else the
+// first human, and the templates' conditions run for that human (docs/humans.md, Scripts).
+procedure RunGlobalScriptsForContext(Star: TStar; RunFrom: Integer; About: TObject);
+function TryStartScriptByName(
+    AnchorStar: TStar;
+    AnchorPlanet: TPlanet;
+    Name: WideString;
+    About: TObject = nil
+): Boolean;
 function TryStartScriptInstanceFromTemplate(
     AnchorStar: TStar;
     AnchorPlanet: TPlanet;
-    TemplateIndex: Integer
+    TemplateIndex: Integer;
+    About: TObject = nil
 ): Boolean;
 function TryRestartScript(Script: TScript; AnchorStar: TStar; AnchorPlanet: TPlanet): Boolean;
 procedure CompileScriptTemplateCondition(TemplateIndex: Integer);
@@ -1163,40 +1176,92 @@ begin
   end;
 end;
 
-procedure RunGlobalScriptsForContext(Star: TStar; RunFrom: Integer);
+// The human a script started now binds to.
+function StartingHuman(About: TObject): THuman;
+begin
+  Result := ScriptHuman;
+  if Result = nil then
+    Result := ActingHuman;
+  if Result = nil then
+    Result := THuman(About);
+  if Result = nil then
+    Result := DefaultScriptHuman;
+end;
+
+// The human item code runs for: the human whose ranger holds the item, else the human of
+// the item's script, else DefaultScriptHuman.
+function ItemScriptHuman(Ship: TShip; Script: TScript): THuman;
+begin
+  Result := HumanOf(Ship);
+  if Result = nil then
+    if Script <> nil then
+      Result := BoundHuman(Script.HumanId)
+    else
+      Result := DefaultScriptHuman;
+end;
+
+// The script Item belongs to, or nil.
+function ItemScriptOf(Item: TItem): TScript;
+begin
+  Result := nil;
+  if (Item <> nil) and (Item.ScriptItem <> nil) then
+    Result := TScriptItem(Item.ScriptItem).Script;
+end;
+
+procedure RunGlobalScriptsForContext(Star: TStar; RunFrom: Integer; About: TObject);
 var
   Template: TScriptTemplUnit;
   Candidates: TList;
   I: Integer;
+  Human, SavedHuman: THuman;
 begin
   Session.SharedScriptVariables.GetVar('GRunFrom').SetInt(RunFrom);
   Session.SharedScriptVariables.GetVar('GRunStar').SetDword(PtrUInt(Star));
+  // CHANGE: ENHANCEMENT - The conditions ask about the human a started script binds to.
+  Human := StartingHuman(About);
   Candidates := TList.Create;
   CollectInactiveScriptTemplates(Candidates);
   for I := 0 to Candidates.Count - 1 do
   begin
     Template := TScriptTemplUnit(Candidates[I]);
     Session.ScriptTemplateStartRequested := False;
+    SavedHuman := ScriptHuman;
+    ScriptHuman := Human;
     try
-      Template.ConditionCode.Run(ScriptProcess);
-    except
-      on E: EBreakMessageGI do
-        ;
-      on E: Exception do
-      begin
-        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-        LogExceptionBackTrace;
-        LogScriptCallHistory;
-        raise Exception.Create(AnsiString('Error in global code of script ' + Template.FileName));
+      try
+        Template.ConditionCode.Run(ScriptProcess);
+      except
+        on E: EBreakMessageGI do
+          ;
+        on E: Exception do
+        begin
+          AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+          LogExceptionBackTrace;
+          LogScriptCallHistory;
+          raise Exception.Create(
+              AnsiString('Error in global code of script ' + Template.FileName));
+        end;
       end;
+    finally
+      ScriptHuman := SavedHuman;
     end;
     if Session.ScriptTemplateStartRequested then
-      TryStartScriptInstanceFromTemplate(Star, nil, Session.ScriptTemplates.IndexOf(Template));
+      TryStartScriptInstanceFromTemplate(
+          Star,
+          nil,
+          Session.ScriptTemplates.IndexOf(Template),
+          Human
+      );
   end;
   Candidates.Free;
 end;
 
-function TryStartScriptByName(AnchorStar: TStar; AnchorPlanet: TPlanet; Name: WideString): Boolean;
+function TryStartScriptByName(
+    AnchorStar: TStar;
+    AnchorPlanet: TPlanet;
+    Name: WideString;
+    About: TObject
+): Boolean;
 var
   Index: Integer;
 begin
@@ -1204,24 +1269,30 @@ begin
   if Index < 0 then
     Result := False
   else
-    Result := TryStartScriptInstanceFromTemplate(AnchorStar, AnchorPlanet, Index);
+    Result := TryStartScriptInstanceFromTemplate(AnchorStar, AnchorPlanet, Index, About);
 end;
 
 function TryStartScriptInstanceFromTemplate(
     AnchorStar: TStar;
     AnchorPlanet: TPlanet;
-    TemplateIndex: Integer
+    TemplateIndex: Integer;
+    About: TObject
 ): Boolean;
 var
   Template: TScriptTemplUnit;
   Script: TScript;
   Index: Integer;
+  Human: THuman;
 begin
   Template := TScriptTemplUnit(Session.ScriptTemplates[TemplateIndex]);
   Script := TScript.Create;
   Galaxy.Scripts.Add(Script);
   Template.ActiveScriptIndex := Galaxy.Scripts.Count - 1;
   Script.ClassId := Template.ConfigValue;
+  // CHANGE: ENHANCEMENT - Bind the script to the human it starts for (Phase 4, item 4).
+  Human := StartingHuman(About);
+  if Human <> nil then
+    Script.HumanId := Human.Id;
   if Script.LoadFromFile(Template.FileName, AnchorStar, AnchorPlanet, True) then
   begin
     Template.LastTurn := Galaxy.CurrentTurn;
@@ -1245,7 +1316,7 @@ function TryRestartScript(Script: TScript; AnchorStar: TStar; AnchorPlanet: TPla
 var
   Template: TScriptTemplUnit;
   NewScript: TScript;
-  Index, I: Integer;
+  Index, I, HumanIndex: Integer;
   Message: TMessagePlayer;
 begin
   Result := False;
@@ -1259,20 +1330,25 @@ begin
   NewScript := TScript.Create;
   Galaxy.Scripts[I] := NewScript;
   NewScript.ClassId := Template.ConfigValue;
+  // CHANGE: ENHANCEMENT - A restarted script keeps its human.
+  NewScript.HumanId := Script.HumanId;
   if NewScript.LoadFromFile(Template.FileName, AnchorStar, AnchorPlanet, True) then
   begin
     Template.LastTurn := Galaxy.CurrentTurn;
     Inc(Template.UseCount);
     Result := True;
+    // CHANGE: CLEANUP - The old instance's ether messages close for every human, as when
+    // a script ends (TGalaxy).
     for I := 0 to Script.EtherIds.GetCount - 1 do
-    begin
-      Message := FindPlayerBubbleByKey(Script.EtherIds.GetTextAt(I), False);
-      if (Message <> nil) and (Message.Kind = 3) then
+      for HumanIndex := 0 to Session.Humans.Count - 1 do
       begin
-        Message.Kind := 5;
-        Message.WasRead := False;
+        Message := Session.Humans[HumanIndex].FindBubbleByKey(Script.EtherIds.GetTextAt(I), False);
+        if (Message <> nil) and (Message.Kind = 3) then
+        begin
+          Message.Kind := 5;
+          Message.WasRead := False;
+        end;
       end;
-    end;
     Script.Free;
   end
   else
@@ -2141,6 +2217,7 @@ begin
   Ether := TEther.Create;
   EtherIds := TStringsEC.Create;
   CurrentAnswer := -1;
+  HumanId := -1;
 end;
 
 destructor TScript.Destroy;
@@ -2392,106 +2469,137 @@ procedure TScript.RunShipState(Binding: TScriptShip);
 var
   SavedScript: TScript;
   SavedState, State: TScriptState;
+  SavedHuman: THuman;
 begin
-  State := Binding.State;
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(HumanId);
   try
-    if (State <> nil) and (State.StateCode <> nil) then
-    begin
-      SavedScript := CurrentScript;
-      CurrentScript := Self;
-      PublishShipContext(Binding);
-      SavedState := CurrentScriptState;
-      CurrentScriptState := State;
-      State.StateCode.Run(ScriptProcess);
-      CurrentScriptState := SavedState;
-      CurrentScript := SavedScript;
+    State := Binding.State;
+    try
+      if (State <> nil) and (State.StateCode <> nil) then
+      begin
+        SavedScript := CurrentScript;
+        CurrentScript := Self;
+        PublishShipContext(Binding);
+        SavedState := CurrentScriptState;
+        CurrentScriptState := State;
+        State.StateCode.Run(ScriptProcess);
+        CurrentScriptState := SavedState;
+        CurrentScript := SavedScript;
+      end;
+    except
+      on E: EBreakMessageGI do
+        ;
+      on E: Exception do
+      begin
+        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+        LogExceptionBackTrace;
+        LogScriptCallHistory;
+        raise Exception.Create(
+            AnsiString(
+                'Error in state code of script '
+                    + ScriptFileName
+                    + ' state #'
+                    + WideString(IntToStr(States.IndexOf(State)))
+                    + '('
+                    + State.Name
+                    + ')'
+            ));
+      end;
     end;
-  except
-    on E: EBreakMessageGI do
-      ;
-    on E: Exception do
-    begin
-      AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-      LogExceptionBackTrace;
-      LogScriptCallHistory;
-      raise Exception.Create(
-          AnsiString(
-              'Error in state code of script '
-                  + ScriptFileName
-                  + ' state #'
-                  + WideString(IntToStr(States.IndexOf(State)))
-                  + '('
-                  + State.Name
-                  + ')'
-          ));
-    end;
+  finally
+    ScriptHuman := SavedHuman;
   end;
 end;
 
 procedure TScript.RunTurnCode;
+var
+  SavedHuman: THuman;
 begin
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(HumanId);
   try
-    CurrentScript := Self;
-    TurnCode.Run(ScriptProcess);
-  except
-    on E: EBreakMessageGI do
-      ;
-    on E: Exception do
-    begin
-      AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-      LogExceptionBackTrace;
-      LogScriptCallHistory;
-      raise Exception.Create(AnsiString('Error in turn code of script ' + ScriptFileName));
+    try
+      CurrentScript := Self;
+      TurnCode.Run(ScriptProcess);
+    except
+      on E: EBreakMessageGI do
+        ;
+      on E: Exception do
+      begin
+        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+        LogExceptionBackTrace;
+        LogScriptCallHistory;
+        raise Exception.Create(AnsiString('Error in turn code of script ' + ScriptFileName));
+      end;
     end;
+  finally
+    ScriptHuman := SavedHuman;
   end;
 end;
 
 procedure TScript.RunAuxiliaryCode;
+var
+  SavedHuman: THuman;
 begin
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(HumanId);
   try
-    CurrentScript := Self;
-    AuxiliaryCode.Run(ScriptProcess);
-  except
-    on E: EBreakMessageGI do
-      ;
-    on E: Exception do
-    begin
-      AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-      LogExceptionBackTrace;
-      LogScriptCallHistory;
-      raise Exception.Create(AnsiString('Error in dialog code of script ' + ScriptFileName));
+    try
+      CurrentScript := Self;
+      AuxiliaryCode.Run(ScriptProcess);
+    except
+      on E: EBreakMessageGI do
+        ;
+      on E: Exception do
+      begin
+        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+        LogExceptionBackTrace;
+        LogScriptCallHistory;
+        raise Exception.Create(AnsiString('Error in dialog code of script ' + ScriptFileName));
+      end;
     end;
+  finally
+    ScriptHuman := SavedHuman;
   end;
 end;
 
 procedure TScript.CallDialog(Index: Integer);
+var
+  SavedHuman: THuman;
 begin
-  if (Index < 0) or (Index >= Dialogs.Count) then
-    raise Exception.Create(
-        AnsiString('Error.Script.CallDialog ' + IntToWideString(Index) + ' ' + ScriptFileName));
-  CurrentScript := Self;
-  CurrentDialog := Index;
-  SkipGreeting := False;
-  Session.ScriptDialogIndex := -1;
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(HumanId);
   try
-    TScriptDialog(Dialogs[Index]).Code.Run(ScriptProcess);
-  except
-    on E: EBreakMessageGI do
-      ;
-    on E: Exception do
-    begin
-      AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-      LogExceptionBackTrace;
-      LogScriptCallHistory;
+    if (Index < 0) or (Index >= Dialogs.Count) then
       raise Exception.Create(
-          AnsiString(
-              'Error in call dialog code of script '
-                  + ScriptFileName
-                  + ' ('
-                  + TScriptDialog(Dialogs[Index]).Name
-                  + ')'
-          ));
+          AnsiString('Error.Script.CallDialog ' + IntToWideString(Index) + ' ' + ScriptFileName));
+    CurrentScript := Self;
+    CurrentDialog := Index;
+    SkipGreeting := False;
+    Session.ScriptDialogIndex := -1;
+    try
+      TScriptDialog(Dialogs[Index]).Code.Run(ScriptProcess);
+    except
+      on E: EBreakMessageGI do
+        ;
+      on E: Exception do
+      begin
+        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+        LogExceptionBackTrace;
+        LogScriptCallHistory;
+        raise Exception.Create(
+            AnsiString(
+                'Error in call dialog code of script '
+                    + ScriptFileName
+                    + ' ('
+                    + TScriptDialog(Dialogs[Index]).Name
+                    + ')'
+            ));
+      end;
     end;
+  finally
+    ScriptHuman := SavedHuman;
   end;
 end;
 
@@ -2506,84 +2614,108 @@ begin
 end;
 
 procedure TScript.CallDialogMessage(Index: Integer);
+var
+  SavedHuman: THuman;
 begin
-  if (Index < 0) or (Index >= DialogMessages.Count) then
-    raise Exception.Create(AnsiString('Error.Script.CallDialogMsg ' + ScriptFileName));
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(HumanId);
   try
-    TScriptDialogMsg(DialogMessages[Index]).Code.Run(ScriptProcess);
-  except
-    on E: EBreakMessageGI do
-      ;
-    on E: Exception do
-    begin
-      AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-      LogExceptionBackTrace;
-      LogScriptCallHistory;
-      raise Exception.Create(
-          AnsiString(
-              'Error in call dialog message code of script '
-                  + ScriptFileName
-                  + ' (message '
-                  + IntToWideString(Index)
-                  + ')'
-          ));
+    if (Index < 0) or (Index >= DialogMessages.Count) then
+      raise Exception.Create(AnsiString('Error.Script.CallDialogMsg ' + ScriptFileName));
+    try
+      TScriptDialogMsg(DialogMessages[Index]).Code.Run(ScriptProcess);
+    except
+      on E: EBreakMessageGI do
+        ;
+      on E: Exception do
+      begin
+        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+        LogExceptionBackTrace;
+        LogScriptCallHistory;
+        raise Exception.Create(
+            AnsiString(
+                'Error in call dialog message code of script '
+                    + ScriptFileName
+                    + ' (message '
+                    + IntToWideString(Index)
+                    + ')'
+            ));
+      end;
     end;
+  finally
+    ScriptHuman := SavedHuman;
   end;
 end;
 
 procedure TScript.BuildDialogAnswer(Index: Integer);
+var
+  SavedHuman: THuman;
 begin
-  if (Index < 0) or (Index >= DialogAnswers.Count) then
-    raise Exception.Create(AnsiString('Error.Script.CallDialogAnswerAnswer ' + ScriptFileName));
-  CurrentAnswer := Index;
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(HumanId);
   try
-    TScriptDialogAnswer(DialogAnswers[Index]).AnswerCode.Run(ScriptProcess);
-    CurrentAnswer := -1;
-  except
-    on E: EBreakMessageGI do
-      ;
-    on E: Exception do
-    begin
-      AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-      LogExceptionBackTrace;
-      LogScriptCallHistory;
-      raise Exception.Create(
-          AnsiString(
-              'Error in call answer code of script '
-                  + ScriptFileName
-                  + ' (answer '
-                  + IntToWideString(Index)
-                  + ')'
-          ));
+    if (Index < 0) or (Index >= DialogAnswers.Count) then
+      raise Exception.Create(AnsiString('Error.Script.CallDialogAnswerAnswer ' + ScriptFileName));
+    CurrentAnswer := Index;
+    try
+      TScriptDialogAnswer(DialogAnswers[Index]).AnswerCode.Run(ScriptProcess);
+      CurrentAnswer := -1;
+    except
+      on E: EBreakMessageGI do
+        ;
+      on E: Exception do
+      begin
+        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+        LogExceptionBackTrace;
+        LogScriptCallHistory;
+        raise Exception.Create(
+            AnsiString(
+                'Error in call answer code of script '
+                    + ScriptFileName
+                    + ' (answer '
+                    + IntToWideString(Index)
+                    + ')'
+            ));
+      end;
     end;
+  finally
+    ScriptHuman := SavedHuman;
   end;
 end;
 
 procedure TScript.ExecuteDialogAnswer(Index: Integer);
+var
+  SavedHuman: THuman;
 begin
-  if Index = -1 then
-    Exit;
-  if (Index < 0) or (Index >= DialogAnswers.Count) then
-    raise Exception.Create(AnsiString('Error.Script.CallDialogAnswerCode ' + ScriptFileName));
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(HumanId);
   try
-    TScriptDialogAnswer(DialogAnswers[Index]).ActionCode.Run(ScriptProcess);
-  except
-    on E: EBreakMessageGI do
-      ;
-    on E: Exception do
-    begin
-      AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-      LogExceptionBackTrace;
-      LogScriptCallHistory;
-      raise Exception.Create(
-          AnsiString(
-              'Error in add answer code of script '
-                  + ScriptFileName
-                  + ' (answer '
-                  + IntToWideString(Index)
-                  + ')'
-          ));
+    if Index = -1 then
+      Exit;
+    if (Index < 0) or (Index >= DialogAnswers.Count) then
+      raise Exception.Create(AnsiString('Error.Script.CallDialogAnswerCode ' + ScriptFileName));
+    try
+      TScriptDialogAnswer(DialogAnswers[Index]).ActionCode.Run(ScriptProcess);
+    except
+      on E: EBreakMessageGI do
+        ;
+      on E: Exception do
+      begin
+        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+        LogExceptionBackTrace;
+        LogScriptCallHistory;
+        raise Exception.Create(
+            AnsiString(
+                'Error in add answer code of script '
+                    + ScriptFileName
+                    + ' (answer '
+                    + IntToWideString(Index)
+                    + ')'
+            ));
+      end;
     end;
+  finally
+    ScriptHuman := SavedHuman;
   end;
 end;
 
@@ -2668,18 +2800,26 @@ begin
 end;
 
 procedure TScript.ChangeState(Binding: TScriptShip; StateIndex: Integer);
+var
+  SavedHuman: THuman;
 begin
-  if Binding = nil then
-    Exit;
-  Binding.State := TScriptState(States[StateIndex]);
-  if Binding.State.EntryCode <> nil then
-    Binding.State.EntryCode.Run(ScriptProcess);
-  if not (Binding.Ship is TPlayer) then
-    Binding.Ship.InitializeScriptStateOrders;
-  if Binding.State.StateCode <> nil then
-  begin
-    PublishShipContext(Binding);
-    Binding.State.StateCode.Run(ScriptProcess);
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(HumanId);
+  try
+    if Binding = nil then
+      Exit;
+    Binding.State := TScriptState(States[StateIndex]);
+    if Binding.State.EntryCode <> nil then
+      Binding.State.EntryCode.Run(ScriptProcess);
+    if not (Binding.Ship is TPlayer) then
+      Binding.Ship.InitializeScriptStateOrders;
+    if Binding.State.StateCode <> nil then
+    begin
+      PublishShipContext(Binding);
+      Binding.State.StateCode.Run(ScriptProcess);
+    end;
+  finally
+    ScriptHuman := SavedHuman;
   end;
 end;
 
@@ -4000,26 +4140,33 @@ var
   Control: TCBufControlEC;
   CachedBuffer: TCBufEC;
   Failed: Boolean;
+  SavedHuman: THuman;
 begin
-  Control := nil;
-  ScriptFileName := FileName;
-  Failed := True;
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(HumanId);
   try
-    Control := TCBufControlEC.Create;
-    GlobalCache.ResetControl(Control);
-    Control.SetCacheKey(FileName);
-    CachedBuffer := AcquireOrCreateBuffer(Control);
-    Result := LoadFromBuffer(CachedBuffer.Buffer, AnchorStar, FirstPlanet, CreateObjects);
-    Failed := False;
-  finally
-    if Control <> nil then
-    begin
-      Control.Release;
-      Control.EvictData(TCBufEC);
-      Control.Free;
+    Control := nil;
+    ScriptFileName := FileName;
+    Failed := True;
+    try
+      Control := TCBufControlEC.Create;
+      GlobalCache.ResetControl(Control);
+      Control.SetCacheKey(FileName);
+      CachedBuffer := AcquireOrCreateBuffer(Control);
+      Result := LoadFromBuffer(CachedBuffer.Buffer, AnchorStar, FirstPlanet, CreateObjects);
+      Failed := False;
+    finally
+      if Control <> nil then
+      begin
+        Control.Release;
+        Control.EvictData(TCBufEC);
+        Control.Free;
+      end;
+      if Failed then
+        AppendLogLineThreadSafe(AnsiString('Failed to load script: ' + FileName));
     end;
-    if Failed then
-      AppendLogLineThreadSafe(AnsiString('Failed to load script: ' + FileName));
+  finally
+    ScriptHuman := SavedHuman;
   end;
 end;
 
@@ -4520,6 +4667,12 @@ var
   State: TScriptState;
   Place: TScriptPlace;
 begin
+  // HUMANS: per-human save block (item 5). The save does not hold the bound human yet, so
+  // every loaded script is bound to the first human, the local one in single player.
+  if Session.Humans.Count > 0 then
+    HumanId := Session.Humans[0].Id
+  else
+    HumanId := -1;
   Count := Ships.Count;
   for I := 0 to Count - 1 do
   begin
@@ -4761,42 +4914,49 @@ var
   Code: TCodeEC;
   SavedScript: TScript;
   ScriptScope: TVarArrayEC;
+  SavedHuman: THuman;
 begin
-  Code := CompileScriptText(SourceText);
-  SavedScript := CurrentScript;
-  if Scope = nil then
-    CurrentScript := nil;
-  Code.LinkAll(Session.SharedScriptVariables, False);
-  Code.LinkAll(ScriptFunctionScope, False);
-  Code.ScriptFunLinked := True;
-  if Scope <> nil then
-    Code.LinkAll(Scope, False);
-  if CurrentScript <> nil then
-  begin
-    ScriptScope := CurrentScript.InitCode.LocalVar;
-    if ScriptScope <> Scope then
-      Code.LinkAll(ScriptScope, False);
-  end;
+  SavedHuman := ScriptHuman;
+  ScriptHuman := DefaultScriptHuman;
   try
-    Code.Run(ScriptProcess);
-  except
-    on E: EBreakMessageGI do
-      ;
-    on E: Exception do
+    Code := CompileScriptText(SourceText);
+    SavedScript := CurrentScript;
+    if Scope = nil then
+      CurrentScript := nil;
+    Code.LinkAll(Session.SharedScriptVariables, False);
+    Code.LinkAll(ScriptFunctionScope, False);
+    Code.ScriptFunLinked := True;
+    if Scope <> nil then
+      Code.LinkAll(Scope, False);
+    if CurrentScript <> nil then
     begin
-      AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-      LogExceptionBackTrace;
-      LogScriptCallHistory;
-      AppendLogLineThreadSafe('Error while executing code from string: ');
-      if Length(SourceText) <= 256 then
-        AppendLogLineThreadSafe(AnsiString(SourceText))
-      else
-        AppendLogLineThreadSafe(AnsiString(Copy(SourceText, 1, 256) + ' ...'));
-      raise;
+      ScriptScope := CurrentScript.InitCode.LocalVar;
+      if ScriptScope <> Scope then
+        Code.LinkAll(ScriptScope, False);
     end;
+    try
+      Code.Run(ScriptProcess);
+    except
+      on E: EBreakMessageGI do
+        ;
+      on E: Exception do
+      begin
+        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+        LogExceptionBackTrace;
+        LogScriptCallHistory;
+        AppendLogLineThreadSafe('Error while executing code from string: ');
+        if Length(SourceText) <= 256 then
+          AppendLogLineThreadSafe(AnsiString(SourceText))
+        else
+          AppendLogLineThreadSafe(AnsiString(Copy(SourceText, 1, 256) + ' ...'));
+        raise;
+      end;
+    end;
+    CurrentScript := SavedScript;
+    Code.Free;
+  finally
+    ScriptHuman := SavedHuman;
   end;
-  CurrentScript := SavedScript;
-  Code.Free;
 end;
 
 function CompileScriptText(SourceText: WideString): TCodeEC;
@@ -5190,46 +5350,53 @@ var
   SavedScript: TScript;
   Text: WideString;
   Cell: TVarEC;
+  SavedHuman: THuman;
 begin
-  Code := Entry.Code;
-  Code.LinkAll(Session.SharedScriptVariables, False);
-  Code.LinkAll(ScriptFunctionScope, False);
-  Code.ScriptFunLinked := True;
-  SavedScript := CurrentScript;
-  CurrentScript := nil;
+  SavedHuman := ScriptHuman;
+  ScriptHuman := DefaultScriptHuman;
   try
-    if VirtualKey <> 0 then
-    begin
-      Cell := Code.LocalVar.GetVarNE('KEY');
-      if Cell <> nil then
-        Cell.SetDword(VirtualKey)
-      else
-        Code.LocalVar.Add('KEY', vkDword).SetDword(VirtualKey);
-      Cell := Code.LocalVar.GetVarNE('KEYMOD');
-      if Cell <> nil then
-        Cell.SetDword(KeyModifiers)
-      else
-        Code.LocalVar.Add('KEYMOD', vkDword).SetDword(KeyModifiers);
+    Code := Entry.Code;
+    Code.LinkAll(Session.SharedScriptVariables, False);
+    Code.LinkAll(ScriptFunctionScope, False);
+    Code.ScriptFunLinked := True;
+    SavedScript := CurrentScript;
+    CurrentScript := nil;
+    try
+      if VirtualKey <> 0 then
+      begin
+        Cell := Code.LocalVar.GetVarNE('KEY');
+        if Cell <> nil then
+          Cell.SetDword(VirtualKey)
+        else
+          Code.LocalVar.Add('KEY', vkDword).SetDword(VirtualKey);
+        Cell := Code.LocalVar.GetVarNE('KEYMOD');
+        if Cell <> nil then
+          Cell.SetDword(KeyModifiers)
+        else
+          Code.LocalVar.Add('KEYMOD', vkDword).SetDword(KeyModifiers);
+      end;
+      Code.Run(ScriptProcess);
+    except
+      on E: EBreakMessageGI do
+        ;
+      on E: Exception do
+      begin
+        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+        LogExceptionBackTrace;
+        LogScriptCallHistory;
+        AppendLogLineThreadSafe('Error while executing GI code:');
+        Text := Entry.SourceText;
+        if Length(Text) <= 256 then
+          AppendLogLineThreadSafe(AnsiString(Text))
+        else
+          AppendLogLineThreadSafe(AnsiString(Copy(Text, 1, 256) + ' ...'));
+        raise;
+      end;
     end;
-    Code.Run(ScriptProcess);
-  except
-    on E: EBreakMessageGI do
-      ;
-    on E: Exception do
-    begin
-      AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-      LogExceptionBackTrace;
-      LogScriptCallHistory;
-      AppendLogLineThreadSafe('Error while executing GI code:');
-      Text := Entry.SourceText;
-      if Length(Text) <= 256 then
-        AppendLogLineThreadSafe(AnsiString(Text))
-      else
-        AppendLogLineThreadSafe(AnsiString(Copy(Text, 1, 256) + ' ...'));
-      raise;
-    end;
+    CurrentScript := SavedScript;
+  finally
+    ScriptHuman := SavedHuman;
   end;
-  CurrentScript := SavedScript;
 end;
 
 procedure ScriptSnap(out Snapshot: TScriptContextSnapshot);
@@ -5320,54 +5487,61 @@ function TScriptItem.RunActionCode(
 ): PtrInt;
 var
   Snapshot: TScriptContextSnapshot;
+  SavedHuman: THuman;
 begin
-  Result := Param;
-  if (ActionCode <> nil) and not ActionCodeInitialized then
-  begin
-    ActionCode.Free;
-    ActionCode := nil;
-  end;
-  if OnActionText <> '' then
-    try
-      if ActionCode = nil then
-        CompileActionCode;
-      if not (ActionType in ActionTypeMask) then
-        Exit;
-      if (ActionType = satOnStep) and not (Param in StepTypeMask) then
-        Exit;
-      if Script <> nil then
-      begin
-        ScriptSnap(Snapshot);
-        Script.PublishCurrentShip(Ship);
-        Session.ScriptItemContextStack.Add(Item);
-        Session.ScriptItemInfoContextStack.Add(nil);
-        Session.ScriptActionTypeStack.Add(Pointer(ActionType));
-        Session.ScriptActionObject1Stack.Add(Object1);
-        Session.ScriptActionObject2Stack.Add(Object2);
-        Session.ScriptActionParamStack.Add(Pointer(Param));
-        Session.ScriptActionShipStack.Add(Ship);
-        RunScriptCode(OnActionText, ActionCode, Script.InitCode);
-        ScriptUnSnap(Snapshot);
-        Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
-        Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
-        Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
-        Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
-        Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
-        Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
-        Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
-        Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
-        Exit;
-      end;
-    except
-      on E: Exception do
-      begin
-        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-        LogExceptionBackTrace;
-        AppendLogLineThreadSafe('Error in script item actcode, item=');
-        AppendLogLineThreadSafe(AnsiString(Item.GetDisplayName + ', script name - ' + Name));
-        raise;
-      end;
+  SavedHuman := ScriptHuman;
+  ScriptHuman := ItemScriptHuman(Ship, Script);
+  try
+    Result := Param;
+    if (ActionCode <> nil) and not ActionCodeInitialized then
+    begin
+      ActionCode.Free;
+      ActionCode := nil;
     end;
+    if OnActionText <> '' then
+      try
+        if ActionCode = nil then
+          CompileActionCode;
+        if not (ActionType in ActionTypeMask) then
+          Exit;
+        if (ActionType = satOnStep) and not (Param in StepTypeMask) then
+          Exit;
+        if Script <> nil then
+        begin
+          ScriptSnap(Snapshot);
+          Script.PublishCurrentShip(Ship);
+          Session.ScriptItemContextStack.Add(Item);
+          Session.ScriptItemInfoContextStack.Add(nil);
+          Session.ScriptActionTypeStack.Add(Pointer(ActionType));
+          Session.ScriptActionObject1Stack.Add(Object1);
+          Session.ScriptActionObject2Stack.Add(Object2);
+          Session.ScriptActionParamStack.Add(Pointer(Param));
+          Session.ScriptActionShipStack.Add(Ship);
+          RunScriptCode(OnActionText, ActionCode, Script.InitCode);
+          ScriptUnSnap(Snapshot);
+          Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
+          Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
+          Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
+          Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
+          Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
+          Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
+          Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
+          Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
+          Exit;
+        end;
+      except
+        on E: Exception do
+        begin
+          AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+          LogExceptionBackTrace;
+          AppendLogLineThreadSafe('Error in script item actcode, item=');
+          AppendLogLineThreadSafe(AnsiString(Item.GetDisplayName + ', script name - ' + Name));
+          raise;
+        end;
+      end;
+  finally
+    ScriptHuman := SavedHuman;
+  end;
 end;
 
 function TScriptShip.RunActionCode(
@@ -5378,41 +5552,48 @@ function TScriptShip.RunActionCode(
 ): PtrInt;
 var
   Snapshot: TScriptContextSnapshot;
+  SavedHuman: THuman;
 begin
-  Result := Param;
-  if (State <> nil) and (State.OnActionText <> '') then
-    if ActionType in State.ActionTypeMask then
-      if (ActionType <> satOnStep) or (Param in State.StepTypeMask) then
-        try
-          ScriptSnap(Snapshot);
-          Script.PublishCurrentShip(Ship);
-          Session.ScriptItemContextStack.Add(nil);
-          Session.ScriptItemInfoContextStack.Add(nil);
-          Session.ScriptActionTypeStack.Add(Pointer(ActionType));
-          Session.ScriptActionObject1Stack.Add(Object1);
-          Session.ScriptActionObject2Stack.Add(Object2);
-          Session.ScriptActionParamStack.Add(Pointer(Param));
-          Session.ScriptActionShipStack.Add(Ship);
-          RunScriptCode(State.OnActionText, State.ActionCode, Script.InitCode);
-          ScriptUnSnap(Snapshot);
-          Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
-          Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
-          Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
-          Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
-          Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
-          Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
-          Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
-          Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
-        except
-          on E: Exception do
-          begin
-            AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-            LogExceptionBackTrace;
-            AppendLogLineThreadSafe('Error in script ship actcode');
-            AppendLogLineThreadSafe(AnsiString(State.Name + ', script - ' + Script.ScriptFileName));
-            raise;
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(Script.HumanId);
+  try
+    Result := Param;
+    if (State <> nil) and (State.OnActionText <> '') then
+      if ActionType in State.ActionTypeMask then
+        if (ActionType <> satOnStep) or (Param in State.StepTypeMask) then
+          try
+            ScriptSnap(Snapshot);
+            Script.PublishCurrentShip(Ship);
+            Session.ScriptItemContextStack.Add(nil);
+            Session.ScriptItemInfoContextStack.Add(nil);
+            Session.ScriptActionTypeStack.Add(Pointer(ActionType));
+            Session.ScriptActionObject1Stack.Add(Object1);
+            Session.ScriptActionObject2Stack.Add(Object2);
+            Session.ScriptActionParamStack.Add(Pointer(Param));
+            Session.ScriptActionShipStack.Add(Ship);
+            RunScriptCode(State.OnActionText, State.ActionCode, Script.InitCode);
+            ScriptUnSnap(Snapshot);
+            Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
+            Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
+            Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
+            Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
+            Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
+            Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
+            Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
+            Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
+          except
+            on E: Exception do
+            begin
+              AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+              LogExceptionBackTrace;
+              AppendLogLineThreadSafe('Error in script ship actcode');
+              AppendLogLineThreadSafe(AnsiString(State.Name + ', script - ' + Script.ScriptFileName));
+              raise;
+            end;
           end;
-        end;
+  finally
+    ScriptHuman := SavedHuman;
+  end;
 end;
 
 function RunItemUseCode(Item: TItem; Ship: TShip): Integer;
@@ -5421,46 +5602,53 @@ var
   SavedScript, Script: TScript;
   Text: WideString;
   ParentCode: TCodeEC;
+  SavedHuman: THuman;
 begin
-  Result := 0;
-  if Item = nil then
-    Exit;
-  Session.ScriptUseItem := Item;
-  Binding := Item.ScriptItem as TScriptItem;
-  SavedScript := CurrentScript;
-  CurrentScript := nil;
-  ParentCode := nil;
-  if Binding <> nil then
-    Text := Binding.OnUseText
-  else
-    Text := '';
-  if Text = '' then
-    if Item is TUselessItem then
-      Text := (Item as TUselessItem).GetOnUseCodeText
-    else if Item is TArtefact then
-      Text := (Item as TArtefact).GetOnUseCodeText;
-  if (Text <> '') and (Binding <> nil) and (Binding.Script <> nil) then
-  begin
-    Script := Binding.Script;
-    CurrentScript := Script;
-    Script.CurrentShip := Ship;
-    Script.InitCode.LocalVar.GetVar('CurShip').SetDword(PtrUInt(Ship));
-    ParentCode := Script.InitCode;
-  end;
-  if Text <> '' then
-  begin
-    Session.ScriptActionParamStack.Add(nil);
-    Session.ScriptActionShipStack.Add(Ship);
-    if ParentCode <> nil then
-      ExecuteScriptText(Text, ParentCode.LocalVar)
+  SavedHuman := ScriptHuman;
+  ScriptHuman := ItemScriptHuman(Ship, ItemScriptOf(Item));
+  try
+    Result := 0;
+    if Item = nil then
+      Exit;
+    Session.ScriptUseItem := Item;
+    Binding := Item.ScriptItem as TScriptItem;
+    SavedScript := CurrentScript;
+    CurrentScript := nil;
+    ParentCode := nil;
+    if Binding <> nil then
+      Text := Binding.OnUseText
     else
-      ExecuteScriptText(Text, nil);
-    Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
-    Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
-    Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
+      Text := '';
+    if Text = '' then
+      if Item is TUselessItem then
+        Text := (Item as TUselessItem).GetOnUseCodeText
+      else if Item is TArtefact then
+        Text := (Item as TArtefact).GetOnUseCodeText;
+    if (Text <> '') and (Binding <> nil) and (Binding.Script <> nil) then
+    begin
+      Script := Binding.Script;
+      CurrentScript := Script;
+      Script.CurrentShip := Ship;
+      Script.InitCode.LocalVar.GetVar('CurShip').SetDword(PtrUInt(Ship));
+      ParentCode := Script.InitCode;
+    end;
+    if Text <> '' then
+    begin
+      Session.ScriptActionParamStack.Add(nil);
+      Session.ScriptActionShipStack.Add(Ship);
+      if ParentCode <> nil then
+        ExecuteScriptText(Text, ParentCode.LocalVar)
+      else
+        ExecuteScriptText(Text, nil);
+      Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
+      Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
+      Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
+    end;
+    CurrentScript := SavedScript;
+    Session.ScriptUseItem := nil;
+  finally
+    ScriptHuman := SavedHuman;
   end;
-  CurrentScript := SavedScript;
-  Session.ScriptUseItem := nil;
 end;
 
 function RunItemConfigActionCode(
@@ -5475,58 +5663,65 @@ var
   Binding: TScriptItem;
   ParentCode: TCodeEC;
   Snapshot: TScriptContextSnapshot;
+  SavedHuman: THuman;
 begin
-  Result := Param;
-  Entry := nil;
-  if Item is TArtefact then
-    Entry := TScriptCacheUnit((Item as TArtefact).GetActionCode);
-  if Item is TUselessItem then
-    Entry := TScriptCacheUnit((Item as TUselessItem).GetActionCode);
-  if Entry <> nil then
-    if ActionType in Entry.ActionTypeMask then
-      if (ActionType <> satOnStep) or (Param in Entry.StepTypeMask) then
-      begin
-        Binding := TScriptItem(Item.ScriptItem);
-        ParentCode := nil;
-        try
-          Session.ScriptItemContextStack.Add(Item);
-          Session.ScriptItemInfoContextStack.Add(nil);
-          Session.ScriptActionTypeStack.Add(Pointer(ActionType));
-          Session.ScriptActionObject1Stack.Add(Object1);
-          Session.ScriptActionObject2Stack.Add(Object2);
-          Session.ScriptActionParamStack.Add(Pointer(Param));
-          Session.ScriptActionShipStack.Add(Ship);
-          ScriptSnap(Snapshot);
-          if (Binding <> nil) and (Binding.Script <> nil) then
-          begin
-            Binding.Script.PublishCurrentShip(Ship);
-            ParentCode := CurrentScript.InitCode;
-          end;
-          RunScriptCode(Entry.SourceText, Entry.Code, ParentCode);
-          ScriptUnSnap(Snapshot);
-          Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
-          Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
-          Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
-          Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
-          Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
-          Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
-          Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
-          Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
-        except
-          on E: Exception do
-          begin
-            AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-            LogExceptionBackTrace;
-            AppendLogLineThreadSafe('Error in item actcode, item=');
-            AppendLogLineThreadSafe(AnsiString(Item.GetDisplayName));
-            if Item.ScriptItem <> nil then
-              AppendLogLineThreadSafe(
-                  AnsiString('script name - ' + TScriptItem(Item.ScriptItem).Name)
-              );
-            raise;
+  SavedHuman := ScriptHuman;
+  ScriptHuman := ItemScriptHuman(Ship, ItemScriptOf(Item));
+  try
+    Result := Param;
+    Entry := nil;
+    if Item is TArtefact then
+      Entry := TScriptCacheUnit((Item as TArtefact).GetActionCode);
+    if Item is TUselessItem then
+      Entry := TScriptCacheUnit((Item as TUselessItem).GetActionCode);
+    if Entry <> nil then
+      if ActionType in Entry.ActionTypeMask then
+        if (ActionType <> satOnStep) or (Param in Entry.StepTypeMask) then
+        begin
+          Binding := TScriptItem(Item.ScriptItem);
+          ParentCode := nil;
+          try
+            Session.ScriptItemContextStack.Add(Item);
+            Session.ScriptItemInfoContextStack.Add(nil);
+            Session.ScriptActionTypeStack.Add(Pointer(ActionType));
+            Session.ScriptActionObject1Stack.Add(Object1);
+            Session.ScriptActionObject2Stack.Add(Object2);
+            Session.ScriptActionParamStack.Add(Pointer(Param));
+            Session.ScriptActionShipStack.Add(Ship);
+            ScriptSnap(Snapshot);
+            if (Binding <> nil) and (Binding.Script <> nil) then
+            begin
+              Binding.Script.PublishCurrentShip(Ship);
+              ParentCode := CurrentScript.InitCode;
+            end;
+            RunScriptCode(Entry.SourceText, Entry.Code, ParentCode);
+            ScriptUnSnap(Snapshot);
+            Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
+            Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
+            Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
+            Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
+            Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
+            Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
+            Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
+            Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
+          except
+            on E: Exception do
+            begin
+              AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+              LogExceptionBackTrace;
+              AppendLogLineThreadSafe('Error in item actcode, item=');
+              AppendLogLineThreadSafe(AnsiString(Item.GetDisplayName));
+              if Item.ScriptItem <> nil then
+                AppendLogLineThreadSafe(
+                    AnsiString('script name - ' + TScriptItem(Item.ScriptItem).Name)
+                );
+              raise;
+            end;
           end;
         end;
-      end;
+  finally
+    ScriptHuman := SavedHuman;
+  end;
 end;
 
 function RunCustomShipInfoActionCode(
@@ -5540,66 +5735,73 @@ var
   Config: TBlockParEC;
   Entry: TScriptCacheUnit;
   Snapshot: TScriptContextSnapshot;
+  SavedHuman: THuman;
 begin
-  Result := Param;
-  Entry := TScriptCacheUnit(Info.ActionCode);
-  if not Info.ActionCodeInitialized then
-  begin
-    Info.ActionCodeInitialized := True;
-    Config :=
-        LanguageDataConfig
-            .GetBlock('ShipInfo')
-            .GetBlock('AddInfo')
-            .GetBlock('CustomInfos')
-            .GetBlock(Info.TypeName);
-    try
-      Entry := GetCachedActionCode(CustomShipInfoScriptCache, Info.TypeName, Config);
-    except
-      on E: Exception do
-      begin
-        AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-        LogExceptionBackTrace;
-        AppendLogLineThreadSafe(AnsiString('Error in actcode, info=' + Info.TypeName));
-        LogScriptCallHistory;
-        raise;
-      end;
-    end;
-    Info.ActionCode := Entry;
-  end;
-  if Entry <> nil then
-    if ActionType in Entry.ActionTypeMask then
-      if (ActionType <> satOnStep) or (Param in Entry.StepTypeMask) then
-      begin
-        Session.ScriptItemContextStack.Add(nil);
-        Session.ScriptItemInfoContextStack.Add(Info);
-        Session.ScriptActionTypeStack.Add(Pointer(ActionType));
-        Session.ScriptActionObject1Stack.Add(Object1);
-        Session.ScriptActionObject2Stack.Add(Object2);
-        Session.ScriptActionParamStack.Add(Pointer(Param));
-        Session.ScriptActionShipStack.Add(Ship);
-        try
-          ScriptSnap(Snapshot);
-          RunScriptCode(Entry.SourceText, Entry.Code, nil);
-          ScriptUnSnap(Snapshot);
-        except
-          on E: Exception do
-          begin
-            AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
-            LogExceptionBackTrace;
-            AppendLogLineThreadSafe(AnsiString('Error in actcode, info=' + Info.TypeName));
-            LogScriptCallHistory;
-            raise;
-          end;
+  SavedHuman := ScriptHuman;
+  ScriptHuman := ItemScriptHuman(Ship, nil);
+  try
+    Result := Param;
+    Entry := TScriptCacheUnit(Info.ActionCode);
+    if not Info.ActionCodeInitialized then
+    begin
+      Info.ActionCodeInitialized := True;
+      Config :=
+          LanguageDataConfig
+              .GetBlock('ShipInfo')
+              .GetBlock('AddInfo')
+              .GetBlock('CustomInfos')
+              .GetBlock(Info.TypeName);
+      try
+        Entry := GetCachedActionCode(CustomShipInfoScriptCache, Info.TypeName, Config);
+      except
+        on E: Exception do
+        begin
+          AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+          LogExceptionBackTrace;
+          AppendLogLineThreadSafe(AnsiString('Error in actcode, info=' + Info.TypeName));
+          LogScriptCallHistory;
+          raise;
         end;
-        Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
-        Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
-        Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
-        Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
-        Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
-        Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
-        Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
-        Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
       end;
+      Info.ActionCode := Entry;
+    end;
+    if Entry <> nil then
+      if ActionType in Entry.ActionTypeMask then
+        if (ActionType <> satOnStep) or (Param in Entry.StepTypeMask) then
+        begin
+          Session.ScriptItemContextStack.Add(nil);
+          Session.ScriptItemInfoContextStack.Add(Info);
+          Session.ScriptActionTypeStack.Add(Pointer(ActionType));
+          Session.ScriptActionObject1Stack.Add(Object1);
+          Session.ScriptActionObject2Stack.Add(Object2);
+          Session.ScriptActionParamStack.Add(Pointer(Param));
+          Session.ScriptActionShipStack.Add(Ship);
+          try
+            ScriptSnap(Snapshot);
+            RunScriptCode(Entry.SourceText, Entry.Code, nil);
+            ScriptUnSnap(Snapshot);
+          except
+            on E: Exception do
+            begin
+              AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
+              LogExceptionBackTrace;
+              AppendLogLineThreadSafe(AnsiString('Error in actcode, info=' + Info.TypeName));
+              LogScriptCallHistory;
+              raise;
+            end;
+          end;
+          Result := PtrInt(Session.ScriptActionParamStack[Session.ScriptActionParamStack.Count - 1]);
+          Session.ScriptActionTypeStack.Delete(Session.ScriptActionTypeStack.Count - 1);
+          Session.ScriptActionObject1Stack.Delete(Session.ScriptActionObject1Stack.Count - 1);
+          Session.ScriptActionObject2Stack.Delete(Session.ScriptActionObject2Stack.Count - 1);
+          Session.ScriptActionParamStack.Delete(Session.ScriptActionParamStack.Count - 1);
+          Session.ScriptActionShipStack.Delete(Session.ScriptActionShipStack.Count - 1);
+          Session.ScriptItemInfoContextStack.Delete(Session.ScriptItemInfoContextStack.Count - 1);
+          Session.ScriptItemContextStack.Delete(Session.ScriptItemContextStack.Count - 1);
+        end;
+  finally
+    ScriptHuman := SavedHuman;
+  end;
 end;
 
 function TScriptItem.FormatDataText(Text, ColorTag: WideString): WideString;

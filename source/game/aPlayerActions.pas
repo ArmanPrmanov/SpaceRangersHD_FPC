@@ -871,7 +871,7 @@ begin
   H.PlayerStar.RefreshSpaceObjectPositions;
   if (Flags and tfReturnShopStock) <> 0 then
     RestoreTemporaryShopStock(H);
-  RunGlobalScriptsForContext(P.CurrentStar, 1);
+  RunGlobalScriptsForContext(P.CurrentStar, 1, H);
   // How dominators look follows the local human's health effect: presentation.
   if (LocalPlayer <> nil) and LocalPlayer.IsHealthEffectActive(3) then
     Galaxy.EnableDominatorSurfaces
@@ -905,7 +905,7 @@ begin
   if (Cardinal(P.OrderStateData) and $FFFF) = 1 then
   begin
     ActorHuman(Command).PruneExpiredBubbles;
-    RunGlobalScriptsForContext(P.CurrentStar, 3);
+    RunGlobalScriptsForContext(P.CurrentStar, 3, ActorHuman(Command));
   end;
   if IntArg(Command, 0) <> 0 then
     P.InHyperspace := True;

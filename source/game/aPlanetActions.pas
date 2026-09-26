@@ -217,7 +217,11 @@ end;
 // Moved from TfPlanet.OnOpen and TfGov.OnOpen.
 procedure ExecuteRunGlobalScripts(const Command: TPlayerCommand);
 begin
-  RunGlobalScriptsForContext(RefObject(Command, 0) as TStar, IntArg(Command, 0));
+  RunGlobalScriptsForContext(
+      RefObject(Command, 0) as TStar,
+      IntArg(Command, 0),
+      ActorHuman(Command)
+  );
 end;
 
 procedure RunGlobalScripts(Star: TStar; RunFrom: Integer);

@@ -865,6 +865,7 @@ procedure SF_RunFunctionFromScript(av: array of TVarEC; code: TCodeEC);
 var
   Index, LastArg, I: Integer;
   Script, SavedScript: TScript;
+  SavedHuman: THuman;
   Value: TVarEC;
   Name: WideString;
   CallCode: TCodeEC;
@@ -897,19 +898,26 @@ begin
     else
       CallCode.LocalVar.GetItem(I - 3).Assume(av[I], False);
   SavedScript := CurrentScript;
+  // CHANGE: ENHANCEMENT - The function runs for its own script's human.
+  SavedHuman := ScriptHuman;
+  ScriptHuman := BoundHuman(Script.HumanId);
   try
-    CallCode.LocalVar.GetVar('result').SetRef(av[0]);
-    CurrentScript := Script;
-    CallCode.Run(ScriptProcess);
-  except
-    on E: EBreakMessageGI do
-    begin
-      CallCode.Free;
-      raise;
+    try
+      CallCode.LocalVar.GetVar('result').SetRef(av[0]);
+      CurrentScript := Script;
+      CallCode.Run(ScriptProcess);
+    except
+      on E: EBreakMessageGI do
+      begin
+        CallCode.Free;
+        raise;
+      end;
+      on E: Exception do
+        raise ExceptionExpressionEC.Create(
+            'Error in function ' + Value.Name + ' (' + E.ClassName + ' ' + E.Message + ')');
     end;
-    on E: Exception do
-      raise ExceptionExpressionEC.Create(
-          'Error in function ' + Value.Name + ' (' + E.ClassName + ' ' + E.Message + ')');
+  finally
+    ScriptHuman := SavedHuman;
   end;
   { Native exceptions bypass context restoration; only EBreakMessageGI frees CallCode. }
   CurrentScript := SavedScript;

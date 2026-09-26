@@ -144,6 +144,11 @@ var
   // The human whose command is executing (aCommands.ExecuteCommand), nil outside a command.
   // Code an executor calls uses it where it means "the human doing this".
   ActingHuman: THuman;
+  // The human of the script code that is running (aScript): the script's bound human, the
+  // human who holds the item whose code runs, or DefaultScriptHuman for code of no script.
+  // Every entry into script code sets it and restores the previous value; nil outside.
+  // Script functions use it where they mean "the player" (docs/humans.md, Scripts).
+  ScriptHuman: THuman;
   // The human at this machine: whose screen this is. LocalPlayer is its ranger.
   LocalHuman: THuman;
 // The human whose ranger is Ship, or nil when Ship is not a human's ranger.
@@ -175,6 +180,14 @@ procedure CollectFilmedStars(Stars: TList);
 function FilmHuman(Star: TStar): THuman;
 // The human with this id, or nil.
 function FindHuman(Id: Integer): THuman;
+// The human a script is bound to (TScript.HumanId), or the first human when it has left or
+// the script is not bound; nil when there is none.
+function BoundHuman(Id: Integer): THuman;
+// ScriptHuman's ranger; nil when there is no script human or its ranger is gone.
+function ScriptPlayer: TPlayer; inline;
+// The human script code that belongs to no script runs for: ScriptHuman when it runs inside
+// other script code, else ActingHuman, else the first human; nil when there is none.
+function DefaultScriptHuman: THuman;
 // Makes Player a human. The first human is the local one.
 function AddHuman(Player: TPlayer): THuman;
 // Forgets Player's human, as when its ranger is destroyed. The local human's state is kept.
@@ -328,6 +341,32 @@ begin
       Exit;
   end;
   Result := nil;
+end;
+
+function BoundHuman(Id: Integer): THuman;
+begin
+  Result := nil;
+  if Id >= 0 then
+    Result := FindHuman(Id);
+  if (Result = nil) and (Session.Humans.Count > 0) then
+    Result := Session.Humans[0];
+end;
+
+function ScriptPlayer: TPlayer;
+begin
+  if ScriptHuman <> nil then
+    Result := ScriptHuman.Player
+  else
+    Result := nil;
+end;
+
+function DefaultScriptHuman: THuman;
+begin
+  Result := ScriptHuman;
+  if Result = nil then
+    Result := ActingHuman;
+  if (Result = nil) and (Session.Humans.Count > 0) then
+    Result := Session.Humans[0];
 end;
 
 function AddHuman(Player: TPlayer): THuman;

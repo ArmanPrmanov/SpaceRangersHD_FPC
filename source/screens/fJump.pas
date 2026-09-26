@@ -128,7 +128,7 @@ begin
   begin
     SetCursorActive(True);
     LoadPanel.OnOpen;
-    RunGlobalScriptsForContext(LocalPlayer.CurrentStar, 2);
+    RunGlobalScriptsForContext(LocalPlayer.CurrentStar, 2, LocalHuman);
     LoadingStarted := False;
     NoPendingLoads := False;
     if LocalPlayer.InHyperspace or LocalPlayer.IsDockedToShip then
@@ -145,7 +145,7 @@ begin
   begin
     SetCursorActive(False);
     LoadPanel.OnOpen;
-    RunGlobalScriptsForContext(LocalPlayer.CurrentStar, 2);
+    RunGlobalScriptsForContext(LocalPlayer.CurrentStar, 2, LocalHuman);
     LoadingStarted := False;
     NoPendingLoads := False;
     Progress := 0;

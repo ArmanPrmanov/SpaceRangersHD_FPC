@@ -28,6 +28,8 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
 | `LocalPlayer`, `LocalHuman` | the human at this machine (UI only) |
 | `Actor(Command)`, `ActorHuman(Command)` | the human who issued the command |
 | `ActingHuman` | the human whose command is executing; nil outside a command |
+| `ScriptHuman`, `ScriptPlayer` | the human of the script code that is running, and its ranger; nil outside script code |
+| `BoundHuman(Script.HumanId)` | the human a script is bound to |
 | `Session.Humans` | every human |
 | `IsHuman(Ship)` | whether a ranger is a human's |
 | `HumanOf(Ship)` | the `THuman` of a human's ranger, or nil |
@@ -40,6 +42,37 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
 | `IsRuinsProxy(Station)` | whether a station is some human's ruins proxy, the storage station that is not part of the galaxy |
 | `Human.AddOrUpdateBubble(...)` etc. | that human's message bubbles; the `Globals` functions of the old names are the local human's |
 | `JoinHuman(Planet, Name, Preset)` | adds a human landed at a planet |
+
+## Scripts
+
+Every script instance (`TScript`) is bound to one human, `TScript.HumanId`, and
+its code runs for that human.
+
+- **Binding.** A script binds when it starts from its template
+  (`TryStartScriptInstanceFromTemplate`) to, in order: the human of the script
+  code that starts it (`ScriptHuman`), `ActingHuman`, the human the start is
+  about (the `About` parameter: the human arriving in the star or landing), or
+  the first human in `Session.Humans`. `RunGlobalScriptsForContext` takes the
+  human it runs for; commands pass the actor and screens the local human. A
+  restarted script keeps its human. `BoundHuman(Id)` gives the first human
+  when the bound one has left. The save does not hold the binding yet, so a
+  loaded script is bound to the first human (`HUMANS: per-human save block`
+  in `TScript.ResolveLoadedReferences`).
+- **Context.** `ScriptHuman` is the human of the code that is running. Every
+  entry into script code sets it and restores the previous value, so nested
+  runs nest:
+  - a script's own code (init, turn, dialog, answer, state, ship action code,
+    the template condition, `RunFunctionFromScript`) and its loading run for
+    its bound human; a template's condition runs for the human the script
+    would bind to;
+  - item code (`ScriptItemsAct`, `RunItemUseCode`, the artefact and
+    custom-info action code) runs for the human whose ranger holds the item,
+    else for the item's script's human, else as code of no script;
+  - code of no script (`ExecuteScriptText`, gameplay UI code) runs for
+    `DefaultScriptHuman`: the running script code's human when nested, else
+    `ActingHuman`, else the first human.
+- With one human every script is bound to it and `ScriptPlayer` is
+  `GetPlayer`.
 
 ## Classifying a site
 
