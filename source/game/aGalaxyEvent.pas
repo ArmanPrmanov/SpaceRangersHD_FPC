@@ -17,6 +17,11 @@ type
     Turn: Integer;
     Data: TList;
     TextData: TList;
+    // CHANGE: ENHANCEMENT - The id of the human a Player* event is about (ROADMAP.md,
+    // Phase 4), -1 when it is about no human in particular or was loaded from a save that
+    // does not say. The original layout has no room for it; the per-human save block
+    // (aHumanSave) holds it when it is not the first human's.
+    HumanId: Integer;
     constructor Create(EventType: WideString);
     destructor Destroy; override;
     procedure AddData(Value: Integer);
@@ -37,6 +42,7 @@ constructor TGalaxyEvent.Create(EventType: WideString);
 begin
   Self.EventType := EventType;
   Turn := 0;
+  HumanId := -1;
   Data := nil;
   TextData := nil;
 end;

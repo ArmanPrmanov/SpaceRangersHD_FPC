@@ -101,6 +101,11 @@ type
     // nor the deployed satellites while it is held. Origin 0 is the hold, 1 an orbit.
     PlanetHeldSatellite: TSatellite;
     PlanetHeldSatelliteOrigin: Integer;
+    // CHANGE: ENHANCEMENT - The cheats the human has used, by name, and the cheat points
+    // they cost (ROADMAP.md, Phase 6: the host sees which humans used which cheats). Saved in
+    // the per-human save block (aHumanSave).
+    UsedCheats: array of WideString;
+    CheatPoints: Integer;
     constructor Create;
     destructor Destroy; override;
     // The message bubbles, under PersistentPlayerMessageLock. SkipLock means the caller
@@ -130,6 +135,12 @@ type
         const Text, Key: WideString
     ): TMessagePlayer;
     procedure PruneExpiredBubbles;
+    // Records that the human used the cheat Name, which cost Points. A cheat command's
+    // executor calls it for the command's actor.
+    procedure RecordCheat(const Name: WideString; Points: Integer);
+    function HasUsedCheat(const Name: WideString): Boolean;
+    function HasCheated: Boolean;
+    procedure ClearCheats;
   end;
   // The humans in join order. Every TPlayer in the galaxy is in it, and nothing else is.
   THumanList = class(TList)
@@ -390,7 +401,8 @@ begin
   if Result <> LocalHuman then
   begin
     Result.PlayerStar := Player.CurrentStar;
-    // Saved for the local human only, until the per-human save block (Phase 4, item 5).
+    // The original layout saves the local human's; the per-human save block (aHumanSave)
+    // fills this one when a save holds it.
     Result.PlayerOldQuests := TList.Create;
   end;
   Session.Humans.Add(Result);
@@ -771,6 +783,36 @@ begin
   finally
     PersistentPlayerMessageLock.Leave;
   end;
+end;
+
+procedure THuman.RecordCheat(const Name: WideString; Points: Integer);
+begin
+  Inc(CheatPoints, Points);
+  if HasUsedCheat(Name) then
+    Exit;
+  SetLength(UsedCheats, Length(UsedCheats) + 1);
+  UsedCheats[High(UsedCheats)] := Name;
+end;
+
+function THuman.HasUsedCheat(const Name: WideString): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to High(UsedCheats) do
+    if UsedCheats[I] = Name then
+      Exit(True);
+  Result := False;
+end;
+
+function THuman.HasCheated: Boolean;
+begin
+  Result := (CheatPoints <> 0) or (Length(UsedCheats) > 0);
+end;
+
+procedure THuman.ClearCheats;
+begin
+  UsedCheats := nil;
+  CheatPoints := 0;
 end;
 
 constructor THuman.Create;

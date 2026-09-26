@@ -690,8 +690,8 @@ begin
       end;
     end;
   ShopBlock.AddParam('AddItem', '');
-  // HUMANS: per-human save block (item 5). The editable save block holds the local human's
-  // shop and storage, as it holds the local player.
+  // The editable save block holds the local human's shop and storage, as it holds the
+  // local player.
   with Block.AddBlockByPath('Storage') do
   begin
     for I := 0 to LocalPlayer.StorageEntries.Count - 1 do
@@ -773,8 +773,8 @@ begin
         Break;
       end;
   end;
-  // HUMANS: per-human save block (item 5). The editable save block holds the local human's
-  // shop and storage, as it holds the local player.
+  // The editable save block holds the local human's shop and storage, as it holds the
+  // local player.
   with Block.GetBlockByPath('Storage') do
   begin
     for I := 0 to LocalPlayer.StorageEntries.Count - 1 do

@@ -809,6 +809,7 @@ uses
   SaveTrace,
   aSession,
   aHuman,
+  aHumanSave,
   ObserverHooks,
   SE_Garbage,
   SE_Sputnik,
@@ -911,6 +912,7 @@ begin
     if ParseCheatsDisabledFlag(TrimWideString(Block.GetParamByPathOrMarker('CheatsDisabled'))) then
       CheatsDisabled := True;
   Session.GameEndReason := 0;
+  ResetHumanSessionState;
   PlayerRangerIndex := -1;
   for I := 0 to 8 do
     LocalHuman.HangarShipIds[I] := 0;
@@ -1305,7 +1307,7 @@ begin
     Buffer.AddDWord(KellerTargetStar.Id);
   Buffer.AddIntegerValue(KellerMissionState);
   Count := 0;
-  // HUMANS: per-human save block (item 5)
+  // The local human's; the per-human save block (aHumanSave) holds the other humans'.
   if LocalHuman.TemporaryShopSlots <> nil then
     Count := LocalHuman.TemporaryShopSlots.Count;
   Buffer.AddWideChar(WideChar(Count));
@@ -1347,7 +1349,7 @@ begin
   Buffer.AddDWord(CurrentTurn);
   for Difficulty := 0 to 7 do
     Buffer.AddAnsiChar(AnsiChar(DifficultyLevels[Difficulty]));
-  // HUMANS: per-human save block (item 5)
+  // The local human's; the per-human save block (aHumanSave) holds the other humans'.
   Buffer.AddDWord(LocalPlayer.Id);
   if LocalHuman.PendingPlayerFollowTarget = nil then
     Buffer.AddDWord(0)
@@ -1365,7 +1367,7 @@ begin
     Buffer.AddDWord(0)
   else
     Buffer.AddDWord(TerronShip.Id);
-  // HUMANS: per-human save block (item 5)
+  // The local human's; the per-human save block (aHumanSave) holds the other humans'.
   Buffer.AddDWord(LocalHuman.PlayerStar.Id);
   Buffer.AddDWord(PieceCreatorTargetStarId);
   for Career := 0 to 2 do
@@ -1375,7 +1377,7 @@ begin
     else
       Buffer.AddDWord((EminentCareerShips[Career] as TShip).Id);
   end;
-  // HUMANS: per-human save block (item 5)
+  // The local human's; the per-human save block (aHumanSave) holds the other humans'.
   Count := LocalHuman.PlayerOldQuests.Count;
   Buffer.AddWideChar(WideChar(Count));
   for I := 0 to Count - 1 do
@@ -1437,7 +1439,7 @@ begin
     Buffer.AddSingle(SpaceBackgroundEntries[I].OrbitStepDegrees);
     Buffer.AddIntegerValue(SpaceBackgroundEntries[I].FrameIndex);
   end;
-  // HUMANS: per-human save block (item 5)
+  // The local human's; the per-human save block (aHumanSave) holds the other humans'.
   for I := 0 to 8 do
     if Assigned(SnapshotObjectIdentity) then
       Buffer.AddDWord(0)
@@ -1552,6 +1554,8 @@ begin
     SaveEditableState;
   // CHANGE: BUGFIX - Name saved script object addresses by id after the original layout.
   EndObjectReferenceSave(Buffer);
+  // CHANGE: ENHANCEMENT - The other humans, the session flags and the script bindings.
+  SaveHumanBlock(Self, Buffer);
 end;
 procedure TGalaxy.LoadFromBuffer(Buffer: TBufEC);
 var
@@ -1785,7 +1789,7 @@ begin
     Stage := 8;
     ClearTemporaryShopSlotGrid;
     Count := Buffer.GetWord;
-    // HUMANS: per-human save block (item 5)
+    // The local human's; the per-human save block (aHumanSave) holds the other humans'.
     if Count > 0 then
     begin
       LocalHuman.TemporaryShopSlots := TList.Create;
@@ -1863,7 +1867,7 @@ begin
     CurrentTurn := Buffer.GetUInt32;
     for Difficulty := 0 to 7 do
       DifficultyLevels[Difficulty] := Buffer.GetByte;
-    // HUMANS: per-human save block (item 5)
+    // The local human's; the per-human save block (aHumanSave) holds the other humans'.
     PlayerRangerIndex := Buffer.GetUInt32;
     LocalHuman.PendingPlayerFollowTarget := TShip(Buffer.GetUInt32);
     BlazerShip := TKling(Buffer.GetUInt32);
@@ -1895,7 +1899,7 @@ begin
       Star := TStar(Stars[I]);
       Star.ResolveLoadedReferences(Self);
     end;
-    // HUMANS: per-human save block (item 5)
+    // The local human's; the per-human save block (aHumanSave) holds the other humans'.
     if LocalHuman.TemporaryShopSlots <> nil then
     begin
       if LocalPlayer.CurrentPlanet <> nil then
@@ -1922,7 +1926,7 @@ begin
     if KellerTargetStar <> nil then
       KellerTargetStar := TObject(IdToStar(Cardinal(KellerTargetStar))) as TStar;
     Stage := 23;
-    // HUMANS: per-human save block (item 5)
+    // The local human's; the per-human save block (aHumanSave) holds the other humans'.
     LocalHuman.PendingPlayerFollowTarget :=
         TObject(IdToShip(Cardinal(LocalHuman.PendingPlayerFollowTarget), True)) as TShip;
     BlazerShip := TObject(IdToShip(Cardinal(BlazerShip), True)) as TKling;
@@ -1934,7 +1938,7 @@ begin
       EminentCareerShips[Career] :=
           TObject(IdToShip(Cardinal(EminentCareerShips[Career]), True)) as TRanger;
     Stage := 25;
-    // HUMANS: per-human save block (item 5)
+    // The local human's; the per-human save block (aHumanSave) holds the other humans'.
     if LocalHuman.PlayerOldQuests <> nil then
     begin
       LocalHuman.PlayerOldQuests.Free;
@@ -2019,7 +2023,7 @@ begin
       SpaceBackgroundEntries[I].FrameIndex := Buffer.GetInt32;
     end;
     Stage := 32;
-    // HUMANS: per-human save block (item 5)
+    // The local human's; the per-human save block (aHumanSave) holds the other humans'.
     for I := 0 to 8 do
       LocalHuman.HangarShipIds[I] := Buffer.GetUInt32;
     Stage := 33;
@@ -2468,6 +2472,8 @@ begin
     aGalaxy.Galaxy := Self;
     // CHANGE: BUGFIX - Point script variables at the loaded objects, not stale addresses.
     ResolveLoadedObjectReferences(Buffer);
+    // CHANGE: ENHANCEMENT - The other humans, the session flags and the script bindings.
+    LoadHumanBlock(Self, Buffer);
     for I := 0 to LoadedShips.Count - 1 do
     begin
       Ship := TShip(LoadedShips[I]);
@@ -2545,7 +2551,7 @@ begin
   Session
       .EditableSaveBlock
       .AddParam('NormalsDeltaWin', WideString(SysUtils.IntToStr(Self.WarDeltaWin[0])));
-  // HUMANS: per-human save block (item 5)
+  // The editable save block holds the local human's ranger.
   Session
       .EditableSaveBlock
       .AddParam('RejectPB', BoolToWideString(LocalPlayer.DeclinePlanetBattleOffers));
@@ -2600,7 +2606,7 @@ begin
     WarDeltaWin[1] := StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('KlingsDeltaWin')));
     WarDeltaWin[2] := StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('PiratesDeltaWin')));
     WarDeltaWin[0] := StrToInt(AnsiString(Session.EditableSaveBlock.GetParam('NormalsDeltaWin')));
-    // HUMANS: per-human save block (item 5)
+    // The editable save block holds the local human's ranger.
     LocalPlayer.DeclinePlanetBattleOffers :=
         LowerCase(AnsiString(Session.EditableSaveBlock.GetParam('RejectPB'))) = 'true';
     LocalPlayer.LoadFromBlock(Session.EditableSaveBlock.GetBlockByPath('Player'));
@@ -2616,8 +2622,7 @@ begin
       Hole := THole.Create;
       Hole.InitializeGraphic('');
       THoleSE(Hole.Graphic).SetState(1);
-      // HUMANS: per-human save block (item 5). The edited state is the local human's, and
-      // so is the star its new holes open in.
+      // The edited state is the local human's, and so is the star its new holes open in.
       Hole.Star1 := LocalPlayer.CurrentStar;
       Hole.Star2 := LocalPlayer.CurrentStar;
       Hole.ArcadeMapName := '';
@@ -4794,7 +4799,7 @@ begin
   begin
     Ship := TShip(Ships[I]);
     Key := 'ShipId' + IntToStr(Cardinal(Ship.Id));
-    // HUMANS: per-human save block (item 5). The local human's ranger has its own block.
+    // The local human's ranger has its own block in the editable save.
     if LocalPlayer <> Ship then
       Ship.SaveToBlock(ShipBlock.AddBlockByPath(Key));
   end;
@@ -4879,7 +4884,7 @@ begin
     begin
       Ship := TShip(Ships[I]);
       Key := 'ShipId' + IntToStr(Cardinal(Ship.Id));
-      // HUMANS: per-human save block (item 5). The local human's ranger has its own block.
+      // The local human's ranger has its own block in the editable save.
       if LocalPlayer <> Ship then
         Ship.LoadFromBlock(GetBlockByPath(Key));
     end;

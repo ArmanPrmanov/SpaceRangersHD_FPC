@@ -576,6 +576,7 @@ begin
       begin
         ScriptItemsAct(satOnGovItemReward, ModuleItem, nil, 0);
         Event := AddGalaxyEvent('PlayerReceivesMMAsReward');
+        Event.HumanId := Id;
         Event.AddData(ModuleItem.Id);
         Event.AddData(ModuleItem.MicroModuleIndex - 1);
       end;

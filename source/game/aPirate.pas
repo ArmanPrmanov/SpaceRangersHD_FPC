@@ -2061,6 +2061,7 @@ var
     begin
       LastPlayerExtortionTurn := Galaxy.CurrentTurn;
       Event := AddGalaxyEvent('PlayerExtortsMoney');
+      Event.HumanId := OtherShip.Id;
       Event.AddData(DemandedAmount);
       Event.AddData(TypeId);
       Event.AddData(CurrentStar.Id);
@@ -2151,6 +2152,7 @@ var
     begin
       LastPlayerExtortionTurn := Galaxy.CurrentTurn;
       Event := AddGalaxyEvent('PlayerExtortsGoods');
+      Event.HumanId := OtherShip.Id;
       Event.AddData(TotalValue);
       Event.AddData(TypeId);
       Event.AddData(CurrentStar.Id);

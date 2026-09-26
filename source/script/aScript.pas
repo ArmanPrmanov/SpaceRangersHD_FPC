@@ -4674,8 +4674,8 @@ var
   State: TScriptState;
   Place: TScriptPlace;
 begin
-  // HUMANS: per-human save block (item 5). The save does not hold the bound human yet, so
-  // every loaded script is bound to the first human, the local one in single player.
+  // A save without the per-human save block binds every script to the first human, the local
+  // one in single player. The block (aHumanSave), read after this, restores the bindings.
   if Session.Humans.Count > 0 then
     HumanId := Session.Humans[0].Id
   else

@@ -272,9 +272,8 @@ begin
     Human.AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
 end;
 
-// CHANGE: CLEANUP - The finished quests of a human's ranger. Nil for a ship that is not a
-// human's, and for a human whose list was never created: humans rebuilt from a save get one
-// only once the per-human save block exists (ROADMAP.md, Phase 4, item 5).
+// CHANGE: CLEANUP - The finished quests of a human's ranger, nil for a ship that is not a
+// human's. The per-human save block (aHumanSave) keeps the other humans' across a save.
 function OldQuestsOf(Ranger: TObject): TList;
 var
   Human: THuman;
@@ -3161,6 +3160,7 @@ begin
     if Scope = nil then
     begin
       Event := AddGalaxyEvent('GlobalChangeToPlayerReputation');
+      Event.HumanId := Id;
       Event.AddData(Ord(Mode));
       Event.AddData(Amount);
       Event.AddData(Byte(OwnerMask));
@@ -3593,6 +3593,7 @@ var
     begin
       LastPlayerExtortionTurn := Galaxy.CurrentTurn;
       Event := AddGalaxyEvent('PlayerExtortsMoney');
+      Event.HumanId := OtherShip.Id;
       Event.AddData(DemandedAmount);
       Event.AddData(TypeId);
       Event.AddData(CurrentStar.Id);
@@ -3727,6 +3728,7 @@ var
     begin
       LastPlayerExtortionTurn := Galaxy.CurrentTurn;
       Event := AddGalaxyEvent('PlayerExtortsGoods');
+      Event.HumanId := OtherShip.Id;
       Event.AddData(TotalValue);
       Event.AddData(TypeId);
       Event.AddData(CurrentStar.Id);
@@ -3805,6 +3807,7 @@ var
     if IsHuman(Self) then
     begin
       Event := AddGalaxyEvent('PlayerAcceptsMoneyForTruce');
+      Event.HumanId := Id;
       Event.AddData(OfferedAmount);
       Event.AddData(OtherShip.TypeId);
       Event.AddData(OtherShip.CurrentStar.Id);
@@ -4919,6 +4922,7 @@ var
     if IsHuman(Self) then
     begin
       Event := AddGalaxyEvent('PlayerFinishesQuest');
+      Event.HumanId := Id;
       Event.AddData(Ord(Quest.QuestType));
       Event.AddData(Quest.QuestNumber);
       Event.AddData(Quest.RewardMoney);
@@ -5344,6 +5348,7 @@ begin
       begin
         ScriptItemsAct(satOnGovItemReward, ModuleItem, nil, 0);
         Event := AddGalaxyEvent('PlayerReceivesMMAsReward');
+        Event.HumanId := Id;
         Event.AddData(ModuleItem.Id);
         Event.AddData(ModuleItem.MicroModuleIndex - 1);
       end;
@@ -5552,6 +5557,7 @@ begin
       begin
         ScriptItemsAct(satOnGovItemReward, ModuleItem, nil, 0);
         Event := AddGalaxyEvent('PlayerReceivesMMAsReward');
+        Event.HumanId := Id;
         Event.AddData(ModuleItem.Id);
         Event.AddData(ModuleItem.MicroModuleIndex - 1);
       end;

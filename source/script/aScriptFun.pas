@@ -12761,7 +12761,8 @@ end;
 // The GalaxyEvent* builtins read any event as it is. HUMANS: event human id. The Player*
 // events (PlayerExtortsMoney/Goods, PlayerAcceptsMoneyForTruce, PlayerFinishesQuest,
 // PlayerReceivesMMAsReward, GlobalChangeToPlayerReputation, PlayerUsesSubportal) fire for
-// any human and carry no human id, so a script cannot tell whose event it reads.
+// any human. They carry the human in TGalaxyEvent.HumanId, but no builtin reads it yet, so a
+// script cannot tell whose event it reads.
 procedure SF_GalaxyEvents(av: array of TVarEC; code: TCodeEC);
 begin
   av[0].SetInt(Galaxy.GalaxyEvents.Count);
@@ -15686,8 +15687,8 @@ begin
       if ScriptHuman = LocalHuman then
         StarMapScreen.PendingHoleRefresh := Hole;
       Galaxy.Holes.Add(Hole);
-      // HUMANS: event human id. The event does not say which human used the subportal.
       Event := AddGalaxyEvent('PlayerUsesSubportal');
+      Event.HumanId := ScriptHuman.Id;
       Event.AddData(Hole.Id);
       Event.AddData(Hole.CreatedTurn);
       aCalc.WaitForTurnCalculationUI;

@@ -55,9 +55,8 @@ its code runs for that human.
   the first human in `Session.Humans`. `RunGlobalScriptsForContext` takes the
   human it runs for; commands pass the actor and screens the local human. A
   restarted script keeps its human. `BoundHuman(Id)` gives the first human
-  when the bound one has left. The save does not hold the binding yet, so a
-  loaded script is bound to the first human (`HUMANS: per-human save block`
-  in `TScript.ResolveLoadedReferences`).
+  when the bound one has left. The per-human save block holds the binding
+  (see Saving).
 - **Context.** `ScriptHuman` is the human of the code that is running. Every
   entry into script code sets it and restores the previous value, so nested
   runs nest:
@@ -103,6 +102,45 @@ Converting the script functions (`aScriptFun`):
   `// HUMANS: remote dialogue (Phase 5)`; so are the queued battles. Text
   quests are off in multiplayer (ROADMAP.md, Phase 6), so they follow the
   local human.
+
+## Saving
+
+Every `TPlayer` is saved as a ship, so every human's ranger survives a save.
+The original layout also writes the local human's `THuman` state. The rest is
+in the **per-human save block** (`source/game/aHumanSave.pas`), which
+`TGalaxy.SaveToBuffer` appends after the original layout and the object
+reference table:
+
+- the session flags;
+- every human, keyed by id, in `Session.Humans` order: its cheats, and for
+  every human except the local one, its `THuman` state (the player star, the
+  follow target, automatic control, tips, bubbles, finished quests, the hangar
+  slots, the hold order and the open shop);
+- the human each script is bound to (`TScript.HumanId`);
+- the human each galaxy event is about (`TGalaxyEvent.HumanId`).
+
+The block is written only when a save without it would load differently: more
+than one human, a flag that is not its default, a cheat on record, or a script
+or event bound to a human other than the first. A single-player save is
+therefore byte for byte as before. A save without the block loads as the
+original does: every script and event is bound to the first human. After a
+load the local human is still the saved `PlayerRangerIndex`, and
+`Session.Humans` is in the saved order.
+
+The block starts with `SRHU`, a version and its size. A later version only
+appends fields; a reader reads the fields it knows and skips the rest.
+
+**Session flags** (`Session` in `aSession`) are part of the saved session and
+change only through the `SetSessionFlag` command (`SetSessionFlagValue`):
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `TextQuestsDisabled` | off | no text quest is offered at a government (`TRanger.GenerateQuestOffer`) |
+| `FriendlyFireEnabled` | on | stored only; targeting reads it in item 8 |
+
+**Cheats.** `Human.RecordCheat(Name, Points)` records that a human used a
+cheat. A cheat command's executor calls it for the command's actor. Nothing
+calls it yet, since `CheatCode` is not built.
 
 ## Classifying a site
 
