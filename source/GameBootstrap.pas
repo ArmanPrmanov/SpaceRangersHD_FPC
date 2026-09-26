@@ -110,6 +110,26 @@ begin
   DumpExceptionBackTrace(StdErr);
 end;
 
+// Each of a comma-separated list of paths, expanded.
+function ExpandFileNames(const Paths: AnsiString): AnsiString;
+var
+  Rest: AnsiString;
+  Position: Integer;
+begin
+  Result := '';
+  Rest := Paths;
+  while Rest <> '' do
+  begin
+    Position := Pos(',', Rest);
+    if Position = 0 then
+      Position := Length(Rest) + 1;
+    if Result <> '' then
+      Result := Result + ',';
+    Result := Result + ExpandFileName(Copy(Rest, 1, Position - 1));
+    Delete(Rest, 1, Position);
+  end;
+end;
+
 procedure ReadOptions;
 var
   I: Integer;
@@ -186,7 +206,8 @@ begin
     else if Pos('--replay-commands=', Argument) = 1 then
     begin
       SimulationMode := True;
-      Replay.LogPath := ExpandFileName(Copy(Argument, 19, MaxInt))
+      // One log, several separated by commas (one per human), or a directory of them.
+      Replay.LogPath := ExpandFileNames(Copy(Argument, 19, MaxInt))
     end
     else if Argument = '--replay-verbose' then
       Replay.Verbose := True

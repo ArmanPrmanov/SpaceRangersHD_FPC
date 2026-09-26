@@ -14,11 +14,23 @@ unit CommandLog;
 //   job, and again before the next one. When the two differ, something that is not a command
 //   changed the game; the recorder then writes the state so that the replay can go on, and
 //   names the screen that was open. Their number measures what is still to be converted.
+// - Local: hot-seat passed the screen to another human (aHuman.SetLocalHuman). It is not a
+//   command: it changes only whose screen this is, but the save, and so the hash, starts with
+//   the local human.
 // Commands and jobs carry the hash of the state after them, so the replay reports the
 // first record where it differs from the recording.
+//
+// Hot-seat (ROADMAP.md, Phase 4): the replay can take one log per human, as
+// tools/split_commands.py writes them from one recording. Each such log holds its human's
+// commands and a copy of every other record (loads, jobs, checkpoints, local changes), which
+// are the points where the logs meet. Between two such points the replay applies each
+// human's commands in Session.Humans order, the hot-seat order, then the next shared record
+// (RunMergedReplay). A day's job must find every human's end turn (the end-turn barrier).
 interface
 type
   TReplayOptions = record
+    // One log, several separated by commas, or a directory of *.srcl logs; several logs are
+    // one per human and are merged.
     LogPath: AnsiString;
     Seed: Cardinal;
     // Print every record, not only differences and the summary.
@@ -46,6 +58,7 @@ uses
   aGalaxy,
   aShip,
   aCommands,
+  aHuman,
   aObjectRefs,
   aSaveLoad;
 
@@ -54,7 +67,7 @@ const
   LogVersion = 1;
 
 type
-  TRecordType = (rtLoad = 1, rtCommand = 2, rtJob = 3, rtCheckpoint = 4);
+  TRecordType = (rtLoad = 1, rtCommand = 2, rtJob = 3, rtCheckpoint = 4, rtLocal = 5);
 
 // Appends Source's bytes without a length.
 procedure AppendRaw(Target, Source: TBufEC);
@@ -114,6 +127,7 @@ type
     procedure JobFinished;
     procedure WaitChanged(Starting, Talk: Boolean);
     procedure Answer(Query: TSimQuery; Value: PtrInt);
+    procedure LocalChanged(Human: THuman; Before: Boolean);
   end;
 
 var
@@ -416,6 +430,42 @@ begin
   end;
 end;
 
+// Before the change, whatever changed the game since the last record is written as a
+// checkpoint; after it, the new local human and the hash.
+procedure TRecorder.LocalChanged(Human: THuman; Before: Boolean);
+var
+  Payload: TBufEC;
+  Hash: QWord;
+begin
+  Lock.Enter;
+  try
+    if (Stream = nil) or JobRunning then
+      Exit;
+    if Before then
+    begin
+      Boundary;
+      Exit;
+    end;
+    Payload := TBufEC.Create;
+    try
+      Hash := CurrentHash;
+      LastHash := Hash;
+      Payload.AddInt32(Human.Id);
+      Payload.AddBytes(@Hash, 8);
+      WriteRecord(rtLocal, Payload);
+    finally
+      Payload.Free
+    end;
+  finally
+    Lock.Leave;
+  end;
+end;
+
+procedure RecorderLocalChanged(Human: THuman; Before: Boolean);
+begin
+  Recorder.LocalChanged(Human, Before);
+end;
+
 procedure RecorderGameLoaded(const FileName: WideString);
 begin
   Recorder.GameLoaded(FileName);
@@ -459,6 +509,7 @@ begin
   TurnJobHook := @RecorderJob;
   TurnWaitHook := @RecorderWait;
   QueryAnswerHook := @RecorderAnswer;
+  LocalHumanHook := @RecorderLocalChanged;
 end;
 
 procedure StopCommandRecording;
@@ -471,6 +522,7 @@ begin
   TurnJobHook := nil;
   TurnWaitHook := nil;
   QueryAnswerHook := nil;
+  LocalHumanHook := nil;
   FreeAndNil(Recorder);
 end;
 
@@ -543,6 +595,8 @@ type
     procedure ReplayLoad(Buffer: TBufEC);
     procedure ReplayCheckpoint(Buffer: TBufEC);
     procedure ReplayJob(Buffer: TBufEC);
+    procedure ReplayLocal(Buffer: TBufEC);
+    procedure ReplayRecord(RecordType: Byte; Payload: TBufEC);
   end;
 
 procedure TReplay.Emit(const Line: AnsiString);
@@ -746,7 +800,363 @@ begin
   Compare(Format('job %d day=%d', [Ord(Job), Galaxy.CurrentTurn]), Hash);
 end;
 
+procedure TReplay.ReplayLocal(Buffer: TBufEC);
+var
+  Id: Integer;
+  Hash: QWord;
+  Human: THuman;
+begin
+  Id := Buffer.GetInt32;
+  ReadHash(Buffer, Hash);
+  Human := FindHuman(Id);
+  if Human = nil then
+    raise Exception.CreateFmt('Record %d makes a missing human %d local', [Index, Id]);
+  SetLocalHuman(Human);
+  Compare(Format('local human=%d', [Id]), Hash);
+end;
+
+procedure TReplay.ReplayRecord(RecordType: Byte; Payload: TBufEC);
+begin
+  Payload.SetPosition(0);
+  Inc(Index);
+  case TRecordType(RecordType) of
+    rtLoad: ReplayLoad(Payload);
+    rtCommand: ReplayCommand(Payload);
+    rtJob: ReplayJob(Payload);
+    rtCheckpoint: ReplayCheckpoint(Payload);
+    rtLocal: ReplayLocal(Payload);
+  else
+    raise Exception.CreateFmt('Unknown record type %d', [RecordType]);
+  end;
+end;
+
+type
+  TLogRecord = class
+    RecordType: Byte;
+    Payload: TBufEC;
+    destructor Destroy; override;
+  end;
+  // One human's log: its records, the actor of its commands, and how far it is replayed.
+  TLogFile = class
+    Path: AnsiString;
+    Records: TList;
+    Actor: Cardinal;
+    HasActor: Boolean;
+    Next: Integer;
+    constructor Create(const APath: AnsiString);
+    destructor Destroy; override;
+    function Item(I: Integer): TLogRecord;
+  end;
+
+destructor TLogRecord.Destroy;
+begin
+  Payload.Free;
+  inherited Destroy;
+end;
+
+// Every record but a command is shared: each human's log has a copy.
+function IsSharedRecord(RecordType: Byte): Boolean;
+begin
+  Result := TRecordType(RecordType) <> rtCommand;
+end;
+
+// The actor of a command record: the command starts with its kind (a word), then the actor.
+function CommandActor(Payload: TBufEC): Cardinal;
+begin
+  Move(PByte(Payload.Data)[2], Result, 4);
+end;
+
+constructor TLogFile.Create(const APath: AnsiString);
+var
+  Stream: TFileStream;
+  Header: packed record
+    RecordType: Byte;
+    Size: Integer;
+  end;
+  Magic, Version, CommandBy: Cardinal;
+  LogRecord: TLogRecord;
+begin
+  Path := APath;
+  Records := TList.Create;
+  Stream := TFileStream.Create(APath, fmOpenRead or fmShareDenyWrite);
+  try
+    Stream.ReadBuffer(Magic, 4);
+    Stream.ReadBuffer(Version, 4);
+    if (Magic <> LogMagic) or (Version <> LogVersion) then
+      raise Exception.Create('Not a command log of this version: ' + APath);
+    while Stream.Position < Stream.Size do
+    begin
+      Stream.ReadBuffer(Header, SizeOf(Header));
+      LogRecord := TLogRecord.Create;
+      Records.Add(LogRecord);
+      LogRecord.RecordType := Header.RecordType;
+      LogRecord.Payload := TBufEC.Create;
+      LogRecord.Payload.SetSize(Header.Size);
+      if Header.Size > 0 then
+        Stream.ReadBuffer(LogRecord.Payload.Data^, Header.Size);
+      if TRecordType(Header.RecordType) = rtCommand then
+      begin
+        CommandBy := CommandActor(LogRecord.Payload);
+        if HasActor and (CommandBy <> Actor) then
+          raise Exception.CreateFmt(
+              '%s holds commands of humans %d and %d; give one log per human',
+              [APath, Actor, CommandBy]
+          );
+        Actor := CommandBy;
+        HasActor := True;
+      end;
+    end;
+  finally
+    Stream.Free;
+  end;
+end;
+
+destructor TLogFile.Destroy;
+var
+  I: Integer;
+begin
+  for I := 0 to Records.Count - 1 do
+    TLogRecord(Records[I]).Free;
+  Records.Free;
+  inherited Destroy;
+end;
+
+function TLogFile.Item(I: Integer): TLogRecord;
+begin
+  Result := TLogRecord(Records[I]);
+end;
+
+function SameRecord(A, B: TLogRecord): Boolean;
+begin
+  Result :=
+      (A.RecordType = B.RecordType)
+          and (A.Payload.DataSize = B.Payload.DataSize)
+          and CompareMem(A.Payload.Data, B.Payload.Data, A.Payload.DataSize);
+end;
+
+// Every log must hold the same shared records in the same order.
+procedure CheckSharedRecords(Logs: TList);
+var
+  I, J, K, Count: Integer;
+  First, Log: TLogFile;
+  Shared: array of TLogRecord;
+begin
+  First := TLogFile(Logs[0]);
+  Count := 0;
+  for I := 0 to First.Records.Count - 1 do
+    if IsSharedRecord(First.Item(I).RecordType) then
+    begin
+      SetLength(Shared, Count + 1);
+      Shared[Count] := First.Item(I);
+      Inc(Count);
+    end;
+  for J := 1 to Logs.Count - 1 do
+  begin
+    Log := TLogFile(Logs[J]);
+    K := 0;
+    for I := 0 to Log.Records.Count - 1 do
+      if IsSharedRecord(Log.Item(I).RecordType) then
+      begin
+        if (K >= Count) or not SameRecord(Shared[K], Log.Item(I)) then
+          raise Exception.CreateFmt(
+              '%s and %s are not logs of one session (shared record %d differs)',
+              [First.Path, Log.Path, K + 1]
+          );
+        Inc(K);
+      end;
+    if K <> Count then
+      raise Exception.CreateFmt(
+          '%s and %s are not logs of one session (%d and %d shared records)',
+          [First.Path, Log.Path, Count, K]
+      );
+  end;
+end;
+
+// Applies Log's commands up to its next shared record.
+procedure ApplyCommands(Replay: TReplay; Log: TLogFile);
+var
+  Item: TLogRecord;
+begin
+  while Log.Next < Log.Records.Count do
+  begin
+    Item := Log.Item(Log.Next);
+    if IsSharedRecord(Item.RecordType) then
+      Break;
+    Replay.ReplayRecord(Item.RecordType, Item.Payload);
+    Inc(Log.Next);
+  end;
+end;
+
+function HasCommandsBeforeShared(Log: TLogFile): Boolean;
+begin
+  Result := (Log.Next < Log.Records.Count) and not IsSharedRecord(Log.Item(Log.Next).RecordType);
+end;
+
+// One log per human, merged: between two shared records, each human's commands in
+// Session.Humans order (a human who joins on the way comes in its turn), then the shared
+// record. The player-star job starts the day, so it must find that no human holds the day.
+function RunMergedReplay(Replay: TReplay; Logs: TList): Integer;
+var
+  I, J, BarrierWaits: Integer;
+  First, Log: TLogFile;
+  Human, Waiting: THuman;
+  Item: TLogRecord;
+  Done: array of Boolean;
+begin
+  CheckSharedRecords(Logs);
+  for I := 0 to Logs.Count - 1 do
+    Replay.Emit('replay log=' + TLogFile(Logs[I]).Path);
+  BarrierWaits := 0;
+  SetLength(Done, Logs.Count);
+  First := TLogFile(Logs[0]);
+  while True do
+  begin
+    for J := 0 to Logs.Count - 1 do
+      Done[J] := False;
+    if Galaxy <> nil then
+    begin
+      I := 0;
+      while I < Session.Humans.Count do
+      begin
+        Human := Session.Humans[I];
+        Inc(I);
+        for J := 0 to Logs.Count - 1 do
+        begin
+          Log := TLogFile(Logs[J]);
+          if not Done[J] and Log.HasActor and (Log.Actor = Cardinal(Human.Id)) then
+          begin
+            Done[J] := True;
+            ApplyCommands(Replay, Log);
+          end;
+        end;
+      end;
+    end;
+    for J := 0 to Logs.Count - 1 do
+    begin
+      Log := TLogFile(Logs[J]);
+      if HasCommandsBeforeShared(Log) then
+      begin
+        Inc(Replay.Differences);
+        Replay.Emit(
+            Format('unmerged log=%s actor=%d: its human is not in the game', [Log.Path, Log.Actor])
+        );
+        ApplyCommands(Replay, Log);
+      end;
+    end;
+    if First.Next >= First.Records.Count then
+      Break;
+    Item := First.Item(First.Next);
+    if (TRecordType(Item.RecordType) = rtJob)
+        and (TTurnCalculationJob(PByte(Item.Payload.Data)[0]) = tcjPlayerStar) then
+    begin
+      Waiting := NextHumanToEndTurn;
+      if Waiting <> nil then
+      begin
+        Inc(BarrierWaits);
+        Replay.Emit(
+            Format(
+                'barrier record=%d day=%d: human %d has not ended the turn',
+                [Replay.Index + 1, Galaxy.CurrentTurn, Waiting.Id]
+            )
+        );
+      end;
+    end;
+    Replay.ReplayRecord(Item.RecordType, Item.Payload);
+    for J := 0 to Logs.Count - 1 do
+      Inc(TLogFile(Logs[J]).Next);
+  end;
+  Replay.Emit(
+      Format(
+          'done records=%d loads=%d commands=%d jobs=%d checkpoints=%d diverged=%d drift=%d'
+              + ' answer-mismatches=%d logs=%d humans=%d barrier-waits=%d day=%d hash=%s',
+          [Replay.Index, Replay.Loads, Replay.Commands, Replay.Jobs, Replay.Checkpoints,
+              Replay.Differences, Replay.DriftAfterCheckpoint, AnswerMismatches, Logs.Count,
+              Session.Humans.Count, BarrierWaits, Galaxy.CurrentTurn, IntToHex(CurrentHash, 16)]
+      )
+  );
+  if (Replay.Differences > 0) or (BarrierWaits > 0) then
+    Result := 1
+  else
+    Result := 0;
+end;
+
+// The logs LogPath names: one, several separated by commas, or a directory's *.srcl in name
+// order.
+procedure ListLogs(const LogPath: AnsiString; Paths: TStringList);
+var
+  Rest, Part: AnsiString;
+  Found: TSearchRec;
+  Position: Integer;
+begin
+  if DirectoryExists(LogPath) then
+  begin
+    if FindFirst(IncludeTrailingPathDelimiter(LogPath) + '*.srcl', faAnyFile, Found) = 0 then
+      try
+        repeat
+          Paths.Add(IncludeTrailingPathDelimiter(LogPath) + Found.Name);
+        until FindNext(Found) <> 0;
+      finally
+        FindClose(Found);
+      end;
+    Paths.Sort;
+    if Paths.Count = 0 then
+      raise Exception.Create('No *.srcl logs in ' + LogPath);
+    Exit;
+  end;
+  Rest := LogPath;
+  repeat
+    Position := Pos(',', Rest);
+    if Position = 0 then
+    begin
+      Part := Rest;
+      Rest := '';
+    end
+    else
+    begin
+      Part := Copy(Rest, 1, Position - 1);
+      Delete(Rest, 1, Position);
+    end;
+    if Part <> '' then
+      Paths.Add(Part);
+  until Rest = '';
+end;
+
+function RunSingleReplay(const Options: TReplayOptions; const LogPath: AnsiString): Integer;
+  forward;
+
 function RunCommandReplay(const Options: TReplayOptions): Integer;
+var
+  Paths: TStringList;
+  Logs: TList;
+  Replay: TReplay;
+  I: Integer;
+begin
+  Paths := TStringList.Create;
+  try
+    ListLogs(Options.LogPath, Paths);
+    if Paths.Count = 1 then
+      Exit(RunSingleReplay(Options, Paths[0]));
+    Logs := TList.Create;
+    Replay := TReplay.Create;
+    QueryAnswerHook := @ReplayAnswer;
+    try
+      Replay.Options := Options;
+      for I := 0 to Paths.Count - 1 do
+        Logs.Add(TLogFile.Create(Paths[I]));
+      Result := RunMergedReplay(Replay, Logs);
+    finally
+      QueryAnswerHook := nil;
+      for I := 0 to Logs.Count - 1 do
+        TLogFile(Logs[I]).Free;
+      Logs.Free;
+      Replay.Free;
+    end;
+  finally
+    Paths.Free;
+  end;
+end;
+
+function RunSingleReplay(const Options: TReplayOptions; const LogPath: AnsiString): Integer;
 var
   Stream: TFileStream;
   Header: packed record
@@ -759,15 +1169,15 @@ var
 begin
   Replay := TReplay.Create;
   Payload := TBufEC.Create;
-  Stream := TFileStream.Create(Options.LogPath, fmOpenRead or fmShareDenyWrite);
+  Stream := TFileStream.Create(LogPath, fmOpenRead or fmShareDenyWrite);
   QueryAnswerHook := @ReplayAnswer;
   try
     Replay.Options := Options;
     Stream.ReadBuffer(Magic, 4);
     Stream.ReadBuffer(Version, 4);
     if (Magic <> LogMagic) or (Version <> LogVersion) then
-      raise Exception.Create('Not a command log of this version: ' + Options.LogPath);
-    Replay.Emit('replay log=' + Options.LogPath);
+      raise Exception.Create('Not a command log of this version: ' + LogPath);
+    Replay.Emit('replay log=' + LogPath);
     while Stream.Position < Stream.Size do
     begin
       Stream.ReadBuffer(Header, SizeOf(Header));
@@ -775,16 +1185,7 @@ begin
       Payload.SetSize(Header.Size);
       if Header.Size > 0 then
         Stream.ReadBuffer(Payload.Data^, Header.Size);
-      Payload.SetPosition(0);
-      Inc(Replay.Index);
-      case TRecordType(Header.RecordType) of
-        rtLoad: Replay.ReplayLoad(Payload);
-        rtCommand: Replay.ReplayCommand(Payload);
-        rtJob: Replay.ReplayJob(Payload);
-        rtCheckpoint: Replay.ReplayCheckpoint(Payload);
-      else
-        raise Exception.CreateFmt('Unknown record type %d', [Header.RecordType]);
-      end;
+      Replay.ReplayRecord(Header.RecordType, Payload);
     end;
     Replay.Emit(
         Format(
