@@ -16,9 +16,12 @@ uses
   EC_BlockPar,
   EC_Expression,
   ThreadCalc,
+  aHuman,
   aItem;
 type
   TSessionState = record
+    // The humans in the game (aHuman). LocalHuman is one of them while its ranger exists.
+    Humans: THumanList;
     // The version of the save being loaded.
     LoadedSaveVersion: Integer;
     LoadedSaveModSet: WideString;

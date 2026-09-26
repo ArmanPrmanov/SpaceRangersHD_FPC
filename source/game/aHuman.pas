@@ -5,10 +5,10 @@ unit aHuman;
 {$B-}
 {$A8}
 
-// CHANGE: CLEANUP - State that belongs to the human at this machine rather than to the
-// galaxy. These were separate globals in aGalaxy and aRanger; the fields keep their
-// names. It is not part of TPlayer because it outlives the player's ship. Multiplayer
-// needs one per human (ROADMAP.md, Phase 4).
+// CHANGE: CLEANUP - The humans in the game and the state that belongs to each of them rather
+// than to the galaxy. These were separate globals in aGalaxy and aRanger; the fields keep
+// their names. The state is not part of TPlayer because it outlives the player's ship.
+// docs/humans.md describes how the game code refers to humans (ROADMAP.md, Phase 4).
 interface
 uses
   Classes,
@@ -17,6 +17,7 @@ uses
   aHold,
   aItem,
   aPlanet,
+  aPlayer,
   aRuins,
   aShip;
 type
@@ -27,7 +28,14 @@ type
     PurchasePrice: Integer;
     BaseSalePrice: Integer;
   end;
-  THumanState = record
+  THuman = class
+    // The human's ranger. Nil once it is destroyed in single player; the id stays.
+    Player: TPlayer;
+    // The ship id of the human's ranger. It is never reused within a game, so commands,
+    // saves and logs can refer to a human who has left.
+    Id: Integer;
+    // Whether the human has pressed end turn for the coming day.
+    EndedTurn: Boolean;
     // The star the human is in; its day is simulated with the film.
     PlayerStar: TStar;
     PlayerDialogueRequestCount: Byte;
@@ -77,7 +85,143 @@ type
     TalkText: WideString;
     TalkAmount: Integer;
   end;
+  // The humans in join order. Every TPlayer in the galaxy is in it, and nothing else is.
+  THumanList = class(TList)
+  private
+    function GetHuman(Index: Integer): THuman; inline;
+  public
+    property Items[Index: Integer]: THuman read GetHuman; default;
+  end;
 var
-  LocalHuman: THumanState;
+  // The human at this machine: whose screen this is. LocalPlayer is its ranger.
+  LocalHuman: THuman;
+// The human whose ranger is Ship, or nil when Ship is not a human's ranger.
+function HumanOf(Ship: TObject): THuman;
+// Whether Ship is a human's ranger. Every TPlayer is.
+function IsHuman(Ship: TObject): Boolean; inline;
+// Whether a human's ranger is in Star, in normal space, docked or landed.
+function StarHasHuman(Star: TStar): Boolean;
+// The human with this id, or nil.
+function FindHuman(Id: Integer): THuman;
+// Makes Player a human. The first human is the local one.
+function AddHuman(Player: TPlayer): THuman;
+// Forgets Player's human, as when its ranger is destroyed. The local human's state is kept.
+procedure RemoveHuman(Player: TPlayer);
+// Rebuilds the list from the TPlayer instances in Galaxy.Rangers, keeping the local
+// human's state for Local.
+procedure RebuildHumans(Galaxy: TGalaxy; Local: TPlayer);
 implementation
+uses
+  aSession;
+
+function THumanList.GetHuman(Index: Integer): THuman;
+begin
+  Result := THuman(inherited Items[Index]);
+end;
+
+function HumanOf(Ship: TObject): THuman;
+var
+  I: Integer;
+begin
+  if Ship <> nil then
+    for I := 0 to Session.Humans.Count - 1 do
+    begin
+      Result := Session.Humans[I];
+      if Result.Player = Ship then
+        Exit;
+    end;
+  Result := nil;
+end;
+
+function IsHuman(Ship: TObject): Boolean;
+begin
+  Result := Ship is TPlayer;
+end;
+
+function StarHasHuman(Star: TStar): Boolean;
+var
+  I: Integer;
+  Player: TPlayer;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Player := Session.Humans[I].Player;
+    if (Player <> nil) and (Player.CurrentStar = Star) then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
+function FindHuman(Id: Integer): THuman;
+var
+  I: Integer;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Result := Session.Humans[I];
+    if Result.Id = Id then
+      Exit;
+  end;
+  Result := nil;
+end;
+
+function AddHuman(Player: TPlayer): THuman;
+begin
+  Result := HumanOf(Player);
+  if Result <> nil then
+    Exit;
+  if (Session.Humans.Count = 0) or (LocalHuman.Player = Player) then
+    Result := LocalHuman
+  else
+    Result := THuman.Create;
+  Result.Player := Player;
+  Result.Id := Player.Id;
+  if Result <> LocalHuman then
+    Result.PlayerStar := Player.CurrentStar;
+  Session.Humans.Add(Result);
+end;
+
+procedure RemoveHuman(Player: TPlayer);
+var
+  Human: THuman;
+begin
+  Human := HumanOf(Player);
+  if Human = nil then
+    Exit;
+  Session.Humans.Remove(Human);
+  Human.Player := nil;
+  if Human <> LocalHuman then
+    Human.Free;
+end;
+
+procedure RebuildHumans(Galaxy: TGalaxy; Local: TPlayer);
+var
+  I: Integer;
+  Ranger: TObject;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+    if Session.Humans[I] <> LocalHuman then
+      Session.Humans[I].Free;
+  Session.Humans.Clear;
+  LocalHuman.Player := nil;
+  if Local = nil then
+    Exit;
+  AddHuman(Local);
+  if Galaxy.Rangers <> nil then
+    for I := 0 to Galaxy.Rangers.Count - 1 do
+    begin
+      Ranger := TObject(Galaxy.Rangers[I]);
+      if Ranger is TPlayer then
+        AddHuman(TPlayer(Ranger));
+    end;
+end;
+
+initialization
+  LocalHuman := THuman.Create;
+  Session.Humans := THumanList.Create;
+finalization
+  Session.Humans.Free;
+  Session.Humans := nil;
+  LocalHuman.Free;
+  LocalHuman := nil;
 end.

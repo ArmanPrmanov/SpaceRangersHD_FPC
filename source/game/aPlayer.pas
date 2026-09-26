@@ -245,6 +245,8 @@ var
   StorageItemColumns: TStorageItemColumnTable =
       ((Heading: 190; Size: 300; Cost: 380), (Heading: 250; Size: 400; Cost: 490));
 function GetPlayer: TPlayer;
+// The local human's ranger: whose screen this is (aHuman, docs/humans.md).
+function LocalPlayer: TPlayer; inline;
 procedure SetPlayer(Player: TPlayer; Galaxy: TGalaxy);
 procedure LinkRecoveredTypes;
 implementation
@@ -296,11 +298,18 @@ begin
   Result := PlayerInstance;
 end;
 
+function LocalPlayer: TPlayer;
+begin
+  Result := PlayerInstance;
+end;
+
 procedure SetPlayer(Player: TPlayer; Galaxy: TGalaxy);
 begin
   if Galaxy <> nil then
   begin
     PlayerInstance := Player;
+    // CHANGE: CLEANUP - Setting the local player also finds the other humans.
+    RebuildHumans(Galaxy, Player);
     if Player = nil then
       Galaxy.PlayerRangerIndex := -1
     else if Galaxy.Rangers = nil then

@@ -1149,7 +1149,10 @@ begin
   end;
   MovementPath.Free;
   if GetPlayer = Self then
-    SetPlayer(nil, Galaxy);
+    SetPlayer(nil, Galaxy)
+  // CHANGE: CLEANUP - Another human's ranger leaves the humans too.
+  else if IsHuman(Self) then
+    RemoveHuman(TPlayer(Self));
   if BlazerShip = Self then
     BlazerShip := nil;
   if KellerShip = Self then
