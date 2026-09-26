@@ -4,10 +4,11 @@ unit aShopActions;
 // CHANGE: ENHANCEMENT - What a human does in the shops, as commands (docs/commands.md): the
 // equipment shop, the goods shop and the hangar. The code is moved from the screens; they
 // keep their dialogs, sounds and images. Items in the open shop's grid are in no galaxy
-// list, so a command names one by its slot in LocalHuman.TemporaryShopSlots and its id.
+// list, so a command names one by its slot in the human's TemporaryShopSlots and its id.
 interface
 uses
   aCommands,
+  aHuman,
   aItem,
   aShip;
 const
@@ -39,8 +40,8 @@ procedure ShowShopItemInfo(Item: TItem);
 function BuyEquipment(SlotIndex: Integer; Item: TItem): TEquipmentPurchase;
 procedure FinishStoredHullPurchase;
 
-// The prices of Partner's cargo while the player trades with it in space.
-procedure RefreshTradeRows(Partner: TShip);
+// The prices of Partner's cargo while Human trades with it in space (Human.TradeRows).
+procedure RefreshTradeRows(Human: THuman; Partner: TShip);
 // Buys Count of Good from the market, or sells them from the cargo.
 procedure TradeGoods(Good: Byte; Count: Integer; Sell: Boolean);
 
@@ -60,7 +61,6 @@ uses
   aGalaxy,
   aGalaxyEvent,
   aGalaxyStruct,
-  aHuman,
   aPlayer,
   aScript,
   aShopStock,
@@ -87,14 +87,16 @@ end;
 // The slot the command names from Index on; its item must have the id the command names.
 function ShopSlotArg(const Command: TPlayerCommand; Index: Integer): TShopStockSlot;
 var
+  H: THuman;
   SlotIndex: Integer;
 begin
+  H := ActorHuman(Command);
   SlotIndex := IntArg(Command, Index);
-  if (LocalHuman.TemporaryShopSlots = nil)
+  if (H.TemporaryShopSlots = nil)
       or (SlotIndex < 0)
-      or (SlotIndex >= LocalHuman.TemporaryShopSlots.Count) then
+      or (SlotIndex >= H.TemporaryShopSlots.Count) then
     raise Exception.Create(CommandKindName(Command.Kind) + ' names a missing shop slot');
-  Result := TShopStockSlot(LocalHuman.TemporaryShopSlots[SlotIndex]);
+  Result := TShopStockSlot(H.TemporaryShopSlots[SlotIndex]);
   if (Result.Item = nil) or (Result.Item.Id <> IntArg(Command, Index + 1)) then
     raise Exception.Create(CommandKindName(Command.Kind) + ' names another shop item');
 end;
@@ -102,12 +104,14 @@ end;
 // Moved from TfEquipmentShop.OnOpen.
 procedure ExecuteEnterEquipmentShop(const Command: TPlayerCommand);
 var
+  H: THuman;
   SavedSlots: TList;
 begin
-  SavedSlots := LocalHuman.TemporaryShopSlots;
-  LocalHuman.TemporaryShopSlots := nil;
+  H := ActorHuman(Command);
+  SavedSlots := H.TemporaryShopSlots;
+  H.TemporaryShopSlots := nil;
   Actor(Command).ScriptItemsAct(satOnEnteringForm, nil, nil, 0);
-  LocalHuman.TemporaryShopSlots := SavedSlots;
+  H.TemporaryShopSlots := SavedSlots;
 end;
 
 procedure EnterEquipmentShop;
@@ -151,7 +155,7 @@ begin
   // log then writes a checkpoint.
   if SlotIndex < 0 then
   begin
-    RunShopItemInfoScripts(GetPlayer, Item);
+    RunShopItemInfoScripts(LocalPlayer, Item);
     Exit;
   end;
   Command := NewCommand(ckShowShopItemInfo);
@@ -349,12 +353,12 @@ var
   Command: TPlayerCommand;
   Index: Integer;
 begin
-  Index := StorageIndex(GetPlayer, PurchasedItem);
+  Index := StorageIndex(LocalPlayer, PurchasedItem);
   // A storage script that moved the hull away leaves nothing to name; the rest then runs
   // unrecorded, and the command log writes a checkpoint.
   if Index < 0 then
   begin
-    FinishHullPurchase(GetPlayer, PurchasedItem);
+    FinishHullPurchase(LocalPlayer, PurchasedItem);
     Exit;
   end;
   Command := NewCommand(ckFinishStoredHullPurchase);
@@ -364,29 +368,29 @@ begin
 end;
 
 // Moved verbatim from TfGoodsShop2.RefreshGoodsDisplay.
-procedure RefreshTradeRows(Partner: TShip);
+procedure RefreshTradeRows(Human: THuman; Partner: TShip);
 var
   Good: Byte;
 begin
   for Good := 0 to 7 do
   begin
-    LocalHuman.TradeRows[Good].Count := Partner.CargoGoods[Good].Count;
-    LocalHuman.TradeRows[Good].MaximumPrice := GoodsMarket[Good].MaxPrice;
+    Human.TradeRows[Good].Count := Partner.CargoGoods[Good].Count;
+    Human.TradeRows[Good].MaximumPrice := GoodsMarket[Good].MaxPrice;
     if Partner.CargoGoods[Good].Count <= 0 then
     begin
-      LocalHuman.TradeRows[Good].PurchasePrice := Round(Max(GoodsMarket[Good].AveragePrice * 1.1, 0));
-      LocalHuman.TradeRows[Good].BaseSalePrice := Round(Max(GoodsMarket[Good].MinPrice, 0));
+      Human.TradeRows[Good].PurchasePrice := Round(Max(GoodsMarket[Good].AveragePrice * 1.1, 0));
+      Human.TradeRows[Good].BaseSalePrice := Round(Max(GoodsMarket[Good].MinPrice, 0));
     end
     else
     begin
-      LocalHuman.TradeRows[Good].PurchasePrice :=
+      Human.TradeRows[Good].PurchasePrice :=
           Round(
               Max(
                   GoodsMarket[Good].AveragePrice * 1.1,
                   Partner.CargoGoods[Good].TotalCost / Partner.CargoGoods[Good].Count * 1.3
               )
           );
-      LocalHuman.TradeRows[Good].BaseSalePrice :=
+      Human.TradeRows[Good].BaseSalePrice :=
           Round(
               Max(
                   GoodsMarket[Good].MinPrice,
@@ -414,10 +418,10 @@ begin
   Sell := IntArg(Command, 2) <> 0;
   if P.InNormalSpace then
   begin
-    Partner := LocalHuman.TalkShip;
+    Partner := ActorHuman(Command).TalkShip;
     if RefObject(Command, 0) <> Partner then
       raise Exception.Create('TradeGoods names another partner');
-    RefreshTradeRows(Partner);
+    RefreshTradeRows(ActorHuman(Command), Partner);
     if not Sell then
     begin
       Partner.SetMoney(
@@ -457,7 +461,7 @@ var
   Command: TPlayerCommand;
 begin
   Command := NewCommand(ckTradeGoods);
-  if GetPlayer.InNormalSpace then
+  if LocalPlayer.InNormalSpace then
     AddRef(Command, LocalHuman.TalkShip)
   else
     AddRef(Command, nil);
@@ -543,7 +547,7 @@ end;
 // Moved from TfHangar.TakeOffClicked.
 procedure ExecuteEndAutomaticControl(const Command: TPlayerCommand);
 begin
-  LocalHuman.PlayerAutomaticControl := False;
+  ActorHuman(Command).PlayerAutomaticControl := False;
 end;
 
 procedure EndAutomaticControl;

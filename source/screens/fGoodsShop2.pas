@@ -655,7 +655,7 @@ begin
   begin
     // The prices are computed again from the partner's cargo, so a trade command can compute
     // them too; the state hash leaves them out.
-    RefreshTradeRows(LocalHuman.TalkShip);
+    RefreshTradeRows(LocalHuman, LocalHuman.TalkShip);
     PartnerCargoLimit := LocalHuman.TalkShip.GetCargoFreeSpace - LocalHuman.TalkShip.GetDesiredCargoFreeSpace;
     PartnerMoneyLimit := LocalHuman.TalkShip.Money;
   end;

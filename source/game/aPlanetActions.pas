@@ -8,11 +8,11 @@ unit aPlanetActions;
 // achievements and images. A command that decides for itself returns its branch in
 // PlanetOutcome and the text the game built in PlanetText.
 //
-// The government's negotiation state lives here, not in the screen, so a replay has it:
-// the planet scripts whose dialogs it walks through (GovernmentDialogNames) and the quest
-// being negotiated (GovernmentQuestOffer). So does the satellite the human holds on the
-// uninhabited planet's cursor (PlanetHeldSatellite), which is in neither the hold nor the
-// deployed satellites while it is held.
+// The government's negotiation state is not in the screen, so a replay has it, and it is
+// each human's (THuman): the planet scripts whose dialogs it walks through
+// (GovernmentDialogNames) and the quest being negotiated (GovernmentQuestOffer). So is the
+// satellite the human holds on the uninhabited planet's cursor (PlanetHeldSatellite), which
+// is in neither the hold nor the deployed satellites while it is held.
 interface
 uses
   EC_Str,
@@ -91,23 +91,13 @@ var
   PlanetOutcome: Integer;
   PlanetAmount: Integer;
   PlanetText: WideString;
-  // The government: the planet scripts with a dialog for it and the one being shown, the
-  // script the last dialog command selected, and whether BeginGovernmentDialog turned a
-  // quest in (PlanetText then holds the answer).
-  GovernmentDialogNames: TStringsEC;
-  GovernmentDialogCursor: Integer;
+  // The government: the script the last dialog command selected, and whether
+  // BeginGovernmentDialog turned a quest in (PlanetText then holds the answer). The
+  // negotiation state that lasts between commands is the human's (THuman).
   GovernmentScript: TScript;
   GovernmentQuestTurnedIn: Boolean;
-  // The quest the government offers and how far the player has negotiated it.
-  GovernmentQuestOffer: TQuest;
-  GovernmentQuestLevel: Integer;
-  GovernmentQuestRewardStep: Integer;
-  GovernmentQuestDurationStep: Integer;
   // The planetary battle the government offers (RequestQuest).
   GovernmentBattleMapId: Integer;
-  // The satellite on the uninhabited planet's cursor. Origin 0 is the hold, 1 an orbit.
-  PlanetHeldSatellite: TSatellite;
-  PlanetHeldSatelliteOrigin: Integer;
   // The experience GrantPlanetQuestReward awarded (PlanetBattleResult).
   PlanetBattleExperience: Integer;
 
@@ -259,7 +249,7 @@ procedure ReportPlanetCaptured;
 begin
   // With no player there is no one to act; this runs unrecorded, and the log's next
   // boundary writes a checkpoint.
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     ApplyPlanetCaptured
   else
     SubmitSimple(ckPlanetCaptured);
@@ -284,15 +274,15 @@ procedure ExecuteLeaveGovernment(const Command: TPlayerCommand);
 begin
   Actor(Command).ScriptItemsAct($19, nil, nil, 0);
   Session.ScriptDialogIndex := -1;
-  GovernmentDialogNames.Clear;
+  ActorHuman(Command).GovernmentDialogNames.Clear;
 end;
 
 procedure LeaveGovernment;
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
   begin
     Session.ScriptDialogIndex := -1;
-    GovernmentDialogNames.Clear;
+    LocalHuman.GovernmentDialogNames.Clear;
   end
   else
     SubmitSimple(ckLeaveGovernment);
@@ -348,21 +338,23 @@ end;
 // Moved from TfGov.BuildGovernmentChoices.
 procedure ExecuteBeginGovernmentDialog(const Command: TPlayerCommand);
 var
+  H: THuman;
   Script: TScript;
   Text: WideString;
 begin
+  H := ActorHuman(Command);
   ClearScriptDialogRules;
-  Actor(Command).CurrentPlanet.CollectScriptDialogChoices(GovernmentDialogNames);
-  GovernmentDialogCursor := 0;
+  Actor(Command).CurrentPlanet.CollectScriptDialogChoices(H.GovernmentDialogNames);
+  H.GovernmentDialogCursor := 0;
   Script := nil;
   Session.ScriptDialogIndex := -1;
-  while GovernmentDialogCursor < GovernmentDialogNames.GetCount do
+  while H.GovernmentDialogCursor < H.GovernmentDialogNames.GetCount do
   begin
-    Script := TScript(GovernmentDialogNames.GetDataAt(GovernmentDialogCursor));
-    Script.CallDialogByVariable(GovernmentDialogNames.GetTextAt(GovernmentDialogCursor));
+    Script := TScript(H.GovernmentDialogNames.GetDataAt(H.GovernmentDialogCursor));
+    Script.CallDialogByVariable(H.GovernmentDialogNames.GetTextAt(H.GovernmentDialogCursor));
     if Session.ScriptDialogIndex >= 0 then
       Break;
-    Inc(GovernmentDialogCursor);
+    Inc(H.GovernmentDialogCursor);
   end;
   GovernmentQuestTurnedIn := Actor(Command).TryTurnInAnyQuest(Text);
   PlanetText := Text;
@@ -384,18 +376,20 @@ end;
 // Moved from TfGov.ContinueScriptDialog.
 procedure ExecuteContinueGovernmentDialog(const Command: TPlayerCommand);
 var
+  H: THuman;
   Script: TScript;
 begin
+  H := ActorHuman(Command);
   Session.ScriptDialogIndex := -1;
-  Inc(GovernmentDialogCursor);
+  Inc(H.GovernmentDialogCursor);
   Script := nil;
-  while GovernmentDialogCursor < GovernmentDialogNames.GetCount do
+  while H.GovernmentDialogCursor < H.GovernmentDialogNames.GetCount do
   begin
-    Script := GovernmentDialogNames.GetDataAt(GovernmentDialogCursor);
-    Script.CallDialogByVariable(GovernmentDialogNames.GetTextAt(GovernmentDialogCursor));
+    Script := H.GovernmentDialogNames.GetDataAt(H.GovernmentDialogCursor);
+    Script.CallDialogByVariable(H.GovernmentDialogNames.GetTextAt(H.GovernmentDialogCursor));
     if Session.ScriptDialogIndex >= 0 then
       Break;
-    Inc(GovernmentDialogCursor);
+    Inc(H.GovernmentDialogCursor);
   end;
   GovernmentScript := Script;
 end;
@@ -652,10 +646,12 @@ end;
 // Moved from TfGov.RequestQuest.
 procedure ExecuteRequestQuest(const Command: TPlayerCommand);
 var
+  H: THuman;
   ResponseText: WideString;
   MapId: Integer;
   P: TPlayer;
 begin
+  H := ActorHuman(Command);
   P := Actor(Command);
   if P.DeclinePlanetBattleOffers then
     MapId := -1
@@ -666,17 +662,17 @@ begin
     GovernmentBattleMapId := MapId;
     PlanetOutcome := rqPlanetBattle;
   end
-  else if not P.GenerateQuestOffer(GovernmentQuestOffer, ResponseText) then
+  else if not P.GenerateQuestOffer(H.GovernmentQuestOffer, ResponseText) then
   begin
     PlanetText := ResponseText;
     PlanetOutcome := rqRefused;
   end
   else
   begin
-    GovernmentQuestLevel := 0;
-    GovernmentQuestRewardStep := Round(GovernmentQuestOffer.RewardMoney * 0.3);
-    GovernmentQuestDurationStep :=
-        Round((GovernmentQuestOffer.DeadlineTurn - Galaxy.CurrentTurn) * 0.5);
+    H.GovernmentQuestLevel := 0;
+    H.GovernmentQuestRewardStep := Round(H.GovernmentQuestOffer.RewardMoney * 0.3);
+    H.GovernmentQuestDurationStep :=
+        Round((H.GovernmentQuestOffer.DeadlineTurn - Galaxy.CurrentTurn) * 0.5);
     PlanetOutcome := rqOffer;
   end;
 end;
@@ -689,28 +685,31 @@ end;
 
 // Moved from TfGov.MakeQuestEasier and TfGov.MakeQuestHarder.
 procedure ExecuteNegotiateQuest(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
+  H := ActorHuman(Command);
   if IntArg(Command, 0) < 0 then
   begin
-    Dec(GovernmentQuestLevel);
-    case GovernmentQuestOffer.QuestType of
+    Dec(H.GovernmentQuestLevel);
+    case H.GovernmentQuestOffer.QuestType of
       qtSendLetter..qtPlanetQuest:
-        Inc(GovernmentQuestOffer.DeadlineTurn, GovernmentQuestDurationStep);
+        Inc(H.GovernmentQuestOffer.DeadlineTurn, H.GovernmentQuestDurationStep);
       qtDefendSystem..qtDefendShip:
-        Dec(GovernmentQuestOffer.DeadlineTurn, GovernmentQuestDurationStep);
+        Dec(H.GovernmentQuestOffer.DeadlineTurn, H.GovernmentQuestDurationStep);
     end;
-    Dec(GovernmentQuestOffer.RewardMoney, GovernmentQuestRewardStep);
+    Dec(H.GovernmentQuestOffer.RewardMoney, H.GovernmentQuestRewardStep);
   end
   else
   begin
-    Inc(GovernmentQuestLevel);
-    case GovernmentQuestOffer.QuestType of
+    Inc(H.GovernmentQuestLevel);
+    case H.GovernmentQuestOffer.QuestType of
       qtSendLetter..qtPlanetQuest:
-        Dec(GovernmentQuestOffer.DeadlineTurn, GovernmentQuestDurationStep);
+        Dec(H.GovernmentQuestOffer.DeadlineTurn, H.GovernmentQuestDurationStep);
       qtDefendSystem..qtDefendShip:
-        Inc(GovernmentQuestOffer.DeadlineTurn, GovernmentQuestDurationStep);
+        Inc(H.GovernmentQuestOffer.DeadlineTurn, H.GovernmentQuestDurationStep);
     end;
-    Inc(GovernmentQuestOffer.RewardMoney, GovernmentQuestRewardStep);
+    Inc(H.GovernmentQuestOffer.RewardMoney, H.GovernmentQuestRewardStep);
   end;
 end;
 
@@ -722,13 +721,15 @@ end;
 // Moved from TfGov.AcceptQuest.
 procedure ExecuteAcceptQuest(const Command: TPlayerCommand);
 var
+  H: THuman;
   Quest: PQuest;
   Item: TUselessItem;
   P: TPlayer;
 begin
+  H := ActorHuman(Command);
   P := Actor(Command);
   New(Quest);
-  Quest^ := GovernmentQuestOffer;
+  Quest^ := H.GovernmentQuestOffer;
   Quest.Description := P.BuildQuestText(Quest^, qtkOffer);
   Quest.CompletionText := P.BuildQuestText(Quest^, qtkCompletion);
   P.Quests.Add(Quest);
@@ -756,16 +757,18 @@ end;
 // Moved from TfGov.PermanentlyDeclineQuest.
 procedure ExecuteDeclineQuestPermanently(const Command: TPlayerCommand);
 var
+  H: THuman;
   Quest: PPlayerOldQuest;
 begin
+  H := ActorHuman(Command);
   New(Quest);
-  Quest.QuestType := GovernmentQuestOffer.QuestType;
-  Quest.QuestNumber := GovernmentQuestOffer.QuestNumber;
-  Quest.Planet := GovernmentQuestOffer.Planet;
+  Quest.QuestType := H.GovernmentQuestOffer.QuestType;
+  Quest.QuestNumber := H.GovernmentQuestOffer.QuestNumber;
+  Quest.Planet := H.GovernmentQuestOffer.Planet;
   Quest.Description := 'PlanetQuestClose';
   Quest.Successful := False;
   Quest.Declined := True;
-  LocalHuman.PlayerOldQuests.Add(Quest);
+  H.PlayerOldQuests.Add(Quest);
 end;
 
 procedure DeclineQuestPermanently;
@@ -948,8 +951,9 @@ begin
   else
     Galaxy.TerronLandingLockTurn := 0;
   P.OrderTakeoff;
-  LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
-  if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
+  ActorHuman(Command).PlayerStar.RefreshSpaceObjectPositions;
+  // How dominators look follows the local human's health effect: presentation.
+  if (LocalPlayer <> nil) and LocalPlayer.IsHealthEffectActive(3) then
     Galaxy.EnableDominatorSurfaces
   else
     Galaxy.DisableDominatorSurfaces;
@@ -1001,30 +1005,32 @@ end;
 // Moved from TfPlanetNO.SatelliteInventoryMouseDown.
 procedure ExecuteSatelliteSlot(const Command: TPlayerCommand);
 var
+  H: THuman;
   Item: TSatellite;
   TrajectoryIndex: Integer;
   P: TPlayer;
 begin
+  H := ActorHuman(Command);
   P := Actor(Command);
   TrajectoryIndex := IntArg(Command, 0);
   Item := P.FindSatelliteByTrajectoryIndex(TrajectoryIndex);
   PlanetOutcome := ssNone;
-  if (PlanetHeldSatellite = nil) and (Item <> nil) then
+  if (H.PlanetHeldSatellite = nil) and (Item <> nil) then
   begin
-    PlanetHeldSatellite := Item;
-    PlanetHeldSatelliteOrigin := 0;
+    H.PlanetHeldSatellite := Item;
+    H.PlanetHeldSatelliteOrigin := 0;
     P.Inventory.Delete(P.Inventory.IndexOf(Item));
     P.RefreshDerivedStats(True);
     PlanetOutcome := ssTaken;
   end
-  else if PlanetHeldSatellite <> nil then
+  else if H.PlanetHeldSatellite <> nil then
   begin
     if Item <> nil then
       P.InsertSatelliteTrajectoryIndex(TrajectoryIndex);
-    P.Inventory.Add(PlanetHeldSatellite);
-    (TObject(PlanetHeldSatellite) as TSatellite).TrajectoryIndex := TrajectoryIndex;
-    (TObject(PlanetHeldSatellite) as TSatellite).TargetPlanet := nil;
-    PlanetHeldSatellite := nil;
+    P.Inventory.Add(H.PlanetHeldSatellite);
+    (TObject(H.PlanetHeldSatellite) as TSatellite).TrajectoryIndex := TrajectoryIndex;
+    (TObject(H.PlanetHeldSatellite) as TSatellite).TargetPlanet := nil;
+    H.PlanetHeldSatellite := nil;
     P.RefreshDerivedStats(True);
     P.RemoveEmptySatelliteTrajectoryIndex(TrajectoryIndex + 1);
     P.ArrangeHoldSatellitesByTrajectoryIndex;
@@ -1061,34 +1067,36 @@ end;
 // Moved from TfPlanetNO.ResearchMapMouseDown.
 procedure ExecuteSatelliteOrbit(const Command: TPlayerCommand);
 var
+  H: THuman;
   Item: TSatellite;
   TrajectoryIndex: Integer;
   P: TPlayer;
 begin
+  H := ActorHuman(Command);
   P := Actor(Command);
   TrajectoryIndex := IntArg(Command, 0);
-  PlanetHeldSatelliteOrigin := 1;
+  H.PlanetHeldSatelliteOrigin := 1;
   Item := FindDeployedSatellite(P, TrajectoryIndex);
   if Item <> nil then
     P.Satellites.Delete(P.Satellites.IndexOf(Item));
   PlanetOutcome := soNone;
-  if PlanetHeldSatellite <> nil then
+  if H.PlanetHeldSatellite <> nil then
   begin
     PlanetOutcome := soPut;
-    P.Satellites.Add(PlanetHeldSatellite);
+    P.Satellites.Add(H.PlanetHeldSatellite);
     if Item <> nil then
     begin
-      Item.TrajectoryIndex := (TObject(PlanetHeldSatellite) as TSatellite).TrajectoryIndex;
-      PlanetHeldSatelliteOrigin := 0;
+      Item.TrajectoryIndex := (TObject(H.PlanetHeldSatellite) as TSatellite).TrajectoryIndex;
+      H.PlanetHeldSatelliteOrigin := 0;
     end;
-    (TObject(PlanetHeldSatellite) as TSatellite).TrajectoryIndex := TrajectoryIndex;
-    (TObject(PlanetHeldSatellite) as TSatellite).TargetPlanet := P.CurrentPlanet;
-    PlanetHeldSatellite := nil;
+    (TObject(H.PlanetHeldSatellite) as TSatellite).TrajectoryIndex := TrajectoryIndex;
+    (TObject(H.PlanetHeldSatellite) as TSatellite).TargetPlanet := P.CurrentPlanet;
+    H.PlanetHeldSatellite := nil;
   end
   else if Item <> nil then
     PlanetOutcome := soTaken;
   if Item <> nil then
-    PlanetHeldSatellite := Item;
+    H.PlanetHeldSatellite := Item;
 end;
 
 function ClickSatelliteOrbit(TrajectoryIndex: Integer): Integer;
@@ -1099,20 +1107,23 @@ end;
 
 // Moved from TfPlanetNO.ReturnHeldSatellite.
 procedure ExecuteReturnHeldSatellite(const Command: TPlayerCommand);
+var
+  H: THuman;
 begin
-  PlanetOutcome := PlanetHeldSatelliteOrigin;
-  if PlanetHeldSatellite = nil then
+  H := ActorHuman(Command);
+  PlanetOutcome := H.PlanetHeldSatelliteOrigin;
+  if H.PlanetHeldSatellite = nil then
     Exit;
-  if PlanetHeldSatelliteOrigin = 0 then
+  if H.PlanetHeldSatelliteOrigin = 0 then
   begin
-    Actor(Command).Inventory.Add(PlanetHeldSatellite);
-    PlanetHeldSatellite := nil;
+    Actor(Command).Inventory.Add(H.PlanetHeldSatellite);
+    H.PlanetHeldSatellite := nil;
     Actor(Command).RefreshDerivedStats(True);
   end
   else
   begin
-    Actor(Command).Satellites.Add(PlanetHeldSatellite);
-    PlanetHeldSatellite := nil;
+    Actor(Command).Satellites.Add(H.PlanetHeldSatellite);
+    H.PlanetHeldSatellite := nil;
   end;
 end;
 
@@ -1251,7 +1262,6 @@ begin
 end;
 
 initialization
-  GovernmentDialogNames := TStringsEC.Create;
   RegisterCommand(ckRunGlobalScripts, 'RunGlobalScripts', @ExecuteRunGlobalScripts);
   RegisterCommand(ckPlanetCaptured, 'PlanetCaptured', @ExecutePlanetCaptured);
   RegisterCommand(ckEnterGovernment, 'EnterGovernment', @ExecuteEnterGovernment);
@@ -1306,6 +1316,4 @@ initialization
   RegisterCommand(ckDeleteJournalRecord, 'DeleteJournalRecord', @ExecuteDeleteJournalRecord);
   RegisterCommand(ckClearJournal, 'ClearJournal', @ExecuteClearJournal);
   RegisterCommand(ckClearNews, 'ClearNews', @ExecuteClearNews);
-finalization
-  GovernmentDialogNames.Free;
 end.

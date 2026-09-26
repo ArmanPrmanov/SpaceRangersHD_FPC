@@ -9342,7 +9342,7 @@ begin
             and Star.IsConstellationVisible then
         begin
           Inc(Count);
-          Cost := GetDominionRelocationCost(Star);
+          Cost := GetDominionRelocationCost(LocalPlayer, Star);
           if LocalPlayer.Money < Cost then
             AddChoice(
                 '- '
@@ -9758,7 +9758,7 @@ begin
   ReplaceTextToken(DialogText, '<Star>', Target.Name, '<color=255,240,100>');
   ReplaceTextToken(DialogText, '<Date>', FormatGameTurnDate(Turn), '<color=255,240,100>');
   StationServiceQuoteCost :=
-      ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(Target) * 1.5);
+      ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(LocalPlayer, Target) * 1.5);
   ReplaceTextToken(DialogText, '<Cost>', IntToStr(StationServiceQuoteCost), '<color=255,240,100>');
   if LocalPlayer.Money >= StationServiceQuoteCost then
     AddChoice(
@@ -9870,7 +9870,7 @@ begin
             and Star.IsConstellationVisible then
         begin
           Inc(Count);
-          Cost := ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(Star) * 2.5);
+          Cost := ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(LocalPlayer, Star) * 2.5);
           if LocalPlayer.Money < Cost then
             AddChoice(
                 '- '

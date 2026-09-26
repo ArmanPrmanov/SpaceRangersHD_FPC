@@ -103,7 +103,7 @@ end;
 // Runs the command, or with no player to act, the executor directly.
 procedure SubmitOrRun(const Command: TPlayerCommand; Executor: TCommandExecutor);
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     Executor(Command)
   else
     SubmitCommand(Command);
@@ -201,7 +201,7 @@ begin
   if Length(Names) = 0 then
     Exit;
   Command := NewCommand(ckSetQuestVariables);
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     AddInt(Command, -1)
   else
     AddInt(Command, ScriptIndex(Script));
@@ -213,7 +213,7 @@ begin
     AddInt(Command, Values[I]);
   end;
   // With no player, or a script the command cannot name, this runs unrecorded.
-  if (GetPlayer = nil) or ((Script <> nil) and (Command.Ints[0] < 0)) then
+  if (LocalPlayer = nil) or ((Script <> nil) and (Command.Ints[0] < 0)) then
     ApplyQuestVariables(Script, Command)
   else
     SubmitCommand(Command);
@@ -259,7 +259,7 @@ begin
                 P.CurrentPlanet.Name,
                 '<color=255,240,100>'
             );
-            AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, News, '');
+            ActorHuman(Command).AddOrUpdateBubble(0, Galaxy.CurrentTurn, News, '');
           end;
           ItemName :=
               LookupLocalizedTextByKey(
@@ -357,7 +357,7 @@ begin
             GovernmentQuest.Planet.GetRelationLevelTextToShip(P),
             '<color=255,240,100>'
         );
-        AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, News, '');
+        ActorHuman(Command).AddOrUpdateBubble(0, Galaxy.CurrentTurn, News, '');
         P.CurrentPlanet.TextQuestId := -1;
         P.ArchiveQuest(I);
         Break;

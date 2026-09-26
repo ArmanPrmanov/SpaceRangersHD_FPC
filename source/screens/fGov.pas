@@ -28,8 +28,8 @@ type
     AnimationRestartRequested: Boolean;
     GapED: array[0..2] of Byte;
     // CHANGE: ENHANCEMENT - The quest being negotiated and the planet scripts the dialog
-    // walks through moved to aPlanetActions (GovernmentQuestOffer, GovernmentDialogNames),
-    // so a replay has them.
+    // walks through moved to the human (THuman.GovernmentQuestOffer and
+    // GovernmentDialogNames, set by aPlanetActions), so a replay has them.
     PlanetBattleMapId: Integer;
     PendingTransition: Integer;
     UseHdPortrait: Boolean;
@@ -1332,7 +1332,7 @@ begin
   AddChoice(LocalizedColorText('FormGov.I_QuestReject'), 0, RejectQuest);
   AddChoice(LocalizedColorText('FormGov.I_QuestEasy'), 0, MakeQuestEasier);
   AddChoice(LocalizedColorText('FormGov.I_QuestDifficult'), 0, MakeQuestHarder);
-  if GovernmentQuestOffer.QuestType = qtPlanetQuest then
+  if LocalHuman.GovernmentQuestOffer.QuestType = qtPlanetQuest then
     AddChoice(LocalizedColorText('FormGov.I_PlanetQuestClose'), 0, PermanentlyDeclineQuest);
   AddChoice(LocalizedColorText('FormGov.I_Exit'), 0, ReturnToPlanet);
 end;
@@ -1547,15 +1547,15 @@ begin
     end
     else
     begin
-      DialogText := LocalPlayer.BuildQuestText(GovernmentQuestOffer, qtkOffer);
-      if (GovernmentQuestOffer.QuestType = qtPlanetQuest)
-          and (GovernmentQuestOffer.QuestNumber >= 10000) then
+      DialogText := LocalPlayer.BuildQuestText(LocalHuman.GovernmentQuestOffer, qtkOffer);
+      if (LocalHuman.GovernmentQuestOffer.QuestType = qtPlanetQuest)
+          and (LocalHuman.GovernmentQuestOffer.QuestNumber >= 10000) then
         if (LanguageDataConfig.GetBlock('PlanetQuest').CountBlocks('PlanetQuestLic') <= 0)
             or (LanguageDataConfig
                     .GetBlock('PlanetQuest')
                     .GetBlock('PlanetQuestLic')
-                    .GetParamOrMarker(WideString(IntToStr(GovernmentQuestOffer.QuestNumber)))
-                <> PlanetQuestScreen.GetQuestContentHash(GovernmentQuestOffer.QuestNumber)) then
+                    .GetParamOrMarker(WideString(IntToStr(LocalHuman.GovernmentQuestOffer.QuestNumber)))
+                <> PlanetQuestScreen.GetQuestContentHash(LocalHuman.GovernmentQuestOffer.QuestNumber)) then
           DialogText :=
               DialogText
                   + #13#10
@@ -1572,14 +1572,14 @@ begin
   DialogText :=
       LocalizedColorText('FormGov.CheckQuest.Easy')
           + #13#10
-          + LocalPlayer.BuildQuestText(GovernmentQuestOffer, qtkOffer);
-  if GovernmentQuestLevel <= -1 then
+          + LocalPlayer.BuildQuestText(LocalHuman.GovernmentQuestOffer, qtkOffer);
+  if LocalHuman.GovernmentQuestLevel <= -1 then
   begin
     ClearDialogChoices;
     AddChoice(LocalizedColorText('FormGov.I_QuestAccept'), 0, AcceptQuest);
     AddChoice(LocalizedColorText('FormGov.I_QuestReject'), 0, RejectQuest);
     AddChoice(LocalizedColorText('FormGov.I_QuestDifficult'), 0, MakeQuestHarder);
-    if GovernmentQuestOffer.QuestType = qtPlanetQuest then
+    if LocalHuman.GovernmentQuestOffer.QuestType = qtPlanetQuest then
       AddChoice(LocalizedColorText('FormGov.I_PlanetQuestClose'), 0, PermanentlyDeclineQuest);
     AddChoice(LocalizedColorText('FormGov.I_Exit'), 0, ReturnToPlanet);
   end
@@ -1592,14 +1592,14 @@ begin
   DialogText :=
       LocalizedColorText('FormGov.CheckQuest.Difficult')
           + #13#10
-          + LocalPlayer.BuildQuestText(GovernmentQuestOffer, qtkOffer);
-  if GovernmentQuestLevel >= 1 then
+          + LocalPlayer.BuildQuestText(LocalHuman.GovernmentQuestOffer, qtkOffer);
+  if LocalHuman.GovernmentQuestLevel >= 1 then
   begin
     ClearDialogChoices;
     AddChoice(LocalizedColorText('FormGov.I_QuestAccept'), 0, AcceptQuest);
     AddChoice(LocalizedColorText('FormGov.I_QuestReject'), 0, RejectQuest);
     AddChoice(LocalizedColorText('FormGov.I_QuestEasy'), 0, MakeQuestEasier);
-    if GovernmentQuestOffer.QuestType = qtPlanetQuest then
+    if LocalHuman.GovernmentQuestOffer.QuestType = qtPlanetQuest then
       AddChoice(LocalizedColorText('FormGov.I_PlanetQuestClose'), 0, PermanentlyDeclineQuest);
     AddChoice(LocalizedColorText('FormGov.I_Exit'), 0, ReturnToPlanet);
   end

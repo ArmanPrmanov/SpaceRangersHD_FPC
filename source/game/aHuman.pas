@@ -13,12 +13,14 @@ interface
 uses
   Classes,
   SyncObjs,
+  EC_Str,
   Globals,
   aGalaxy,
   aHold,
   aItem,
   aPlanet,
   aPlayer,
+  aRanger,
   aRuins,
   aShip,
   aCommands;
@@ -86,6 +88,20 @@ type
     TalkResponse: Byte;
     TalkText: WideString;
     TalkAmount: Integer;
+    // The government the human talks to (aPlanetActions): the planet scripts with a dialog
+    // for it and the one being shown, and the quest it offers and how far the human has
+    // negotiated it.
+    GovernmentDialogNames: TStringsEC;
+    GovernmentDialogCursor: Integer;
+    GovernmentQuestOffer: TQuest;
+    GovernmentQuestLevel: Integer;
+    GovernmentQuestRewardStep: Integer;
+    GovernmentQuestDurationStep: Integer;
+    // The satellite on the uninhabited planet's cursor (aPlanetActions), in neither the hold
+    // nor the deployed satellites while it is held. Origin 0 is the hold, 1 an orbit.
+    PlanetHeldSatellite: TSatellite;
+    PlanetHeldSatelliteOrigin: Integer;
+    constructor Create;
     destructor Destroy; override;
     // The message bubbles, under PersistentPlayerMessageLock. SkipLock means the caller
     // holds it. Globals has the same functions for the local human.
@@ -176,8 +192,7 @@ implementation
 uses
   aConst,
   aMyFunction,
-  aSession,
-  EC_Str;
+  aSession;
 
 function THumanList.GetHuman(Index: Integer): THuman;
 begin
@@ -712,12 +727,19 @@ begin
   end;
 end;
 
+constructor THuman.Create;
+begin
+  inherited Create;
+  GovernmentDialogNames := TStringsEC.Create;
+end;
+
 destructor THuman.Destroy;
 begin
   if PersistentPlayerMessageLock <> nil then
     ClearBubbles;
   // As TGalaxy.LoadFromBuffer releases the local human's list.
   PlayerOldQuests.Free;
+  GovernmentDialogNames.Free;
   inherited Destroy;
 end;
 

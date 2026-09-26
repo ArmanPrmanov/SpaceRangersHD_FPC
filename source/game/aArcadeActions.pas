@@ -169,7 +169,7 @@ var
 begin
   Command := NewCommand(ckArcadeBattleExit);
   Flags := 0;
-  if GetPlayer <> nil then
+  if LocalPlayer <> nil then
     Flags := Flags or 1;
   if ScriptedBattle then
     Flags := Flags or 2;
@@ -227,9 +227,9 @@ begin
   CurrentScript.CallDialogByVariable(TScriptShip(KellerShip.ScriptShip).State.AuxiliaryText);
   if Session.ScriptDialogIndex < 0 then
     RaiseWideMessage('Not found dialog');
-  LocalHuman.TalkShip := KellerShip;
-  LocalHuman.TalkPlanet := nil;
-  LocalHuman.TalkScripted := True;
+  ActorHuman(Command).TalkShip := KellerShip;
+  ActorHuman(Command).TalkPlanet := nil;
+  ActorHuman(Command).TalkScripted := True;
 end;
 
 procedure BeginArcadeKellerTalk;

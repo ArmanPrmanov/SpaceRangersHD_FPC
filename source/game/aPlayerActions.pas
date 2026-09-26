@@ -186,21 +186,23 @@ end;
 procedure ExecuteParkPlayer(const Command: TPlayerCommand);
 var
   P: TPlayer;
+  H: THuman;
   I: Integer;
 begin
   P := Actor(Command);
+  H := ActorHuman(Command);
   // This is deliberately a sandbox policy: the player stays docked and the
   // observer never writes a save. No landing/travel actions or quests are run.
   if P.InNormalSpace then
   begin
-    P.CurrentPlanet := TPlanet(LocalHuman.PlayerStar.Planets[0]);
+    P.CurrentPlanet := TPlanet(H.PlayerStar.Planets[0]);
     P.DockedTo := nil;
   end;
   P.OrderNone(False);
   for I := 1 to P.WeaponCount do
     P.Weapons[I].Target := nil;
-  LocalHuman.PlayerAutomaticControl := False;
-  LocalHuman.PendingPlayerFollowTarget := nil;
+  H.PlayerAutomaticControl := False;
+  H.PendingPlayerFollowTarget := nil;
   Session.PlayerStarDayPrepared := False;
 end;
 
@@ -211,7 +213,7 @@ end;
 
 procedure ExecutePruneMessages(const Command: TPlayerCommand);
 begin
-  PruneExpiredPersistentPlayerMessages;
+  ActorHuman(Command).PruneExpiredBubbles;
 end;
 
 procedure PruneMessages;
@@ -221,7 +223,7 @@ end;
 
 procedure ExecuteOrderStop(const Command: TPlayerCommand);
 begin
-  LocalHuman.PendingPlayerFollowTarget := nil;
+  ActorHuman(Command).PendingPlayerFollowTarget := nil;
   Actor(Command).OrderNone(False);
 end;
 
@@ -230,12 +232,24 @@ begin
   SubmitCommand(NewCommand(ckOrderStop));
 end;
 
+// The auto-battle target Ship's human has picked, or nil when Ship is not a human's.
+function PendingFollowTarget(Ship: TShip): TShip;
+var
+  Human: THuman;
+begin
+  Human := HumanOf(Ship);
+  if Human = nil then
+    Result := nil
+  else
+    Result := Human.PendingPlayerFollowTarget;
+end;
+
 function ShipPathNeedsPreparing(Ship: TShip): Boolean;
 begin
   Result :=
       (Ship.Order in [soFollowShip, soLand, soJumpHole, soJump])
-          or ((Ship = GetPlayer) and (LocalHuman.PendingPlayerFollowTarget <> nil))
-          or ((Ship <> GetPlayer) and (Ship.Order = soMove));
+          or (PendingFollowTarget(Ship) <> nil)
+          or (not IsHuman(Ship) and (Ship.Order = soMove));
 end;
 
 // Moved verbatim from TfStarMap.BuildShipPathOverlay.
@@ -247,10 +261,10 @@ var
   Index, Count: Integer;
 begin
   Result := -1;
-  if (Ship.Order = soFollowShip) or ((Ship = GetPlayer) and (LocalHuman.PendingPlayerFollowTarget <> nil)) then
+  if (Ship.Order = soFollowShip) or (PendingFollowTarget(Ship) <> nil) then
   begin
-    if (Ship = GetPlayer) and (LocalHuman.PendingPlayerFollowTarget <> nil) then
-      TargetShip := LocalHuman.PendingPlayerFollowTarget
+    if PendingFollowTarget(Ship) <> nil then
+      TargetShip := PendingFollowTarget(Ship)
     else
       TargetShip := Ship.OrderTarget as TShip;
     if TargetShip.IsOnPlanet then
@@ -299,7 +313,7 @@ begin
   else if Ship.Order = soLand then
   begin
     Ship.ClearMovementPath;
-    if (Ship = GetPlayer) and (Ship.OrderTarget is TPlanet) then
+    if IsHuman(Ship) and (Ship.OrderTarget is TPlanet) then
     begin
       Ship.BuildPlanetLandingPath;
       Result := Ship.GetMovementPathTurnCount;
@@ -329,7 +343,7 @@ begin
     Ship.ClearMovementPath;
     Ship.BuildOrderMovementPath(999999);
   end
-  else if (Ship <> GetPlayer) and (Ship.Order = soMove) then
+  else if not IsHuman(Ship) and (Ship.Order = soMove) then
   begin
     Ship.ClearMovementPath;
     Ship.BuildFullPathTo(Ship.OrderDestination);
@@ -366,7 +380,7 @@ begin
   P := Actor(Command);
   Flags := IntArg(Command, 2);
   if (Flags and mfClearPending) <> 0 then
-    LocalHuman.PendingPlayerFollowTarget := nil;
+    ActorHuman(Command).PendingPlayerFollowTarget := nil;
   P.OrderMove(PointArg(Command, 0), False);
   if (Flags and mfNoPath) = 0 then
     P.BuildOrderMovementPath(999999);
@@ -415,7 +429,7 @@ var
   P: TPlayer;
 begin
   P := Actor(Command);
-  LocalHuman.PendingPlayerFollowTarget := nil;
+  ActorHuman(Command).PendingPlayerFollowTarget := nil;
   P.OrderLanding(RefObject(Command, 0), False);
   P.OrderDestination := PointArg(Command, 0);
 end;
@@ -435,7 +449,7 @@ var
   P: TPlayer;
 begin
   P := Actor(Command);
-  LocalHuman.PendingPlayerFollowTarget := nil;
+  ActorHuman(Command).PendingPlayerFollowTarget := nil;
   P.OrderJumpHole(RefObject(Command, 0) as THole, False);
   P.OrderDestination := PointArg(Command, 0);
   P.BuildOrderMovementPath(999999);
@@ -453,7 +467,7 @@ end;
 
 procedure ExecuteOrderFollow(const Command: TPlayerCommand);
 begin
-  LocalHuman.PendingPlayerFollowTarget := nil;
+  ActorHuman(Command).PendingPlayerFollowTarget := nil;
   Actor(Command).OrderFollowShip(RefObject(Command, 0) as TShip, IntArg(Command, 0), False);
 end;
 
@@ -474,7 +488,7 @@ begin
   Actor(Command).OrderNone(False);
   Target := RefObject(Command, 0);
   if Target <> nil then
-    LocalHuman.PendingPlayerFollowTarget := Target as TShip;
+    ActorHuman(Command).PendingPlayerFollowTarget := Target as TShip;
 end;
 
 procedure OrderAutoBattle(Target: TShip);
@@ -581,7 +595,7 @@ end;
 
 procedure ExecuteSetPendingFollow(const Command: TPlayerCommand);
 begin
-  LocalHuman.PendingPlayerFollowTarget := RefObject(Command, 0) as TShip;
+  ActorHuman(Command).PendingPlayerFollowTarget := RefObject(Command, 0) as TShip;
 end;
 
 procedure SetPendingFollowTarget(Ship: TShip);
@@ -667,7 +681,7 @@ end;
 
 procedure ExecuteRefreshStepParameters(const Command: TPlayerCommand);
 begin
-  LocalHuman.PlayerStar.RefreshMovementStepParameters;
+  ActorHuman(Command).PlayerStar.RefreshMovementStepParameters;
 end;
 
 procedure RefreshPlayerStarSteps;
@@ -752,7 +766,7 @@ end;
 procedure ExecuteOrderJump(const Command: TPlayerCommand);
 begin
   Actor(Command).OrderJump(RefObject(Command, 0) as TStar, False);
-  LocalHuman.PendingPlayerFollowTarget := nil;
+  ActorHuman(Command).PendingPlayerFollowTarget := nil;
 end;
 
 procedure OrderJumpTo(Star: TObject);
@@ -770,7 +784,7 @@ var
 begin
   P := Actor(Command);
   P.OrderTeleport(RefObject(Command, 0) as TStar, P.Position, 10, False);
-  LocalHuman.PendingPlayerFollowTarget := nil;
+  ActorHuman(Command).PendingPlayerFollowTarget := nil;
 end;
 
 procedure OrderTeleportTo(Star: TObject);
@@ -817,7 +831,7 @@ begin
   Event := AddGalaxyEvent('PlayerCreatedStarDestroyerBH');
   Event.AddData(Hole.Id);
   Event.AddData(Hole.CreatedTurn);
-  LocalHuman.PendingPlayerFollowTarget := nil;
+  ActorHuman(Command).PendingPlayerFollowTarget := nil;
   CreatedHole := Hole;
 end;
 
@@ -839,24 +853,27 @@ var
 procedure ExecuteTakeoff(const Command: TPlayerCommand);
 var
   P: TPlayer;
+  H: THuman;
   Flags, I: Integer;
 begin
   P := Actor(Command);
+  H := ActorHuman(Command);
   Flags := IntArg(Command, 0);
   if (Flags and tfEndAutomaticControl) <> 0 then
-    LocalHuman.PlayerAutomaticControl := False;
-  PruneExpiredPersistentPlayerMessages;
+    H.PlayerAutomaticControl := False;
+  H.PruneExpiredBubbles;
   P.OrderTakeoff;
   TookOff := P.Order = soTakeoff;
   if not TookOff and ((Flags and tfStopWithoutOrder) <> 0) then
     Exit;
   for I := 0 to Galaxy.Scripts.Count - 1 do
     TScript(Galaxy.Scripts[I]).RunTurnCode;
-  LocalHuman.PlayerStar.RefreshSpaceObjectPositions;
+  H.PlayerStar.RefreshSpaceObjectPositions;
   if (Flags and tfReturnShopStock) <> 0 then
-    RestoreTemporaryShopStock;
+    RestoreTemporaryShopStock(H);
   RunGlobalScriptsForContext(P.CurrentStar, 1);
-  if (GetPlayer <> nil) and GetPlayer.IsHealthEffectActive(3) then
+  // How dominators look follows the local human's health effect: presentation.
+  if (LocalPlayer <> nil) and LocalPlayer.IsHealthEffectActive(3) then
     Galaxy.EnableDominatorSurfaces
   else
     Galaxy.DisableDominatorSurfaces;
@@ -887,7 +904,7 @@ begin
   PreviousStar.RebuildShipMovementPaths;
   if (Cardinal(P.OrderStateData) and $FFFF) = 1 then
   begin
-    PruneExpiredPersistentPlayerMessages;
+    ActorHuman(Command).PruneExpiredBubbles;
     RunGlobalScriptsForContext(P.CurrentStar, 3);
   end;
   if IntArg(Command, 0) <> 0 then
@@ -905,7 +922,7 @@ end;
 
 procedure ExecuteReturnShopStock(const Command: TPlayerCommand);
 begin
-  RestoreTemporaryShopStock;
+  RestoreTemporaryShopStock(ActorHuman(Command));
 end;
 
 procedure ReturnShopStock;
@@ -917,7 +934,7 @@ end;
 procedure ExecuteOpenShopStock(const Command: TPlayerCommand);
 begin
   ShopVisibleColumnCount := IntArg(Command, 0);
-  BuildTemporaryShopSlotGrid;
+  BuildTemporaryShopSlotGrid(ActorHuman(Command));
 end;
 
 procedure OpenShopStock;
@@ -937,7 +954,7 @@ begin
   P := Actor(Command);
   if P.CalculateSpeed = 0 then
     P.OrderNone(False);
-  if LocalHuman.PendingPlayerFollowTarget <> nil then
+  if ActorHuman(Command).PendingPlayerFollowTarget <> nil then
     P.ProcessPendingPlayerFollowTargeting;
 end;
 
@@ -948,8 +965,8 @@ end;
 
 procedure ExecuteBeginSpaceDay(const Command: TPlayerCommand);
 begin
-  PruneExpiredPersistentPlayerMessages;
-  LocalHuman.PlayerAutomaticControl := False;
+  ActorHuman(Command).PruneExpiredBubbles;
+  ActorHuman(Command).PlayerAutomaticControl := False;
   Actor(Command).NextDay;
 end;
 
@@ -958,14 +975,22 @@ begin
   SubmitCommand(NewCommand(ckBeginSpaceDay));
 end;
 
-// Moved from aSaveLoad. Returns shop stock left behind by a shop the player is no longer
-// at, and runs mod OnSave handlers.
+// Moved from aSaveLoad. Returns shop stock left behind by a shop its human is no longer
+// at, for every human, and runs mod OnSave handlers.
 procedure PrepareGalaxyForSave;
+var
+  I: Integer;
+  H: THuman;
 begin
-  if (LocalHuman.TemporaryShopSlots <> nil)
-      and (GetPlayer.CurrentPlanet <> LocalHuman.TemporaryShopPlanet)
-      and (GetPlayer.DockedTo <> LocalHuman.TemporaryShopStation) then
-    RestoreTemporaryShopStock;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    H := Session.Humans[I];
+    if (H.TemporaryShopSlots <> nil)
+        and (H.Player <> nil)
+        and (H.Player.CurrentPlanet <> H.TemporaryShopPlanet)
+        and (H.Player.DockedTo <> H.TemporaryShopStation) then
+      RestoreTemporaryShopStock(H);
+  end;
   Galaxy.RunConfigOnSaveHandlers;
 end;
 

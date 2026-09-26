@@ -49,8 +49,8 @@ type
     ProbeSignalTimer: PCallbackTimerGI;
     ProbeSignalSound: TSoundBufferControl;
     ProbeSignalCount: Integer;
-    // CHANGE: ENHANCEMENT - The held satellite and where it came from moved to aPlanetActions
-    // (PlanetHeldSatellite, PlanetHeldSatelliteOrigin), so a replay has them.
+    // CHANGE: ENHANCEMENT - The held satellite and where it came from moved to the human
+    // (THuman.PlanetHeldSatellite, set by aPlanetActions), so a replay has them.
     HoveringSurfaceLoot: Boolean;
     NewSurfaceLootDiscovered: Boolean;
     Gap7956: array[0..1] of Byte;
@@ -308,9 +308,9 @@ begin
   aCalc.WaitForTurnCalculationUI;
   RefreshPlayerStats;
   aCalc.WaitForTurnCalculationUI;
-  if (PlanetHeldSatellite <> nil)
-      and (PlanetHeldSatelliteOrigin = 0)
-      and (LocalPlayer.GetCargoFreeSpace < PlanetHeldSatellite.Weight) then
+  if (LocalHuman.PlanetHeldSatellite <> nil)
+      and (LocalHuman.PlanetHeldSatelliteOrigin = 0)
+      and (LocalPlayer.GetCargoFreeSpace < LocalHuman.PlanetHeldSatellite.Weight) then
   begin
     ShowMessageBoxGI(Self, LocalizedText('FormRuins.ShipOvercharging'), mbgCancel or mbgError);
     Exit;
@@ -1009,7 +1009,7 @@ begin
       begin
         UpdateItemInfoPopup(Entry.Item);
         HoveringSurfaceLoot := True;
-        if (PlanetHeldSatellite = nil) and not IsCursorImageSelected('Take') then
+        if (LocalHuman.PlanetHeldSatellite = nil) and not IsCursorImageSelected('Take') then
           SetCursorByName('Take');
         if SelectedTrajectoryIndex >= 0 then
         begin
@@ -1526,7 +1526,7 @@ var
 begin
   aCalc.WaitForTurnCalculationUI;
   Item := LocalPlayer.FindSatelliteByTrajectoryIndex(SatelliteInventoryPageStart + Sender.UserValue);
-  if ((PlanetHeldSatellite = nil) and (Item <> nil)) or (PlanetHeldSatellite <> nil) then
+  if ((LocalHuman.PlanetHeldSatellite = nil) and (Item <> nil)) or (LocalHuman.PlanetHeldSatellite <> nil) then
   begin
     if ClickSatelliteSlot(SatelliteInventoryPageStart + Sender.UserValue) = ssTaken then
     begin
@@ -1590,7 +1590,7 @@ begin
         end;
     end;
   if (SelectedTrajectoryIndex >= 0)
-      and ((PlanetHeldSatellite <> nil) or (FindDeployedSatellite(SelectedTrajectoryIndex) <> nil)) then
+      and ((LocalHuman.PlanetHeldSatellite <> nil) or (FindDeployedSatellite(SelectedTrajectoryIndex) <> nil)) then
   begin
     // CHANGE: ENHANCEMENT - The origin is set in the command, after the wait for the turn.
     aCalc.WaitForTurnCalculationUI;
@@ -1618,8 +1618,8 @@ end;
 
 procedure TfPlanetNO.UpdateActionCursor(ForceHand: Boolean);
 begin
-  if PlanetHeldSatellite <> nil then
-    SetCursorImage('GI,' + PlanetHeldSatellite.GetBitmapResourceName + 's', Classes.Point(16, 16))
+  if LocalHuman.PlanetHeldSatellite <> nil then
+    SetCursorImage('GI,' + LocalHuman.PlanetHeldSatellite.GetBitmapResourceName + 's', Classes.Point(16, 16))
   else if (SelectedTrajectoryIndex >= 0)
       and (FindDeployedSatellite(SelectedTrajectoryIndex) <> nil) then
   begin
@@ -1636,12 +1636,12 @@ begin
   end
   else if not IsCursorImageSelected('Main') then
     SetCursorByName('Main');
-  GetByName('Glow').SetActive(PlanetHeldSatellite <> nil);
+  GetByName('Glow').SetActive(LocalHuman.PlanetHeldSatellite <> nil);
 end;
 
 procedure TfPlanetNO.ReturnHeldSatellite;
 begin
-  if PlanetHeldSatellite = nil then
+  if LocalHuman.PlanetHeldSatellite = nil then
     Exit;
   aCalc.WaitForTurnCalculationUI;
   if aPlanetActions.ReturnHeldSatellite = 0 then
@@ -1979,7 +1979,7 @@ begin
   begin
     if ResearchPanelVisible then
     begin
-      if PlanetHeldSatellite <> nil then
+      if LocalHuman.PlanetHeldSatellite <> nil then
         ReturnHeldSatellite
       else
         CloseResearchPanel;

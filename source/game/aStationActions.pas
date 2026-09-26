@@ -20,6 +20,7 @@ uses
   aCommands,
   aGalaxy,
   aItem,
+  aPlayer,
   aScript,
   aShip;
 const
@@ -221,7 +222,8 @@ function OrderPirateRaid: Boolean;
 procedure OrderPirateAmbush(Star: TStar);
 procedure OrderPirateAssault(Star: TStar);
 
-function GetDominionRelocationCost(Star: TStar): Integer;
+// What P pays to move the station it is docked with to Star.
+function GetDominionRelocationCost(P: TPlayer; Star: TStar): Integer;
 function ApplyRecentDominionOrderSurcharge(Cost: Single): Integer;
 implementation
 uses
@@ -236,7 +238,6 @@ uses
   aHuman,
   aKling,
   aPlanet,
-  aPlayer,
   aRanger,
   aNormalShip,
   aPirate,
@@ -390,20 +391,20 @@ begin
 end;
 
 // Moved from fRuinsTalk.
-function GetDominionRelocationCost(Star: TStar): Integer;
+function GetDominionRelocationCost(P: TPlayer; Star: TStar): Integer;
 var
   Discount: Byte;
 begin
-  Discount := GetPlayer.GetPirateServiceDiscount;
+  Discount := P.GetPirateServiceDiscount;
   Result :=
       Min(
           100000000,
           Round(
-              (PointDistanceSquared(GetPlayer.DockedTo.CurrentStar.Position, Star.Position) + 6400)
+              (PointDistanceSquared(P.DockedTo.CurrentStar.Position, Star.Position) + 6400)
                   * SeededRandomIntRange(
                       Galaxy.ComputeScaledHugeMoney(2) div 2,
                       Galaxy.ComputeScaledHugeMoney(2) * 2,
-                      Star.GenerationSeed + 1171 + GetPlayer.DockedTo.CurrentStar.GenerationSeed)
+                      Star.GenerationSeed + 1171 + P.DockedTo.CurrentStar.GenerationSeed)
                   / 6400
                   * (100 - Discount)
                   / 100
@@ -464,7 +465,7 @@ end;
 procedure ClearStationDialog;
 begin
   // With no player there is no one to act; this runs unrecorded.
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     Session.ScriptDialogIndex := -1
   else
     SubmitSimple(ckClearStationDialog);
@@ -472,12 +473,15 @@ end;
 
 { The station's dialog }
 
-// Moved from TfRuinsTalk.ShowDominatorVictoryDialog; the screen builds the text.
-function ApplyDominatorVictory(P: TPlayer): Boolean;
+// Moved from TfRuinsTalk.ShowDominatorVictoryDialog; the screen builds the text. The news
+// bubbles and the medal are Human's.
+function ApplyDominatorVictory(Human: THuman): Boolean;
 var
+  P: TPlayer;
   MessageEntry: TMessagePlayer;
   Variant: Integer;
 begin
+  P := Human.Player;
   Result := False;
   StationVictorySeries := 0;
   StationVictoryVariant := 0;
@@ -486,7 +490,7 @@ begin
       or (Galaxy.KellerSeriesResolvedTurn <> 0)
       or (Galaxy.BlazerSeriesResolvedTurn <> 0) then
   begin
-    MessageEntry := FindPlayerBubbleByKey('BlazerWin', False);
+    MessageEntry := Human.FindBubbleByKey('BlazerWin', False);
     if (MessageEntry <> nil) and (MessageEntry.Kind = 3) then
     begin
       MessageEntry.Kind := 4;
@@ -504,7 +508,7 @@ begin
     end
     else
     begin
-      MessageEntry := FindPlayerBubbleByKey('KellerWin', False);
+      MessageEntry := Human.FindBubbleByKey('KellerWin', False);
       if (MessageEntry <> nil) and (MessageEntry.Kind = 3) then
       begin
         MessageEntry.Kind := 4;
@@ -520,7 +524,7 @@ begin
       end
       else
       begin
-        MessageEntry := FindPlayerBubbleByKey('TerronWin', False);
+        MessageEntry := Human.FindBubbleByKey('TerronWin', False);
         if (MessageEntry <> nil) and (MessageEntry.Kind = 3) then
         begin
           MessageEntry.Kind := 4;
@@ -567,7 +571,7 @@ begin
   Script := nil;
   StationScript := nil;
   StationOutcome := sdContinue;
-  if (IntArg(Command, 0) <> 0) and ApplyDominatorVictory(P) then
+  if (IntArg(Command, 0) <> 0) and ApplyDominatorVictory(ActorHuman(Command)) then
   begin
     StationOutcome := sdVictory;
     Exit;
@@ -600,7 +604,7 @@ end;
 // Moved from TfRuinsTalk.ShowDominatorVictoryDialog.
 procedure ExecuteShowDominatorVictory(const Command: TPlayerCommand);
 begin
-  ApplyDominatorVictory(Actor(Command));
+  ApplyDominatorVictory(ActorHuman(Command));
 end;
 
 function ReportDominatorVictory: Integer;
@@ -2735,15 +2739,15 @@ var
   var
     Station: TRuins;
   begin
-    if LocalHuman.TemporaryShopSlots <> nil then
+    if ActorHuman(Command).TemporaryShopSlots <> nil then
     begin
       // CHANGE: ENHANCEMENT - ReturnShopStock and OpenShopStock as they run inside this
       // command; the screen rebuilds the shop controls after it.
-      RestoreTemporaryShopStock;
+      RestoreTemporaryShopStock(ActorHuman(Command));
       Station := TRuins(P.DockedTo);
       Station.EquipmentShop.Delete(Station.EquipmentShop.IndexOf(Item));
       ShopVisibleColumnCount := IntArg(Command, 2 * ConstructionPartCount);
-      BuildTemporaryShopSlotGrid;
+      BuildTemporaryShopSlotGrid(ActorHuman(Command));
       Inc(ShopItems);
     end;
   end;
@@ -2921,7 +2925,7 @@ var
 begin
   P := Actor(Command);
   Star := StarArg(Command, 0);
-  P.SetMoney(P.Money - GetDominionRelocationCost(Star));
+  P.SetMoney(P.Money - GetDominionRelocationCost(P, Star));
   SpendDominionServiceCredit(P, 1);
   TRuins(P.DockedTo).RelocationAge := (TRuins(P.DockedTo).RelocationAge - 150) div 2;
   P.DockedTo.OrderTeleport(Star, TRuins(P.DockedTo).SelectTeleportArrivalPoint(Star), 10, True);
@@ -3067,7 +3071,7 @@ var
 begin
   P := Actor(Command);
   Star := StarArg(Command, 0);
-  Cost := ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(Star) * 1.5);
+  Cost := ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(P, Star) * 1.5);
   Event := AddGalaxyEvent('PlayerOrdersPirateAmbush');
   Event.AddData(Star.Id);
   P.SetMoney(P.Money - Cost);
@@ -3094,7 +3098,7 @@ var
 begin
   P := Actor(Command);
   Star := StarArg(Command, 0);
-  P.SetMoney(P.Money - ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(Star) * 2.5));
+  P.SetMoney(P.Money - ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(P, Star) * 2.5));
   SpendDominionServiceCredit(P, 1);
   TRuins(P.DockedTo).RelocationAge := (TRuins(P.DockedTo).RelocationAge - 150) div 2;
   TRuins(P.DockedTo).FlyToStar := Star;

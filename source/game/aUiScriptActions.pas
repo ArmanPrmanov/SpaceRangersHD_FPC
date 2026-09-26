@@ -74,7 +74,7 @@ uses
 // Runs the command, or with no player to act, the executor directly.
 procedure SubmitOrRun(const Command: TPlayerCommand; Executor: TCommandExecutor);
 begin
-  if GetPlayer = nil then
+  if LocalPlayer = nil then
     Executor(Command)
   else
     SubmitCommand(Command);
@@ -326,7 +326,7 @@ var
   Command: TPlayerCommand;
 begin
   if not CanNameObject(Target) then
-    Exit(CustomSelectionAction(GetPlayer, ActionType, Item, InfoName, Target));
+    Exit(CustomSelectionAction(LocalPlayer, ActionType, Item, InfoName, Target));
   Command := NewCommand(ckCustomSelectionAction);
   AddRef(Command, Item);
   AddRef(Command, Target);
