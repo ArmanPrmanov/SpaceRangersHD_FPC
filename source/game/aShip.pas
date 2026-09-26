@@ -15469,6 +15469,7 @@ end;
 
 procedure TShip.AssignSatelliteIndicesFromHoldOrder;
 var
+  Human: THuman;
   Indices: array of Integer;
   I, Next, Count: Integer;
   Item: TEquipment;
@@ -15478,10 +15479,10 @@ begin
   begin
     RepairDuplicateSatelliteTrajectoryIndices;
     RefreshAssignedItemSlots;
-    // HUMANS: hold order. aHold keeps the local human's; this becomes the acting human's
-    // when aHold takes the human (docs/humans.md).
-    LocalHuman.PlayerHoldShip := Self;
-    RefreshPlayerHoldView(True);
+    // Self is a human's ranger, and the hold order is that human's.
+    Human := HumanOf(Self);
+    Human.PlayerHoldShip := Self;
+    RefreshPlayerHoldView(Human, True);
     SetLength(Indices, Inventory.Count);
     Count := 0;
     for I := 0 to GetSatelliteTrajectoryIndexLimit - 1 do
@@ -15494,9 +15495,9 @@ begin
       end;
     end;
     Next := 0;
-    for I := 0 to LocalHuman.PlayerHoldEntries.Count - 1 do
+    for I := 0 to Human.PlayerHoldEntries.Count - 1 do
     begin
-      Entry := LocalHuman.PlayerHoldEntries[I];
+      Entry := Human.PlayerHoldEntries[I];
       if Entry = nil then
         Continue;
       if Entry.Kind <> phkEquipment then
@@ -15520,6 +15521,7 @@ end;
 
 procedure TShip.ArrangeHoldSatellitesByTrajectoryIndex;
 var
+  Human: THuman;
   Indices: array of Integer;
   Entries: array of TPlayerHoldUnit;
   I, Next, Count: Integer;
@@ -15530,16 +15532,16 @@ begin
   begin
     RepairDuplicateSatelliteTrajectoryIndices;
     RefreshAssignedItemSlots;
-    // HUMANS: hold order. aHold keeps the local human's; this becomes the acting human's
-    // when aHold takes the human (docs/humans.md).
-    LocalHuman.PlayerHoldShip := Self;
-    RefreshPlayerHoldView(True);
+    // Self is a human's ranger, and the hold order is that human's.
+    Human := HumanOf(Self);
+    Human.PlayerHoldShip := Self;
+    RefreshPlayerHoldView(Human, True);
     SetLength(Indices, Inventory.Count);
     SetLength(Entries, Inventory.Count);
     Count := 0;
-    for I := 0 to LocalHuman.PlayerHoldEntries.Count - 1 do
+    for I := 0 to Human.PlayerHoldEntries.Count - 1 do
     begin
-      Entry := LocalHuman.PlayerHoldEntries[I];
+      Entry := Human.PlayerHoldEntries[I];
       if (Entry <> nil)
           and (Entry.Kind = phkEquipment)
           and (Inventory.IndexOf(Entry.Item) >= 0) then
@@ -15566,7 +15568,7 @@ begin
       begin
         if Next >= Count then
           RaiseWideMessage('Satellite renom 3');
-        Entry := LocalHuman.PlayerHoldEntries[Indices[Next]];
+        Entry := Human.PlayerHoldEntries[Indices[Next]];
         Entry.Kind := Entries[Next].Kind;
         Entry.GoodsIndex := Entries[Next].GoodsIndex;
         Entry.ItemId := Item.Id;

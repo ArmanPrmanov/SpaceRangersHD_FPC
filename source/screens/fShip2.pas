@@ -1305,12 +1305,12 @@ end;
 
 function TfShip2.CanUseLocalStorage: Boolean;
 begin
-  Result := aHoldActions.CanUseLocalStorage;
+  Result := aHoldActions.CanUseLocalStorage(LocalHuman);
 end;
 
 function TfShip2.GetLocalStorageOwner: TObject;
 begin
-  Result := aHoldActions.GetLocalStorageOwner;
+  Result := aHoldActions.GetLocalStorageOwner(LocalHuman);
 end;
 
 procedure TfShip2.RefreshRewards(Ship: TNormalShip);
@@ -2328,7 +2328,7 @@ begin
   for Row := 0 to 10 do
     for Column := 0 to 4 do
     begin
-      I := FindPlayerHoldIndexByOrder(RemoteHoldFirstOrder + Column + Row * 5);
+      I := FindPlayerHoldIndexByOrder(LocalHuman, RemoteHoldFirstOrder + Column + Row * 5);
       if I < 0 then
         Entry := nil
       else
@@ -3085,7 +3085,7 @@ begin
   else
   begin
     Inc(Index, RemoteHoldFirstOrder);
-    J := FindPlayerHoldIndexByOrder(Index);
+    J := FindPlayerHoldIndexByOrder(LocalHuman, Index);
     if J < 0 then
       Entry := nil
     else
@@ -5839,7 +5839,7 @@ begin
           Position.X := -(670 + ExtraScreenWidth div 2);
           with RemoteHoldImages[Row * 5 + Column] do
             Position.Y := HitTestBounds.Top + ClientSize.Y div 2;
-          I := FindPlayerHoldIndexByOrder(RemoteHoldFirstOrder + Column + Row * 5);
+          I := FindPlayerHoldIndexByOrder(LocalHuman, RemoteHoldFirstOrder + Column + Row * 5);
           if I >= 0 then
           begin
             Hold := LocalHuman.PlayerHoldEntries[I];
@@ -7829,7 +7829,7 @@ end;
 
 function TfShip2.CanUsePlayerExperience: Boolean;
 begin
-  Result := aHoldActions.CanUsePlayerExperience;
+  Result := aHoldActions.CanUsePlayerExperience(LocalHuman);
 end;
 
 procedure TfShip2.ToggleRemoteHoldClicked(Sender: TObjectGI);

@@ -213,7 +213,7 @@ begin
   P := Actor(Command);
   if ArcadeKellerReward <> nil then
   begin
-    ClearPlayerHoldEntries;
+    ClearPlayerHoldEntries(ActorHuman(Command));
     if ArcadeKellerReward is TArtefact then
       P.Artefacts.Insert(0, ArcadeKellerReward)
     else

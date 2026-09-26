@@ -739,6 +739,7 @@ begin
     ClearBubbles;
   // As TGalaxy.LoadFromBuffer releases the local human's list.
   PlayerOldQuests.Free;
+  FinalizePlayerHoldView(Self);
   GovernmentDialogNames.Free;
   inherited Destroy;
 end;

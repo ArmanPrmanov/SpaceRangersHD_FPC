@@ -91,6 +91,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   aHold,
+  aHuman,
   aCalc,
   Math,
   aMyFunction,
@@ -370,7 +371,7 @@ begin
         end
         else
         begin
-          ClearPlayerHoldEntries;
+          ClearPlayerHoldEntries(LocalHuman);
           LocalPlayer.ScriptItemsAct(satOnABItemDrop, Reward, nil, 0);
           if Reward is TArtefact then
             LocalPlayer.Artefacts.Insert(0, Reward)
@@ -381,7 +382,7 @@ begin
       end
       else if RewardObject <> nil then
       begin
-        ClearPlayerHoldEntries;
+        ClearPlayerHoldEntries(LocalHuman);
         LocalPlayer.ScriptItemsAct(satOnABItemDrop, RewardObject, nil, 0);
         if RewardObject is TArtefact then
           LocalPlayer.Artefacts.Insert(0, RewardObject)
@@ -450,7 +451,7 @@ begin
           Inc(Attempts);
           if Attempts > 10000 then
           begin
-            ClearPlayerHoldEntries;
+            ClearPlayerHoldEntries(LocalHuman);
             LocalPlayer.ScriptItemsAct(satOnABItemDrop, Item, nil, 0);
             LocalPlayer.Inventory.Insert(1, Item);
             LocalPlayer.RefreshDerivedStats(True);
@@ -479,7 +480,7 @@ begin
                       or (Attempts > 500)))
               <> False then
           begin
-            ClearPlayerHoldEntries;
+            ClearPlayerHoldEntries(LocalHuman);
             LocalPlayer.ScriptItemsAct(satOnABItemDrop, Item, nil, 0);
             LocalPlayer.Inventory.Insert(1, Item);
             LocalPlayer.RefreshDerivedStats(True);

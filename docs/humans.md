@@ -17,8 +17,9 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
   whose screen this is. They exist for the UI. The simulation must not depend
   on which human is local: on a host, the local human is just one of several.
 - Per-human state lives on `THuman`, for example the star whose day is
-  filmed, the message bubbles, the open shop, the conversation and the hold
-  order. `HumanOf(Ship)` finds the human for a ranger.
+  filmed, the message bubbles, the open shop, the conversation, the hold
+  order, the item held on the ship screen's cursor and the government
+  negotiation. `HumanOf(Ship)` finds the human for a ranger.
 - `Actor(Command)` and `ActorHuman(Command)` are the human who issued a
   command. Executors use them, never `LocalHuman`.
 
@@ -53,8 +54,10 @@ code means, not from what is shortest.
   Inside a `TShip`/`TRanger` method after `IsHuman(Self)`, it is
   `TPlayer(Self)`. In an executor it is `Actor(Command)`. In code an executor
   calls (the actions units' helpers, shop stock, the hold order) it is
-  `ActingHuman`. Elsewhere, pass the human in as a parameter from the caller
-  that knows it.
+  `ActingHuman`. A routine that screens or the turn thread also call runs
+  outside a command, where `ActingHuman` is nil, so it takes the human as a
+  parameter instead, and screens pass `LocalHuman`. Elsewhere, pass the human
+  in as a parameter from the caller that knows it.
 - **each**: every human. Day ticks, galaxy news, victory and defeat checks,
   and messages that every human gets.
   `for I := 0 to Session.Humans.Count - 1 do ... Session.Humans[I] ...`.

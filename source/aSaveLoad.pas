@@ -299,7 +299,7 @@ begin
         Message := Message.Next;
       end;
       LocalHuman.PlayerHoldShip := LocalPlayer;
-      RefreshPlayerHoldView(False);
+      RefreshPlayerHoldView(LocalHuman, False);
       Count := LocalHuman.PlayerHoldEntries.Count;
       GameState.AddWideChar(WideChar(Count));
       for I := 0 to Count - 1 do
@@ -380,7 +380,7 @@ var
   Entry: TPlayerHoldUnit;
   LoadingGalaxy: TGalaxy;
 begin
-  InitializePlayerHoldView;
+  InitializePlayerHoldView(LocalHuman);
   Count := Buffer.GetWord;
   for I := 0 to Count - 1 do
   begin
@@ -596,7 +596,7 @@ begin
   end;
   MemorySnapshotBuffer.AddDWord(LocalHuman.ShownPlayerTips);
   LocalHuman.PlayerHoldShip := LocalPlayer;
-  RefreshPlayerHoldView(False);
+  RefreshPlayerHoldView(LocalHuman, False);
   Count := LocalHuman.PlayerHoldEntries.Count;
   MemorySnapshotBuffer.AddWideChar(WideChar(Count));
   for I := 0 to Count - 1 do
@@ -656,7 +656,7 @@ begin
     Message.LoadFromBuffer(MemorySnapshotBuffer);
   end;
   LocalHuman.ShownPlayerTips := MemorySnapshotBuffer.GetUInt32;
-  InitializePlayerHoldView;
+  InitializePlayerHoldView(LocalHuman);
   Count := MemorySnapshotBuffer.GetWord;
   for I := 0 to Count - 1 do
   begin
@@ -1109,7 +1109,7 @@ begin
     Message := CreatePersistentPlayerMessage;
     Message.LoadFromBuffer(Buffer);
   end;
-  InitializePlayerHoldView;
+  InitializePlayerHoldView(LocalHuman);
   Count := Buffer.GetInt32;
   for I := 0 to Count - 1 do
   begin

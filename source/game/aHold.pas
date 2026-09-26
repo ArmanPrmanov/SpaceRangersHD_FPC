@@ -6,8 +6,10 @@ unit aHold;
 {$A8}
 
 // CHANGE: CLEANUP - The order in which the ship screen lists the player's hold, moved out of
-// fShip2. The save writes it, and satellites are numbered by it. The list is
-// LocalHuman.PlayerHoldEntries, for the ship LocalHuman.PlayerHoldShip.
+// fShip2. The save writes it, and satellites are numbered by it. Each human has one: the
+// list is Human.PlayerHoldEntries, for the ship Human.PlayerHoldShip (or the human's ranger
+// when that is nil). Human is a THuman; it is a TObject because this interface cannot use
+// aHuman without a unit cycle.
 interface
 uses
   aItem;
@@ -26,22 +28,23 @@ type
     Retained: Boolean;
     Gap19: array[0..2] of Byte;
   end;
-procedure InitializePlayerHoldView;
-procedure FinalizePlayerHoldView;
-procedure RefreshPlayerHoldView(IncludeFilteredItems: Boolean);
-procedure RemoveEmptyPlayerHoldSlot(Index: Integer);
-procedure ClearPlayerHoldEntries;
-procedure RemoveEmptyPlayerHoldSlots;
-function IsPlayerHoldSlotEmpty(Index: Integer): Boolean;
+procedure InitializePlayerHoldView(Human: TObject);
+procedure FinalizePlayerHoldView(Human: TObject);
+procedure RefreshPlayerHoldView(Human: TObject; IncludeFilteredItems: Boolean);
+procedure RemoveEmptyPlayerHoldSlot(Human: TObject; Index: Integer);
+procedure ClearPlayerHoldEntries(Human: TObject);
+procedure RemoveEmptyPlayerHoldSlots(Human: TObject);
+function IsPlayerHoldSlotEmpty(Human: TObject; Index: Integer): Boolean;
 function ComparePlayerHoldEntries(
+    Human: TObject;
     Left: TPlayerHoldUnit;
     Right: TPlayerHoldUnit;
     Sort: TPlayerHoldSort
 ): Integer;
-procedure SortPlayerHoldEntries(Sort: TPlayerHoldSort);
-procedure RestorePlayerHoldDisplayOrder;
-function FindPlayerHoldIndexByOrder(DisplayOrder: Integer): Integer;
-function FindFreePlayerHoldOrder: Integer;
+procedure SortPlayerHoldEntries(Human: TObject; Sort: TPlayerHoldSort);
+procedure RestorePlayerHoldDisplayOrder(Human: TObject);
+function FindPlayerHoldIndexByOrder(Human: TObject; DisplayOrder: Integer): Integer;
+function FindFreePlayerHoldOrder(Human: TObject): Integer;
 implementation
 uses
   Classes,
@@ -52,52 +55,60 @@ uses
   aPlayer,
   aShip;
 
-procedure InitializePlayerHoldView;
+procedure InitializePlayerHoldView(Human: TObject);
+var
+  H: THuman;
 begin
-  FinalizePlayerHoldView;
-  LocalHuman.PlayerHoldEntries := TList.Create;
+  H := THuman(Human);
+  FinalizePlayerHoldView(Human);
+  H.PlayerHoldEntries := TList.Create;
 end;
 
-procedure FinalizePlayerHoldView;
+procedure FinalizePlayerHoldView(Human: TObject);
+var
+  H: THuman;
 begin
-  if LocalHuman.PlayerHoldEntries <> nil then
+  H := THuman(Human);
+  if H.PlayerHoldEntries <> nil then
   begin
-    ClearPlayerHoldEntries;
-    LocalHuman.PlayerHoldEntries.Free;
-    LocalHuman.PlayerHoldEntries := nil;
+    ClearPlayerHoldEntries(Human);
+    H.PlayerHoldEntries.Free;
+    H.PlayerHoldEntries := nil;
   end;
 end;
 
-procedure RefreshPlayerHoldView(IncludeFilteredItems: Boolean);
+procedure RefreshPlayerHoldView(Human: TObject; IncludeFilteredItems: Boolean);
 var
+  H: THuman;
   Ship: TShip;
   Goods: Byte;
   Entry, Other: TPlayerHoldUnit;
   I, J, Order: Integer;
   Item: TEquipment;
 begin
-  if LocalHuman.PlayerHoldEntries = nil then
-    InitializePlayerHoldView;
-  if LocalHuman.PlayerHoldShip <> nil then
-    Ship := LocalHuman.PlayerHoldShip
+  H := THuman(Human);
+  if H.PlayerHoldEntries = nil then
+    InitializePlayerHoldView(Human);
+  if H.PlayerHoldShip <> nil then
+    Ship := H.PlayerHoldShip
   else
-    Ship := GetPlayer;
-  for I := 0 to LocalHuman.PlayerHoldEntries.Count - 1 do
+    Ship := H.Player;
+  for I := 0 to H.PlayerHoldEntries.Count - 1 do
   begin
-    Entry := LocalHuman.PlayerHoldEntries[I];
+    Entry := H.PlayerHoldEntries[I];
     Entry.Retained := Entry.Kind = phkEmpty;
   end;
   for Goods := 0 to 7 do
   begin
     if not IncludeFilteredItems then
-      if not GetPlayer.CanAccessHoldGoods(Goods) then
+      if not H.Player.CanAccessHoldGoods(Goods) then
         Continue;
     if Ship.CargoGoods[Goods].Count > 0 then
     begin
       I := 0;
-      while I < LocalHuman.PlayerHoldEntries.Count do
+      while I < H.PlayerHoldEntries.Count do
       begin
-        Entry := LocalHuman.PlayerHoldEntries[I];
+        Entry := H.PlayerHoldEntries[I];
         if not Entry.Retained and (Entry.Kind = phkGoods) and (Entry.GoodsIndex = Goods) then
         begin
           Entry.Retained := True;
@@ -105,10 +116,10 @@ begin
         end;
         Inc(I);
       end;
-      if I >= LocalHuman.PlayerHoldEntries.Count then
+      if I >= H.PlayerHoldEntries.Count then
       begin
         Entry := TPlayerHoldUnit.Create;
-        LocalHuman.PlayerHoldEntries.Insert(0, Entry);
+        H.PlayerHoldEntries.Insert(0, Entry);
         Entry.Kind := phkGoods;
         Entry.GoodsIndex := Goods;
         Entry.Retained := True;
@@ -120,12 +131,12 @@ begin
     Item := TEquipment(Ship.Inventory[J]);
     if (Item.EquippedFlag = 0) and (Ship.GetHull <> Item) then
     begin
-      if IncludeFilteredItems or GetPlayer.CanAccessStoredItem(Item) then
+      if IncludeFilteredItems or H.Player.CanAccessStoredItem(Item) then
       begin
         I := 0;
-        while I < LocalHuman.PlayerHoldEntries.Count do
+        while I < H.PlayerHoldEntries.Count do
         begin
-          Entry := LocalHuman.PlayerHoldEntries[I];
+          Entry := H.PlayerHoldEntries[I];
           if not Entry.Retained and (Entry.Kind = phkEquipment) and (Item.Id = Entry.ItemId) then
           begin
             Entry.Retained := True;
@@ -134,10 +145,10 @@ begin
           end;
           Inc(I);
         end;
-        if I >= LocalHuman.PlayerHoldEntries.Count then
+        if I >= H.PlayerHoldEntries.Count then
         begin
           Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Add(Entry);
+          H.PlayerHoldEntries.Add(Entry);
           Entry.Kind := phkEquipment;
           Entry.ItemId := Item.Id;
           Entry.Item := Item;
@@ -151,12 +162,12 @@ begin
     Item := TEquipment(Ship.Artefacts[J]);
     if Item.EquippedFlag = 0 then
     begin
-      if IncludeFilteredItems or GetPlayer.CanAccessStoredItem(Item) then
+      if IncludeFilteredItems or H.Player.CanAccessStoredItem(Item) then
       begin
         I := 0;
-        while I < LocalHuman.PlayerHoldEntries.Count do
+        while I < H.PlayerHoldEntries.Count do
         begin
-          Entry := LocalHuman.PlayerHoldEntries[I];
+          Entry := H.PlayerHoldEntries[I];
           if not Entry.Retained and (Entry.Kind = phkArtefact) and (Item.Id = Entry.ItemId) then
           begin
             Entry.Retained := True;
@@ -165,10 +176,10 @@ begin
           end;
           Inc(I);
         end;
-        if I >= LocalHuman.PlayerHoldEntries.Count then
+        if I >= H.PlayerHoldEntries.Count then
         begin
           Entry := TPlayerHoldUnit.Create;
-          LocalHuman.PlayerHoldEntries.Add(Entry);
+          H.PlayerHoldEntries.Add(Entry);
           Entry.Kind := phkArtefact;
           Entry.ItemId := Item.Id;
           Entry.Item := Item;
@@ -177,37 +188,37 @@ begin
       end;
     end;
   end;
-  I := LocalHuman.PlayerHoldEntries.Count - 1;
+  I := H.PlayerHoldEntries.Count - 1;
   while I >= 0 do
   begin
-    Entry := LocalHuman.PlayerHoldEntries[I];
+    Entry := H.PlayerHoldEntries[I];
     if Entry.Kind <> phkEmpty then
       Break;
     Entry.Retained := False;
     Dec(I);
   end;
   I := 0;
-  while I < LocalHuman.PlayerHoldEntries.Count do
+  while I < H.PlayerHoldEntries.Count do
   begin
-    Entry := LocalHuman.PlayerHoldEntries[I];
+    Entry := H.PlayerHoldEntries[I];
     if not Entry.Retained then
     begin
-      LocalHuman.PlayerHoldEntries.Delete(I);
+      H.PlayerHoldEntries.Delete(I);
       Entry.Free;
     end
     else
       Inc(I);
   end;
   Order := 0;
-  for I := 1 to LocalHuman.PlayerHoldEntries.Count - 1 do
+  for I := 1 to H.PlayerHoldEntries.Count - 1 do
   begin
-    Entry := LocalHuman.PlayerHoldEntries[I];
+    Entry := H.PlayerHoldEntries[I];
     if Entry.Kind = phkEmpty then
       Continue;
     J := 0;
     while J < I do
     begin
-      Other := LocalHuman.PlayerHoldEntries[J];
+      Other := H.PlayerHoldEntries[J];
       if (Other.Kind <> phkEmpty) and (Other.DisplayOrder = Entry.DisplayOrder) then
         Break;
       Inc(J);
@@ -217,15 +228,15 @@ begin
       while True do
       begin
         J := 0;
-        while J < LocalHuman.PlayerHoldEntries.Count do
+        while J < H.PlayerHoldEntries.Count do
         begin
-          Other := LocalHuman.PlayerHoldEntries[J];
+          Other := H.PlayerHoldEntries[J];
           if Other.Kind <> phkEmpty then
             if Other.DisplayOrder = Order then
               Break;
           Inc(J);
         end;
-        if J >= LocalHuman.PlayerHoldEntries.Count then
+        if J >= H.PlayerHoldEntries.Count then
           Break;
         Inc(Order);
       end;
@@ -235,73 +246,87 @@ begin
   end;
 end;
 
-procedure RemoveEmptyPlayerHoldSlot(Index: Integer);
+procedure RemoveEmptyPlayerHoldSlot(Human: TObject; Index: Integer);
 var
+  H: THuman;
   Entry: TPlayerHoldUnit;
 begin
-  if (Index < 0) or (Index >= LocalHuman.PlayerHoldEntries.Count) then
+  H := THuman(Human);
+  if (Index < 0) or (Index >= H.PlayerHoldEntries.Count) then
     Exit;
-  Entry := LocalHuman.PlayerHoldEntries[Index];
+  Entry := H.PlayerHoldEntries[Index];
   if Entry.Kind = phkEmpty then
   begin
-    LocalHuman.PlayerHoldEntries.Delete(Index);
+    H.PlayerHoldEntries.Delete(Index);
     Entry.Free;
   end;
 end;
 
-procedure ClearPlayerHoldEntries;
+procedure ClearPlayerHoldEntries(Human: TObject);
 var
+  H: THuman;
   I: Integer;
   Entry: TPlayerHoldUnit;
 begin
-  if LocalHuman.PlayerHoldEntries = nil then
+  H := THuman(Human);
+  if H.PlayerHoldEntries = nil then
     Exit;
-  for I := LocalHuman.PlayerHoldEntries.Count - 1 downto 0 do
+  for I := H.PlayerHoldEntries.Count - 1 downto 0 do
   begin
-    Entry := LocalHuman.PlayerHoldEntries[I];
+    Entry := H.PlayerHoldEntries[I];
     begin
-      LocalHuman.PlayerHoldEntries.Delete(I);
+      H.PlayerHoldEntries.Delete(I);
       Entry.Free;
     end;
   end;
 end;
 
-procedure RemoveEmptyPlayerHoldSlots;
+procedure RemoveEmptyPlayerHoldSlots(Human: TObject);
 var
+  H: THuman;
   I: Integer;
   Entry: TPlayerHoldUnit;
 begin
-  if LocalHuman.PlayerHoldEntries = nil then
+  H := THuman(Human);
+  if H.PlayerHoldEntries = nil then
     Exit;
-  for I := LocalHuman.PlayerHoldEntries.Count - 1 downto 0 do
+  for I := H.PlayerHoldEntries.Count - 1 downto 0 do
   begin
-    Entry := LocalHuman.PlayerHoldEntries[I];
+    Entry := H.PlayerHoldEntries[I];
     if Entry.Kind = phkEmpty then
     begin
-      LocalHuman.PlayerHoldEntries.Delete(I);
+      H.PlayerHoldEntries.Delete(I);
       Entry.Free;
     end;
   end;
 end;
 
-function IsPlayerHoldSlotEmpty(Index: Integer): Boolean;
+function IsPlayerHoldSlotEmpty(Human: TObject; Index: Integer): Boolean;
 var
+  H: THuman;
   Entry: TPlayerHoldUnit;
 begin
+  H := THuman(Human);
   Result := True;
-  if (Index < 0) or (Index >= LocalHuman.PlayerHoldEntries.Count) then
+  if (Index < 0) or (Index >= H.PlayerHoldEntries.Count) then
     Exit;
-  Entry := LocalHuman.PlayerHoldEntries[Index];
+  Entry := H.PlayerHoldEntries[Index];
   Result := Entry.Kind = phkEmpty;
 end;
 
-function ComparePlayerHoldEntries(Left, Right: TPlayerHoldUnit; Sort: TPlayerHoldSort): Integer;
+function ComparePlayerHoldEntries(
+    Human: TObject;
+    Left, Right: TPlayerHoldUnit;
+    Sort: TPlayerHoldSort
+): Integer;
 var
+  H: THuman;
   LeftValue, RightValue: Integer;
   LeftType, RightType: Byte;
   LeftName, RightName: WideString;
   NameComparison: Integer;
 begin
+  H := THuman(Human);
   Result := 0;
   if Sort = phsType then
   begin
@@ -368,11 +393,11 @@ begin
   if Integer(Sort) <= Integer(phsSize) then
   begin
     if Left.Kind = phkGoods then
-      LeftValue := LocalHuman.PlayerHoldShip.CargoGoods[Left.GoodsIndex].Count
+      LeftValue := H.PlayerHoldShip.CargoGoods[Left.GoodsIndex].Count
     else
       LeftValue := Left.Item.Weight;
     if Right.Kind = phkGoods then
-      RightValue := LocalHuman.PlayerHoldShip.CargoGoods[Right.GoodsIndex].Count
+      RightValue := H.PlayerHoldShip.CargoGoods[Right.GoodsIndex].Count
     else
       RightValue := Right.Item.Weight;
     if LeftValue < RightValue then
@@ -387,11 +412,11 @@ begin
     end;
   end;
   if Left.Kind = phkGoods then
-    LeftValue := LocalHuman.PlayerHoldShip.CargoGoods[Left.GoodsIndex].TotalCost
+    LeftValue := H.PlayerHoldShip.CargoGoods[Left.GoodsIndex].TotalCost
   else
     LeftValue := Left.Item.Cost;
   if Right.Kind = phkGoods then
-    RightValue := LocalHuman.PlayerHoldShip.CargoGoods[Right.GoodsIndex].TotalCost
+    RightValue := H.PlayerHoldShip.CargoGoods[Right.GoodsIndex].TotalCost
   else
     RightValue := Right.Item.Cost;
   if LeftValue < RightValue then
@@ -406,25 +431,27 @@ begin
   end;
 end;
 
-procedure SortPlayerHoldEntries(Sort: TPlayerHoldSort);
+procedure SortPlayerHoldEntries(Human: TObject; Sort: TPlayerHoldSort);
 var
+  H: THuman;
   I, J: Integer;
   Entry: TPlayerHoldUnit;
 begin
+  H := THuman(Human);
   aCalc.WaitForTurnCalculationUI;
-  RemoveEmptyPlayerHoldSlots;
-  for I := 0 to LocalHuman.PlayerHoldEntries.Count - 2 do
-    for J := I + 1 to LocalHuman.PlayerHoldEntries.Count - 1 do
-      if ComparePlayerHoldEntries(LocalHuman.PlayerHoldEntries[I], LocalHuman.PlayerHoldEntries[J], Sort) > 0 then
+  RemoveEmptyPlayerHoldSlots(Human);
+  for I := 0 to H.PlayerHoldEntries.Count - 2 do
+    for J := I + 1 to H.PlayerHoldEntries.Count - 1 do
+      if ComparePlayerHoldEntries(Human, H.PlayerHoldEntries[I], H.PlayerHoldEntries[J], Sort) > 0 then
       begin
-        Entry := LocalHuman.PlayerHoldEntries[I];
-        LocalHuman.PlayerHoldEntries[I] := LocalHuman.PlayerHoldEntries[J];
-        LocalHuman.PlayerHoldEntries[J] := Entry;
+        Entry := H.PlayerHoldEntries[I];
+        H.PlayerHoldEntries[I] := H.PlayerHoldEntries[J];
+        H.PlayerHoldEntries[J] := Entry;
       end;
   J := 0;
-  for I := 0 to LocalHuman.PlayerHoldEntries.Count - 1 do
+  for I := 0 to H.PlayerHoldEntries.Count - 1 do
   begin
-    Entry := LocalHuman.PlayerHoldEntries[I];
+    Entry := H.PlayerHoldEntries[I];
     if Entry.Kind <> phkEmpty then
     begin
       Entry.DisplayOrder := J;
@@ -434,32 +461,36 @@ begin
   aCalc.WaitForTurnCalculationUI;
 end;
 
-procedure RestorePlayerHoldDisplayOrder;
+procedure RestorePlayerHoldDisplayOrder(Human: TObject);
 var
+  H: THuman;
   I, J: Integer;
   Entry: TPlayerHoldUnit;
 begin
-  for I := LocalHuman.PlayerHoldEntries.Count - 1 downto 0 do
-    RemoveEmptyPlayerHoldSlot(I);
-  for I := 0 to LocalHuman.PlayerHoldEntries.Count - 2 do
-    for J := I + 1 to LocalHuman.PlayerHoldEntries.Count - 1 do
-      if TPlayerHoldUnit(LocalHuman.PlayerHoldEntries[I]).DisplayOrder
-          > TPlayerHoldUnit(LocalHuman.PlayerHoldEntries[J]).DisplayOrder then
+  H := THuman(Human);
+  for I := H.PlayerHoldEntries.Count - 1 downto 0 do
+    RemoveEmptyPlayerHoldSlot(Human, I);
+  for I := 0 to H.PlayerHoldEntries.Count - 2 do
+    for J := I + 1 to H.PlayerHoldEntries.Count - 1 do
+      if TPlayerHoldUnit(H.PlayerHoldEntries[I]).DisplayOrder
+          > TPlayerHoldUnit(H.PlayerHoldEntries[J]).DisplayOrder then
       begin
-        Entry := LocalHuman.PlayerHoldEntries[I];
-        LocalHuman.PlayerHoldEntries[I] := LocalHuman.PlayerHoldEntries[J];
-        LocalHuman.PlayerHoldEntries[J] := Entry;
+        Entry := H.PlayerHoldEntries[I];
+        H.PlayerHoldEntries[I] := H.PlayerHoldEntries[J];
+        H.PlayerHoldEntries[J] := Entry;
       end;
 end;
 
-function FindPlayerHoldIndexByOrder(DisplayOrder: Integer): Integer;
+function FindPlayerHoldIndexByOrder(Human: TObject; DisplayOrder: Integer): Integer;
 var
+  H: THuman;
   I: Integer;
   Entry: TPlayerHoldUnit;
 begin
-  for I := 0 to LocalHuman.PlayerHoldEntries.Count - 1 do
+  H := THuman(Human);
+  for I := 0 to H.PlayerHoldEntries.Count - 1 do
   begin
-    Entry := LocalHuman.PlayerHoldEntries[I];
+    Entry := H.PlayerHoldEntries[I];
     if Entry.Kind <> phkEmpty then
       if Entry.DisplayOrder = DisplayOrder then
       begin
@@ -470,24 +501,26 @@ begin
   Result := -1;
 end;
 
-function FindFreePlayerHoldOrder: Integer;
+function FindFreePlayerHoldOrder(Human: TObject): Integer;
 var
+  H: THuman;
   Order, I: Integer;
   Entry: TPlayerHoldUnit;
 begin
+  H := THuman(Human);
   Order := 0;
   while True do
   begin
     I := 0;
-    while I < LocalHuman.PlayerHoldEntries.Count do
+    while I < H.PlayerHoldEntries.Count do
     begin
-      Entry := LocalHuman.PlayerHoldEntries[I];
+      Entry := H.PlayerHoldEntries[I];
       if Entry.Kind <> phkEmpty then
         if Entry.DisplayOrder = Order then
           Break;
       Inc(I);
     end;
-    if I >= LocalHuman.PlayerHoldEntries.Count then
+    if I >= H.PlayerHoldEntries.Count then
     begin
       Result := Order;
       Exit;
