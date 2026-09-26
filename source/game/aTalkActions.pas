@@ -999,13 +999,13 @@ begin
     if RecognizesPlayer and (Target.TypeId in [stRanger..stPirate]) then
     begin
       if not FearsAttacker then
-        Target.ShowMessageToPlayer(Target.LookupTalkText('Talk.Protect.TargetNotFearShip'))
+        Target.ShowMessageToPlayer(Target.LookupTalkText('Talk.Protect.TargetNotFearShip'), Player)
       else if CanEscape and (Target.GetHullIntegrityPercent > 30) then
-        Target.ShowMessageToPlayer(Target.LookupTalkText('Talk.Protect.TargetMayRunAway'))
+        Target.ShowMessageToPlayer(Target.LookupTalkText('Talk.Protect.TargetMayRunAway'), Player)
       else if Target.HasCargoGoods then
       begin
         Target.JettisonCargoGoodsTowardTargetValue(Reward);
-        Target.ShowMessageToPlayer(Target.LookupTalkText('Talk.Protect.TargetGiveGoods'));
+        Target.ShowMessageToPlayer(Target.LookupTalkText('Talk.Protect.TargetGiveGoods'), Player);
       end
       else if Target.Money >= Reward then
       begin
@@ -1017,11 +1017,12 @@ begin
                 '<color=255,240,100>',
                 '<Money>',
                 WideString(IntToStr(Reward))
-            )
+            ),
+            Player
         );
       end
       else
-        Target.ShowMessageToPlayer(Target.LookupTalkText('Talk.Protect.TargetThanks'));
+        Target.ShowMessageToPlayer(Target.LookupTalkText('Talk.Protect.TargetThanks'), Player);
     end;
     TalkOutcome := rpAccepted;
   end

@@ -580,9 +580,11 @@ type
     function DropCarriedItemAsMovingLoot(Item: TItem): Boolean;
     function DropCarriedArtefactAsMovingLoot(Item: TArtefact): Boolean;
     procedure DropGuaranteedDeathDropItems;
-    function CanDropTreasureMap: Boolean;
-    function SelectTreasureMapPlanet: TPlanet;
-    function TryDropTreasureMap: Boolean;
+    // CHANGE: CLEANUP - Finder is the human's ranger that destroyed this ship; the map is
+    // for a planet it has not mapped yet. Native asked this of the one player.
+    function CanDropTreasureMap(Finder: TShip): Boolean;
+    function SelectTreasureMapPlanet(Finder: TShip): TPlanet;
+    function TryDropTreasureMap(Finder: TShip): Boolean;
     function DropItemIntoStar(Item: TItem): Boolean;
     procedure DropAllArtefactsOnDestruction;
     procedure DropGoodsIntoSpace(Good: Byte; Count: Integer);
@@ -734,13 +736,15 @@ type
     procedure NotifyPartnerBreak(Leader: TShip);
     procedure NotifyPartnershipExpired(Leader: TShip);
     procedure NotifyPartnerRebellion(Leader: TShip);
-    procedure ShowMessageToPlayer(Text: WideString);
+    // CHANGE: CLEANUP - Tells Player, the human's ranger this ship speaks to.
+    procedure ShowMessageToPlayer(Text: WideString; Player: TShip);
     procedure NotifyPiratePartnerRelationBreak(Leader: TShip);
     procedure NotifyPiratePartnerRatingBreak(Leader: TShip);
     procedure NotifyPiratePartnershipExpired(Leader: TShip);
     procedure NotifyPiratePartnerRebellion(Leader: TShip);
     function CalculatePartnershipMonths(Amount: Integer; OtherShip: TShip): Integer;
-    function GetGreetingText: WideString;
+    // CHANGE: CLEANUP - The greeting to Player, the human's ranger that hails this ship.
+    function GetGreetingText(Player: TShip): WideString;
     procedure InitializeScriptStateOrders;
     procedure ApplyScriptStateOrders;
     procedure UpdateScriptStateCompletionAndPickups;
@@ -971,6 +975,58 @@ begin
     Result := TTranclucator(Ship).OwnerShip
   else
     Result := nil;
+end;
+
+// CHANGE: CLEANUP - Whether Player, a human's ranger, overhears Ship talking to OtherShip:
+// it is in normal space in Ship's star, with either ship on its radar. Native asked this of
+// the one player.
+function HumanOverhears(Player: TPlayer; Ship, OtherShip: TShip): Boolean;
+var
+  RadarSquared: Integer;
+begin
+  Result := False;
+  if (Player = nil) or (Player.CurrentStar <> Ship.CurrentStar) or not Player.InNormalSpace then
+    Exit;
+  RadarSquared := Sqr(Player.GetRadarRange);
+  Result :=
+      (RadarSquared >= PointDistanceSquared(Ship.Position, Player.Position))
+          or (RadarSquared >= PointDistanceSquared(OtherShip.Position, Player.Position));
+end;
+
+// CHANGE: CLEANUP - Whether a human whose star Star is filmed for is out in space or taking
+// off, and so watches its film. Paths there are resampled for the film. Native asked this of
+// the local human only.
+function IsFilmWatchedInStar(Star: TStar): Boolean;
+var
+  I: Integer;
+  Human: THuman;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if (Human.PlayerStar = Star)
+        and (Human.Player <> nil)
+        and ((Human.Player.CurrentPlanet = nil) or (Human.Player.Order = soTakeoff)) then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
+// CHANGE: CLEANUP - Whether some human's ranger has more than 0.6 of the best ranger's
+// strength. NPC equipment keeps up with the strongest human; native asked this of the one
+// player.
+function IsSomeHumanNearBestRangerStrength: Boolean;
+var
+  I: Integer;
+  Player: TPlayer;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Player := Session.Humans[I].Player;
+    if (Player <> nil) and (Player.StrengthInBestRanger > 0.6) then
+      Exit(True);
+  end;
+  Result := False;
 end;
 
 constructor TShip.Create;
@@ -4790,7 +4846,7 @@ begin
         JettisonCargoGoodsTowardTargetValue(Galaxy.ComputeScaledAverageMoney(OwnerId));
     end;
     if IsHuman(Attacker) then
-      TryDropTreasureMap;
+      TryDropTreasureMap(Attacker);
     if Artefacts.Count > 0 then
       DropAllArtefactsOnDestruction;
     for I := Inventory.Count - 1 downto 1 do
@@ -10597,7 +10653,7 @@ var
     Value: Double;
   begin
     Result := nil;
-    if GetPlayer = nil then
+    if Session.Humans.Count = 0 then
       Exit;
     Index := NextRandomIntRange(1, Inventory.Count - 1, RandomState);
     for Attempt := 1 to Inventory.Count - 1 do
@@ -10741,18 +10797,18 @@ begin
   GuaranteedDeathDropItems.Clear;
 end;
 
-function TShip.CanDropTreasureMap: Boolean;
+function TShip.CanDropTreasureMap(Finder: TShip): Boolean;
 begin
   Result := False;
   if (Self is TPirate)
       and ((Self as TPirate).PirateType = 0)
-      and (GetPlayer <> PartnerShip)
+      and (Finder <> PartnerShip)
       and (ScriptShip = nil) then
     if SeededRandomIntRange(1, 100, Seed) <= 15 then
       Result := True;
 end;
 
-function TShip.SelectTreasureMapPlanet: TPlanet;
+function TShip.SelectTreasureMapPlanet(Finder: TShip): TPlanet;
 var
   I, J, K, Last, Index: Integer;
   Planet: TPlanet;
@@ -10777,9 +10833,9 @@ begin
       if not (Planet.OwnerId in [Ord(oiUninhabited)]) or (Planet.SurfaceLootEntries = nil) then
         Continue;
       AlreadyMapped := False;
-      for K := 0 to GetPlayer.Inventory.Count - 1 do
+      for K := 0 to Finder.Inventory.Count - 1 do
       begin
-        Item := GetPlayer.Inventory[K];
+        Item := Finder.Inventory[K];
         if (Item is TTreasureMap) and ((Item as TTreasureMap).TargetPlanet = Planet) then
         begin
           AlreadyMapped := True;
@@ -10788,9 +10844,9 @@ begin
       end;
       if AlreadyMapped then
         Continue;
-      for K := 0 to GetPlayer.StorageEntries.Count - 1 do
+      for K := 0 to TPlayer(Finder).StorageEntries.Count - 1 do
       begin
-        Storage := GetPlayer.StorageEntries[K];
+        Storage := TPlayer(Finder).StorageEntries[K];
         Item := Storage.Item;
         if (Item is TTreasureMap) and ((Item as TTreasureMap).TargetPlanet = Planet) then
         begin
@@ -10804,7 +10860,7 @@ begin
       begin
         Loot := Planet.SurfaceLootEntries[K];
         if (Loot.Item <> nil)
-            and GetPlayer.CanAccessSurfaceLootItem(Loot.Item)
+            and TPlayer(Finder).CanAccessSurfaceLootItem(Loot.Item)
             and ((Loot.Item is TArtefact) or (Loot.Item is TMicroModule)) then
         begin
           Result := Planet;
@@ -10815,15 +10871,15 @@ begin
   end;
 end;
 
-function TShip.TryDropTreasureMap: Boolean;
+function TShip.TryDropTreasureMap(Finder: TShip): Boolean;
 var
   Item: TItem;
   Planet: TPlanet;
 begin
   Result := False;
-  if CanDropTreasureMap and not NoDrop then
+  if CanDropTreasureMap(Finder) and not NoDrop then
   begin
-    Planet := SelectTreasureMapPlanet;
+    Planet := SelectTreasureMapPlanet(Finder);
     if Planet <> nil then
     begin
       Item := TTreasureMap.Create;
@@ -10845,7 +10901,7 @@ var
 begin
   if (Item is TEquipment) and (TEquipment(Item).EquippedFlag <> 0) then
     UnequipItem(TEquipment(Item));
-  if GetPlayer <> Self then
+  if not IsHuman(Self) then
   begin
     if Item is TArtefact then
     begin
@@ -10870,8 +10926,8 @@ begin
             / 180;
     if Item is TWeapon then
       (Item as TWeapon).Target := nil;
-    Item.Position.X := GetPlayer.Position.X + Sin(Angle) * 100;
-    Item.Position.Y := GetPlayer.Position.Y - Cos(Angle) * 100;
+    Item.Position.X := Position.X + Sin(Angle) * 100;
+    Item.Position.Y := Position.Y - Cos(Angle) * 100;
     ActionResult := ScriptItemsAct(satOnDropItemFixed, Item, nil, 0);
     if Item is TEquipmentWithActCode then
       ActionResult :=
@@ -11040,7 +11096,7 @@ begin
   if ActionResult = 0 then
   begin
     CurrentStar.MovingDropItems.Add(Drop);
-    if not ((Self is TKling) and (Item is TProtoplasm)) and (GetPlayer <> Self) then
+    if not ((Self is TKling) and (Item is TProtoplasm)) and not IsHuman(Self) then
       AddRecentlyDroppedItem(Item);
   end
   else
@@ -11279,7 +11335,7 @@ end;
 procedure TShip.LiquidateInventoryItem(Item: TItem);
 begin
   if (Item.ItemType = t_Protoplasm)
-      and (GetPlayer <> Self)
+      and not IsHuman(Self)
       and (((Self is TRanger) and (DockedTo <> nil) and (DockedTo.TypeId = Byte(rstRangerCenter)))
           or (DaysSincePlayerSeen > 100)
           or ((Self is TWarrior) and ((Self as TWarrior).WarriorType = wtFlagship))) then
@@ -11440,9 +11496,10 @@ function TShip.ApplyItemDegradation(
 var
   BeforeScript, AfterScript, AttackCount: Integer;
   NewCondition: Double;
+  Bubble: TMessagePlayer;
 begin
   Result := False;
-  if (GetPlayer = Self)
+  if IsHuman(Self)
       and ((Galaxy.TechnicModEnabled = 1) or (Galaxy.SpecialSimulationMode <> 0)) then
     Exit;
   if Item = nil then
@@ -11463,7 +11520,7 @@ begin
     if AttackCount > 1 then
       DurabilityDamage := DurabilityDamage / AttackCount;
   end;
-  if GetPlayer = Self then
+  if IsHuman(Self) then
   begin
     DurabilityDamage :=
         DurabilityDamage * GalaxyDifficultyTuning[Galaxy.DifficultyLevels[3]].EquipmentWearFactor;
@@ -11504,36 +11561,28 @@ begin
     end;
     Result := True;
     Item.BrokenFlag := 1;
-    if (GetPlayer = Self) and (Item.EquippedFlag <> 0) then
+    // CHANGE: CLEANUP - The bubbles and the broken-equipment flag are Self's human's.
+    if IsHuman(Self) and (Item.EquippedFlag <> 0) then
     begin
+      Bubble := nil;
       case Kind of
-        idkBattle:
-          AddOrUpdatePlayerBubble(8, Galaxy.CurrentTurn, Item.GetBrokenInBattleText, '')
-                  .Targets[0]
-                  .ShipId :=
-              Id;
-        idkUse, idkAfterburner:
-          AddOrUpdatePlayerBubble(8, Galaxy.CurrentTurn, Item.GetBrokenInUseText, '')
-                  .Targets[0]
-                  .ShipId :=
-              Id;
-        idkForce:
-          AddOrUpdatePlayerBubble(8, Galaxy.CurrentTurn, Item.GetBrokenByForceText, '')
-                  .Targets[0]
-                  .ShipId :=
-              Id;
+        idkBattle: Bubble := AddHumanBubble(Self, 8, Item.GetBrokenInBattleText);
+        idkUse, idkAfterburner: Bubble := AddHumanBubble(Self, 8, Item.GetBrokenInUseText);
+        idkForce: Bubble := AddHumanBubble(Self, 8, Item.GetBrokenByForceText);
       end;
-      LocalHuman.PlayerEquipmentBrokenThisTurn := True;
+      if Bubble <> nil then
+        Bubble.Targets[0].ShipId := Id;
+      if HumanOf(Self) <> nil then
+        HumanOf(Self).PlayerEquipmentBrokenThisTurn := True;
     end;
-    if (GetPlayer = Self)
+    if IsHuman(Self)
         and (Item is TSatellite)
         and ((Item as TSatellite).TargetPlanet <> nil) then
     begin
-      AddOrUpdatePlayerBubble(8, Galaxy.CurrentTurn, (Item as TSatellite).GetBrokenInUseText, '')
-              .Targets[0]
-              .ShipId :=
-          Id;
-      GetPlayer.RefreshStorageBubbles;
+      Bubble := AddHumanBubble(Self, 8, (Item as TSatellite).GetBrokenInUseText);
+      if Bubble <> nil then
+        Bubble.Targets[0].ShipId := Id;
+      TPlayer(Self).RefreshStorageBubbles;
     end;
     RefreshDerivedStats(True);
   end;
@@ -11545,7 +11594,7 @@ var
   Item: TEquipment;
 begin
   Result := False;
-  if GetPlayer = Self then
+  if IsHuman(Self) then
   begin
     Result := True;
     Exit;
@@ -11573,7 +11622,7 @@ end;
 
 function TShip.CanGenerateSpecialHullModule: Boolean;
 begin
-  Result := (GetPlayer = Self) or (GetHull.SpecialModuleIndex <> 0);
+  Result := IsHuman(Self) or (GetHull.SpecialModuleIndex <> 0);
 end;
 
 procedure TShip.ImproveRandomEquipment(ResolveOverload: Boolean);
@@ -11603,8 +11652,7 @@ begin
   end;
   if Best <> nil then
     if (Galaxy.TechLevel > 6)
-        and (GetPlayer <> nil)
-        and (GetPlayer.StrengthInBestRanger > 0.6)
+        and IsSomeHumanNearBestRangerStrength
         and ((StrengthInBestRanger < 0.5) or (NextRandomUnitFloat(RandomState) < 0.4)) then
       Best.Improve(ikMajor)
     else
@@ -11732,8 +11780,7 @@ begin
   Inventory.Add(Weapon);
   if NextRandomUnitFloat(RandomState) < 0.5 then
     if (Galaxy.TechLevel > 6)
-        and (GetPlayer <> nil)
-        and (GetPlayer.StrengthInBestRanger > 0.6)
+        and IsSomeHumanNearBestRangerStrength
         and ((StrengthInBestRanger < 0.5) or (NextRandomUnitFloat(RandomState) < 0.4)) then
       Weapon.Improve(ikMajor)
     else
@@ -11877,9 +11924,34 @@ var
   RestoreStock, GeneratedBatch, DifferentHullGraph, UseMoney: Boolean;
   SavedNextItemId: Cardinal;
   Bought: Boolean;
+  ShopHumans: TList;
   UnusedNativeFrame:
       array[0..7] of
           Byte; // EBP-$74..-$6D are never accessed in the native frame; original local types are unknown.
+  // CHANGE: CLEANUP - Every human whose shop at Location is open gives its stock back while
+  // this ship buys there, and ShopHumans lists them to rebuild their shops after. Native did
+  // this for the local human's shop only.
+  function RestoreOpenShops(Location: TObject): Boolean;
+  var
+    HumanIndex: Integer;
+    Human: THuman;
+  begin
+    Result := False;
+    for HumanIndex := 0 to Session.Humans.Count - 1 do
+    begin
+      Human := Session.Humans[HumanIndex];
+      if (Human.TemporaryShopSlots <> nil)
+          and ((Human.TemporaryShopPlanet = Location)
+              or (Human.TemporaryShopStation = Location)) then
+      begin
+        RestoreTemporaryShopStock(Human);
+        if ShopHumans = nil then
+          ShopHumans := TList.Create;
+        ShopHumans.Add(Human);
+        Result := True;
+      end;
+    end;
+  end;
   function SelectReplacedWeapon: TWeapon; // @addr 0x76A290 @ida "TWeapon *__cdecl $name(void *ParentFrame);" @note "Caller-popped static link; ship -4. Selects the lowest evaluated weapon when all slots are occupied."
   var
     J, Best: Integer;
@@ -11927,6 +11999,7 @@ var
   end;
 begin
   RestoreStock := False;
+  ShopHumans := nil;
   GeneratedBatch := False;
   UseMoney := True;
   SavedNextItemId := Galaxy.NextItemId;
@@ -11934,11 +12007,8 @@ begin
   OriginalMoney := Money;
   if CurrentPlanet <> nil then
   begin
-    if (LocalHuman.TemporaryShopSlots <> nil) and (LocalHuman.TemporaryShopPlanet = CurrentPlanet) then
-    begin
-      RestoreTemporaryShopStock;
+    if RestoreOpenShops(CurrentPlanet) then
       RestoreStock := True;
-    end;
     if Galaxy.IsAIShoppingEnabled
         and not ForceGeneratedOffers
         and (not (Self is TWarrior) or ((Self as TWarrior).WarriorType <> wtFlagship)) then
@@ -11951,11 +12021,8 @@ begin
   end
   else if (DockedTo <> nil) and (DockedTo is TRuins) then
   begin
-    if (LocalHuman.TemporaryShopSlots <> nil) and (LocalHuman.TemporaryShopStation = DockedTo) then
-    begin
-      RestoreTemporaryShopStock;
+    if RestoreOpenShops(DockedTo) then
       RestoreStock := True;
-    end;
     if Galaxy.IsAIShoppingEnabled
         and not ForceGeneratedOffers
         and (not (Self is TWarrior) or ((Self as TWarrior).WarriorType <> wtFlagship)) then
@@ -11968,11 +12035,8 @@ begin
   end
   else if (Self is TRuins) and Galaxy.IsStationShopUpdateEnabled then
   begin
-    if (LocalHuman.TemporaryShopSlots <> nil) and (LocalHuman.TemporaryShopStation = Self) then
-    begin
-      RestoreTemporaryShopStock;
+    if RestoreOpenShops(Self) then
       RestoreStock := True;
-    end;
     Offers := TRuins(Self).EquipmentShop;
     UseMoney := False;
   end
@@ -12151,7 +12215,9 @@ begin
   end;
   if RestoreStock then
   begin
-    BuildTemporaryShopSlotGrid;
+    for I := 0 to ShopHumans.Count - 1 do
+      BuildTemporaryShopSlotGrid(THuman(ShopHumans[I]));
+    ShopHumans.Free;
     NotifyShopStockChanged;
   end;
   if GeneratedBatch then
@@ -12980,6 +13046,7 @@ var
   PickupNode: PSPathNode;
   CanLand: Boolean;
   Effect: TObjectSE;
+  Bubble: TMessagePlayer;
   procedure InitializeFilm(
       Alpha: Byte
   ); // @addr 0x76CF2C @ida "void __usercall $name(unsigned __int8 Alpha@<al>, void *ParentFrame@<^0>);" @note "Caller-popped static link; step index -4, ship -8."
@@ -13032,23 +13099,24 @@ begin
           Break;
       end;
   end;
-  if (GetPlayer = Self) and (Order = soJump) and InNormalSpace then
+  // CHANGE: CLEANUP - The bubble goes to Self's human.
+  if IsHuman(Self) and (Order = soJump) and InNormalSpace then
     if GetFuelTanks.Fuel
         < Round(PointDistance((OrderTarget as TStar).Position, CurrentStar.Position)) then
     begin
-      AddOrUpdatePlayerBubble(
-                  8,
-                  Galaxy.CurrentTurn,
-                  FormatText1(
-                      LocalizedText('Items.FuelTanks.NoFuelJump'),
-                      '<color=255,240,100>',
-                      '<Star>',
-                      (OrderTarget as TStar).Name
-                  ),
-                  '')
-              .Targets[0]
-              .ShipId :=
-          Id;
+      Bubble :=
+          AddHumanBubble(
+              Self,
+              8,
+              FormatText1(
+                  LocalizedText('Items.FuelTanks.NoFuelJump'),
+                  '<color=255,240,100>',
+                  '<Star>',
+                  (OrderTarget as TStar).Name
+              )
+          );
+      if Bubble <> nil then
+        Bubble.Targets[0].ShipId := Id;
       OrderMove(OrderDestination, False);
     end;
   if RecordFilm
@@ -13074,7 +13142,8 @@ begin
       if RecordFilm and not IsOnPlanet and not IsDockedToShip then
       begin
         InitializeFilm(255);
-        if GetPlayer = Self then
+        // HUMANS: film viewpoint
+        if Self = LocalPlayer then
           TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
       end;
   end
@@ -13085,7 +13154,8 @@ begin
     if RecordFilm then
     begin
       InitializeFilm(255);
-      if GetPlayer = Self then
+      // HUMANS: film viewpoint
+      if Self = LocalPlayer then
         TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, OrderDestination, True);
     end;
   end
@@ -13128,7 +13198,8 @@ begin
         begin
           FilmAlphaStep := -(FilmAlpha / MovementPath.NodeCount);
           TEFilm(PrimaryFilm).SetObjectAlpha(StartStepIndex, FilmObject, 255);
-          if GetPlayer = Self then
+          // HUMANS: film viewpoint
+          if Self = LocalPlayer then
             TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
         end
         else
@@ -13140,7 +13211,8 @@ begin
     else if RecordFilm then
     begin
       TEFilm(PrimaryFilm).SetObjectAlpha(StartStepIndex, FilmObject, 255);
-      if GetPlayer = Self then
+      // HUMANS: film viewpoint
+      if Self = LocalPlayer then
         TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, TargetPosition, True);
     end;
   end
@@ -13150,7 +13222,8 @@ begin
     begin
       if RecordFilm then
       begin
-        if GetPlayer = Self then
+        // HUMANS: film viewpoint
+        if Self = LocalPlayer then
           TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
         if (FilmObject.SceneObject is TRuinsSE)
             and TRuinsSE(FilmObject.SceneObject).HasTransitionImages then
@@ -13226,7 +13299,8 @@ begin
             FilmAlphaStep := 3.825;
             InitializeFilm(0);
           end;
-          if GetPlayer = Self then
+          // HUMANS: film viewpoint
+          if Self = LocalPlayer then
             TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, True);
           if (Self is TRuins)
               and (TypeId = Byte(rstDominion))
@@ -13265,15 +13339,18 @@ begin
             if CurrentStar.StarDistances[I].Distance > 40 then
               Break;
             Star := CurrentStar.StarDistances[I].Star;
-            if (Star.Dominion <> nil) and ((GetPlayer <> Self) or Star.IsConstellationVisible) then
+            if (Star.Dominion <> nil) and (not IsHuman(Self) or Star.IsConstellationVisible) then
               TRuins(Star.Dominion).TryAbductDepartingShip(Self);
           end;
         if RecordFilm then
         begin
-          if GetPlayer = Self then
+          // HUMANS: film viewpoint
+          if Self = LocalPlayer then
             TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
           FilmAlphaStep := -(510 / MovementPath.NodeCount);
-          if LocalHuman.PlayerStar = CurrentStar then
+          // CHANGE: CLEANUP - The gate is drawn in the film of every star a human's day is
+          // filmed in.
+          if IsFilmedStar(CurrentStar) then
           begin
             Point := MovementPath.ActiveHead.Position;
             Angle := MovementPath.ActiveHead.Heading;
@@ -13354,7 +13431,8 @@ begin
           end;
         end;
       end
-      else if RecordFilm and (GetPlayer = Self) then
+      // HUMANS: film viewpoint
+      else if RecordFilm and (Self = LocalPlayer) then
         TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, OrderDestination, False);
     end
     else
@@ -13422,7 +13500,8 @@ begin
         Graphic.SetPosition(Position);
         Graphic.SetAngle(HeadingDegreesToByte(MovementDirection));
         OrderNone(True);
-        if (AbductedByPirateClan or ((GetPlayer = Self) and (GetPlayer.QueuedTravelTarget <> nil)))
+        if (AbductedByPirateClan
+                or (IsHuman(Self) and (TPlayer(Self).QueuedTravelTarget <> nil)))
             and (GetEngine <> nil) then
           GetEngine.OutputPercent := 0;
         Order := soMove;
@@ -13435,15 +13514,18 @@ begin
         begin
           FilmAlphaStep := 510 / MovementPath.NodeCount;
           InitializeFilm(0);
-          if GetPlayer = Self then
+          // HUMANS: film viewpoint
+          if Self = LocalPlayer then
             TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, True);
-          if LocalHuman.PlayerStar = CurrentStar then
+          // CHANGE: CLEANUP - The gate is drawn in the film of every star a human's day is
+          // filmed in.
+          if IsFilmedStar(CurrentStar) then
           begin
             Distance := PointDistance(Position, OrderDestination);
             Gate :=
                 Galaxy.CreateJumpGate(
                     AbductedByPirateClan
-                        or ((GetPlayer = Self) and (GetPlayer.QueuedTravelTarget <> nil))
+                        or (IsHuman(Self) and (TPlayer(Self).QueuedTravelTarget <> nil))
                 );
             if GiResourceVariant = 2 then
               Gate.Gate.SetSize(
@@ -13507,18 +13589,25 @@ begin
               TEFilm(PrimaryFilm).AttachObject(StartStepIndex, EffectFilm);
             end;
           end;
-          if GetPlayer = Self then
+          // HUMANS: film viewpoint
+          if Self = LocalPlayer then
           begin
             TEFilm(PrimaryFilm).SetViewCenter(StartStepIndex, OrderDestination);
             TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, OrderDestination, False);
+          end;
+          // CHANGE: CLEANUP - The human arriving is Self's; the achievement belongs to the
+          // human at this machine.
+          if IsHuman(Self) then
+          begin
             for K := 0 to 2 do
-              GetPlayer.ChameleonDetected[K] := False;
-            GetPlayer.ReportIdleSatellites(GetPlayer.CurrentStar);
-            TryAddAchievementProgress('JUMPER', 1);
+              TPlayer(Self).ChameleonDetected[K] := False;
+            TPlayer(Self).ReportIdleSatellites(CurrentStar);
+            if Self = LocalPlayer then
+              TryAddAchievementProgress('JUMPER', 1);
           end;
         end;
-        if (GetPlayer = Self) and (GetPlayer.QueuedTravelTarget <> nil) then
-          GetPlayer.QueuedTravelTarget := nil;
+        if IsHuman(Self) and (TPlayer(Self).QueuedTravelTarget <> nil) then
+          TPlayer(Self).QueuedTravelTarget := nil;
       end;
     end;
   end
@@ -13539,7 +13628,8 @@ begin
           begin
             FilmAlphaStep := -(FilmAlpha / MovementPath.NodeCount);
             TEFilm(PrimaryFilm).SetObjectAlpha(StartStepIndex, FilmObject, 255);
-            if GetPlayer = Self then
+            // HUMANS: film viewpoint
+            if Self = LocalPlayer then
               TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
           end
           else
@@ -13549,7 +13639,8 @@ begin
       else if RecordFilm then
       begin
         TEFilm(PrimaryFilm).SetObjectAlpha(StartStepIndex, FilmObject, 255);
-        if GetPlayer = Self then
+        // HUMANS: film viewpoint
+        if Self = LocalPlayer then
           TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, OrderDestination, True);
       end;
     end
@@ -13601,13 +13692,18 @@ begin
         begin
           FilmAlphaStep := 1.275;
           InitializeFilm(0);
-          if GetPlayer = Self then
+          // HUMANS: film viewpoint
+          if Self = LocalPlayer then
           begin
             TEFilm(PrimaryFilm).SetViewCenter(StartStepIndex, Position);
             TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
+          end;
+          // CHANGE: CLEANUP - The human arriving is Self's.
+          if IsHuman(Self) then
+          begin
             for K := 0 to 2 do
-              GetPlayer.ChameleonDetected[K] := False;
-            GetPlayer.ReportIdleSatellites(GetPlayer.CurrentStar);
+              TPlayer(Self).ChameleonDetected[K] := False;
+            TPlayer(Self).ReportIdleSatellites(CurrentStar);
           end;
         end;
       end;
@@ -13622,18 +13718,19 @@ begin
       FilmAlpha := 0;
       FilmAlphaStep := 1.33875;
       InitializeFilm(0);
-      if GetPlayer = Self then
+      // HUMANS: film viewpoint
+      if Self = LocalPlayer then
       begin
         TEFilm(PrimaryFilm).SetViewCenter(StartStepIndex, Position);
         TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
       end;
     end;
-    if (GetPlayer = Self) and (GetPlayer.QueuedTravelTarget <> nil) then
+    if IsHuman(Self) and (TPlayer(Self).QueuedTravelTarget <> nil) then
     begin
       FilmAlphaStep := 5.1;
       OrderNone(True);
       MovementDirection :=
-          PointBearingDegrees(CurrentStar.Position, GetPlayer.QueuedTravelTarget.Position);
+          PointBearingDegrees(CurrentStar.Position, TPlayer(Self).QueuedTravelTarget.Position);
       AppendHyperspaceTransitionPath(-1);
       if MovementPath.ActiveTail <> nil then
         OrderDestination := MovementPath.ActiveTail.Position
@@ -13715,7 +13812,8 @@ begin
     if RecordFilm then
     begin
       InitializeFilm(255);
-      if GetPlayer = Self then
+      // HUMANS: film viewpoint
+      if Self = LocalPlayer then
         TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, (OrderTarget as TShip).Position, True);
     end;
     if Self is TTranclucator then
@@ -13753,7 +13851,8 @@ begin
   end
   else
     raise Exception.Create('Error in TShip.StepDayStart');
-  if RecordFilm and (GetPlayer = Self) then
+  // HUMANS: film viewpoint
+  if RecordFilm and (Self = LocalPlayer) then
     TEFilm(PrimaryFilm).SetRadarCenter(StartStepIndex, Position);
 end;
 
@@ -13787,7 +13886,8 @@ var
       TEFilm(PrimaryFilm).SetObjectPosition(StepIndex, FilmObject, Position);
       if AuxiliaryFilmObject <> nil then
         TEFilm(PrimaryFilm).SetObjectPosition(StepIndex, AuxiliaryFilmObject, Position);
-      if GetPlayer = Self then
+      // HUMANS: film viewpoint
+      if Self = LocalPlayer then
         TEFilm(PrimaryFilm).SetRadarCenter(StepIndex, Position);
       if FilmAlphaStep <> 0 then
       begin
@@ -13850,7 +13950,8 @@ begin
     if MovementPath.ActiveHead <> nil then
     begin
       AdvancePath;
-      if RecordFilm and (GetPlayer = Self) and (OrderStateData = 0) then
+      // HUMANS: film viewpoint
+      if RecordFilm and (Self = LocalPlayer) and (OrderStateData = 0) then
       begin
         if OrderTarget is TShip then
           TEFilm(PrimaryFilm).SetCameraAnchor(StepIndex, (OrderTarget as TShip).Position, True)
@@ -13861,8 +13962,8 @@ begin
       if ((MovementPath.ActiveHead = nil) or (MovementPath.ActiveHead.Next = nil))
           and (OrderStateData = 1) then
       begin
-        if GetPlayer = Self then
-          GetPlayer.ProcessCareerActivityAndEminentProgress;
+        if IsHuman(Self) then
+          TPlayer(Self).ProcessCareerActivityAndEminentProgress;
         ClearPickupTargets;
         if OrderTarget is TShip then
           DockedTo := OrderTarget as TShip
@@ -13870,17 +13971,22 @@ begin
         begin
           CurrentPlanet := OrderTarget as TPlanet;
           AbductedByPirateClan := False;
-          if (GetPlayer = Self) and not CurrentPlanet.HasPlayerLanded then
+          // CHANGE: CLEANUP - A planet counts as landed on once any human lands there. The
+          // achievement belongs to the human at this machine, the count to Self.
+          if IsHuman(Self) and not CurrentPlanet.HasPlayerLanded then
           begin
             CurrentPlanet.HasPlayerLanded := True;
             if CurrentPlanet.OwnerId = Byte(oiUninhabited) then
             begin
-              TrySetAchievementProgress(
-                  'EXPLORER',
-                  GetPlayer.AchievementStats.UninhabitedPlanetsVisited
-              );
-              TryAddAchievementProgress('EXPLORER', 1);
-              Inc(GetPlayer.AchievementStats.UninhabitedPlanetsVisited);
+              if Self = LocalPlayer then
+              begin
+                TrySetAchievementProgress(
+                    'EXPLORER',
+                    TPlayer(Self).AchievementStats.UninhabitedPlanetsVisited
+                );
+                TryAddAchievementProgress('EXPLORER', 1);
+              end;
+              Inc(TPlayer(Self).AchievementStats.UninhabitedPlanetsVisited);
             end;
           end;
         end;
@@ -13945,7 +14051,7 @@ begin
   end
   else if Order = soJump then
   begin
-    if (GetPlayer = Self) and (GetPlayer.QueuedTravelTarget <> nil) and (StepIndex >= 50) then
+    if IsHuman(Self) and (TPlayer(Self).QueuedTravelTarget <> nil) and (StepIndex >= 50) then
       FilmAlphaStep := -1.785;
     if not InHyperspace and (MovementPath.ActiveHead <> nil) then
     begin
@@ -13962,13 +14068,13 @@ begin
             TEFilm(PrimaryFilm).DetachObject(StepIndex, AuxiliaryFilmObject);
         end;
         ClearMovementPath;
-        if ((GetPlayer = Self)
+        if (IsHuman(Self)
                 or (TypeId <> stRanger)
                 or (PartnerShip = nil)
                 or ((TStar(OrderTarget).ControlFaction <> sfDominators)
                     and (TStar(OrderTarget).Status.CustomFaction = '')))
-            and ((GetPlayer <> Self)
-                or ((Galaxy.AmmoModEnabled <> 1) and (GetPlayer.QueuedTravelTarget = nil))) then
+            and (not IsHuman(Self)
+                or ((Galaxy.AmmoModEnabled <> 1) and (TPlayer(Self).QueuedTravelTarget = nil))) then
         begin
           Fuel :=
               GetFuelTanks.Fuel
@@ -13991,14 +14097,15 @@ begin
     else if not InHyperspace and (MovementPath.ActiveHead <> nil) then
     begin
       AdvancePath;
-      if RecordFilm and (FilmAlphaStep = 0) and (GetPlayer = Self) then
+      // HUMANS: film viewpoint
+      if RecordFilm and (FilmAlphaStep = 0) and (Self = LocalPlayer) then
         TEFilm(PrimaryFilm).SetCameraAnchor(StepIndex, OrderDestination, True);
       if (Position.X = OrderDestination.X) and (Position.Y = OrderDestination.Y) then
       begin
         if THole(OrderTarget).HoleType in [1] then
           THole(OrderTarget).HoleType := 3;
         if (THole(OrderTarget).HoleType = 4)
-            and (GetPlayer = Self)
+            and IsHuman(Self)
             and ((KellerShip = nil) or KellerShip.InHyperspace)
             and (Galaxy.KellerMissionState = 5) then
           THole(OrderTarget).CreatedTurn := Galaxy.CurrentTurn - 10 - 1;
@@ -14026,7 +14133,8 @@ begin
     if MovementPath.ActiveHead <> nil then
     begin
       AdvancePath;
-      if RecordFilm and (GetPlayer = Self) then
+      // HUMANS: film viewpoint
+      if RecordFilm and (Self = LocalPlayer) then
         TEFilm(PrimaryFilm).SetCameraAnchor(StepIndex, (OrderTarget as TShip).Position, True);
     end;
   end
@@ -14266,7 +14374,9 @@ var
   Node: PSPathNode;
 begin
   JumpDeparturePathCommitted := False;
-  if (LocalHuman.PlayerStar = CurrentStar) and (GetPlayer = Self) then
+  // CHANGE: CLEANUP - A human in the star its day is filmed in; native asked this of the
+  // local human.
+  if IsHuman(Self) and (HumanOf(Self) <> nil) and (HumanOf(Self).PlayerStar = CurrentStar) then
     MovementSpeed := Max(0.5, MovementSpeed);
   MovementDirection := WrapHeadingDegrees(MovementDirection);
   ClearMovementPath;
@@ -14306,7 +14416,7 @@ begin
     Planet := OrderTarget as TPlanet;
     OuterRadius := Planet.GraphicRadius + 150;
     InnerRadius := Planet.GraphicRadius + 50;
-    if GetPlayer = Self then
+    if IsHuman(Self) then
     begin
       Point := AddPointsF(Planet.PredictPosition(Steps), OrderDestination);
       if PointDistanceSquared(Position, Planet.GetPosition) > Sqr(OuterRadius) then
@@ -14469,7 +14579,8 @@ begin
             );
         if ((Angle >= 125) and (Speed > 200)) or (Angle >= 175) then
         begin
-          if (Angle < 175) and (Speed >= 200) and (LocalHuman.PlayerStar = CurrentStar) then
+          // CHANGE: CLEANUP - In any star a human's day is filmed in, not only the local one.
+          if (Angle < 175) and (Speed >= 200) and IsFilmedStar(CurrentStar) then
           begin
             Distance := 1 / Sqrt(Position.X * Position.X + Position.Y * Position.Y);
             Point.X := Position.X + Position.X * Distance * 10000;
@@ -14507,10 +14618,9 @@ var
 begin
   AppendTurningPath(Destination, False, MaximumNodes);
   AppendStraightPath(Destination, MaximumNodes);
-  if (LocalHuman.PlayerStar = CurrentStar)
-      and (MovementPath.NodeCount < 200)
-      and ((GetPlayer.CurrentPlanet = nil)
-          or ((GetPlayer.CurrentPlanet <> nil) and (GetPlayer.Order = soTakeoff))) then
+  // CHANGE: CLEANUP - Resampled wherever a human watches the star's film, not only the
+  // local one.
+  if (MovementPath.NodeCount < 200) and IsFilmWatchedInStar(CurrentStar) then
     MovementPath.ResampleBezierRange(MovementPath.ActiveHead, MovementPath.ActiveTail, 200);
   Step := MovementSpeed * 200 * CurrentStar.MovementStepScale;
   if MovementPath.ActiveHead <> nil then
@@ -14539,10 +14649,9 @@ var
   Step: Single;
 begin
   AppendStarAvoidingPath(Destination, MaximumNodes);
-  if (LocalHuman.PlayerStar = CurrentStar)
-      and (MovementPath.NodeCount < 200)
-      and ((GetPlayer.CurrentPlanet = nil)
-          or ((GetPlayer.CurrentPlanet <> nil) and (GetPlayer.Order = soTakeoff))) then
+  // CHANGE: CLEANUP - Resampled wherever a human watches the star's film, not only the
+  // local one.
+  if (MovementPath.NodeCount < 200) and IsFilmWatchedInStar(CurrentStar) then
     MovementPath.ResampleBezierRange(MovementPath.ActiveHead, MovementPath.ActiveTail, 200);
   Step := MovementSpeed * 200 * CurrentStar.MovementStepScale;
   if MovementPath.ActiveHead <> nil then
@@ -14580,7 +14689,8 @@ begin
     Node.Heading := 0;
     Angle := Angle + Step;
   end;
-  if (CurrentStar = LocalHuman.PlayerStar) and (MovementPath.NodeCount < 200) then
+  // CHANGE: CLEANUP - In any star a human's day is filmed in, not only the local one.
+  if IsFilmedStar(CurrentStar) and (MovementPath.NodeCount < 200) then
     MovementPath.ResampleBezierRange(MovementPath.ActiveHead, MovementPath.ActiveTail, 200);
 end;
 
@@ -14828,7 +14938,8 @@ begin
   begin
     Point := MovementPath.ActiveTail.Position;
     Heading := MovementPath.ActiveTail.Heading;
-    if LocalHuman.PlayerStar = CurrentStar then
+    // CHANGE: CLEANUP - In any star a human's day is filmed in, not only the local one.
+    if IsFilmedStar(CurrentStar) then
       I := Min(100, MovementPath.NodeCount mod 200);
   end;
   Count := CurrentStar.MovementStepCount;
@@ -15374,6 +15485,8 @@ begin
   begin
     RepairDuplicateSatelliteTrajectoryIndices;
     RefreshAssignedItemSlots;
+    // HUMANS: hold order. aHold keeps the local human's; this becomes the acting human's
+    // when aHold takes the human (docs/humans.md).
     LocalHuman.PlayerHoldShip := Self;
     RefreshPlayerHoldView(True);
     SetLength(Indices, Inventory.Count);
@@ -15424,6 +15537,8 @@ begin
   begin
     RepairDuplicateSatelliteTrajectoryIndices;
     RefreshAssignedItemSlots;
+    // HUMANS: hold order. aHold keeps the local human's; this becomes the acting human's
+    // when aHold takes the human (docs/humans.md).
     LocalHuman.PlayerHoldShip := Self;
     RefreshPlayerHoldView(True);
     SetLength(Indices, Inventory.Count);
@@ -15881,6 +15996,7 @@ procedure TShip.ApplyNanoArtefactRepair;
 var
   Item: TEquipment;
   I, EquippedCount, UnequippedCount: Integer;
+  Bubble: TMessagePlayer;
   procedure SelectOrdinal(
       Ordinal: Integer;
       Equipped: Boolean
@@ -15962,20 +16078,23 @@ begin
     if (Item.ConditionPercent > 0) and (Item.BrokenFlag <> 0) then
     begin
       Item.BrokenFlag := 0;
-      if GetPlayer = Self then
-        AddOrUpdatePlayerBubble(
-                    2,
-                    Galaxy.CurrentTurn,
-                    FormatText1(
-                        LocalizedText('Artefacts.ArtNano.RepairItem'),
-                        '<color=255,240,100>',
-                        '<Name>',
-                        Item.GetDisplayName
-                    ),
-                    '')
-                .Targets[0]
-                .ShipId :=
-            Id;
+      // CHANGE: CLEANUP - The bubble goes to Self's human.
+      if IsHuman(Self) then
+      begin
+        Bubble :=
+            AddHumanBubble(
+                Self,
+                2,
+                FormatText1(
+                    LocalizedText('Artefacts.ArtNano.RepairItem'),
+                    '<color=255,240,100>',
+                    '<Name>',
+                    Item.GetDisplayName
+                )
+            );
+        if Bubble <> nil then
+          Bubble.Targets[0].ShipId := Id;
+      end;
     end;
   end;
 end;
@@ -16007,10 +16126,11 @@ var
 begin
   if Pos('Talk.', Path) = 1 then
   begin
-    if GetPlayer <> Self then
+    // CHANGE: CLEANUP - A human's lines take the context of the ship its human talks to.
+    if not IsHuman(Self) then
       Key := ReplaceAllWideString(Path, 'Talk.', GetTalkContextPrefix(Self))
-    else if LocalHuman.TalkShip <> nil then
-      Key := ReplaceAllWideString(Path, 'Talk.', GetTalkContextPrefix(LocalHuman.TalkShip))
+    else if (HumanOf(Self) <> nil) and (HumanOf(Self).TalkShip <> nil) then
+      Key := ReplaceAllWideString(Path, 'Talk.', GetTalkContextPrefix(HumanOf(Self).TalkShip))
     else
       Key := Path;
   end
@@ -16045,8 +16165,16 @@ begin
   Result := ReplaceColoredToken(Result, '<FullShip>', GetFullName(' '), '<color=255,240,100>');
   Result := ReplaceAllWideString(Result, '<clr>', '<color=255,240,100>');
   Result := ReplaceAllWideString(Result, '<clrEnd>', '</color>');
-  if (GetPlayer = Self) and (LocalHuman.TalkShip <> nil) then
-    Result := ReplaceColoredToken(Result, '<LocalHuman.TalkShip>', LocalHuman.TalkShip.GetName, '<color=255,240,100>');
+  // CHANGE: CLEANUP - '<TalkShip>' again, as in the game data; a bulk rename had made it
+  // '<LocalHuman.TalkShip>'. The ship is the one Self's human talks to.
+  if IsHuman(Self) and (HumanOf(Self) <> nil) and (HumanOf(Self).TalkShip <> nil) then
+    Result :=
+        ReplaceColoredToken(
+            Result,
+            '<TalkShip>',
+            HumanOf(Self).TalkShip.GetName,
+            '<color=255,240,100>'
+        );
 end;
 
 function TShip.OpenPlayerConversation(RespectChameleon: Boolean): Boolean;
@@ -16054,9 +16182,11 @@ var
   Handles: array[0..1] of Windows.THandle;
   WaitResult: Cardinal;
 begin
+  // CHANGE: CLEANUP - The conversation screen is this machine's, so it opens for the local
+  // human only. Callers route other humans to the automatic answer (docs/humans.md).
   if ExitScreenLoop
-      or not GetPlayer.InNormalSpace
-      or (GetPlayer.CurrentStar <> CurrentStar)
+      or not LocalPlayer.InNormalSpace
+      or (LocalPlayer.CurrentStar <> CurrentStar)
       or (TurnCalculationPhase
           in [tcpIdle, tcpGalaxyFinished, tcpPlayerStarFinished, tcpPlayerStarPrepared])
       or (HumanScreen <> screenStarMap)
@@ -16065,8 +16195,8 @@ begin
     Result := False;
     Exit;
   end;
-  if ((Byte(RespectChameleon) and Byte(GetPlayer.ChameleonActive)) <> 0)
-      and IsPlayerChameleonEffectiveAgainstSelf
+  if ((Byte(RespectChameleon) and Byte(LocalPlayer.ChameleonActive)) <> 0)
+      and IsChameleonEffectiveAgainstSelf(LocalPlayer)
       and ((ScriptShip = nil) or not HasScriptControl) then
   begin
     Result := False;
@@ -16114,273 +16244,284 @@ begin
     Result := LocalHuman.TalkResponse;
 end;
 
+// CHANGE: CLEANUP - Every human who overhears the demand gets the bubble.
 procedure TShip.NotifyMoneyDemand(OtherShip: TShip; Response: WideString; Amount: Integer);
 var
-  Header, Request: WideString;
-  RadarSquared: Integer;
+  Header, Request, Text: WideString;
+  HumanIndex: Integer;
 begin
-  if (GetPlayer.CurrentStar <> CurrentStar) or not GetPlayer.InNormalSpace then
-    Exit;
-  RadarSquared := Sqr(GetPlayer.GetRadarRange);
-  if not ((RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-      or (RadarSquared >= PointDistanceSquared(OtherShip.Position, GetPlayer.Position))) then
-    Exit;
-  Header :=
-      '<color=255,240,100>'
-          + GetFullName(' ')
-          + '</color>'
-          + LookupTalkText('Talk.To')
-          + '<color=255,240,100>'
-          + OtherShip.GetFullName(' ')
-          + '</color>';
-  Request :=
-      '- '
-          + ReplaceColoredToken(
-              LookupTalkText('Talk.Money.Send'),
-              '<Money>',
-              IntToStr(Amount),
-              '<color=255,240,100>');
-  Response := '- ' + Response;
-  with AddOrUpdatePlayerBubble(
-      1,
-      Galaxy.CurrentTurn,
-      Header + #13#10 + Request + #13#10 + Response,
-      '') do
+  Text := '';
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    Targets[0].ShipId := Self.Id;
-    Targets[1].ShipId := OtherShip.Id;
+    if not HumanOverhears(Session.Humans[HumanIndex].Player, Self, OtherShip) then
+      Continue;
+    if Text = '' then
+    begin
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + OtherShip.GetFullName(' ')
+              + '</color>';
+      Request :=
+          '- '
+              + ReplaceColoredToken(
+                  LookupTalkText('Talk.Money.Send'),
+                  '<Money>',
+                  IntToStr(Amount),
+                  '<color=255,240,100>');
+      Text := Header + #13#10 + Request + #13#10 + '- ' + Response;
+    end;
+    with Session.Humans[HumanIndex].AddOrUpdateBubble(1, Galaxy.CurrentTurn, Text, '') do
+    begin
+      Targets[0].ShipId := Self.Id;
+      Targets[1].ShipId := OtherShip.Id;
+    end;
   end;
 end;
 
+// CHANGE: CLEANUP - Every human who overhears the demand gets the bubble.
 procedure TShip.NotifyCargoDemand(OtherShip: TShip; Response: WideString);
 var
-  Header, Request: WideString;
-  RadarSquared: Integer;
+  Header, Request, Text: WideString;
+  HumanIndex: Integer;
 begin
-  if (GetPlayer.CurrentStar <> CurrentStar) or not GetPlayer.InNormalSpace then
-    Exit;
-  RadarSquared := Sqr(GetPlayer.GetRadarRange);
-  if not ((RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-      or (RadarSquared >= PointDistanceSquared(OtherShip.Position, GetPlayer.Position))) then
-    Exit;
-  Header :=
-      '<color=255,240,100>'
-          + GetFullName(' ')
-          + '</color>'
-          + LookupTalkText('Talk.To')
-          + '<color=255,240,100>'
-          + OtherShip.GetFullName(' ')
-          + '</color>';
-  Request := '- ' + WrapTextInColor(LookupTalkText('Talk.Goods.Send'), '');
-  Response := '- ' + Response;
-  with AddOrUpdatePlayerBubble(
-      1,
-      Galaxy.CurrentTurn,
-      Header + #13#10 + Request + #13#10 + Response,
-      '') do
+  Text := '';
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    Targets[0].ShipId := Self.Id;
-    Targets[1].ShipId := OtherShip.Id;
+    if not HumanOverhears(Session.Humans[HumanIndex].Player, Self, OtherShip) then
+      Continue;
+    if Text = '' then
+    begin
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + OtherShip.GetFullName(' ')
+              + '</color>';
+      Request := '- ' + WrapTextInColor(LookupTalkText('Talk.Goods.Send'), '');
+      Text := Header + #13#10 + Request + #13#10 + '- ' + Response;
+    end;
+    with Session.Humans[HumanIndex].AddOrUpdateBubble(1, Galaxy.CurrentTurn, Text, '') do
+    begin
+      Targets[0].ShipId := Self.Id;
+      Targets[1].ShipId := OtherShip.Id;
+    end;
   end;
 end;
 
+// CHANGE: CLEANUP - Every human who overhears it gets the bubble, except OtherShip's human
+// when its chameleon fools this ship.
 procedure TShip.NotifyFearCargoDrop(OtherShip: TShip);
 var
   Header: WideString;
-  RadarSquared: Integer;
   Request: WideString;
+  HumanIndex: Integer;
+  Player: TPlayer;
 begin
-  if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    RadarSquared := Sqr(GetPlayer.GetRadarRange);
-    if (RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-        or (RadarSquared >= PointDistanceSquared(OtherShip.Position, GetPlayer.Position)) then
+    Player := Session.Humans[HumanIndex].Player;
+    if not HumanOverhears(Player, Self, OtherShip) then
+      Continue;
+    if ((Player <> OtherShip)
+            or not Player.ChameleonActive
+            or not IsChameleonEffectiveAgainstSelf(Player))
+        and not NoTalk
+        and not OtherShip.NoTalk then
     begin
-      if ((GetPlayer <> OtherShip)
-              or not GetPlayer.ChameleonActive
-              or not IsPlayerChameleonEffectiveAgainstSelf)
-          and not NoTalk
-          and not OtherShip.NoTalk then
+      Request := LookupVisibleTalkText('Talk.DropGoodsInFear.Drop', OtherShip);
+      ReplaceTextToken(Request, '<ShipBad>', OtherShip.GetName, '<color=255,240,100>');
+      ReplaceTextToken(
+          Request,
+          '<FullShipBad>',
+          OtherShip.GetFullName(' '),
+          '<color=255,240,100>'
+      );
+      ReplaceTextToken(Request, '<Star>', CurrentStar.Name, '<color=255,240,100>');
+      Header := '<color=255,240,100>' + GetFullName(' ') + '</color>' + ':';
+      Request := '- ' + Request;
+      with Session.Humans[HumanIndex]
+          .AddOrUpdateBubble(1, Galaxy.CurrentTurn, Header + #13#10 + Request, '') do
       begin
-        Request := LookupVisibleTalkText('Talk.DropGoodsInFear.Drop', OtherShip);
-        ReplaceTextToken(Request, '<ShipBad>', OtherShip.GetName, '<color=255,240,100>');
-        ReplaceTextToken(
-            Request,
-            '<FullShipBad>',
-            OtherShip.GetFullName(' '),
-            '<color=255,240,100>'
-        );
-        ReplaceTextToken(Request, '<Star>', CurrentStar.Name, '<color=255,240,100>');
-        Header := '<color=255,240,100>' + GetFullName(' ') + '</color>' + ':';
-        Request := '- ' + Request;
-        with AddOrUpdatePlayerBubble(1, Galaxy.CurrentTurn, Header + #13#10 + Request, '') do
-        begin
-          Targets[0].ShipId := Self.Id;
-          Targets[1].ShipId := OtherShip.Id;
-        end;
+        Targets[0].ShipId := Self.Id;
+        Targets[1].ShipId := OtherShip.Id;
       end;
     end;
   end;
 end;
 
+// CHANGE: CLEANUP - Every human who overhears the offer gets the bubble.
 procedure TShip.NotifyTruceOffer(OtherShip: TShip; Response: WideString; Amount: Integer);
 var
-  Header, Request: WideString;
-  RadarSquared: Integer;
+  Header, Request, Text: WideString;
+  HumanIndex: Integer;
 begin
-  if (GetPlayer.CurrentStar <> CurrentStar) or not GetPlayer.InNormalSpace then
-    Exit;
-  RadarSquared := Sqr(GetPlayer.GetRadarRange);
-  if not ((RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-      or (RadarSquared >= PointDistanceSquared(OtherShip.Position, GetPlayer.Position))) then
-    Exit;
   if NoTalk or OtherShip.NoTalk then
     Exit;
-  Header :=
-      '<color=255,240,100>'
-          + GetFullName(' ')
-          + '</color>'
-          + LookupTalkText('Talk.To')
-          + '<color=255,240,100>'
-          + OtherShip.GetFullName(' ')
-          + '</color>';
-  Request :=
-      '- '
-          + ReplaceColoredToken(
-              LookupTalkText('Talk.Truce.' + GetTypeNameKey + 'Send'),
-              '<Money>',
-              IntToStr(Amount),
-              '<color=255,240,100>');
-  Response := '- ' + Response;
-  with AddOrUpdatePlayerBubble(
-      1,
-      Galaxy.CurrentTurn,
-      Header + #13#10 + Request + #13#10 + Response,
-      '') do
+  Text := '';
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    Targets[0].ShipId := Self.Id;
-    Targets[1].ShipId := OtherShip.Id;
+    if not HumanOverhears(Session.Humans[HumanIndex].Player, Self, OtherShip) then
+      Continue;
+    if Text = '' then
+    begin
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + OtherShip.GetFullName(' ')
+              + '</color>';
+      Request :=
+          '- '
+              + ReplaceColoredToken(
+                  LookupTalkText('Talk.Truce.' + GetTypeNameKey + 'Send'),
+                  '<Money>',
+                  IntToStr(Amount),
+                  '<color=255,240,100>');
+      Text := Header + #13#10 + Request + #13#10 + '- ' + Response;
+    end;
+    with Session.Humans[HumanIndex].AddOrUpdateBubble(1, Galaxy.CurrentTurn, Text, '') do
+    begin
+      Targets[0].ShipId := Self.Id;
+      Targets[1].ShipId := OtherShip.Id;
+    end;
   end;
 end;
 
+// CHANGE: CLEANUP - Every human who overhears the request gets the bubble.
 procedure TShip.NotifyAttackRequest(OtherShip: TShip; Response: WideString; Target: TShip);
 var
-  Header, Request: WideString;
-  RadarSquared: Integer;
+  Header, Request, Text: WideString;
+  HumanIndex: Integer;
 begin
-  if (GetPlayer.CurrentStar <> CurrentStar) or not GetPlayer.InNormalSpace then
-    Exit;
-  RadarSquared := Sqr(GetPlayer.GetRadarRange);
-  if not ((RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-      or (RadarSquared >= PointDistanceSquared(OtherShip.Position, GetPlayer.Position))) then
-    Exit;
   if NoTalk or OtherShip.NoTalk then
     Exit;
-  Header :=
-      '<color=255,240,100>'
-          + GetFullName(' ')
-          + '</color>'
-          + LookupTalkText('Talk.To')
-          + '<color=255,240,100>'
-          + OtherShip.GetFullName(' ')
-          + '</color>';
-  Request :=
-      '- '
-          + ReplaceColoredToken(
-              LookupTalkText('Talk.Attack.' + GetTypeNameKey + 'Send'),
-              '<Target>',
-              Target.GetFullName(' '),
-              '<color=255,240,100>');
-  Response := '- ' + Response;
-  with AddOrUpdatePlayerBubble(
-      1,
-      Galaxy.CurrentTurn,
-      Header + #13#10 + Request + #13#10 + Response,
-      '') do
+  Text := '';
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    Targets[0].ShipId := Self.Id;
-    Targets[1].ShipId := OtherShip.Id;
-    Targets[2].ShipId := Target.Id;
+    if not HumanOverhears(Session.Humans[HumanIndex].Player, Self, OtherShip) then
+      Continue;
+    if Text = '' then
+    begin
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + OtherShip.GetFullName(' ')
+              + '</color>';
+      Request :=
+          '- '
+              + ReplaceColoredToken(
+                  LookupTalkText('Talk.Attack.' + GetTypeNameKey + 'Send'),
+                  '<Target>',
+                  Target.GetFullName(' '),
+                  '<color=255,240,100>');
+      Text := Header + #13#10 + Request + #13#10 + '- ' + Response;
+    end;
+    with Session.Humans[HumanIndex].AddOrUpdateBubble(1, Galaxy.CurrentTurn, Text, '') do
+    begin
+      Targets[0].ShipId := Self.Id;
+      Targets[1].ShipId := OtherShip.Id;
+      Targets[2].ShipId := Target.Id;
+    end;
   end;
 end;
 
+// CHANGE: CLEANUP - Every human who overhears the offer gets the bubble.
 procedure TShip.NotifyPartnershipOffer(OtherShip: TShip; Response: WideString; Amount: Integer);
 var
-  Header, Request: WideString;
-  RadarSquared: Integer;
+  Header, Request, Text: WideString;
+  HumanIndex: Integer;
 begin
-  if (GetPlayer.CurrentStar <> CurrentStar) or not GetPlayer.InNormalSpace then
-    Exit;
-  RadarSquared := Sqr(GetPlayer.GetRadarRange);
-  if not ((RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-      or (RadarSquared >= PointDistanceSquared(OtherShip.Position, GetPlayer.Position))) then
-    Exit;
   if NoTalk or OtherShip.NoTalk then
     Exit;
-  Header :=
-      '<color=255,240,100>'
-          + GetFullName(' ')
-          + '</color>'
-          + LookupTalkText('Talk.To')
-          + '<color=255,240,100>'
-          + OtherShip.GetFullName(' ')
-          + '</color>';
-  Request :=
-      '- '
-          + FormatText1(
-              LookupTalkText('Talk.Partner.Send'),
-              '<color=255,240,100>',
-              '<Money>',
-              IntToStr(Amount));
-  Response := '- ' + Response;
-  with AddOrUpdatePlayerBubble(
-      1,
-      Galaxy.CurrentTurn,
-      Header + #13#10 + Request + #13#10 + Response,
-      '') do
+  Text := '';
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    Targets[0].ShipId := Self.Id;
-    Targets[1].ShipId := OtherShip.Id;
+    if not HumanOverhears(Session.Humans[HumanIndex].Player, Self, OtherShip) then
+      Continue;
+    if Text = '' then
+    begin
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + OtherShip.GetFullName(' ')
+              + '</color>';
+      Request :=
+          '- '
+              + FormatText1(
+                  LookupTalkText('Talk.Partner.Send'),
+                  '<color=255,240,100>',
+                  '<Money>',
+                  IntToStr(Amount));
+      Text := Header + #13#10 + Request + #13#10 + '- ' + Response;
+    end;
+    with Session.Humans[HumanIndex].AddOrUpdateBubble(1, Galaxy.CurrentTurn, Text, '') do
+    begin
+      Targets[0].ShipId := Self.Id;
+      Targets[1].ShipId := OtherShip.Id;
+    end;
   end;
 end;
 
 procedure TShip.NotifyPartnerBreak(Leader: TShip);
 var
   Header, Request, Response: WideString;
-  RadarSquared: Integer;
+  HumanIndex: Integer;
+  Human: THuman;
+  Player: TPlayer;
 begin
-  if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
+  // CHANGE: CLEANUP - Leader is asked when it is a human; every other human who overhears
+  // the talk gets the bubble.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
+    Human := Session.Humans[HumanIndex];
+    Player := Human.Player;
+    if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
+      Continue;
+    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
+    // answer is automatic, as when the local one has automatic control.
+    if (Player = Leader)
+        and (Player = LocalPlayer)
+        and not LocalHuman.PlayerAutomaticControl
+        and not Leader.NoTalk then
     begin
       ShowPlayerDialogue(tkPartnerBreak, LookupTalkText('Talk.Partner.MateBreak'), 0);
-      GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
+      Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
-    else
+    else if HumanOverhears(Player, Self, Leader)
+        and not NoTalk
+        and (not Leader.NoTalk or (Player = Leader)) then
     begin
-      RadarSquared := Sqr(GetPlayer.GetRadarRange);
-      if (RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-          or (RadarSquared >= PointDistanceSquared(Leader.Position, GetPlayer.Position)) then
-        if not NoTalk and (not Leader.NoTalk or (GetPlayer = Leader)) then
-        begin
-          Header :=
-              '<color=255,240,100>'
-                  + GetFullName(' ')
-                  + '</color>'
-                  + LookupTalkText('Talk.To')
-                  + '<color=255,240,100>'
-                  + Leader.GetFullName(' ')
-                  + '</color>';
-          Request := #13#10'- ' + LookupTalkText('Talk.Partner.MateBreak');
-          Response := #13#10'- ' + LookupTalkText('Talk.Partner.AnswerLiderBreak');
-          if Leader.NoTalk then
-            Response := '';
-          with AddOrUpdatePlayerBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
-          begin
-            Targets[0].ShipId := Self.Id;
-            Targets[1].ShipId := Leader.Id;
-          end;
-        end;
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + Leader.GetFullName(' ')
+              + '</color>';
+      Request := #13#10'- ' + LookupTalkText('Talk.Partner.MateBreak');
+      Response := #13#10'- ' + LookupTalkText('Talk.Partner.AnswerLiderBreak');
+      if Leader.NoTalk then
+        Response := '';
+      with Human.AddOrUpdateBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
+      begin
+        Targets[0].ShipId := Self.Id;
+        Targets[1].ShipId := Leader.Id;
+      end;
     end;
   end;
 end;
@@ -16388,47 +16529,56 @@ end;
 procedure TShip.NotifyPartnershipExpired(Leader: TShip);
 var
   Header, Request, Response: WideString;
-  RadarSquared: Integer;
+  HumanIndex: Integer;
+  Human: THuman;
+  Player: TPlayer;
 begin
-  if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
+  // CHANGE: CLEANUP - Leader is asked when it is a human; every other human who overhears
+  // the talk gets the bubble.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
+    Human := Session.Humans[HumanIndex];
+    Player := Human.Player;
+    if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
+      Continue;
+    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
+    // answer is automatic, as when the local one has automatic control.
+    if (Player = Leader)
+        and (Player = LocalPlayer)
+        and not LocalHuman.PlayerAutomaticControl
+        and not Leader.NoTalk then
     begin
-      if GetPlayer.GetEffectiveSkillLevel(psLeadership) > GetPlayer.CountWingmen then
+      if Player.GetEffectiveSkillLevel(psLeadership) > Player.CountWingmen then
         ShowPlayerDialogue(tkPartnerEnd, LookupTalkText('Talk.Partner.MateTheEnd'), 0)
       else
         ShowPlayerDialogue(tkPartnerEnd, LookupTalkText('Talk.Partner.MateTheEndLowLeadership'), 0);
-      GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
+      Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
-    else
+    else if HumanOverhears(Player, Self, Leader)
+        and not NoTalk
+        and (not Leader.NoTalk or (Player = Leader)) then
     begin
-      RadarSquared := Sqr(GetPlayer.GetRadarRange);
-      if (RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-          or (RadarSquared >= PointDistanceSquared(Leader.Position, GetPlayer.Position)) then
-        if not NoTalk and (not Leader.NoTalk or (GetPlayer = Leader)) then
-        begin
-          Header :=
-              '<color=255,240,100>'
-                  + GetFullName(' ')
-                  + '</color>'
-                  + LookupTalkText('Talk.To')
-                  + '<color=255,240,100>'
-                  + Leader.GetFullName(' ')
-                  + '</color>';
-          if (GetPlayer <> Leader)
-              or (GetPlayer.GetEffectiveSkillLevel(psLeadership) > GetPlayer.CountWingmen) then
-            Request := #13#10'- ' + LookupTalkText('Talk.Partner.MateTheEnd')
-          else
-            Request := #13#10'- ' + LookupTalkText('Talk.Partner.MateTheEndLowLeadership');
-          Response := #13#10'- ' + LookupTalkText('Talk.Partner.AnswerLiderTheEnd');
-          if Leader.NoTalk then
-            Response := '';
-          with AddOrUpdatePlayerBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
-          begin
-            Targets[0].ShipId := Self.Id;
-            Targets[1].ShipId := Leader.Id;
-          end;
-        end;
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + Leader.GetFullName(' ')
+              + '</color>';
+      if (Player <> Leader)
+          or (Player.GetEffectiveSkillLevel(psLeadership) > Player.CountWingmen) then
+        Request := #13#10'- ' + LookupTalkText('Talk.Partner.MateTheEnd')
+      else
+        Request := #13#10'- ' + LookupTalkText('Talk.Partner.MateTheEndLowLeadership');
+      Response := #13#10'- ' + LookupTalkText('Talk.Partner.AnswerLiderTheEnd');
+      if Leader.NoTalk then
+        Response := '';
+      with Human.AddOrUpdateBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
+      begin
+        Targets[0].ShipId := Self.Id;
+        Targets[1].ShipId := Leader.Id;
+      end;
     end;
   end;
 end;
@@ -16436,57 +16586,70 @@ end;
 procedure TShip.NotifyPartnerRebellion(Leader: TShip);
 var
   Header, Request, Response: WideString;
-  RadarSquared: Integer;
+  HumanIndex: Integer;
+  Human: THuman;
+  Player: TPlayer;
 begin
-  if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
+  // CHANGE: CLEANUP - Leader is asked when it is a human; every other human who overhears
+  // the talk gets the bubble.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
+    Human := Session.Humans[HumanIndex];
+    Player := Human.Player;
+    if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
+      Continue;
+    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
+    // answer is automatic, as when the local one has automatic control.
+    if (Player = Leader)
+        and (Player = LocalPlayer)
+        and not LocalHuman.PlayerAutomaticControl
+        and not Leader.NoTalk then
     begin
       ShowPlayerDialogue(tkPartnerRiot, LookupTalkText('Talk.Partner.MateRiot'), 0);
-      GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
+      Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
-    else
+    else if HumanOverhears(Player, Self, Leader)
+        and not NoTalk
+        and (not Leader.NoTalk or (Player = Leader)) then
     begin
-      RadarSquared := Sqr(GetPlayer.GetRadarRange);
-      if (RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-          or (RadarSquared >= PointDistanceSquared(Leader.Position, GetPlayer.Position)) then
-        if not NoTalk and (not Leader.NoTalk or (GetPlayer = Leader)) then
-        begin
-          Header :=
-              '<color=255,240,100>'
-                  + GetFullName(' ')
-                  + '</color>'
-                  + LookupTalkText('Talk.To')
-                  + '<color=255,240,100>'
-                  + Leader.GetFullName(' ')
-                  + '</color>';
-          Request := #13#10'- ' + LookupTalkText('Talk.Partner.MateRiot');
-          Response := #13#10'- ' + LookupTalkText('Talk.Partner.AnswerLiderRiot');
-          if Leader.NoTalk then
-            Response := '';
-          with AddOrUpdatePlayerBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
-          begin
-            Targets[0].ShipId := Self.Id;
-            Targets[1].ShipId := Leader.Id;
-          end;
-        end;
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + Leader.GetFullName(' ')
+              + '</color>';
+      Request := #13#10'- ' + LookupTalkText('Talk.Partner.MateRiot');
+      Response := #13#10'- ' + LookupTalkText('Talk.Partner.AnswerLiderRiot');
+      if Leader.NoTalk then
+        Response := '';
+      with Human.AddOrUpdateBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
+      begin
+        Targets[0].ShipId := Self.Id;
+        Targets[1].ShipId := Leader.Id;
+      end;
     end;
   end;
 end;
 
-procedure TShip.ShowMessageToPlayer(Text: WideString);
+procedure TShip.ShowMessageToPlayer(Text: WideString; Player: TShip);
+var
+  Bubble: TMessagePlayer;
 begin
-  if not NoTalk and not GetPlayer.NoTalk then
+  if not NoTalk and not Player.NoTalk then
   begin
     TurnsSinceLastShipMessage := 0;
-    with AddOrUpdatePlayerBubble(
-        1,
-        Galaxy.CurrentTurn,
-        WrapTextInColor(GetFullName(' '), '<color=255,240,100>') + #13#10 + ' ' + #13#10 + Text,
-        '') do
+    Bubble :=
+        AddHumanBubble(
+            Player,
+            1,
+            WrapTextInColor(GetFullName(' '), '<color=255,240,100>') + #13#10 + ' ' + #13#10 + Text
+        );
+    if Bubble <> nil then
     begin
-      Targets[0].ShipId := Id;
-      Targets[1].ShipId := GetPlayer.Id;
+      Bubble.Targets[0].ShipId := Id;
+      Bubble.Targets[1].ShipId := Player.Id;
     end;
   end;
 end;
@@ -16494,40 +16657,49 @@ end;
 procedure TShip.NotifyPiratePartnerRelationBreak(Leader: TShip);
 var
   Header, Request, Response: WideString;
-  RadarSquared: Integer;
+  HumanIndex: Integer;
+  Human: THuman;
+  Player: TPlayer;
 begin
-  if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
+  // CHANGE: CLEANUP - Leader is asked when it is a human; every other human who overhears
+  // the talk gets the bubble.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
+    Human := Session.Humans[HumanIndex];
+    Player := Human.Player;
+    if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
+      Continue;
+    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
+    // answer is automatic, as when the local one has automatic control.
+    if (Player = Leader)
+        and (Player = LocalPlayer)
+        and not LocalHuman.PlayerAutomaticControl
+        and not Leader.NoTalk then
     begin
       ShowPlayerDialogue(tkPartnerBreak, LookupTalkText('Talk.Pirate.MateBreakRelation'), 0);
-      GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
+      Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
-    else
+    else if HumanOverhears(Player, Self, Leader)
+        and not NoTalk
+        and (not Leader.NoTalk or (Player = Leader)) then
     begin
-      RadarSquared := Sqr(GetPlayer.GetRadarRange);
-      if (RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-          or (RadarSquared >= PointDistanceSquared(Leader.Position, GetPlayer.Position)) then
-        if not NoTalk and (not Leader.NoTalk or (GetPlayer = Leader)) then
-        begin
-          Header :=
-              '<color=255,240,100>'
-                  + GetFullName(' ')
-                  + '</color>'
-                  + LookupTalkText('Talk.To')
-                  + '<color=255,240,100>'
-                  + Leader.GetFullName(' ')
-                  + '</color>';
-          Request := #13#10'- ' + LookupTalkText('Talk.Pirate.MateBreakRelation');
-          Response := #13#10'- ' + LookupTalkText('Talk.Pirate.AnswerLiderBreak');
-          if Leader.NoTalk then
-            Response := '';
-          with AddOrUpdatePlayerBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
-          begin
-            Targets[0].ShipId := Self.Id;
-            Targets[1].ShipId := Leader.Id;
-          end;
-        end;
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + Leader.GetFullName(' ')
+              + '</color>';
+      Request := #13#10'- ' + LookupTalkText('Talk.Pirate.MateBreakRelation');
+      Response := #13#10'- ' + LookupTalkText('Talk.Pirate.AnswerLiderBreak');
+      if Leader.NoTalk then
+        Response := '';
+      with Human.AddOrUpdateBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
+      begin
+        Targets[0].ShipId := Self.Id;
+        Targets[1].ShipId := Leader.Id;
+      end;
     end;
   end;
 end;
@@ -16535,40 +16707,49 @@ end;
 procedure TShip.NotifyPiratePartnerRatingBreak(Leader: TShip);
 var
   Header, Request, Response: WideString;
-  RadarSquared: Integer;
+  HumanIndex: Integer;
+  Human: THuman;
+  Player: TPlayer;
 begin
-  if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
+  // CHANGE: CLEANUP - Leader is asked when it is a human; every other human who overhears
+  // the talk gets the bubble.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
+    Human := Session.Humans[HumanIndex];
+    Player := Human.Player;
+    if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
+      Continue;
+    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
+    // answer is automatic, as when the local one has automatic control.
+    if (Player = Leader)
+        and (Player = LocalPlayer)
+        and not LocalHuman.PlayerAutomaticControl
+        and not Leader.NoTalk then
     begin
       ShowPlayerDialogue(tkPartnerBreak, LookupTalkText('Talk.Pirate.MateBreakRating'), 0);
-      GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
+      Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
-    else
+    else if HumanOverhears(Player, Self, Leader)
+        and not NoTalk
+        and (not Leader.NoTalk or (Player = Leader)) then
     begin
-      RadarSquared := Sqr(GetPlayer.GetRadarRange);
-      if (RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-          or (RadarSquared >= PointDistanceSquared(Leader.Position, GetPlayer.Position)) then
-        if not NoTalk and (not Leader.NoTalk or (GetPlayer = Leader)) then
-        begin
-          Header :=
-              '<color=255,240,100>'
-                  + GetFullName(' ')
-                  + '</color>'
-                  + LookupTalkText('Talk.To')
-                  + '<color=255,240,100>'
-                  + Leader.GetFullName(' ')
-                  + '</color>';
-          Request := #13#10'- ' + LookupTalkText('Talk.Pirate.MateBreakRating');
-          Response := #13#10'- ' + LookupTalkText('Talk.Pirate.AnswerLiderBreak');
-          if Leader.NoTalk then
-            Response := '';
-          with AddOrUpdatePlayerBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
-          begin
-            Targets[0].ShipId := Self.Id;
-            Targets[1].ShipId := Leader.Id;
-          end;
-        end;
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + Leader.GetFullName(' ')
+              + '</color>';
+      Request := #13#10'- ' + LookupTalkText('Talk.Pirate.MateBreakRating');
+      Response := #13#10'- ' + LookupTalkText('Talk.Pirate.AnswerLiderBreak');
+      if Leader.NoTalk then
+        Response := '';
+      with Human.AddOrUpdateBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
+      begin
+        Targets[0].ShipId := Self.Id;
+        Targets[1].ShipId := Leader.Id;
+      end;
     end;
   end;
 end;
@@ -16576,47 +16757,56 @@ end;
 procedure TShip.NotifyPiratePartnershipExpired(Leader: TShip);
 var
   Header, Request, Response: WideString;
-  RadarSquared: Integer;
+  HumanIndex: Integer;
+  Human: THuman;
+  Player: TPlayer;
 begin
-  if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
+  // CHANGE: CLEANUP - Leader is asked when it is a human; every other human who overhears
+  // the talk gets the bubble.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
+    Human := Session.Humans[HumanIndex];
+    Player := Human.Player;
+    if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
+      Continue;
+    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
+    // answer is automatic, as when the local one has automatic control.
+    if (Player = Leader)
+        and (Player = LocalPlayer)
+        and not LocalHuman.PlayerAutomaticControl
+        and not Leader.NoTalk then
     begin
-      if GetPlayer.GetEffectiveSkillLevel(psLeadership) > GetPlayer.CountWingmen then
+      if Player.GetEffectiveSkillLevel(psLeadership) > Player.CountWingmen then
         ShowPlayerDialogue(tkPartnerEnd, LookupTalkText('Talk.Pirate.MateTheEnd'), 0)
       else
         ShowPlayerDialogue(tkPartnerEnd, LookupTalkText('Talk.Pirate.MateTheEndLowLeadership'), 0);
-      GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
+      Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
-    else
+    else if HumanOverhears(Player, Self, Leader)
+        and not NoTalk
+        and (not Leader.NoTalk or (Player = Leader)) then
     begin
-      RadarSquared := Sqr(GetPlayer.GetRadarRange);
-      if (RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-          or (RadarSquared >= PointDistanceSquared(Leader.Position, GetPlayer.Position)) then
-        if not NoTalk and (not Leader.NoTalk or (GetPlayer = Leader)) then
-        begin
-          Header :=
-              '<color=255,240,100>'
-                  + GetFullName(' ')
-                  + '</color>'
-                  + LookupTalkText('Talk.To')
-                  + '<color=255,240,100>'
-                  + Leader.GetFullName(' ')
-                  + '</color>';
-          if (GetPlayer <> Leader)
-              or (GetPlayer.GetEffectiveSkillLevel(psLeadership) > GetPlayer.CountWingmen) then
-            Request := #13#10'- ' + LookupTalkText('Talk.Pirate.MateTheEnd')
-          else
-            Request := #13#10'- ' + LookupTalkText('Talk.Pirate.MateTheEndLowLeadership');
-          Response := #13#10'- ' + LookupTalkText('Talk.Pirate.AnswerLiderTheEnd');
-          if Leader.NoTalk then
-            Response := '';
-          with AddOrUpdatePlayerBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
-          begin
-            Targets[0].ShipId := Self.Id;
-            Targets[1].ShipId := Leader.Id;
-          end;
-        end;
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + Leader.GetFullName(' ')
+              + '</color>';
+      if (Player <> Leader)
+          or (Player.GetEffectiveSkillLevel(psLeadership) > Player.CountWingmen) then
+        Request := #13#10'- ' + LookupTalkText('Talk.Pirate.MateTheEnd')
+      else
+        Request := #13#10'- ' + LookupTalkText('Talk.Pirate.MateTheEndLowLeadership');
+      Response := #13#10'- ' + LookupTalkText('Talk.Pirate.AnswerLiderTheEnd');
+      if Leader.NoTalk then
+        Response := '';
+      with Human.AddOrUpdateBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
+      begin
+        Targets[0].ShipId := Self.Id;
+        Targets[1].ShipId := Leader.Id;
+      end;
     end;
   end;
 end;
@@ -16624,40 +16814,49 @@ end;
 procedure TShip.NotifyPiratePartnerRebellion(Leader: TShip);
 var
   Header, Request, Response: WideString;
-  RadarSquared: Integer;
+  HumanIndex: Integer;
+  Human: THuman;
+  Player: TPlayer;
 begin
-  if (GetPlayer.CurrentStar = CurrentStar) and GetPlayer.InNormalSpace then
+  // CHANGE: CLEANUP - Leader is asked when it is a human; every other human who overhears
+  // the talk gets the bubble.
+  for HumanIndex := 0 to Session.Humans.Count - 1 do
   begin
-    if (GetPlayer = Leader) and not LocalHuman.PlayerAutomaticControl and not Leader.NoTalk then
+    Human := Session.Humans[HumanIndex];
+    Player := Human.Player;
+    if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
+      Continue;
+    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
+    // answer is automatic, as when the local one has automatic control.
+    if (Player = Leader)
+        and (Player = LocalPlayer)
+        and not LocalHuman.PlayerAutomaticControl
+        and not Leader.NoTalk then
     begin
       ShowPlayerDialogue(tkPartnerRiot, LookupTalkText('Talk.Pirate.MateRiot'), 0);
-      GetPlayer.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
+      Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
-    else
+    else if HumanOverhears(Player, Self, Leader)
+        and not NoTalk
+        and (not Leader.NoTalk or (Player = Leader)) then
     begin
-      RadarSquared := Sqr(GetPlayer.GetRadarRange);
-      if (RadarSquared >= PointDistanceSquared(Position, GetPlayer.Position))
-          or (RadarSquared >= PointDistanceSquared(Leader.Position, GetPlayer.Position)) then
-        if not NoTalk and (not Leader.NoTalk or (GetPlayer = Leader)) then
-        begin
-          Header :=
-              '<color=255,240,100>'
-                  + GetFullName(' ')
-                  + '</color>'
-                  + LookupTalkText('Talk.To')
-                  + '<color=255,240,100>'
-                  + Leader.GetFullName(' ')
-                  + '</color>';
-          Request := #13#10'- ' + LookupTalkText('Talk.Pirate.MateRiot');
-          Response := #13#10'- ' + LookupTalkText('Talk.Pirate.AnswerLiderRiot');
-          if Leader.NoTalk then
-            Response := '';
-          with AddOrUpdatePlayerBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
-          begin
-            Targets[0].ShipId := Self.Id;
-            Targets[1].ShipId := Leader.Id;
-          end;
-        end;
+      Header :=
+          '<color=255,240,100>'
+              + GetFullName(' ')
+              + '</color>'
+              + LookupTalkText('Talk.To')
+              + '<color=255,240,100>'
+              + Leader.GetFullName(' ')
+              + '</color>';
+      Request := #13#10'- ' + LookupTalkText('Talk.Pirate.MateRiot');
+      Response := #13#10'- ' + LookupTalkText('Talk.Pirate.AnswerLiderRiot');
+      if Leader.NoTalk then
+        Response := '';
+      with Human.AddOrUpdateBubble(1, Galaxy.CurrentTurn, Header + Request + Response, '') do
+      begin
+        Targets[0].ShipId := Self.Id;
+        Targets[1].ShipId := Leader.Id;
+      end;
     end;
   end;
 end;
@@ -16679,22 +16878,22 @@ begin
           RemapClamped(Amount, Wealth / 45, Wealth / 8, 8, 36)
               * RemapClamped(Integer(RelationToShip(OtherShip)) and $7F, 50, 100, 0.7, 1.5)
       );
-  if (GetPlayer = OtherShip) and OtherShip.IsHealthEffectActive(20) then
+  if IsHuman(OtherShip) and OtherShip.IsHealthEffectActive(20) then
     Result := Result * 2;
 end;
 
-function TShip.GetGreetingText: WideString;
+function TShip.GetGreetingText(Player: TShip): WideString;
 var
   Key: WideString;
   Chameleon: Boolean;
   Series: Byte;
 begin
-  Chameleon := GetPlayer.ChameleonActive;
+  Chameleon := TPlayer(Player).ChameleonActive;
   if Self is TTranclucator then
     Key := 'Talk.Tranclucator.Greeting'
   else if IsFemaleHumanPilot then
   begin
-    if GetPlayer = PartnerShip then
+    if Player = PartnerShip then
     begin
       if Chameleon then
         Key := 'ShipGreetings.Standart.FemalePartnerChameleon'
@@ -16703,7 +16902,7 @@ begin
     end
     else if Chameleon then
     begin
-      if GetRelationLevelToShip(GetPlayer) < rlNormal then
+      if GetRelationLevelToShip(Player) < rlNormal then
         Key := 'ShipGreetings.Standart.FemaleChameleonWar'
       else
         Key := 'ShipGreetings.Standart.FemaleChameleon';
@@ -16713,7 +16912,7 @@ begin
       Result := (Self as TNormalShip).SelectSituationalMessage(False);
       if Result <> '' then
         Exit;
-      case Integer(GetRelationLevelToShip(GetPlayer)) and $7F of
+      case Integer(GetRelationLevelToShip(Player)) and $7F of
         0: Key := 'ShipGreetings.Standart.FemaleWar';
         1: Key := 'ShipGreetings.Standart.FemaleBad';
         2: Key := 'ShipGreetings.Standart.FemaleNormal';
@@ -16722,7 +16921,7 @@ begin
       end;
     end;
   end
-  else if GetPlayer = PartnerShip then
+  else if Player = PartnerShip then
   begin
     if Chameleon and (TypeId <> stPirate) then
       Key := 'ShipGreetings.Standart.' + GetTypeNameKey + 'PartnerChameleon'
@@ -16731,13 +16930,13 @@ begin
   end
   else if Self is TNormalShip then
   begin
-    if Chameleon and (TypeId = stPirate) and (GetRelationLevelToShip(GetPlayer) < rlNormal) then
+    if Chameleon and (TypeId = stPirate) and (GetRelationLevelToShip(Player) < rlNormal) then
       Key := 'ShipGreetings.Standart.' + GetTypeNameKey + 'ChameleonWar'
-    else if Chameleon and ((TypeId = stPirate) or IsPlayerChameleonEffectiveAgainstSelf) then
+    else if Chameleon and ((TypeId = stPirate) or IsChameleonEffectiveAgainstSelf(Player)) then
       Key := 'ShipGreetings.Standart.' + GetTypeNameKey + 'Chameleon'
     else
     begin
-      if (LiberationGroup <> nil) and (GetRelationLevelToShip(GetPlayer) > rlHostile) then
+      if (LiberationGroup <> nil) and (GetRelationLevelToShip(Player) > rlHostile) then
       begin
         Result := (TObject(LiberationGroup) as TGroup).GetShipGreeting(Self);
         if Result <> '' then
@@ -16746,7 +16945,7 @@ begin
       Result := (Self as TNormalShip).SelectSituationalMessage(False);
       if Result <> '' then
         Exit;
-      case Integer(GetRelationLevelToShip(GetPlayer)) and $7F of
+      case Integer(GetRelationLevelToShip(Player)) and $7F of
         0: Key := 'ShipGreetings.Standart.' + GetTypeNameKey + 'War';
         1: Key := 'ShipGreetings.Standart.' + GetTypeNameKey + 'Bad';
         2: Key := 'ShipGreetings.Standart.' + GetTypeNameKey + 'Normal';
@@ -16757,7 +16956,8 @@ begin
   end
   else if Self is TKling then
   begin
-    if not GetPlayer.HasProgram(prgIntercom) or not GetPlayer.CanResolveObjectWithScanner(Self) then
+    if not TPlayer(Player).HasProgram(prgIntercom)
+        or not TPlayer(Player).CanResolveObjectWithScanner(Self) then
       Key := 'ShipGreetings.Dominator.Rnd'
     else
     begin
@@ -16772,8 +16972,8 @@ begin
           2: Key := 'ShipGreetings.Dominator.' + DominatorSeriesNames[2];
         end;
         if Chameleon
-            and (Byte(GetPlayer.ChameleonSeries) = Series)
-            and not GetPlayer.ChameleonDetected[Series] then
+            and (Byte(TPlayer(Player).ChameleonSeries) = Series)
+            and not TPlayer(Player).ChameleonDetected[Series] then
           Key := Key + 'Chameleon';
       end;
     end;
@@ -16788,7 +16988,7 @@ begin
     ReplaceTextToken(
         Result,
         '<Name>',
-        GetPlayer.GetProgramName((Self as TKling).ActiveProgramId),
+        TPlayer(Player).GetProgramName((Self as TKling).ActiveProgramId),
         '<color=255,240,100>'
     );
 end;
@@ -17070,37 +17270,39 @@ begin
   end
   else
   begin
-    if GetPlayer = Self then
+    if IsHuman(Self) then
       case SourceKind of
         1:
         begin
-          Awarded := Round(Awarded / (GetPlayer.ExperienceByDominators * 0.000001 + 1));
-          Inc(GetPlayer.ExperienceByDominators, Awarded);
+          Awarded := Round(Awarded / (TPlayer(Self).ExperienceByDominators * 0.000001 + 1));
+          Inc(TPlayer(Self).ExperienceByDominators, Awarded);
         end;
         2:
         begin
           Awarded :=
               Round(
                   Awarded
-                      / ((GetPlayer.ExperienceByPirates + GetPlayer.ExperienceByNormals) * 0.000001
+                      / ((TPlayer(Self).ExperienceByPirates + TPlayer(Self).ExperienceByNormals)
+                              * 0.000001
                           + 1)
               );
-          Inc(GetPlayer.ExperienceByPirates, Awarded);
+          Inc(TPlayer(Self).ExperienceByPirates, Awarded);
         end;
         3:
         begin
           Awarded :=
               Round(
                   Awarded
-                      / ((GetPlayer.ExperienceByPirates + GetPlayer.ExperienceByNormals) * 0.000001
+                      / ((TPlayer(Self).ExperienceByPirates + TPlayer(Self).ExperienceByNormals)
+                              * 0.000001
                           + 1)
               );
-          Inc(GetPlayer.ExperienceByNormals, Awarded);
+          Inc(TPlayer(Self).ExperienceByNormals, Awarded);
         end;
         4:
         begin
-          Awarded := Round(Awarded / (GetPlayer.ExperienceByTraderCareer * 0.000001 + 1));
-          Inc(GetPlayer.ExperienceByTraderCareer, Awarded);
+          Awarded := Round(Awarded / (TPlayer(Self).ExperienceByTraderCareer * 0.000001 + 1));
+          Inc(TPlayer(Self).ExperienceByTraderCareer, Awarded);
         end;
       end
     else
@@ -17108,7 +17310,8 @@ begin
     Inc(TotalExperience, Awarded);
     Inc(FreeExperience, Awarded);
   end;
-  if GetPlayer = Self then
+  // CHANGE: CLEANUP - Achievements belong to the human at this machine.
+  if Self = LocalPlayer then
     TryAddAchievementProgress('OLDFAG', Awarded);
 end;
 
@@ -17496,8 +17699,8 @@ begin
   for I := 1 to 12 do
     if (CaptainHealth[I].Progress > 0)
         and (CurrentPlanet <> nil)
-        and (GetPlayer = Self)
-        and (CurrentPlanet.GetFullName(' ') = GetPlayer.StatusEffectSourceNames[I]) then
+        and IsHuman(Self)
+        and (CurrentPlanet.GetFullName(' ') = TPlayer(Self).StatusEffectSourceNames[I]) then
     begin
       Result := True;
       Exit;
@@ -17512,8 +17715,8 @@ begin
   for I := 1 to 12 do
     if (CaptainHealth[I].Progress > 0)
         and (DockedTo <> nil)
-        and (GetPlayer = Self)
-        and (DockedTo.GetName = GetPlayer.StatusEffectSourceNames[I]) then
+        and IsHuman(Self)
+        and (DockedTo.GetName = TPlayer(Self).StatusEffectSourceNames[I]) then
     begin
       Result := True;
       Exit;
@@ -17530,7 +17733,7 @@ procedure TShip.SimulateNpcHealthEffects;
 var
   Index, I: Integer;
 begin
-  if GetPlayer = Self then
+  if IsHuman(Self) then
     Exit;
   if (ScriptShip <> nil) and IsOnPlanet then
     RefuelAtLocation;
@@ -17620,7 +17823,7 @@ begin
     Exit;
   if CargoFreeSpace < 0 then
     Exit;
-  if GetPlayer = Self then
+  if IsHuman(Self) then
   begin
     if not CanUseEquipmentTech(GetFuelTanks) then
       Exit;
@@ -17714,8 +17917,8 @@ begin
   Result :=
       (PilotRace = Byte(oiHuman))
           and (PortraitFaceId in [25..32])
-          and (GetPlayer <> Self)
-          and (GetPlayer <> nil)
+          and not IsHuman(Self)
+          and (Session.Humans.Count > 0)
           and (Self is TNormalShip)
           and (Galaxy.SpecialSimulationMode = 0);
 end;
@@ -17727,8 +17930,8 @@ begin
           and (PilotRace = Byte(oiHuman))
           and (Cardinal(Id) mod 6 = 0)
           and (CreationTurn < 666)
-          and (GetPlayer <> Self)
-          and (GetPlayer <> nil)
+          and not IsHuman(Self)
+          and (Session.Humans.Count > 0)
           and not IsFemaleHumanPilot
           and (Galaxy.SpecialSimulationMode = 0);
 end;
@@ -17738,6 +17941,7 @@ var
   I: Integer;
   Ship, Current: TShip;
   Strategy: TInterceptorTargetingStrategy;
+  SelfHuman: THuman;
   function IsBetterInterceptorTarget(
       Current, Candidate: TShip;
       Strategy: TInterceptorTargetingStrategy
@@ -17786,7 +17990,8 @@ begin
     Exit;
   end;
   Current := nil;
-  if GetPlayer = Self then
+  SelfHuman := HumanOf(Self);
+  if IsHuman(Self) then
     Strategy := GetHull.InterceptorTargetingStrategy
   else
     Strategy := itsMostHullPoints;
@@ -17800,11 +18005,11 @@ begin
     Ship := TShip(CurrentStar.Ships[I]);
     if (Ship <> Self)
         and Ship.InNormalSpace
-        and ((GetPlayer = Self) or (GetRelationLevelToShip(Ship) <= rlHostile))
-        and ((GetPlayer <> Self)
+        and (IsHuman(Self) or (GetRelationLevelToShip(Ship) <= rlHostile))
+        and (not IsHuman(Self)
             or (Ship.GetRelationLevelToShip(Self) <= rlHostile)
             or (EnemyShip = Ship)
-            or (LocalHuman.PendingPlayerFollowTarget = Ship))
+            or ((SelfHuman <> nil) and (SelfHuman.PendingPlayerFollowTarget = Ship)))
         and (Sqr(Ship.Position.X) + Sqr(Ship.Position.Y)
             >= CurrentStar.DamageRadius * CurrentStar.DamageRadius)
         and (PointDistanceSquared(Position, Ship.Position) <= 1000000)
@@ -18330,13 +18535,13 @@ begin
   try
     SavedScript := CurrentScript;
     CurrentScript := nil;
-    if GetPlayer = Self then
+    if IsHuman(Self) then
     begin
       Stage := 1;
-      I := GetPlayer.ScriptShipBindings.Count - 1;
+      I := TPlayer(Self).ScriptShipBindings.Count - 1;
       while I >= 0 do
       begin
-        Binding := GetPlayer.ScriptShipBindings[I];
+        Binding := TPlayer(Self).ScriptShipBindings[I];
         Param := Binding.RunActionCode(ActionType, Self, Object1, Object2, Param);
         if IsHullDestroyed and (ActionType <> satOnDeath) then
         begin
@@ -18344,13 +18549,13 @@ begin
           Result := Param;
           Exit;
         end;
-        if (GetPlayer.ScriptShipBindings.Count <= I)
-            or (GetPlayer.ScriptShipBindings[I] <> Binding) then
+        if (TPlayer(Self).ScriptShipBindings.Count <= I)
+            or (TPlayer(Self).ScriptShipBindings[I] <> Binding) then
         begin
-          NewIndex := GetPlayer.ScriptShipBindings.IndexOf(Binding);
+          NewIndex := TPlayer(Self).ScriptShipBindings.IndexOf(Binding);
           if NewIndex < 0 then
           begin
-            I := Min(I - 1, GetPlayer.ScriptShipBindings.Count - 1);
+            I := Min(I - 1, TPlayer(Self).ScriptShipBindings.Count - 1);
             Continue;
           end;
           I := NewIndex;
@@ -18575,7 +18780,7 @@ begin
   end;
   if Galaxy.SpecialSimulationMode <> 0 then
   begin
-    if (GetPlayer = Ship) or (GetPlayer = Self) then
+    if IsHuman(Ship) or IsHuman(Self) then
       Result := 100
     else
       Result := 0;

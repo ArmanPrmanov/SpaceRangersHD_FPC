@@ -3664,7 +3664,7 @@ end;
 
 function TfTalk.GetShipGreeting: WideString;
 begin
-  Result := LocalHuman.TalkShip.GetGreetingText;
+  Result := LocalHuman.TalkShip.GetGreetingText(LocalPlayer);
   if Result = '' then
     RaiseWideMessage('Не найдено приветствие корабля');
 end;

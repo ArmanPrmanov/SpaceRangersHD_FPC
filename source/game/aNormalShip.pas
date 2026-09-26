@@ -277,7 +277,7 @@ begin
     begin
       MessageText := SelectSituationalMessage(True);
       if MessageText <> '' then
-        ShowMessageToPlayer(MessageText);
+        ShowMessageToPlayer(MessageText, GetPlayer);
     end;
     Stage := 2;
     UpdateRelationsForNearbyCombat;
