@@ -213,6 +213,12 @@ procedure CollectFilmedStars(Stars: TList);
 function FilmHuman(Star: TStar): THuman;
 // The human with this id, or nil.
 function FindHuman(Id: Integer): THuman;
+// CHANGE: ENHANCEMENT - The first human in Session.Humans: the one who created or hosted the
+// game, since join order keeps that (ROADMAP.md, Phase 4/6). Nil when there are no humans. Code
+// that used to mean "the one player" for a galaxy-wide rule (NPC catch-up, which star the
+// dominators spare, the shop stock or reserve cap with nobody acting, whose home sets the
+// distance tiers) uses this. With one human it is that human, so single player is unchanged.
+function HostHuman: THuman;
 // The human a script is bound to (TScript.HumanId), or the first human when it has left or
 // the script is not bound; nil when there is none.
 function BoundHuman(Id: Integer): THuman;
@@ -221,6 +227,11 @@ function ScriptPlayer: TPlayer; inline;
 // The human script code that belongs to no script runs for: ScriptHuman when it runs inside
 // other script code, else ActingHuman, else the first human; nil when there is none.
 function DefaultScriptHuman: THuman;
+// CHANGE: ENHANCEMENT - The human in context: ActingHuman, else ScriptHuman, else HostHuman;
+// nil when there is none. Code that used to read one player's state where there is no command
+// or script to bind to more precisely (an artefact's weight, a default hull's race or a
+// satellite's owner, <Player> in localized text) uses this. With one human it is that human.
+function ContextHuman: THuman;
 // Makes Player a human. The first human is the local one.
 function AddHuman(Player: TPlayer): THuman;
 // Forgets Player's human, as when its ranger is freed. The other humans stay. When Player is
@@ -437,6 +448,14 @@ begin
   Result := nil;
 end;
 
+function HostHuman: THuman;
+begin
+  if Session.Humans.Count > 0 then
+    Result := Session.Humans[0]
+  else
+    Result := nil;
+end;
+
 function BoundHuman(Id: Integer): THuman;
 begin
   Result := nil;
@@ -461,6 +480,15 @@ begin
     Result := ActingHuman;
   if (Result = nil) and (Session.Humans.Count > 0) then
     Result := Session.Humans[0];
+end;
+
+function ContextHuman: THuman;
+begin
+  Result := ActingHuman;
+  if Result = nil then
+    Result := ScriptHuman;
+  if Result = nil then
+    Result := HostHuman;
 end;
 
 function AddHuman(Player: TPlayer): THuman;

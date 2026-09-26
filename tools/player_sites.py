@@ -6,9 +6,11 @@ site means. The class of a site is the name it uses:
 
     unclassified  GetPlayer
     local         LocalPlayer, LocalHuman: whose screen this is
-    actor         Actor(...), ActorHuman(...), ActingHuman, script bindings: who did this
+    actor         Actor(...), ActorHuman(...), ActingHuman, ContextHuman, script bindings:
+                  who did this
     each          Session.Humans, ForEachHuman: every human
     any           IsHuman, StarHasHuman, HumanOf, FindHuman: some human qualifies
+    host          HostHuman: the first human, join order; the game's host
 
 Sites that became `Self` or a parameter are not counted; the unclassified count is the
 measure of progress. The table is written to tools/player_sites.txt. With --check the
@@ -29,9 +31,10 @@ SIMULATION = ("game", "core", "script")
 CLASSES = {
     "unclassified": r"\bGetPlayer\b",
     "local": r"\bLocal(?:Player|Human)\b",
-    "actor": r"\bActor(?:Human)?\(|\bActingHuman\b|\bScriptHuman\b|\bScriptPlayer\b|\bBoundHuman\b|\bDefaultScriptHuman\b",
+    "actor": r"\bActor(?:Human)?\(|\bActingHuman\b|\bScriptHuman\b|\bScriptPlayer\b|\bBoundHuman\b|\bDefaultScriptHuman\b|\bContextHuman\b",
     "each": r"\bSession\.Humans\b|\bForEachHuman\b",
     "any": r"\b(?:IsHuman|StarHasHuman|StarHasHumanInSpace|HumanOf|FindHuman|NearestHuman|IsRuinsProxy|RuinsProxyOwner|HasLivingHuman|IsFilmedStar|FilmHuman)\(",
+    "host": r"\bHostHuman\b",
 }
 COMMENT = re.compile(r"//[^\n]*|\{[^}]*\}|\(\*.*?\*\)", re.S)
 STRING = re.compile(r"'[^'\n]*'")

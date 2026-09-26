@@ -30,6 +30,8 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
 | `ActingHuman` | the human whose command is executing; nil outside a command |
 | `ScriptHuman`, `ScriptPlayer` | the human of the script code that is running, and its ranger; nil outside script code |
 | `BoundHuman(Script.HumanId)` | the human a script is bound to |
+| `HostHuman` | the first human in `Session.Humans`: whoever created or hosted the game; nil when there are no humans. Galaxy-wide rules that used to read the one player (NPC catch-up, which star the dominators spare, whose home sets the distance tiers, the shop stock or a loot/reserve scale with nobody acting) follow this human. With one human it is that human. |
+| `ContextHuman` | the human in context: `ActingHuman`, else `ScriptHuman`, else `HostHuman`; nil when there is none. Used where a site means "the human this code is working on behalf of" but is neither strictly inside a command nor strictly inside script code (an artefact's weight, a default hull's race or a satellite's owner, `<Player>` in localized text). With one human it is that human. |
 | `Session.Humans` | every human |
 | `IsHuman(Ship)` | whether a ranger is a human's |
 | `HumanOf(Ship)` | the `THuman` of a human's ranger, or nil |
