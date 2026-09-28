@@ -2,7 +2,8 @@
 """Check that simulation units do not use UI units or UI globals.
 
 Units under source/game, source/core and source/script must not name a unit under
-source/screens, source/ui or source/arcade in a uses clause. They also reach the UI through
+source/screens, source/ui or source/arcade in a uses clause, nor one under source/net: the
+network sets the game layer's hooks, never the other way round (docs/network.md). They also reach the UI through
 the root units' globals (Globals, GlobalsV, GR_Main): every root global they use must be
 classified in tools/layers_globals.txt, and they must not use one classified as ui.
 
@@ -22,6 +23,8 @@ ALLOWLIST = Path(__file__).with_name("layers_allowlist.txt")
 GLOBAL_KINDS = Path(__file__).with_name("layers_globals.txt")
 SIMULATION = ("game", "core", "script")
 PRESENTATION = ("screens", "ui", "arcade")
+# Layers the simulation must not use besides the presentation.
+FORBIDDEN = (*PRESENTATION, "net")
 ROOT_UNITS = ("Globals", "GlobalsV", "GR_Main")
 
 COMMENT = re.compile(r"\{[^}]*\}|\(\*.*?\*\)|//[^\n]*", re.DOTALL)
@@ -82,7 +85,7 @@ def global_kinds() -> dict[str, str]:
 
 def violations() -> tuple[set[str], set[str]]:
     simulation = units_in(SIMULATION)
-    presentation = units_in(PRESENTATION)
+    presentation = units_in(FORBIDDEN)
     names = root_globals()
     kinds = global_kinds()
     found, unclassified = set(), set()

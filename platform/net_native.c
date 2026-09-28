@@ -11,6 +11,8 @@
 #define SR_WINDOWLOG_MAX 30
 
 #ifdef _WIN32
+// The network thread waits on a host's listener and every client at once.
+#define FD_SETSIZE 256
 #include <winsock2.h>
 #include <ws2tcpip.h>
 typedef SOCKET sr_socket;
@@ -236,9 +238,115 @@ int sr_net_wait(int64_t handle, int timeout_ms) {
   return ready != 0 ? 1 : 0;
 }
 
+// Waits until one of the sockets can be read (or has failed), up to the timeout; 1 when one
+// can, 0 on timeout. The network thread waits on its listener and every connection at once.
+int sr_net_wait_many(const int64_t *handles, int count, int timeout_ms) {
+  if (count <= 0)
+    return 0;
+#ifdef _WIN32
+  fd_set set;
+  FD_ZERO(&set);
+  for (int i = 0; i < count && i < FD_SETSIZE; i++)
+    FD_SET((sr_socket)handles[i], &set);
+  fd_set error_set = set;
+  struct timeval timeout = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
+  int ready = select(0, &set, NULL, &error_set, timeout_ms < 0 ? NULL : &timeout);
+  return ready > 0 ? 1 : 0;
+#else
+  struct pollfd entries[256];
+  if (count > 256)
+    count = 256;
+  for (int i = 0; i < count; i++) {
+    entries[i].fd = (int)handles[i];
+    entries[i].events = POLLIN;
+    entries[i].revents = 0;
+  }
+  return poll(entries, (nfds_t)count, timeout_ms) > 0 ? 1 : 0;
+#endif
+}
+
 void sr_net_close(int64_t handle) {
   if (handle >= 0)
     sr_close_socket((sr_socket)handle);
+}
+
+// XXH64 (xxHash, 64-bit) of one block with a seed. The data hash of a game install chains
+// it over fixed-size chunks of each file; it runs at memory speed, where a byte loop in
+// Pascal would take seconds over the ~1.6 GB of packages.
+#define SR_P1 0x9E3779B185EBCA87ULL
+#define SR_P2 0xC2B2AE3D27D4EB4FULL
+#define SR_P3 0x165667B19E3779F9ULL
+#define SR_P4 0x85EBCA77C2B2AE63ULL
+#define SR_P5 0x27D4EB2F165667C5ULL
+
+static uint64_t rotl64(uint64_t x, int r) { return (x << r) | (x >> (64 - r)); }
+
+static uint64_t read64(const uint8_t *p) {
+  uint64_t v;
+  memcpy(&v, p, 8);
+  return v;
+}
+
+static uint32_t read32(const uint8_t *p) {
+  uint32_t v;
+  memcpy(&v, p, 4);
+  return v;
+}
+
+static uint64_t xxh_round(uint64_t acc, uint64_t input) {
+  acc += input * SR_P2;
+  acc = rotl64(acc, 31);
+  return acc * SR_P1;
+}
+
+static uint64_t xxh_merge(uint64_t acc, uint64_t value) {
+  acc ^= xxh_round(0, value);
+  return acc * SR_P1 + SR_P4;
+}
+
+uint64_t sr_hash64(const void *data, int64_t size, uint64_t seed) {
+  const uint8_t *p = (const uint8_t *)data;
+  const uint8_t *end = p + size;
+  uint64_t h;
+  if (size >= 32) {
+    uint64_t v1 = seed + SR_P1 + SR_P2, v2 = seed + SR_P2, v3 = seed, v4 = seed - SR_P1;
+    const uint8_t *limit = end - 32;
+    do {
+      v1 = xxh_round(v1, read64(p));
+      v2 = xxh_round(v2, read64(p + 8));
+      v3 = xxh_round(v3, read64(p + 16));
+      v4 = xxh_round(v4, read64(p + 24));
+      p += 32;
+    } while (p <= limit);
+    h = rotl64(v1, 1) + rotl64(v2, 7) + rotl64(v3, 12) + rotl64(v4, 18);
+    h = xxh_merge(h, v1);
+    h = xxh_merge(h, v2);
+    h = xxh_merge(h, v3);
+    h = xxh_merge(h, v4);
+  } else
+    h = seed + SR_P5;
+  h += (uint64_t)size;
+  while (p + 8 <= end) {
+    h ^= xxh_round(0, read64(p));
+    h = rotl64(h, 27) * SR_P1 + SR_P4;
+    p += 8;
+  }
+  if (p + 4 <= end) {
+    h ^= (uint64_t)read32(p) * SR_P1;
+    h = rotl64(h, 23) * SR_P2 + SR_P3;
+    p += 4;
+  }
+  while (p < end) {
+    h ^= (*p) * SR_P5;
+    h = rotl64(h, 11) * SR_P1;
+    p++;
+  }
+  h ^= h >> 33;
+  h *= SR_P2;
+  h ^= h >> 29;
+  h *= SR_P3;
+  h ^= h >> 32;
+  return h;
 }
 
 // zstd. Sizes are 64-bit; a negative result is an error, and sr_net_error says which.

@@ -13,7 +13,10 @@ function sr_net_connect(Host: PAnsiChar; Port, TimeoutMs: Integer): Int64; cdecl
 function sr_net_send(Handle: Int64; Data: Pointer; Size: Integer): Integer; cdecl; external 'gamenative';
 function sr_net_recv(Handle: Int64; Data: Pointer; Size: Integer): Integer; cdecl; external 'gamenative';
 function sr_net_wait(Handle: Int64; TimeoutMs: Integer): Integer; cdecl; external 'gamenative';
+function sr_net_wait_many(Handles: PInt64; Count, TimeoutMs: Integer): Integer; cdecl; external 'gamenative';
 procedure sr_net_close(Handle: Int64); cdecl; external 'gamenative';
+// XXH64 of one block; chained over a file's chunks by passing the last result as the seed.
+function sr_hash64(Data: Pointer; Size: Int64; Seed: QWord): QWord; cdecl; external 'gamenative';
 function sr_zstd_bound(Size: Int64): Int64; cdecl; external 'gamenative';
 function sr_zstd_content_size(Source: Pointer; Size: Int64): Int64; cdecl; external 'gamenative';
 function sr_zstd_compress(

@@ -7,8 +7,12 @@ implementation
 uses
   SysUtils,
   EC_Buf,
+  aCommands,
+  NetNative,
   NetTransport,
   NetDelta,
+  NetProtocol,
+  NetThread,
   TestSupport;
 
 // A state-like buffer: repetitive records with varying fields.
@@ -150,10 +154,254 @@ begin
   end;
 end;
 
+// Every payload decodes to what was encoded, and nothing is left over.
+procedure RunProtocolTests;
+var
+  Buffer: TBufEC;
+  Hello, HelloBack: THelloMessage;
+  Welcome: TWelcomeMessage;
+  State: TStateHeader;
+  Film: TFilmHeader;
+  Status, StatusBack: TStatusMessage;
+  Chat: TChatMessage;
+  Command, CommandBack: TPlayerCommand;
+begin
+  Buffer := TBufEC.Create;
+  try
+    Hello.Protocol := ProtocolVersion;
+    Hello.GameVersion := GameVersionText;
+    Hello.DataHash := QWord($0123456789ABCDEF);
+    Hello.Name := 'Рейнджер';
+    Hello.Spectator := True;
+    EncodeHello(Hello, Buffer);
+    Buffer.SetPosition(0);
+    HelloBack := DecodeHello(Buffer);
+    Check(
+        (HelloBack.Protocol = ProtocolVersion) and (HelloBack.DataHash = Hello.DataHash)
+            and HelloBack.Spectator and Buffer.IsAtEnd,
+        'Hello round trips'
+    );
+    CheckText(Hello.Name, HelloBack.Name, 'Hello keeps the name');
+    Buffer.Clear;
+    Buffer.AddInt32(ProtocolVersion + 1);
+    Buffer.AddByte(7);
+    Buffer.SetPosition(0);
+    CheckInt(ProtocolVersion + 1, DecodeHello(Buffer).Protocol, 'another protocol decodes its version');
+
+    Buffer.Clear;
+    Welcome.HumanId := 4711;
+    Welcome.HostName := 'Host';
+    EncodeWelcome(Welcome, Buffer);
+    EncodeRefuse('full', Buffer);
+    EncodeAck(-3, Buffer);
+    Buffer.SetPosition(0);
+    Welcome := DecodeWelcome(Buffer);
+    Check((Welcome.HumanId = 4711) and (Welcome.HostName = 'Host'), 'Welcome round trips');
+    CheckText('full', DecodeRefuse(Buffer), 'Refuse round trips');
+    CheckInt(-3, DecodeAck(Buffer), 'Ack round trips');
+    Check(Buffer.IsAtEnd, 'Welcome, Refuse and Ack leave nothing over');
+
+    Buffer.Clear;
+    State.Serial := 12;
+    State.BaseSerial := 11;
+    State.Day := 3040;
+    State.Hash := QWord($FEDCBA9876543210);
+    EncodeStateHeader(State, Buffer);
+    Buffer.AddInt32(99);
+    Buffer.SetPosition(0);
+    State := DecodeStateHeader(Buffer);
+    Check(
+        (State.Serial = 12) and (State.BaseSerial = 11) and (State.Day = 3040)
+            and (State.Hash = QWord($FEDCBA9876543210)),
+        'a state header round trips'
+    );
+    CheckInt(99, Buffer.GetInt32, 'the state follows its header');
+
+    Buffer.Clear;
+    Film.Day := 3041;
+    Film.StarId := 17;
+    EncodeFilmHeader(Film, Buffer);
+    Buffer.SetPosition(0);
+    Film := DecodeFilmHeader(Buffer);
+    Check((Film.Day = 3041) and (Film.StarId = 17) and Buffer.IsAtEnd, 'a film header round trips');
+
+    Buffer.Clear;
+    Status.DayRunning := True;
+    SetLength(Status.Humans, 2);
+    Status.Humans[0].Id := 5;
+    Status.Humans[0].Name := 'A';
+    Status.Humans[0].Connected := True;
+    Status.Humans[0].HoldsDay := False;
+    Status.Humans[1].Id := 9;
+    Status.Humans[1].Name := 'B';
+    Status.Humans[1].Connected := False;
+    Status.Humans[1].HoldsDay := True;
+    EncodeStatus(Status, Buffer);
+    Buffer.SetPosition(0);
+    StatusBack := DecodeStatus(Buffer);
+    Check(
+        StatusBack.DayRunning and (Length(StatusBack.Humans) = 2)
+            and (StatusBack.Humans[1].Id = 9) and (StatusBack.Humans[1].Name = 'B')
+            and not StatusBack.Humans[1].Connected and StatusBack.Humans[1].HoldsDay
+            and StatusBack.Humans[0].Connected and Buffer.IsAtEnd,
+        'Status round trips'
+    );
+
+    Buffer.Clear;
+    Chat.SenderId := 5;
+    Chat.Text := 'привет';
+    EncodeChat(Chat, Buffer);
+    Buffer.SetPosition(0);
+    Chat := DecodeChat(Buffer);
+    Check((Chat.SenderId = 5) and (Chat.Text = 'привет') and Buffer.IsAtEnd, 'Chat round trips');
+
+    Buffer.Clear;
+    Command := Default(TPlayerCommand);
+    Command.Kind := 43;
+    Command.Actor := 1234;
+    SetLength(Command.Ints, 1);
+    Command.Ints[0] := 1;
+    Command.Text := 'x';
+    EncodeCommandMessage(Command, Buffer);
+    Buffer.SetPosition(0);
+    CommandBack := DecodeCommandMessage(Buffer);
+    Check(
+        (CommandBack.Kind = 43) and (CommandBack.Actor = 1234) and (Length(CommandBack.Ints) = 1)
+            and (CommandBack.Ints[0] = 1) and (CommandBack.Text = 'x') and Buffer.IsAtEnd,
+        'Command round trips'
+    );
+    CheckText('TalkDone', WideString(MessageKindName(nkTalkDone)), 'kind names');
+    // XXH64 of nothing with seed 0, the published value.
+    Check(sr_hash64(nil, 0, 0) = QWord($EF46DB3751D8E999), 'the data hash is XXH64');
+  finally
+    Buffer.Free;
+  end;
+end;
+
+var
+  ThreadPayload: TBufEC;
+
+function WaitMessage(Thread: TNetThread; Peer: Integer; out Kind: TNetMessageKind): Boolean;
+var
+  Deadline: QWord;
+begin
+  Deadline := GetTickCount64 + 10000;
+  repeat
+    Result := Thread.Receive(Peer, Kind, ThreadPayload);
+    if Result then
+      Exit;
+    NetInboxEvent.WaitFor(10);
+  until GetTickCount64 > Deadline;
+end;
+
+// Two clients and a host, each on a network thread, over loopback: messages in order, a
+// state sent whole and then as a delta, compressed once for two peers with the same base,
+// and a client that leaves.
+procedure RunThreadTests;
+var
+  Host, Client1, Client2: TNetThread;
+  Peer1, Peer2, HostPeer1, HostPeer2, Id: Integer;
+  Old, New: TNetState;
+  Job: TNetStateJob;
+  Restored: TBufEC;
+  Kind: TNetMessageKind;
+  Header: TStateHeader;
+  Deadline: QWord;
+begin
+  Host := TNetThread.Create(0);
+  Client1 := TNetThread.Create(-1);
+  Client2 := TNetThread.Create(-1);
+  ThreadPayload := TBufEC.Create;
+  Restored := TBufEC.Create;
+  Old := TNetState.Create(1, 100, 11);
+  New := TNetState.Create(2, 101, 22);
+  try
+    Check(Host.ListenPort > 0, 'the host thread listens');
+    Peer1 := Client1.Connect('127.0.0.1', Host.ListenPort, 5000);
+    Check(Peer1 > 0, 'the first client connects');
+    HostPeer1 := -1;
+    Deadline := GetTickCount64 + 5000;
+    while not Host.TakeNewPeer(HostPeer1) and (GetTickCount64 < Deadline) do
+      Sleep(1);
+    Peer2 := Client2.Connect('127.0.0.1', Host.ListenPort, 5000);
+    Check(Peer2 > 0, 'the second client connects');
+    HostPeer2 := -1;
+    Deadline := GetTickCount64 + 5000;
+    while not Host.TakeNewPeer(HostPeer2) and (GetTickCount64 < Deadline) do
+      Sleep(1);
+    Check((HostPeer1 > 0) and (HostPeer2 > 0) and (HostPeer1 <> HostPeer2), 'the host sees both');
+    Check(not Host.TakeNewPeer(Id), 'no other peer');
+    Client1.Send(Peer1, nkHello, nil, 0);
+    Client1.Send(Peer1, nkAck, nil, 0);
+    Check(WaitMessage(Host, HostPeer1, Kind) and (Kind = nkHello), 'the first message arrives first');
+    Check(WaitMessage(Host, HostPeer1, Kind) and (Kind = nkAck), 'the second message follows');
+
+    FillState(Old.Bytes, 50000, 3);
+    FillState(New.Bytes, 50000, 3, 25000);
+    Job := TNetStateJob.Create(Old);
+    Job.AddTarget(HostPeer1, nil);
+    Job.AddTarget(HostPeer2, nil);
+    Host.QueueStateJob(Job);
+    Host.Send(HostPeer1, nkBye, nil, 0);
+    Check(WaitMessage(Client1, Peer1, Kind) and (Kind = nkState), 'a state arrives');
+    Header := DecodeStateHeader(ThreadPayload);
+    Check(
+        (Header.Serial = 1) and (Header.BaseSerial = 0) and (Header.Day = 100)
+            and (Header.Hash = 11),
+        'a whole state'
+    );
+    ExpandState(
+        @PByte(ThreadPayload.Data)[ThreadPayload.Position],
+        ThreadPayload.DataSize - ThreadPayload.Position,
+        nil,
+        Restored
+    );
+    Check(SameBytes(Old.Bytes, Restored), 'the whole state expands');
+    Check(WaitMessage(Client1, Peer1, Kind) and (Kind = nkBye), 'a message sent after a state follows it');
+    Check(Job.Done and (Job.WholeSize > 0), 'the job reports its size');
+    Job.Free;
+    Job := TNetStateJob.Create(New);
+    Job.MeasureWhole := True;
+    Job.AddTarget(HostPeer1, Old);
+    Job.AddTarget(HostPeer2, Old);
+    Host.QueueStateJob(Job);
+    Check(WaitMessage(Client2, Peer2, Kind) and (Kind = nkState), 'the whole state reaches the second client');
+    Check(WaitMessage(Client2, Peer2, Kind) and (Kind = nkState), 'a delta arrives');
+    Header := DecodeStateHeader(ThreadPayload);
+    Check((Header.Serial = 2) and (Header.BaseSerial = 1), 'a delta names its base');
+    ExpandState(
+        @PByte(ThreadPayload.Data)[ThreadPayload.Position],
+        ThreadPayload.DataSize - ThreadPayload.Position,
+        Old.Bytes,
+        Restored
+    );
+    Check(SameBytes(New.Bytes, Restored), 'the delta expands against its base');
+    Check(Host.WaitIdle(5000), 'the host sends everything');
+    Check(Job.Done and (Job.DeltaSize > 0) and (Job.DeltaSize * 5 < Job.WholeSize), 'a delta is small');
+    Job.Free;
+    FreeAndNil(Client2);
+    Deadline := GetTickCount64 + 5000;
+    while not Host.IsClosed(HostPeer2) and (GetTickCount64 < Deadline) do
+      NetInboxEvent.WaitFor(10);
+    Check(Host.IsClosed(HostPeer2), 'a client that leaves closes its peer');
+    Check(not Host.IsClosed(HostPeer1), 'the other peer stays');
+  finally
+    Old.Release;
+    New.Release;
+    Client2.Free;
+    Client1.Free;
+    Host.Free;
+    FreeAndNil(ThreadPayload);
+    Restored.Free;
+  end;
+end;
+
 procedure RunNetTests;
 begin
   RunDeltaTests;
   RunTransportTests;
+  RunProtocolTests;
+  RunThreadTests;
 end;
 
 end.

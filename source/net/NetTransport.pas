@@ -41,6 +41,8 @@ type
     procedure Close;
     function PendingSendBytes: Integer;
     property Closed: Boolean read FClosed;
+    // The socket, for waiting on several at once (sr_net_wait_many); -1 once closed.
+    property Handle: Int64 read FHandle;
     property Error: AnsiString read FError;
     property BytesSent: Int64 read FBytesSent;
     property BytesReceived: Int64 read FBytesReceived;
@@ -57,6 +59,7 @@ type
     // A new connection, or nil.
     function Accept: TNetConnection;
     property Port: Integer read FPort;
+    property Handle: Int64 read FHandle;
   end;
 
 const
