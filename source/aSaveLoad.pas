@@ -906,18 +906,85 @@ begin
   end;
 end;
 
+type
+  // An entry to sort: a key and where it was listed. No two entries share both, so any sort
+  // gives the order a stable sort by key would.
+  TExactSortEntry = record
+    Key: QWord;
+    Index: Integer;
+  end;
+  TExactSortEntries = array of TExactSortEntry;
+
+procedure SortExactEntries(var Entries: TExactSortEntries; Low, High: Integer);
+var
+  I, J: Integer;
+  Pivot, Swap: TExactSortEntry;
+begin
+  while Low < High do
+  begin
+    Pivot := Entries[(Low + High) div 2];
+    I := Low;
+    J := High;
+    repeat
+      while (Entries[I].Key < Pivot.Key)
+          or ((Entries[I].Key = Pivot.Key) and (Entries[I].Index < Pivot.Index)) do
+        Inc(I);
+      while (Entries[J].Key > Pivot.Key)
+          or ((Entries[J].Key = Pivot.Key) and (Entries[J].Index > Pivot.Index)) do
+        Dec(J);
+      if I <= J then
+      begin
+        Swap := Entries[I];
+        Entries[I] := Entries[J];
+        Entries[J] := Swap;
+        Inc(I);
+        Dec(J);
+      end;
+    until I > J;
+    if J - Low < High - I then
+    begin
+      SortExactEntries(Entries, Low, J);
+      Low := I;
+    end
+    else
+    begin
+      SortExactEntries(Entries, I, High);
+      High := J;
+    end;
+  end;
+end;
+
 // The objects that have exact values, each once, in listing order.
+// CHANGE: PERFORMANCE - Finds repeated objects by sorting instead of a list search per
+// object, which took seconds for a large galaxy; the list is the same.
 procedure ListExactObjects(Objects: TList);
 var
   Listed: TList;
-  I: Integer;
+  I, Count: Integer;
   Kind: TExactKind;
+  Entries: TExactSortEntries;
+  Keep: array of Boolean;
 begin
   Listed := TList.Create;
   try
     ListIdentifiedObjects(Listed);
+    SetLength(Entries, Listed.Count);
+    Count := 0;
     for I := 0 to Listed.Count - 1 do
-      if ExactKindOf(TObject(Listed[I]), Kind) and (Objects.IndexOf(Listed[I]) < 0) then
+      if ExactKindOf(TObject(Listed[I]), Kind) then
+      begin
+        Entries[Count].Key := QWord(PtrUInt(Listed[I]));
+        Entries[Count].Index := I;
+        Inc(Count);
+      end;
+    SetLength(Entries, Count);
+    SortExactEntries(Entries, 0, Count - 1);
+    SetLength(Keep, Listed.Count);
+    for I := 0 to Count - 1 do
+      if (I = 0) or (Entries[I].Key <> Entries[I - 1].Key) then
+        Keep[Entries[I].Index] := True;
+    for I := 0 to Listed.Count - 1 do
+      if Keep[I] then
         Objects.Add(Listed[I]);
   finally
     Listed.Free
@@ -946,44 +1013,40 @@ begin
   end;
 end;
 
-// Orders by kind, then id; a stable sort keeps objects that share both in listing order.
-function CompareExact(Left, Right: TObject): Integer;
+// Orders by kind, then id; objects that share both stay in listing order.
+function ExactSortKey(Instance: TObject): QWord;
 var
-  LeftKind, RightKind: TExactKind;
+  Kind: TExactKind;
 begin
-  ExactKindOf(Left, LeftKind);
-  ExactKindOf(Right, RightKind);
-  if LeftKind <> RightKind then
-    Exit(Ord(LeftKind) - Ord(RightKind));
-  if ExactId(Left) < ExactId(Right) then
-    Result := -1
-  else if ExactId(Left) > ExactId(Right) then
-    Result := 1
-  else
-    Result := 0;
+  ExactKindOf(Instance, Kind);
+  Result := (QWord(Ord(Kind)) shl 32) or ExactId(Instance);
 end;
 
 procedure ReadExactValues(Buffer: TBufEC);
 var
-  Objects: TList;
+  Objects, Listed: TList;
+  Entries: TExactSortEntries;
   Used: array of Boolean;
-  I, J, Low, High, Middle, Count: Integer;
+  I, Low, High, Middle, Count: Integer;
   Kind, FoundKind: TExactKind;
   Id: Cardinal;
   Found: TObject;
 begin
   Objects := TList.Create;
+  Listed := TList.Create;
   try
-    ListExactObjects(Objects);
-    for I := 1 to Objects.Count - 1 do
+    ListExactObjects(Listed);
+    // CHANGE: PERFORMANCE - Sorts in O(n log n); the insertion sort it replaces took seconds
+    // for a large galaxy. The order is the same: by kind and id, then listing order.
+    SetLength(Entries, Listed.Count);
+    for I := 0 to Listed.Count - 1 do
     begin
-      J := I;
-      while (J > 0) and (CompareExact(TObject(Objects[J - 1]), TObject(Objects[J])) > 0) do
-      begin
-        Objects.Exchange(J - 1, J);
-        Dec(J);
-      end;
+      Entries[I].Key := ExactSortKey(TObject(Listed[I]));
+      Entries[I].Index := I;
     end;
+    SortExactEntries(Entries, 0, Listed.Count - 1);
+    for I := 0 to Length(Entries) - 1 do
+      Objects.Add(Listed[Entries[I].Index]);
     SetLength(Used, Objects.Count);
     Count := Buffer.GetInt32;
     for I := 0 to Count - 1 do
@@ -1020,7 +1083,8 @@ begin
       ReadExactFields(Buffer, Found, Kind);
     end;
   finally
-    Objects.Free
+    Objects.Free;
+    Listed.Free
   end;
 end;
 
