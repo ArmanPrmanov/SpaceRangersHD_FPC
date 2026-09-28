@@ -21,10 +21,19 @@ Read [humans.md](humans.md) (the barrier, hot-seat, `ActingHuman`) and
 | `source/net/NetHost.pas` | the host session: peers, joins, commands in, states and films out |
 | `source/net/NetClient.pas` | the client session: hello, commands out, films and states in |
 | `source/net/NetSession.pas` | what the rest of the game calls: role, pump, hooks |
+| `source/observer/HeadlessNet.pas` | the headless host and client for tests (Tests) |
 
 `source/game`, `source/core` and `source/script` do not use `source/net`. The
 game layer exposes hooks (procedure variables, as `BeforeCommandHook`); the net
 units set them. `tools/check_layers.py` keeps that direction.
+
+| Hook (game layer) | Set by | What for |
+| --- | --- | --- |
+| `ThreadCalc.StarDayHook` | host | the film of each filmed star after its `NextDay`, on the turn thread |
+| `ThreadCalc.DayCompletedHook` | host | the player-star job has run the day; the pump sends the films |
+| `aCommands.NetworkCommandHook` | client | every command the client submits goes to the host; called after `AfterCommandHook`, so the command log and the network both listen |
+| `aHuman.RemoteTalkHook` | remote-dialogue package | declared, nil, called nowhere yet (Remote dialogue) |
+| `aHuman.NewHumansConnected` | host | humans a load or a join adds start disconnected |
 
 ## Threads
 
@@ -52,10 +61,14 @@ protocol; never renumber one, add new ones at the end and bump
 | `Hello` | client в†’ host | protocol version, game version text, data hash, human name, whether it spectates |
 | `Welcome` | host в†’ client | the client's human id, the host's name |
 | `Refuse` | host в†’ client | reason text; the host then closes |
-| `State` | host в†’ client | day number, base day (0 = whole), state hash, zstd bytes (`NetDelta`) |
+| `State` | host в†’ client | state number, base state number (0 = whole), day number, state hash, zstd bytes (`NetDelta`) |
 | `Film` | host в†’ client | day number, star id, the film (`TEFilm.SaveToBuffer`) |
 | `Command` | both | an encoded `TPlayerCommand` (`aCommands.EncodeCommand`) |
-| `Ack` | client в†’ host | the day of the last state the client applied |
+| `Ack` | client в†’ host | the number of the last state the client applied |
+
+The host numbers its states from 1. A day number cannot name a base: a join
+between two days sends a state of the same day as the one before it.
+`ProtocolVersion` is 1.
 | `Status` | host в†’ client | per human: id, name, connected, holds the day; whether a day is running |
 | `TalkRequest` | host в†’ client | the dialogue the host's day asks the client's human (Remote dialogue) |
 | `TalkDone` | client в†’ host | the client's answer is complete |
@@ -66,9 +79,12 @@ protocol; never renumber one, add new ones at the end and bump
 
 1. The client connects and sends `Hello`.
 2. The host refuses when the protocol version or the data hash differs. Build
-   hashes may differ, since platforms differ.
+   hashes may differ, since platforms differ. It also refuses an empty name, a
+   spectator (not supported yet), a name whose human is connected, and a join
+   when no planet takes a new human.
 3. The host takes the join at a quiet point: no turn job running and no day
-   under way. A join that arrives mid-day waits in the peer's inbox.
+   under way. A join that arrives mid-day waits in the peer's inbox. Joins
+   that wait together are taken in name order.
 4. **Rejoin.** When a disconnected human's ranger has the name the client
    gives, the client takes that human back. Otherwise the host submits the
    `JoinHuman` command (kind 44) as the host human, which adds a human landed
@@ -78,6 +94,14 @@ protocol; never renumber one, add new ones at the end and bump
 
 A human who joins or leaves is a normal operation. Human ids are ship ids and
 are never reused, so a log or a save can name a human who has left.
+
+**The data hash** (`NetProtocol.DataHash`, computed once per process) is XXH64
+(`sr_hash64`, chained over 1 MB chunks) over the packages `INSTALL.TXT` lists,
+`CFG\Main.dat`, `CFG\CacheData.dat`, and every file of each selected mod except
+its language files (`Install_*.txt`, `CFG\<language>\`), then the selected mod
+names. The language packages and `Lang.dat` are left out, so players with
+different languages can play together; settings are not files it reads. It
+reads about 1.6 GB, which takes well under a second once the files are cached.
 
 ## Commands
 
@@ -89,7 +113,12 @@ are never reused, so a log or a save can name a human who has left.
   depends on the network, and the day's outcome must not.
 - A peer is **ready** when its queue holds an `EndTurn` (kind 43), or when its
   human does not hold the day anyway (`HumanHoldsDay` is false: continuing
-  travel, in hyperspace, finished) or is disconnected.
+  travel, in hyperspace, finished) or is disconnected. A queue without an
+  `EndTurn` is not applied; it waits for the day its `EndTurn` arrives. A
+  command the peer sends while its human does not hold the day can race the
+  host's apply, so it waits too rather than landing in whichever day it
+  happened to reach.
+- A queued command that raises when the host applies it is logged and dropped.
 - When the host's human has ended its turn and every peer is ready, the host
   applies the queued commands, human by human in `Session.Humans` order, each
   queue up to and including its `EndTurn`, through `SubmitCommand`, so the
@@ -120,9 +149,12 @@ are never reused, so a log or a save can name a human who has left.
 ## Films
 
 The player-star job records one film per star that holds a human (`aStarFilms`).
-After the job, the host encodes the film of each star that holds a remote human
-once and sends the same bytes to every client in that star (`Film`). The film
-goes before the state: it is small and needed first.
+Right after each star's day, on the turn thread, the host encodes the film of a
+star whose `PlayerStar` humans include a connected remote human
+(`StarDayHook`), once. After the job it sends the same bytes to every client
+whose human was in that star (`Film`), from the pump (`DayCompletedHook` marks
+the day ran) or, headless, at once. The film goes before the state: it is small
+and needed first. A day that was not filmed sends nothing.
 
 The client plays it on the star map as the history viewer plays a stored film:
 the film's objects bind to the client's scene objects by kind, graphics key
@@ -149,11 +181,26 @@ A client that is landed, docked or in hyperspace plays no film.
   with that state as reference), or whole when it has none. Clients with the
   same base get the same bytes; the host compresses once per base. The
   compression runs on the network thread.
-- **Hash.** `State` carries the host's state hash of the day. After loading, the
-  client hashes its state the same way; a difference is logged as a desync (it
-  should never happen, since the client loads the host's bytes).
-- **Ack.** A client acknowledges a day after applying it, and keeps those
-  uncompressed bytes as the base of the next delta.
+- **Hash.** `State` carries the host's `GalaxyStateHash`, taken with the
+  host's human local. The client hashes right after `ReadGameCheckpoint`, while
+  the host's human is still the local one, and only then makes its own human
+  local; the hash starts with the local human, so hashing after the switch
+  could never match. A difference is logged as a desync. It checks that the
+  checkpoint is a faithful serialiser, not only the transport: loading a state
+  and writing it again must give the same state.
+- **Ack.** A client acknowledges a state after applying it, and keeps those
+  uncompressed bytes as the base of the next delta. The host keeps its last
+  four states and each client's acknowledged one.
+- **A fresh local human.** A load fills the local human's state into the
+  `THuman` that is local, and on a client that is its own human. So the client
+  first calls `aHuman.ResetHumans`, which gives the local human a new `THuman`,
+  as at startup; otherwise its own human's lists (the shop, old quests) would
+  mix into the host's.
+- **What a checkpoint cannot carry.** A shop left open while its human's ranger
+  is in space is dropped by a load (`TGalaxy.LoadFromBuffer` keeps the local
+  human's open shop only while landed or docked). The screens give the stock
+  back on leaving, so play never leaves one open; the headless turn takes off
+  with `tfReturnShopStock` for the same reason.
 
 ## Applying state (the safe point)
 
@@ -207,8 +254,11 @@ Every other human waits meanwhile, as for any dialogue: the day is paused.
 
 - A peer whose connection closes, or who sends `Bye`, is disconnected:
   `THuman.Connected` is false, the human does not hold the day, and its ranger
-  holds position (the host submits the stop order as that human). It stays in
-  `Session.Humans` and in saves.
+  holds position (the host submits `OrderStop`, kind 11, as that human, unless
+  it is in hyperspace or finished). It stays in `Session.Humans` and in saves.
+  The host handles disconnects at the next quiet point, in `Session.Humans`
+  order, before joins, and drops the peer's queued commands. Automatic control
+  is left as it was, so a human who left on automatic control goes on flying.
 - It rejoins by joining with the same ranger name (Joining).
 - Humans in a save that the host loads start disconnected, except the host's.
 - `Connected` is not saved; it is session state, not game state.
@@ -220,7 +270,8 @@ Every other human waits meanwhile, as for any dialogue: the day is paused.
 - In the game: the in-game menu hosts the running game; the main menu joins one
   (address and name).
 - Headless, for tests: `--sim-net-host=PORT --sim-net-clients=N` with
-  `--sim-save`, and `--sim-net-join=HOST:PORT`; see Tests.
+  `--sim-save` and `--sim-turns=DAYS`, and `--sim-net-join=HOST:PORT
+  --sim-net-name=NAME` with `--sim-net-leave-at=DAY`; see Tests.
 
 ## Tests
 
@@ -232,3 +283,52 @@ two runs must give the host the same hashes, however the commands arrived; the
 host's command log must replay to the host's final hash; and a client that
 drops and rejoins must get its human back. The runs print the sizes of whole
 states, deltas and films, and the load time, per day.
+
+The headless runner (`HeadlessNet`):
+
+- **Host.** Listens (port 0 picks one; it prints `net host port=`), holds the
+  joins until all N clients have said Hello and then takes them by name, so the
+  humans are the same every run. Each day its own human plays the hot-seat turn
+  (`HeadlessSim.PlayHumanTurn`), it pumps until every peer is ready, applies the
+  queues, runs the player-star job, sends the films, runs the galaxy job, and
+  sends the state. It ends when N clients are joined and have acknowledged the
+  last state (a client that left may join again at the end).
+- **Client.** Joins, and after each state it applies plays the same turn for its
+  own human when that human holds the day (once a day), then ends it. It
+  decodes each film (`TEFilm.LoadFromBuffer`) and counts it.
+- One line per day: host `net host day= serial= hash= state= whole= delta= film=
+  take= compress= humans= away= plan=` (state: the uncompressed checkpoint;
+  whole: it compressed; delta: the largest delta sent; film: the bytes of the
+  distinct films of that day; take: checkpoint and hash, ms), client `net client
+  day= serial= hash= match= human= state= received= delta= film= films= load=`.
+
+Measured on Windows x64, debug build, 10 days (`tools/test.py` prints these per
+save):
+
+| Save | Humans | Whole state (raw / zstd) | Median delta | Median films of a day | Client load | Host take |
+| --- | --- | --- | --- | --- | --- | --- |
+| AutoSave | 2 | 2.91 MB / 558 KB | 93 KB | 102 KB | 453 ms | 187 ms |
+| AutoSave | 8 | 2.98 MB / 561 KB | 95 KB | 650 KB | 938 ms | 289 ms |
+| Система Солнце (1) | 2 | 2.79 MB / 534 KB | 99 KB | 86 KB | 359 ms | 109 ms |
+| Система Солнце (1) | 8 | 2.84 MB / 539 KB | 98 KB | 613 KB | 765 ms | 273 ms |
+| Система Солнце | 2 | 2.77 MB / 531 KB | 90 KB | 99 KB | 344 ms | 164 ms |
+| Система Солнце | 8 | 2.84 MB / 535 KB | 91 KB | 509 KB | 734 ms | 258 ms |
+
+With 8 humans nine processes share the machine, which is most of the slower
+load. Every client with the same base gets the same delta, compressed once.
+A delta is about a sixth of the compressed whole state, and a film of one
+star's day is about as large as a delta.
+
+## Not done yet
+
+- The UI: pumping from `GR_WinMessage`, the waiting screens, applying a state
+  between screens, film playback on a client's star map, the menus and
+  `--host`/`--join`. The functions they call exist: `NetSession.StartHosting`,
+  `JoinGame`, `NetPump`, `StopNetwork`; `TNetHost.PeersReady`, `ApplyQueues`,
+  `BeginDay`, `SendState`, `WaitingFor`; `TNetClient.HasState`, `ApplyState`,
+  `TakeFilm`, `Status`.
+- Remote dialogue: `RemoteTalkHook`, `TalkRequest` and `TalkDone` are
+  reserved; nothing sends them.
+- Chat is in the protocol (the host relays it); nothing shows it.
+- `ContinueUntilArrival` and `EndedTurn` are not in a state, so a client does
+  not know that its human continues until arrival; the host does.

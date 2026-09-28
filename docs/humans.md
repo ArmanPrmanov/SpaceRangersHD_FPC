@@ -222,8 +222,9 @@ like everyone else.
 
 **The barrier.** `HumanHoldsDay(Human)` (`aHuman`) is true while the human's ranger plays and
 the human has not ended its turn (`THuman.EndedTurn`). A finished human never holds the day,
-nor does one whose ranger is in hyperspace: a jump is travel that goes on until arrival.
-Phase 5 adds a disconnected human here; the function has the hook.
+nor does one whose ranger is in hyperspace: a jump is travel that goes on until arrival,
+nor a disconnected one (`THuman.Connected`, session state that is not saved; see
+[network.md](network.md), Disconnects).
 `AllHumansEndedTurn` is true when no human holds the day, and `NextHumanToEndTurn` is the
 first human in `Session.Humans` order who does.
 

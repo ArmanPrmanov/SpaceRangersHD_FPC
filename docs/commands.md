@@ -71,6 +71,9 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
   conversation (`BeginTurnWaitForUi`).
 - A command submitted on the turn thread is part of the job and is not
   recorded.
+- `SubmitCommand` tells `BeforeCommandHook` and `AfterCommandHook` (the command
+  log) and then `NetworkCommandHook` (a client sends the command to its host,
+  [network.md](network.md)).
 - Keep the `aCalc.WaitForTurnCalculationUI` calls the screen already makes
   before changing the game.
 
