@@ -67,6 +67,7 @@ uses
   HeadlessNet,
   CommandLog,
   HotSeat,
+  NetPlay,
   SimEventHandlers,
   InterfaceOverrideViews;
 
@@ -246,6 +247,14 @@ begin
     end
     else if Pos('--sim-net-name=', Argument) = 1 then
       Simulation.NetName := Copy(Argument, 16, MaxInt)
+    // CHANGE: ENHANCEMENT - Networked play in the game (ROADMAP.md, Phase 5): host the running
+    // game, or join one.
+    else if Pos('--host=', Argument) = 1 then
+      CommandLineHostPort := StrToInt(Copy(Argument, 8, MaxInt))
+    else if Pos('--join=', Argument) = 1 then
+      CommandLineJoin := Copy(Argument, 8, MaxInt)
+    else if Pos('--name=', Argument) = 1 then
+      CommandLineName := Copy(Argument, 8, MaxInt)
     else if Pos('--sim-net-leave-at=', Argument) = 1 then
       Simulation.NetLeaveAt := StrToInt(Copy(Argument, 20, MaxInt))
     else if Pos('--sim-kill-human=', Argument) = 1 then
@@ -277,6 +286,12 @@ begin
   end;
   GameDirectory := ExpandFileName(GameDirectory);
   UserDirectory := ExcludeTrailingPathDelimiter(ExpandFileName(UserDirectory));
+  if (CommandLineJoin <> '') and (CommandLineName = '') then
+    raise Exception.Create('--join takes --name');
+  if (CommandLineJoin <> '') and ((CommandLineHostPort >= 0) or (StartupSave <> '')) then
+    raise Exception.Create('--join cannot be combined with --host or --load-save');
+  if SimulationMode and ((CommandLineJoin <> '') or (CommandLineHostPort >= 0)) then
+    raise Exception.Create('--host and --join are for the game; headless, use --sim-net-host and --sim-net-join');
   if SimulationMode then
   begin
     if ObserverMode then
@@ -398,8 +413,10 @@ begin
   RequestedScreenId := screenLoad;
   while not ExitScreenLoop and (RequestedScreenId <> screenNone) do
   begin
-    // CHANGE: ENHANCEMENT - Hot-seat: the next human's screen opens as that human's.
+    // CHANGE: ENHANCEMENT - Hot-seat: the next human's screen opens as that human's. A networked
+    // game starts, joins and applies the host's state here.
     ApplyTurnPass;
+    NetBetweenScreens;
     NextScreen := RequestedScreenId;
     if NextScreen = screenLoadRobot then
       raise Exception.Create('This port has robot battles disabled');
@@ -469,6 +486,13 @@ begin
     WaitForTurnCalculation;
     // Join the worker while the galaxy and script/UI owners are still alive.
     FreeAndNil(Session.TurnCalculationThread);
+  end;
+  // CHANGE: ENHANCEMENT - Say Bye to the peers while the humans are still there.
+  try
+    EndNetSession;
+  except
+    on E: Exception do
+      Log('Network cleanup: ' + E.Message);
   end;
   if CampaignRuntimeStarted then
     try

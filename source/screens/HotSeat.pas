@@ -24,7 +24,7 @@ var
 // loads and after a new game starts; a hot-seat save already has its humans.
 procedure EnsureHotSeatHumans;
 // Whether the next human to end the turn is not the local one, so the screen must pass. Only
-// in multiplayer; false when no human holds the day.
+// in hot-seat multiplayer; false when no human holds the day and in a networked game.
 function TurnPassesToAnother: Boolean;
 // Shows whose turn it is on the open screen, chooses the next human who holds the day
 // (PendingHuman) and requests its screen: the star map, the planet or the station it is at.
@@ -54,6 +54,7 @@ uses
   aSession,
   aStarFilms,
   ThreadCalc,
+  NetSession,
   fStarMap;
 
 procedure EnsureHotSeatHumans;
@@ -92,7 +93,8 @@ function TurnPassesToAnother: Boolean;
 var
   Next: THuman;
 begin
-  if not IsMultiplayer or (PendingHuman <> nil) then
+  // A networked game's other humans play on their own machines (NetPlay).
+  if not IsMultiplayer or (PendingHuman <> nil) or (NetRole <> nrNone) then
     Exit(False);
   Next := NextHumanToEndTurn;
   Result := (Next <> nil) and (Next <> LocalHuman);

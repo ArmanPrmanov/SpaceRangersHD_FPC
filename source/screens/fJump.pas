@@ -64,7 +64,9 @@ uses
   fLoad,
   fStarMap,
   fRuinsTalk,
-  HotSeat;
+  HotSeat,
+  NetPlay,
+  NetSession;
 
 constructor TfJump.Create;
 begin
@@ -217,6 +219,17 @@ end;
 
 procedure TfJump.AdvanceTravel(Timer: PCallbackTimerGI; UserData: PtrInt);
 begin
+  // CHANGE: ENHANCEMENT - A networked client runs no hyperspace day: the host runs its steps,
+  // and each state it sends is applied between screens (NetPlay).
+  if NetRole = nrClient then
+  begin
+    Progress := Progress + 0.008;
+    if Progress > 0.49 then
+      Progress := 0.5;
+    LoadPanel.SetProgress(Progress);
+    ClientTravelTick(Self);
+    Exit;
+  end;
   if (LocalPlayer = nil) or (LocalPlayer.GetHull.HullPoints <= 0) then
   begin
     if LocalPlayer <> nil then
@@ -237,8 +250,9 @@ begin
   if TurnCalculationPhase = tcpGalaxyFinished then
   begin
     // CHANGE: ENHANCEMENT - A human in hyperspace does not hold the day, but the others do
-    // (ROADMAP.md, Phase 4, item 2); in hot-seat the screen passes to the next one of them.
-    if not EndTurn(False) then
+    // (ROADMAP.md, Phase 4, item 2); in hot-seat the screen passes to the next one of them. A
+    // networked host waits for its peers (NetPlay).
+    if not NetEndTurn(Self) then
     begin
       PassTurn(Self);
       Exit;

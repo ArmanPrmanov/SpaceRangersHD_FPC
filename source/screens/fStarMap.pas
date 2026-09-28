@@ -35,7 +35,15 @@ type
   {$Z1}
   TStarMapMode = (smmInactive = 0, smmOrders = 1, smmTurnFilm = 2);
   {$Z1}
-  TStarMapResumeMode = (smrNormal = 0, smrOrders = 1, smrTurnFilm = 2, smrWaitForTurn = 3);
+  // CHANGE: ENHANCEMENT - smrNetFilm: a networked client plays the host's film of its day
+  // (NetPlay; docs/network.md, Films).
+  TStarMapResumeMode = (
+      smrNormal = 0,
+      smrOrders = 1,
+      smrTurnFilm = 2,
+      smrWaitForTurn = 3,
+      smrNetFilm = 4
+  );
   {$Z4}
   TStarMapPathKind = (smpNone = 0, smpAsteroid = 1, smpShip = 2);
   TStarMapReservedEntry = packed record
@@ -118,6 +126,11 @@ type
     FilmCameraEventIndex: Integer;
     FilmCameraTargetKind: Integer;
     FilmCameraShakeAngle: Single;
+    // CHANGE: ENHANCEMENT - Networked play (NetPlay): a client whose travel goes on ends the
+    // next day's turn once the star map has opened, and a continuing host starts the next day at
+    // the film's end, after the peers.
+    NetEndTurnAfterOpen: Boolean;
+    NetDayDeferred: Boolean;
     FilmCameraShakeOffset: TPointF;
     FilmCameraSpeed: Single;
     FilmCameraMoving: Boolean;
@@ -189,6 +202,9 @@ type
     procedure SaveSpaceBackground;
     procedure DeferredEndTurn(Timer: PCallbackTimerGI; UserData: PtrInt);
     procedure DeferredPassTurn(Timer: PCallbackTimerGI; UserData: PtrInt);
+    procedure DeferredNetContinue(Timer: PCallbackTimerGI; UserData: PtrInt);
+    procedure StartNetTurnFilm;
+    function StartDeferredNetDay: Boolean;
     procedure EndTurnClicked(Sender: TObjectGI);
     procedure MapKeyDown(Sender: TObjectGI; Key: Cardinal);
     procedure MapKeyUp(Sender: TObjectGI; Key: Cardinal);
@@ -355,6 +371,8 @@ uses
   Robot,
   aSaveLoad,
   fLoadRobot,
+  NetPlay,
+  NetSession,
   GI_StarFieldImg,
   Math,
   Achievements,
@@ -968,6 +986,11 @@ begin
       RebuildPartnerButtons;
       StartTurnFilm;
     end
+    else if ResumeMode = smrNetFilm then
+    begin
+      SelectMusic;
+      StartNetTurnFilm;
+    end
     else if ResumeMode = smrWaitForTurn then
     begin
       if not MusicInSpaceEnabled then
@@ -1020,6 +1043,12 @@ begin
         EndTurnAfterOpen := False;
         ShipScreen.FlagD4 := False;
         EndTurnClicked(nil);
+      end;
+      if NetEndTurnAfterOpen then
+      begin
+        NetEndTurnAfterOpen := False;
+        if (Mode = smmOrders) and (DeferredEndTurnTimer = nil) then
+          DeferredEndTurnTimer := ScheduleCallbackTimer(1, 1, DeferredNetContinue);
       end;
     end;
   end;
@@ -1356,6 +1385,52 @@ begin
   else
     StartOrderMode;
 end;
+// CHANGE: ENHANCEMENT - A networked client's travel goes on: its next turn ends without the
+// player, as the automatic continue ends it (NetPlay). Only EndTurn: the continue sends no
+// orders and runs no BeginSpaceDay.
+procedure TfStarMap.DeferredNetContinue(Timer: PCallbackTimerGI; UserData: PtrInt);
+begin
+  if DeferredEndTurnTimer <> nil then
+  begin
+    CancelCallbackTimer(DeferredEndTurnTimer);
+    DeferredEndTurnTimer := nil;
+  end;
+  if (Mode <> smmOrders) or MainPanel.NavigationLocked or ShipScreen.FlagD4 then
+    Exit;
+  StopOrderMode;
+  BreakOnNextFilm := False;
+  FilmCameraFollow := ViewFollowShip;
+  if not NetEndTurn(Self) then
+  begin
+    if ClientFilmWaiting then
+      StartNetTurnFilm
+    else if not NetScreenClosing then
+      StartOrderMode;
+  end;
+end;
+// CHANGE: ENHANCEMENT - A networked client plays the host's film of its star's day, its
+// objects bound to this scene (NetPlay.TakeClientFilm). StartTurnFilm makes it SecondaryFilm.
+procedure TfStarMap.StartNetTurnFilm;
+begin
+  if not TakeClientFilm(PrimaryFilm, LocalHuman.PlayerStar) then
+  begin
+    StartOrderMode;
+    Exit;
+  end;
+  RebuildPartnerButtons;
+  StartTurnFilm;
+end;
+// CHANGE: ENHANCEMENT - A networked host's travel goes on: the next day starts at the film's
+// end, once the last day's state has gone and every peer is ready (NetPlay.HostDayMayStart).
+function TfStarMap.StartDeferredNetDay: Boolean;
+begin
+  Result := not HumanHoldsDay(LocalHuman) and HostDayMayStart;
+  if Result then
+  begin
+    MainPanel.TryAutoTurnSave;
+    QueuePlayerStarTurnCalculation;
+  end;
+end;
 procedure TfStarMap.EndTurnClicked(Sender: TObjectGI);
 var
   WaitResult: Cardinal;
@@ -1386,10 +1461,15 @@ begin
       BeginSpaceDay;
       // CHANGE: ENHANCEMENT - The day starts only when every human has ended the turn
       // (ROADMAP.md, Phase 4, item 2). In hot-seat the screen passes to the next human who
-      // has not; with one human the day starts at once, as before.
-      if not EndTurn(False) then
+      // has not; with one human the day starts at once, as before. A networked host waits
+      // here for its peers; a client waits for the host's day and plays its film.
+      if not NetEndTurn(Self) then
       begin
-        if TurnPassesToAnother then
+        if ClientFilmWaiting then
+          StartNetTurnFilm
+        else if NetScreenClosing then
+          Exit
+        else if TurnPassesToAnother then
           PassTurn(Self)
         else
           StartOrderMode;
@@ -1399,7 +1479,7 @@ begin
       Events[0] := Session.TurnCalculationThread.IdleEvent;
       Events[1] := Session.TalkRequestEvent;
       EventList := @Events;
-      WaitResult := WaitForMultipleObjects(Length(Events), EventList, False, INFINITE);
+      WaitResult := NetWaitForEvents(Length(Events), EventList);
       if not ExitScreenLoop then
       begin
         if (Session.TurnCalculationThread.IdleEvent = 0) or (WaitResult = WAIT_OBJECT_0) then
@@ -6809,6 +6889,7 @@ begin
     UpCallback := BreakTurnClicked;
   end;
   ContinueTurnCalculation := False;
+  NetDayDeferred := False;
   FilmProgressTimer := ScheduleCallbackTimer(50, 50, UpdateTurnCalculation);
   NextFilmCommand := SecondaryFilm.FirstCommand;
   Mode := smmTurnFilm;
@@ -6880,6 +6961,7 @@ begin
   end;
   FilmProgressTimer := ScheduleCallbackTimer(50, 50, UpdateTurnCalculation);
   ContinueTurnCalculation := False;
+  NetDayDeferred := False;
   BreakRequested := BreakOnNextFilm;
   (GetByName('PM_Break') as TGraphButtonGI).UpCallback := BreakTurnClicked;
   SwapTurnFilms;
@@ -6917,7 +6999,13 @@ begin
 end;
 function TfStarMap.CompleteHostedTurnFilm: Boolean;
 begin
-  Result := False;
+  // CHANGE: ENHANCEMENT - A networked client's film ends: its state is applied between screens,
+  // where the end-of-film steps run on it and the human's screen opens (NetPlay).
+  Result := NetRole = nrClient;
+  if not Result then
+    Exit;
+  StopTurnFilm(False);
+  ClientFilmEnded(Self, BreakRequested, SecondaryFilm.PlayerCombatRecorded);
 end;
 procedure TfStarMap.ProcessTurnFilm;
 var
@@ -7121,6 +7209,13 @@ begin
             WaitForTurnCalculationUI;
             UpdateTurnCalculation(nil, 0);
           end;
+        // CHANGE: ENHANCEMENT - A networked host starts the continued day here, after its
+        // peers; when it cannot, the film ends as when the travel stops.
+        if ContinueTurnCalculation and NetDayDeferred then
+        begin
+          NetDayDeferred := False;
+          ContinueTurnCalculation := not BreakRequested and StartDeferredNetDay;
+        end;
         if ContinueTurnCalculation then
         begin
           Stage := 22;
@@ -7129,7 +7224,7 @@ begin
             Events[0] := Session.TurnCalculationThread.IdleEvent;
             Events[1] := Session.TalkRequestEvent;
             EventList := @Events;
-            WaitResult := WaitForMultipleObjects(Length(Events), EventList, False, INFINITE);
+            WaitResult := NetWaitForEvents(Length(Events), EventList);
           end
           else
             WaitResult := WAIT_OBJECT_0;
@@ -7175,7 +7270,7 @@ begin
           Events[0] := Session.TurnCalculationThread.IdleEvent;
           Events[1] := Session.TalkRequestEvent;
           EventList := @Events;
-          WaitResult := WaitForMultipleObjects(Length(Events), EventList, False, INFINITE);
+          WaitResult := NetWaitForEvents(Length(Events), EventList);
           if (Session.TurnCalculationThread.IdleEvent = 0) or (WaitResult = WAIT_OBJECT_0) then
           begin
             AnimateSpacePanelOnResume := True;
@@ -7235,6 +7330,18 @@ begin
 end;
 procedure TfStarMap.UpdateTurnCalculation(Timer: PCallbackTimerGI; UserData: PtrInt);
 begin
+  // CHANGE: ENHANCEMENT - A networked client runs no day; whether its travel goes on is decided
+  // on the host's state after the film (NetPlay).
+  if NetRole = nrClient then
+  begin
+    ContinueTurnCalculation := False;
+    if FilmProgressTimer <> nil then
+    begin
+      CancelCallbackTimer(FilmProgressTimer);
+      FilmProgressTimer := nil;
+    end;
+    Exit;
+  end;
   if BreakRequested and (LocalPlayer <> nil) and not LocalPlayer.IsOnPlanet then
     ContinueTurnCalculation := False
   else if not IsTurnCalculationRunningUI
@@ -7245,10 +7352,18 @@ begin
     ContinueTurnCalculation := ShouldContinuePlayerTravel;
     // CHANGE: ENHANCEMENT - Travel that goes on ends the next day's turn by itself. With several
     // humans the local one continues until arrival (THuman.ContinueUntilArrival), and the next
-    // day still waits for the others' end turns; the film then ends and the screen passes.
-    if ContinueTurnCalculation then
+    // day still waits for the others' end turns; the film then ends and the screen passes. A
+    // networked host starts the next day at the film's end, after its peers.
+    if ContinueTurnCalculation and (NetRole = nrHost) then
+    begin
+      EndTurn(True);
+      NetDayDeferred := True;
+    end
+    else if ContinueTurnCalculation then
       ContinueTurnCalculation := EndTurn(IsMultiplayer);
-    if ContinueTurnCalculation and (TurnCalculationPhase = tcpGalaxyFinished) then
+    if ContinueTurnCalculation
+        and not NetDayDeferred
+        and (TurnCalculationPhase = tcpGalaxyFinished) then
     begin
       MainPanel.TryAutoTurnSave;
       QueuePlayerStarTurnCalculation;
@@ -9093,7 +9208,7 @@ begin
   Events[0] := Session.TurnCalculationThread.IdleEvent;
   Events[1] := Session.TalkRequestEvent;
   EventList := @Events;
-  WaitResult := WaitForMultipleObjects(Length(Events), EventList, False, INFINITE);
+  WaitResult := NetWaitForEvents(Length(Events), EventList);
   if (Session.TurnCalculationThread.IdleEvent = 0) or (WaitResult = WAIT_OBJECT_0) then
   begin
     if Session.PlayerStarDayPrepared then

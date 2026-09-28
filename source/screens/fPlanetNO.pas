@@ -145,7 +145,8 @@ uses
   SE_Planet,
   ThreadCalc,
   aCalc,
-  HotSeat;
+  HotSeat,
+  NetPlay;
 type
   PProbeMarkerPixel = ^TProbeMarkerPixel;
   TProbeMarkerPixel = record
@@ -349,8 +350,9 @@ begin
   Takeoff(0);
   StarMapScreen.SetMapCenterManually(TruncatePointF(LocalPlayer.Position));
   // CHANGE: ENHANCEMENT - The day starts only when every human has ended the turn
-  // (ROADMAP.md, Phase 4, item 2); in hot-seat the screen passes to the next human.
-  if not EndTurn(False) then
+  // (ROADMAP.md, Phase 4, item 2); in hot-seat the screen passes to the next human. A
+  // networked host waits for its peers; a client waits for the host's day (NetPlay).
+  if not NetEndTurn(Self) then
   begin
     PassTurn(Self);
     Exit;

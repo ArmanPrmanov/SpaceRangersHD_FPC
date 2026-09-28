@@ -138,7 +138,8 @@ uses
   EC_Struct,
   ThreadCalc,
   aCalc,
-  HotSeat;
+  HotSeat,
+  NetPlay;
 
 constructor TfHangar.Create;
 var
@@ -632,8 +633,9 @@ begin
   LocalHuman.StarMapWeaponPanelOpen := False;
   FilmCameraFollow := True;
   // CHANGE: ENHANCEMENT - The day starts only when every human has ended the turn
-  // (ROADMAP.md, Phase 4, item 2); in hot-seat the next human's screen follows instead.
-  if not EndTurn(False) then
+  // (ROADMAP.md, Phase 4, item 2); in hot-seat the next human's screen follows instead. A
+  // networked host waits for its peers; a client waits for the host's day (NetPlay).
+  if not NetEndTurn(TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)])) then
   begin
     SwitchToNextHuman;
     Exit;

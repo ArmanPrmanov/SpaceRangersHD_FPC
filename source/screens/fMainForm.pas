@@ -71,7 +71,8 @@ uses
   fShip2,
   fSaveManager,
   fMods,
-  Robot;
+  Robot,
+  NetPlay;
 constructor TfMainForm.Create;
 begin
   inherited Create;
@@ -349,6 +350,7 @@ end;
 procedure TfMainForm.OnOpen;
 var
   I: Integer;
+  NetNotice: WideString;
 begin
   SuppressModRetryPrompt := True;
   LoadPanel.OnOpen;
@@ -493,6 +495,10 @@ begin
     ShowXonarWarning := False;
     ShowMessageBoxGI(Self, LocalizedColorText('Warning.XonarDetected'), mbgCancel or mbgUnused04);
   end;
+  // CHANGE: ENHANCEMENT - A networked game that could not start or has ended says why (NetPlay).
+  NetNotice := TakeNetNotice;
+  if NetNotice <> '' then
+    ShowMessageBoxGI(Self, NetNotice, mbgOK or mbgError);
 end;
 procedure TfMainForm.OnClose;
 begin
