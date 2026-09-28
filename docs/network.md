@@ -23,6 +23,7 @@ Read [humans.md](humans.md) (the barrier, hot-seat, `ActingHuman`) and
 | `source/net/NetSession.pas` | what the rest of the game calls: role, pump, hooks |
 | `source/observer/HeadlessNet.pas` | the headless host and client for tests (Tests) |
 | `source/screens/NetPlay.pas` | the game's screens in a session: `--host`/`--join`, the waits, the client's film and state (The day, Films, Applying state, Waiting) |
+| `source/screens/NetMenus.pas` | the main menu's join and the in-game menu's host and stop (Hosting and joining) |
 
 `source/game`, `source/core` and `source/script` do not use `source/net`. The
 game layer exposes hooks (procedure variables, as `BeforeCommandHook`); the net
@@ -138,6 +139,9 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   host's apply, so it waits too rather than landing in whichever day it
   happened to reach.
 - A queued command that raises when the host applies it is logged and dropped.
+  The command log does not record it, and records the commands after it
+  (`CommandFailedHook`, [commands.md](commands.md)). The same holds for a
+  command of a remote dialogue.
 - When the host's human has ended its turn and every peer is ready, the host
   applies the queued commands, human by human in `Session.Humans` order, each
   queue up to and including its `EndTurn`, through `SubmitCommand`, so the
@@ -399,13 +403,46 @@ screens, not a dialogue a client could answer mid-day.
 - Command line: `--host=PORT` hosts the game that runs, from the first game
   screen that opens (with `--load-save=PATH`, after a new game, or after a load
   from the menu); port 0 picks one, and the log says which (`Network: host
-  listens on port`). The host's name is its ranger's. `--join=HOST:PORT
+  listens on port`). The host's name is its ranger's. `--join=HOST[:PORT]
   --name=NAME` joins one after the startup load: it connects, waits for the
   whole state (60 s at most), applies it and opens the human's screen. A refusal,
   a failed connection or no state go to the main menu with a message. `--join`
-  takes no `--host` or `--load-save`.
-- In the game: the in-game menu hosts the running game; the main menu joins one
-  (address and name).
+  takes no `--host` or `--load-save`. An address without a port takes
+  `NetPlay.DefaultNetPort` (47300), which the menus also propose.
+- **The main menu joins** (`NetMenus`): a Network game entry in the row of
+  Mods (a copy of the Mods button, which has the only fitting picture, and of
+  its label; the J key too) opens a dialog for the address (`HOST` or
+  `HOST:PORT`) and the name. The last address and name are kept in the user
+  settings (`NetJoinAddress`, `NetJoinName` in `cfg.txt`); the first name
+  proposed is the new-game screen's. Join closes the menu and the join runs
+  between screens exactly as `--join`'s does (`NetPlay.RequestJoin`), so its
+  failures come back to the main menu as a message box. The wait for the state
+  shows nothing and cannot be cancelled (up to 60 s, as on the command line).
+- **The in-game menu hosts** (`NetMenus`): a button under the round menu (the
+  new-game screen's caption button; the N key too) asks for the port (the last
+  one, `NetHostPort`, else 47300; 0 picks one) and hosts the running game as
+  `--host` does (`NetPlay.HostRunningGame`). A box then says the port, the
+  machine's IPv4 addresses (`sr_net_local_addresses`: the host name's, else the
+  interface of the default route) and who is connected. While it hosts, the
+  button reads Stop hosting and a line under it shows the port and the
+  connected players, refreshed every second. Stop hosting asks first, then
+  disconnects every joined peer's human as a leaver's (`TNetHost.DisconnectHumans`:
+  not connected, `HoldPosition`, queued commands dropped), says `Bye` to every
+  peer (`StopNetwork`) and goes on without a session; those humans can rejoin
+  by name once the game is hosted again. A client has no host button.
+- The in-game menu refuses to host (a message says why, `NetPlay.HostingRefusal`)
+  on a client, while hot-seat is on (`--hotseat=N`, a turn pass pending, or the
+  screen held by another human than the first: hosting would turn the other
+  local humans into remote ones), in a special game mode
+  (`Galaxy.SpecialSimulationMode`), and without a game. The observer and the
+  headless modes never open the in-game menu, and `GameBootstrap` refuses
+  `--host` and `--join` there.
+- A save with several humans loaded without `--hotseat` can be hosted, from the
+  first human's screen: the others start disconnected, as with `--host`, and
+  their players rejoin by name.
+- The dialogs are built in code like the chameleon dialog: the message box's
+  window, font and OK/Cancel buttons, and `TEditGI` fields. Their texts are
+  `Multiplayer.*` keys with English fallbacks (`MultiplayerText`).
 - Headless, for tests: `--sim-net-host=PORT --sim-net-clients=N` with
   `--sim-save` and `--sim-turns=DAYS`, and `--sim-net-join=HOST:PORT
   --sim-net-name=NAME` with `--sim-net-leave-at=DAY`; see Tests.
@@ -473,10 +510,10 @@ star's day is about as large as a delta.
 
 ## Not done yet
 
-- The menus: hosting from the in-game menu, joining from the main menu. They
-  call `NetPlay` as the command line does (`StartHostingGame`,
-  `JoinFromCommandLine`, which would take an address and a name).
-- The `Multiplayer.*` texts in the language data.
+- The `Multiplayer.*` texts in the language data (the menus and the waits show
+  their English fallbacks).
+- The join from the main menu shows no wait and cannot be cancelled; network
+  play has no picture of its own in the main menu (it wears the Mods button's).
 - A join takes the host's prepared day as it is: a human who joins in a star
   the preparation job did not see runs that star's first day without its
   preparation (no news, no planet day).
