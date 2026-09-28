@@ -72,7 +72,8 @@ uses
   fSaveManager,
   fMods,
   Robot,
-  NetPlay;
+  NetPlay,
+  NetMenus;
 constructor TfMainForm.Create;
 begin
   inherited Create;
@@ -346,6 +347,8 @@ begin
     UpCallback := ArcadeBattleClicked;
   with GetByName('Mods') as TGraphButtonGI do
     UpCallback := ModsClicked;
+  // CHANGE: ENHANCEMENT - Join a networked game (ROADMAP.md, Phase 5; NetMenus).
+  AddMainMenuJoin(Self);
 end;
 procedure TfMainForm.OnOpen;
 var
@@ -590,6 +593,9 @@ begin
   end
   else if Key = Ord('M') then
     ModsClicked(nil)
+  // CHANGE: ENHANCEMENT - J joins a networked game (NetMenus).
+  else if Key = Ord('J') then
+    ShowJoinDialog(Self)
   else if (Key = VK_F3) or (Key = Ord('L')) then
   begin
     TGraphButtonGI(GetByName('Load')).ExecuteOnPressCode;

@@ -55,7 +55,8 @@ uses
   aGalaxy,
   fLoad,
   fSaveManager,
-  fStarMap;
+  fStarMap,
+  NetMenus;
 
 procedure TfGameMenu.InitializeLayout;
 begin
@@ -92,6 +93,9 @@ begin
     UpCallback := ResumeClicked;
   with GetByName('Achievements') as TGraphButtonGI do
     UpCallback := AchievementsClicked;
+  // CHANGE: ENHANCEMENT - Host the running game for networked play (ROADMAP.md, Phase 5;
+  // NetMenus).
+  AddGameMenuHost(Self);
 end;
 
 procedure TfGameMenu.OnOpen;
@@ -102,10 +106,12 @@ begin
     CaptureScreenBackground(True, 0);
   (GetByName('BGBuf') as TGraphBufGI).BindExternalGraphBuf(AuxRenderBuffer);
   ContentPanel.KeyDownCallback := MainPanelKeyDown;
+  GameMenuHostOpened(Self);
 end;
 
 procedure TfGameMenu.OnClose;
 begin
+  GameMenuHostClosed(Self);
   if AuxRenderBuffer <> nil then
     AuxRenderBuffer.Clear;
 end;
@@ -205,7 +211,9 @@ begin
               if not (GetByName('Exit') as TGraphButtonGI).ContainsPoint(Point) then
                 if not (GetByName('Close') as TGraphButtonGI).ContainsPoint(Point) then
                   if not (GetByName('Achievements') as TGraphButtonGI).ContainsPoint(Point) then
-                    ResumeClicked(nil);
+                    // CHANGE: ENHANCEMENT - The host button lies beside the menu (NetMenus).
+                    if not GameMenuHostContains(Self, Point) then
+                      ResumeClicked(nil);
 end;
 
 procedure TfGameMenu.MainPanelKeyDown(Sender: TObjectGI; Key: Cardinal);
@@ -224,7 +232,10 @@ begin
     else if Key = Ord('E') then
       ExitClicked(nil)
     else if Key = Ord('H') then
-      HelpClicked(nil);
+      HelpClicked(nil)
+    // CHANGE: ENHANCEMENT - N hosts the game, or stops hosting it (NetMenus).
+    else if Key = Ord('N') then
+      GameMenuHostClicked(Self);
 end;
 
 procedure TfGameMenu.ExecuteUiCode(Block: TBlockParEC; Key: Cardinal);
