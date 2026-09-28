@@ -46,6 +46,8 @@ NET_LEAVE_DAY = 3
 NET_TALK_DAY = 2
 # A networked process that runs longer than this has hung.
 NET_TIMEOUT = 600
+# Options every game run gets, such as --poison-frees (set in main).
+GAME_OPTIONS: list[str] = []
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import split_commands  # noqa: E402
@@ -84,7 +86,9 @@ def save_digest(save: Path) -> str:
 def run_game(binary: Path, game_dir: Path, options: list[str]) -> tuple[int, str]:
     # A throwaway profile keeps the player's settings and logs out of the test.
     with tempfile.TemporaryDirectory(prefix="rangers-test-") as profile:
-        command = [str(binary), f"--game-dir={game_dir}", f"--user-dir={profile}", *options]
+        command = [
+            str(binary), f"--game-dir={game_dir}", f"--user-dir={profile}", *GAME_OPTIONS, *options
+        ]
         result = subprocess.run(command, capture_output=True, cwd=profile)
     output = result.stdout.decode("utf-8", "replace") + result.stderr.decode("utf-8", "replace")
     return result.returncode, output
@@ -251,7 +255,10 @@ class GameProcess:
 
     def __init__(self, binary: Path, game_dir: Path, options: list[str]):
         self.profile = tempfile.TemporaryDirectory(prefix="rangers-net-")
-        command = [str(binary), f"--game-dir={game_dir}", f"--user-dir={self.profile.name}", *options]
+        command = [
+            str(binary), f"--game-dir={game_dir}", f"--user-dir={self.profile.name}",
+            *GAME_OPTIONS, *options,
+        ]  # fmt: skip
         self.process = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=self.profile.name
         )
@@ -669,7 +676,22 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0, help="Seed for the presentation stream.")
     parser.add_argument("--update", action="store_true", help="Record golden hashes again.")
     parser.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
+    parser.add_argument(
+        "--poison-frees",
+        nargs="?",
+        const=0,
+        type=int,
+        metavar="MB",
+        help="Run every game with poisoned frees (debug builds; docs/network.md), optionally "
+        "with a quarantine of MB megabytes.",
+    )
     args = parser.parse_args()
+    if args.poison_frees is not None:
+        if args.release:
+            parser.error("--poison-frees needs the debug build.")
+        GAME_OPTIONS.append(
+            f"--poison-frees={args.poison_frees}" if args.poison_frees else "--poison-frees"
+        )
     # Save names are often Cyrillic; do not fail on a console code page.
     sys.stdout.reconfigure(errors="replace")
     binary = binary_path(args.release)
