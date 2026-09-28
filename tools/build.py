@@ -78,9 +78,9 @@ def compile_pascal(
 def compile_native(
     work: Path, command: list[str | Path], rebuild: bool, env: dict[str, str] | None = None
 ) -> None:
-    stamp = work / "native-command.json"
-    depfile = work / "native.d"
     target = Path(command[command.index("-o") + 1])
+    stamp = work / f"native-{target.stem}.json"
+    depfile = work / f"native-{target.stem}.d"
     command = [*command, "-MD", "-MF", depfile]
     signature = command_signature(command)
     if (
@@ -99,7 +99,7 @@ def compile_native(
             print("Native platform code is up to date.", flush=True)
             return
     stamp.write_text("")
-    run_step(work, "native", command, env)
+    run_step(work, f"native-{target.stem}", command, env)
     stamp.write_text(signature)
 
 
@@ -172,17 +172,19 @@ def build_macos(release: bool, rebuild: bool = False, *, lto: bool = False) -> P
         rebuild=rebuild,
     )
     shutil.copy2(native / "libokgf.dylib", libraries)
-    cflags = shlex.split(output("pkg-config", "--cflags", "sdl2", "SDL2_mixer", "libjpeg"))
-    ldflags = shlex.split(output("pkg-config", "--libs", "sdl2", "SDL2_mixer", "libjpeg"))
-    native_object = work / "game_native.o"
-    # Keep the object: dsymutil needs its DWARF after linking the library.
-    compile_native(work, [
-        clang, "-c", "-O3" if release else "-O2", "-g",
-        "-Wall", "-Wextra", "-mmacosx-version-min=11.0",
-        ROOT / "platform/game_native.c", *cflags, "-o", native_object,
-    ], rebuild)  # fmt: skip
+    cflags = shlex.split(output("pkg-config", "--cflags", "sdl2", "SDL2_mixer", "libjpeg", "libzstd"))
+    ldflags = shlex.split(output("pkg-config", "--libs", "sdl2", "SDL2_mixer", "libjpeg", "libzstd"))
+    native_objects = []
+    # Keep the objects: dsymutil needs their DWARF after linking the library.
+    for source in ("game_native", "net_native"):
+        native_objects.append(work / f"{source}.o")
+        compile_native(work, [
+            clang, "-c", "-O3" if release else "-O2", "-g",
+            "-Wall", "-Wextra", "-mmacosx-version-min=11.0",
+            ROOT / f"platform/{source}.c", *cflags, "-o", native_objects[-1],
+        ], rebuild)  # fmt: skip
     run_step(work, "native-link", [
-        clang, "-dynamiclib", "-mmacosx-version-min=11.0", native_object, *ldflags,
+        clang, "-dynamiclib", "-mmacosx-version-min=11.0", *native_objects, *ldflags,
         "-Wl,-install_name,@rpath/libgamenative.dylib", "-o", libraries / "libgamenative.dylib",
     ])  # fmt: skip
     compile_pascal(work, [
@@ -274,8 +276,9 @@ def build_android(release: bool, rebuild: bool = False) -> Path:
     run_step(work, "native", [
         toolchain / "aarch64-linux-android26-clang", "-shared", "-fPIC",
         "-O3" if release else "-O2", f"-I{prefix}/include", f"-I{prefix}/include/SDL2",
-        f"-I{platform}", ROOT / "platform/game_native.c", platform / "android_native.c",
-        f"-L{prefix}/lib", "-lSDL2_mixer", "-lSDL2", "-ljpeg", "-llog", "-landroid", "-lm",
+        f"-I{platform}", ROOT / "platform/game_native.c", ROOT / "platform/net_native.c",
+        platform / "android_native.c",
+        f"-L{prefix}/lib", "-lSDL2_mixer", "-lSDL2", "-ljpeg", "-lzstd", "-llog", "-landroid", "-lm",
         "-Wl,-z,max-page-size=16384", "-Wl,-soname,libgamenative.so",
         "-o", libraries / "libgamenative.so",
     ])  # fmt: skip
@@ -360,7 +363,7 @@ def sign_android_apk(work: Path, unsigned: Path, sdk_tools: Path, java: Path) ->
 
 
 def msys2_prefix() -> Path:
-    """MSYS2 UCRT64 supplies GCC, Ninja, SDL2, SDL2_mixer, libjpeg-turbo, libpng and zlib."""
+    """MSYS2 UCRT64 supplies GCC, Ninja, SDL2, SDL2_mixer, libjpeg-turbo, libpng, zlib and zstd."""
     prefix = Path(os.environ.get("MSYS2_PREFIX", "C:/msys64/ucrt64"))
     if not (prefix / "bin/gcc.exe").is_file():
         raise FileNotFoundError(f"MSYS2 UCRT64 toolchain not found in {prefix}; set MSYS2_PREFIX")
@@ -404,7 +407,8 @@ def build_windows(release: bool, rebuild: bool = False) -> Path:
         gcc, "-shared", "-O3" if release else "-O2", "-g0" if release else "-g",
         "-Wall", "-Wextra", "-DSDL_MAIN_HANDLED", f"-I{prefix}/include",
         ROOT / "platform/game_native.c", ROOT / "platform/windows_native.c",
-        f"-L{prefix}/lib", "-lSDL2_mixer", "-lSDL2", "-ljpeg", "-o", game / "gamenative.dll",
+        ROOT / "platform/net_native.c", f"-L{prefix}/lib", "-lSDL2_mixer", "-lSDL2", "-ljpeg",
+        "-lzstd", "-lws2_32", "-o", game / "gamenative.dll",
     ], rebuild, env)  # fmt: skip
     # The Windows RTL owns the `windows` and `messages` unit names; compile a staged
     # copy with the shims renamed instead of renaming them in the repository.
