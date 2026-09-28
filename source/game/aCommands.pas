@@ -49,6 +49,10 @@ var
   // Called around every submitted command, on the thread that submits it.
   BeforeCommandHook: TCommandHook;
   AfterCommandHook: TCommandHook;
+  // CHANGE: ENHANCEMENT - Called after AfterCommandHook, so that the command log and the
+  // network can both listen: a client's network session sends the command to the host
+  // (ROADMAP.md, Phase 5; docs/network.md, Commands).
+  NetworkCommandHook: TCommandHook;
 
 function NewCommand(Kind: TCommandKind): TPlayerCommand;
 // Names Instance by kind and id; nil names nothing.
@@ -326,6 +330,8 @@ begin
   ExecuteCommand(Command);
   if Assigned(AfterCommandHook) then
     AfterCommandHook(Command);
+  if Assigned(NetworkCommandHook) then
+    NetworkCommandHook(Command);
 end;
 
 end.

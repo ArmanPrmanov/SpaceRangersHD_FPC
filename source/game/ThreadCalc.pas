@@ -30,10 +30,20 @@ type
   // Told when a job starts (on the thread that starts it) and when it has finished (on the
   // turn thread, before the job counts as idle).
   TTurnJobHook = procedure(Job: TTurnCalculationJob; Starting: Boolean);
+  // CHANGE: ENHANCEMENT - Told on the turn thread, in the player-star job, after each filmed
+  // star's day with the film it recorded (Recorded: whether the day was filmed), while no other
+  // thread uses the film. A host encodes the films its clients need here (ROADMAP.md, Phase 5;
+  // docs/network.md, Films).
+  TStarDayHook = procedure(Star: TObject; Film: TObject; Recorded: Boolean);
+  // CHANGE: ENHANCEMENT - Told on the turn thread when the player-star job has run the day,
+  // after StartDayRound.
+  TDayCompletedHook = procedure;
 var
   AdaptiveBeginCalcNextTurn: Single = 0.5;
   LastGalaxyTurnDuration: Integer;
   TurnJobHook: TTurnJobHook;
+  StarDayHook: TStarDayHook;
+  DayCompletedHook: TDayCompletedHook;
 procedure StartGalaxyTurnCalculation;
 procedure StartPlayerStarTurnCalculation;
 procedure StartPlayerStarPreparation;
@@ -151,6 +161,8 @@ begin
         if Star = LocalHuman.PlayerStar then
           LocalRecordFilm := RecordFilm;
         Star.NextDay(RecordFilm);
+        if Assigned(StarDayHook) then
+          StarDayHook(Star, PrimaryFilm, RecordFilm);
       finally
         PrimaryFilm := SavedFilm;
       end;
@@ -165,6 +177,8 @@ begin
     // CHANGE: ENHANCEMENT - The day has run: every human holds the next one again (the end-turn
     // barrier, ROADMAP.md, Phase 4, item 2).
     StartDayRound;
+    if Assigned(DayCompletedHook) then
+      DayCompletedHook;
   except
     on E: Exception do
     begin

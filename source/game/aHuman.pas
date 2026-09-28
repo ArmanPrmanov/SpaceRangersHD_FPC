@@ -121,6 +121,11 @@ type
     // save block (aHumanSave).
     Finished: Boolean;
     FinishReason: Integer;
+    // CHANGE: ENHANCEMENT - Whether the human's machine is connected (ROADMAP.md, Phase 5;
+    // docs/network.md, Disconnects). A disconnected human does not hold the day and its ranger
+    // holds position until it rejoins. Session state, not game state: it is not saved, and it
+    // is True everywhere but on a host.
+    Connected: Boolean;
     constructor Create;
     destructor Destroy; override;
     // The message bubbles, under PersistentPlayerMessageLock. SkipLock means the caller
@@ -177,6 +182,11 @@ var
   ScriptHuman: THuman;
   // The human at this machine: whose screen this is. LocalPlayer is its ranger.
   LocalHuman: THuman;
+  // CHANGE: ENHANCEMENT - Whether a human added other than the local one (a load, a join)
+  // starts connected (THuman.Connected). A host sets it to False: the humans of a save it
+  // loads start disconnected, and a joining peer's human is connected when the peer takes it
+  // (docs/network.md, Disconnects).
+  NewHumansConnected: Boolean = True;
 // The human whose ranger is Ship, or nil when Ship is not a human's ranger.
 function HumanOf(Ship: TObject): THuman;
 // Whether Ship is a human's ranger. Every TPlayer is.
@@ -264,7 +274,7 @@ procedure DropRefusedHumanAttacks;
 // runs only when every human who plays has pressed end turn.
 // Whether Human holds the day: its ranger plays and it has not ended its turn. A finished
 // human never holds it, nor does one whose ranger is in hyperspace, since a jump is travel
-// that goes on until arrival. Phase 5: a disconnected human will not hold it either.
+// that goes on until arrival, nor a disconnected one (THuman.Connected).
 function HumanHoldsDay(Human: THuman): Boolean;
 // Whether the day may start: no human holds it.
 function AllHumansEndedTurn: Boolean;
@@ -289,6 +299,16 @@ var
 // CHANGE: ENHANCEMENT - Hot-seat: the screen passes to another human, who becomes the local
 // one. The humans stay as they are; only whose screen this is changes.
 procedure SetLocalHuman(Human: THuman);
+type
+  // CHANGE: ENHANCEMENT - Remote dialogue (ROADMAP.md, Phase 5; docs/network.md, Remote
+  // dialogue): on a host, the turn thread asks a remote human something (a hail, a demand, an
+  // offer) through the network session, which sends TalkRequest to that human's client and
+  // waits for TalkDone. Returns whether the talk ran; False ends it as for a human on
+  // automatic control. The sites marked "HUMANS: remote dialogue (Phase 5)" will call it, and
+  // the network package that implements it sets it; until then it is nil and nothing calls it.
+  TRemoteTalkHook = function(Human: THuman): Boolean;
+var
+  RemoteTalkHook: TRemoteTalkHook;
 // A planet where a joining human can start: an inhabited coalition planet in a coalition star
 // that holds no human, the first in galaxy order; nil when there is none. The choice depends
 // only on the galaxy, so runs repeat.
@@ -504,6 +524,7 @@ begin
   Result.Id := Player.Id;
   if Result <> LocalHuman then
   begin
+    Result.Connected := NewHumansConnected;
     Result.PlayerStar := Player.CurrentStar;
     // The original layout saves the local human's; the per-human save block (aHumanSave)
     // fills this one when a save holds it.
@@ -949,6 +970,7 @@ begin
   inherited Create;
   GovernmentDialogNames := TStringsEC.Create;
   FinishReason := -1;
+  Connected := True;
 end;
 
 destructor THuman.Destroy;
@@ -1052,13 +1074,13 @@ end;
 
 function HumanHoldsDay(Human: THuman): Boolean;
 begin
+  // A disconnected human counts as having ended its turn; its ranger holds position.
   Result :=
       not Human.EndedTurn
           and not Human.Finished
+          and Human.Connected
           and (Human.Player <> nil)
           and not Human.Player.InHyperspace;
-  // Phase 5: "and not Human.Disconnected". A disconnected human counts as having ended its
-  // turn; its ranger holds position.
 end;
 
 function AllHumansEndedTurn: Boolean;
