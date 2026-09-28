@@ -22,6 +22,7 @@ Read [humans.md](humans.md) (the barrier, hot-seat, `ActingHuman`) and
 | `source/net/NetClient.pas` | the client session: hello, commands out, films and states in |
 | `source/net/NetSession.pas` | what the rest of the game calls: role, pump, hooks |
 | `source/observer/HeadlessNet.pas` | the headless host and client for tests (Tests) |
+| `source/screens/NetPlay.pas` | the game's screens in a session: `--host`/`--join`, the waits, the client's film and state (The day, Films, Applying state, Waiting) |
 
 `source/game`, `source/core` and `source/script` do not use `source/net`. The
 game layer exposes hooks (procedure variables, as `BeforeCommandHook`); the net
@@ -34,6 +35,11 @@ units set them. `tools/check_layers.py` keeps that direction.
 | `aCommands.NetworkCommandHook` | client | every command the client submits goes to the host; called after `AfterCommandHook`, so the command log and the network both listen |
 | `aHuman.RemoteTalkHook` | remote-dialogue package | declared, nil, called nowhere yet (Remote dialogue) |
 | `aHuman.NewHumansConnected` | host | humans a load or a join adds start disconnected |
+| `aCalc.TurnWaitPumpHook` | `NetPlay` | the UI thread pumps while it waits for a job (`WaitForTurnCalculationUI`, `Calculate*AndWait`) |
+| `ThreadCalc.TurnJobsForbidden` | `NetPlay`, client | starting a job raises: a client never runs one |
+
+`GR_Main.FramePumpHook` (a root unit, not the game layer) is how `NetPlay` pumps
+once per message-loop iteration.
 
 ## Threads
 
@@ -41,10 +47,21 @@ units set them. `tools/check_layers.py` keeps that direction.
   the sockets (a few ms), sends what is queued, and cuts received bytes into
   messages, which it appends to the peer's inbox under one lock. It sets
   `NetInboxEvent` when a message arrives. It never touches game state.
-- **The UI thread** pumps the inboxes once per frame (`NetSession.Pump`, from
-  `GR_WinMessage`) and at the safe points below. Everything that changes the
-  game from the network happens in the pump or at a safe point, never on the
-  network thread.
+- **The UI thread** pumps the inboxes once per frame (`NetPlay`'s frame hook,
+  `GR_Main.FramePumpHook`, called by `GR_WinMessage`) and at the safe points
+  below. Everything that changes the game from the network happens in the pump
+  or at a safe point, never on the network thread. Where the UI thread blocks
+  during a day it pumps too: `WaitForTurnCalculationUI` through
+  `aCalc.TurnWaitPumpHook`, and the star map's waits for a job or a talk
+  (`NetPlay.NetWaitForEvents`). These are loops with a 10 ms timeout rather than
+  waits on `NetInboxEvent`: the star map waits on the platform shim's handles
+  (`platform/Windows.pas`), which a `TEvent` handle is not. The host takes no
+  join, leave or state while a screen that has no game (the menus, a load, a
+  new game, a text quest, an arcade battle) or a memory snapshot is up.
+- **The host's pump while a job runs** only moves messages into the queues:
+  new peers wait for the job (the turn thread reads the peer list in
+  `HostStarDay`), and so does `Status` (a job may free a ranger whose name it
+  reads). Commands, joins and leaves wait for a quiet point as before.
 - **The turn thread**, on the host, reads one peer's inbox only while it waits
   for that peer's human to answer a dialogue (Remote dialogue).
 - Sending is thread-safe: it appends to the peer's outbox under the lock.
@@ -141,8 +158,32 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   the host's screen waits (Waiting). When the last peer becomes ready, the host
   applies the queues and starts the day from the screen that is waiting, as if
   its human had ended the turn again: `aPlayerActions.EndTurn` now returns true.
-- **Client.** A client never starts a day. Its end turn sends `EndTurn` and its
-  screen waits until the host's state for the next day has been applied.
+  Every screen that starts a day asks `NetPlay.NetEndTurn` where it asked
+  `EndTurn` (the star map, the planet and station panels, the takeoffs from the
+  planet, hangar and station, the jump screen); on the host it sends the last
+  day's state if it has not gone, waits, applies the queues and calls
+  `BeginDay` right before the player-star job (`HostDayMayStart`). Without a
+  session it is `EndTurn`.
+- **Host, continuing travel.** The star map's automatic continue ends the host
+  human's turn (`EndTurn` with `ContinueUntilArrival`) during the film, but the
+  next day starts at the film's end: there the state goes, the host waits for
+  its peers, and the next player-star job runs (`TfStarMap.StartDeferredNetDay`).
+  A break in the film, or a human who holds the day again, ends it as when the
+  travel stops. Without a session the next day's job still starts during the
+  film.
+- **Client.** A client never starts a day (`ThreadCalc.TurnJobsForbidden`). Its
+  end turn sends `EndTurn` and its screen waits until the host's film or state
+  comes (Films, Applying state).
+- **Client, continuing travel.** A client never sends `ContinueUntilArrival`:
+  the flag is not in a state, so the client could not tell when it stopped.
+  Instead, after the state of a day whose film it played, when the travel goes
+  on (`HumanTravelContinues` on the new state), the film showed no fight
+  (`PlayerCombatRecorded`) and the player did not break it, the star map opens
+  and ends the next turn by itself: `EndTurn` only, as the automatic continue
+  sends no orders and no `BeginSpaceDay`. So the host waits for a travelling
+  client every day, briefly.
+- Hot-seat passes nothing in a session (`TurnPassesToAnother` is false): the
+  other humans play on their own machines.
 - A disconnected human does not hold the day (`THuman.Connected`, see
   Disconnects).
 
@@ -152,19 +193,32 @@ The player-star job records one film per star that holds a human (`aStarFilms`).
 Right after each star's day, on the turn thread, the host encodes the film of a
 star whose `PlayerStar` humans include a connected remote human
 (`StarDayHook`), once. After the job it sends the same bytes to every client
-whose human was in that star (`Film`), from the pump (`DayCompletedHook` marks
-the day ran) or, headless, at once. The film goes before the state: it is small
-and needed first. A day that was not filmed sends nothing.
+whose human was in that star (`Film`), from the pump as soon as the day has run
+(`DayCompletedHook` marks it; the galaxy job may be running), or, headless, at
+once. The film goes before the state: it is small and needed first. A day that
+was not filmed sends nothing.
 
 The client plays it on the star map as the history viewer plays a stored film:
 the film's objects bind to the client's scene objects by kind, graphics key
 and id, and objects the client does not have (missiles, drops, ships that
 arrived that day) are created for the film (`fFilm.CreateFilmSceneObjects`,
-`ReuseSceneObjectsForPreloadedFilm`). The client needs the new state at the end
-of the film, since the end-of-film branch reads it (landed, docked, in
-hyperspace); it waits there for the state when it has not arrived.
+`ReuseSceneObjectsForPreloadedFilm`). The client's scene objects are those of
+its star's galaxy objects (`StarScene.OpenSpaceScene`: the star, planets and
+satellites, asteroids, ships, items, missiles, holes, and the jump gates, which
+films name with id 0); `NetPlay.TakeClientFilm` loads the film into
+`PrimaryFilm`, binds it, and `StartTurnFilm` makes it `SecondaryFilm` as for a
+film the client recorded. The client needs the new state at the end of the
+film, since the end-of-film branch reads it (landed, docked, in hyperspace); it
+waits there for the state when it has not arrived (`CompleteHostedTurnFilm`),
+then the star map closes and the state is applied between screens.
 
-A client that is landed, docked or in hyperspace plays no film.
+A client plays a film when its ranger was in space or taking off when it
+ended its turn, and only the film of its own star. Taking off from a planet,
+the hangar or a station, the star map opens (through the load screen) and plays
+it (`smrNetFilm`). A client that is landed, docked or in hyperspace plays no
+film; a client arriving from hyperspace does not see the arrival film either
+(its state before the day has no ranger in that star), and goes to the star
+map in order mode.
 
 ## States
 
@@ -174,7 +228,12 @@ A client that is landed, docked or in hyperspace plays no film.
   it on the UI thread at a quiet point after the day: no job running and the
   next day prepared (`Session.PlayerStarDayPrepared`), or, when the host's
   screen does not prepare days (landed, docked, in hyperspace, headless),
-  after the galaxy job.
+  after the galaxy job. Only the star map prepares days (after its film), so on
+  the star map the state waits for the preparation; on any other screen it goes
+  after the galaxy job (`NetPlay.QuietAfterDay`, from the frame hook). A day
+  taken off from the hangar or a station is sent there, before the star map
+  prepares the next one. The next end turn sends a state that has not gone yet
+  before it waits for the peers.
 - **Deltas.** The host keeps the uncompressed states that some client may still
   use as a base: each client's last acknowledged day, and the newest. A state
   goes to a client as a delta against its acknowledged day (`CompressState`
@@ -211,10 +270,26 @@ to ships, planets and items. So a client applies a state only at a safe point:
   screens that start a day (star map, planet or station panel, jump screen),
   and no shop, dialogue or other screen is open above it.
 - The waiting screen closes, and the state is applied between two screens, where
-  hot-seat applies a turn pass (`HotSeat.ApplyTurnPass`): `ReadGameCheckpoint`,
-  then `SetLocalHuman` back to the client's own human (the state was written
-  with the host's human as local), then the human's screen opens: the planet,
-  the station, the jump screen or the star map centred on its ship.
+  hot-seat applies a turn pass (`HotSeat.ApplyTurnPass`, then
+  `NetPlay.NetBetweenScreens`): `ReadGameCheckpoint`, then `SetLocalHuman` back
+  to the client's own human (the state was written with the host's human as
+  local), then the human's screen opens: the planet, the station, the jump
+  screen or the star map centred on its ship. The star map rebuilds its scene
+  and background when it opens; a new star goes through the load screen first,
+  as after a takeoff.
+- **The space background** is in the state, and it is the host's screen's. The
+  client keeps its own when its star did not change, and generates one for a
+  new star, as hot-seat does.
+- **The end of a film.** After a film, the star map's end-of-film steps run on
+  the new state, as commands of the client's human that go to the host with its
+  next day's: the engine wears after a landing (`ApplyLandingWear`) and the
+  scripts run for a jump into a black hole (`RunScriptTurns`). So a remote
+  human gets them too, a day later than a local one. The old hyperspace arcade
+  battle and the Terron planet battle are not offered to a client; it goes to
+  the jump screen or the station.
+- **In hyperspace** the host runs the client's steps and does not wait for it;
+  the jump screen applies each state that comes (`ClientTravelTick`) and opens
+  again, until the ranger arrives.
 - A debug build started with `--poison-frees` fills freed memory with a pattern
   and holds it back from reuse for a while, so a stale reference fails at once.
 
@@ -223,7 +298,22 @@ to ships, planets and items. So a client applies a state only at a safe point:
 A screen that waits for the day shows who it waits for (from `Status`: the
 humans who hold the day, and who is disconnected), stays modal and does not
 change the game. On the host it waits for the barrier; on a client it waits
-for the state. A remote dialogue can open above a waiting client screen.
+for the film or the state. A remote dialogue can open above a waiting client
+screen.
+
+The wait is a message box without buttons (`NetPlay.TNetWaitBoxGI`) over the
+innermost screen; it pumps every 20 ms, closes by itself, and opens again with
+the new text when the text changes. The texts come from the language data with
+an English fallback, as `Multiplayer.Turn` does: `Multiplayer.Waiting`
+("Waiting for <Players>."), `Multiplayer.Away` ("Away: <Players>."),
+`Multiplayer.DayRuns`, `Multiplayer.WaitingHost`, `Multiplayer.WaitingPlayers`,
+and for the main menu `Multiplayer.Refused`, `Multiplayer.Lost`,
+`Multiplayer.HostLeft`, `Multiplayer.NoState`. None is in the game's language
+data yet.
+
+A client that loses its host, or is refused, shows why on the main menu and
+the session ends there. A client that loses its host while it plays its turn
+finds out at its end turn.
 
 ## Remote dialogue
 
@@ -254,19 +344,27 @@ Every other human waits meanwhile, as for any dialogue: the day is paused.
 
 - A peer whose connection closes, or who sends `Bye`, is disconnected:
   `THuman.Connected` is false, the human does not hold the day, and its ranger
-  holds position (the host submits `OrderStop`, kind 11, as that human, unless
-  it is in hyperspace or finished). It stays in `Session.Humans` and in saves.
-  The host handles disconnects at the next quiet point, in `Session.Humans`
-  order, before joins, and drops the peer's queued commands. Automatic control
-  is left as it was, so a human who left on automatic control goes on flying.
+  holds position (the host submits `HoldPosition`, kind 46, as that human,
+  unless it is in hyperspace or finished: no order, no follow target, and
+  automatic control off, so it does not fly on without its player). It stays in
+  `Session.Humans` and in saves. The host handles disconnects at the next quiet
+  point, in `Session.Humans` order, before joins, and drops the peer's queued
+  commands. A rejoin restores nothing: the human takes its ranger back as it
+  stands.
 - It rejoins by joining with the same ranger name (Joining).
 - Humans in a save that the host loads start disconnected, except the host's.
 - `Connected` is not saved; it is session state, not game state.
 
 ## Hosting and joining
 
-- Command line: `--host=PORT` (with `--load-save=PATH`) hosts a game;
-  `--join=HOST:PORT --name=NAME` joins one.
+- Command line: `--host=PORT` hosts the game that runs, from the first game
+  screen that opens (with `--load-save=PATH`, after a new game, or after a load
+  from the menu); port 0 picks one, and the log says which (`Network: host
+  listens on port`). The host's name is its ranger's. `--join=HOST:PORT
+  --name=NAME` joins one after the startup load: it connects, waits for the
+  whole state (60 s at most), applies it and opens the human's screen. A refusal,
+  a failed connection or no state go to the main menu with a message. `--join`
+  takes no `--host` or `--load-save`.
 - In the game: the in-game menu hosts the running game; the main menu joins one
   (address and name).
 - Headless, for tests: `--sim-net-host=PORT --sim-net-clients=N` with
@@ -321,12 +419,17 @@ star's day is about as large as a delta.
 
 ## Not done yet
 
-- The UI: pumping from `GR_WinMessage`, the waiting screens, applying a state
-  between screens, film playback on a client's star map, the menus and
-  `--host`/`--join`. The functions they call exist: `NetSession.StartHosting`,
-  `JoinGame`, `NetPump`, `StopNetwork`; `TNetHost.PeersReady`, `ApplyQueues`,
-  `BeginDay`, `SendState`, `WaitingFor`; `TNetClient.HasState`, `ApplyState`,
-  `TakeFilm`, `Status`.
+- The menus: hosting from the in-game menu, joining from the main menu. They
+  call `NetPlay` as the command line does (`StartHostingGame`,
+  `JoinFromCommandLine`, which would take an address and a name).
+- The `Multiplayer.*` texts in the language data.
+- A join takes the host's prepared day as it is: a human who joins in a star
+  the preparation job did not see runs that star's first day without its
+  preparation (no news, no planet day).
+- A client closes and opens its screen once a day, so the scripts the star map
+  runs when it opens and closes (`RunScriptItemsAct` `$18`/`$19`) and
+  `CancelInvalidTravelOrder` run once a day more than in single player; they go
+  to the host as commands.
 - Remote dialogue: `RemoteTalkHook`, `TalkRequest` and `TalkDone` are
   reserved; nothing sends them.
 - Chat is in the protocol (the host relays it); nothing shows it.
