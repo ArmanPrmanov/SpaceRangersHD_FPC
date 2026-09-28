@@ -796,7 +796,9 @@ var
   I, WaitCount, CommandCount, Size, Next: Integer;
   WaitTalk: array of Boolean;
   WaitCommands: array of TBufEC;
-  Handles: array[0..1] of THandle;
+  // CHANGE: FIX - Windows.THandle, the 32-bit handle the portable event wait reads; the
+  // system THandle is 64-bit there, so the wait failed at once and no talk was answered.
+  Handles: array[0..1] of Windows.THandle;
   Command: TBufEC;
 begin
   Job := TTurnCalculationJob(Buffer.GetByte);
