@@ -10,6 +10,7 @@ uses
   EC_Buf,
   aCommands,
   aPlayerActions,
+  CommandLog,
   aSession,
   TestSupport;
 
@@ -33,6 +34,69 @@ begin
   ResetSessionFlags;
   Check(SessionFlagsAreDefault, 'reset restores the defaults');
   CheckText('SetSessionFlag', WideString(CommandKindName(ckSetSessionFlag)), 'flag command name');
+end;
+
+var
+  HookCalls: string;
+
+procedure TestBeforeHook(const Command: TPlayerCommand);
+begin
+  HookCalls := HookCalls + 'B';
+end;
+
+procedure TestAfterHook(const Command: TPlayerCommand);
+begin
+  HookCalls := HookCalls + 'A';
+end;
+
+procedure TestFailedHook(const Command: TPlayerCommand);
+begin
+  HookCalls := HookCalls + 'F';
+end;
+
+// Submits a command that raises (ckTestMove has no executor); true when it raised.
+function SubmitFailing: Boolean;
+begin
+  Result := False;
+  try
+    SubmitCommand(NewCommand(ckTestMove));
+  except
+    on Exception do
+      Result := True;
+  end;
+end;
+
+// A command that raises tells CommandFailedHook, not AfterCommandHook, and the exception goes
+// on to the caller (the host logs and drops it). The command log's depth then returns to 0,
+// so later commands are recorded; before the fix it stayed raised.
+procedure RunFailedCommandTests;
+var
+  Path: AnsiString;
+begin
+  HookCalls := '';
+  BeforeCommandHook := TestBeforeHook;
+  AfterCommandHook := TestAfterHook;
+  CommandFailedHook := TestFailedHook;
+  try
+    Check(SubmitFailing, 'a failing command raises to its caller');
+    CheckText('BF', WideString(HookCalls), 'a failing command tells the failure hook, not the after hook');
+  finally
+    BeforeCommandHook := nil;
+    AfterCommandHook := nil;
+    CommandFailedHook := nil;
+  end;
+  Path := IncludeTrailingPathDelimiter(GetTempDir(False)) + 'SpaceRangersUnitTests.srcl';
+  StartCommandRecording(Path);
+  try
+    CheckInt(0, RecordingCommandDepth, 'the recorder starts with no command open');
+    Check(SubmitFailing, 'a failing command raises while recording');
+    CheckInt(0, RecordingCommandDepth, 'a failing command closes its record');
+    Check(SubmitFailing, 'a second failing command raises while recording');
+    CheckInt(0, RecordingCommandDepth, 'the depth stays at 0 after failures');
+  finally
+    StopCommandRecording;
+  end;
+  Check(not Assigned(CommandFailedHook), 'stopping the recorder clears the failure hook');
 end;
 
 procedure RunCommandTests;
@@ -95,6 +159,7 @@ begin
   CheckText('TestMove', WideString(CommandKindName(ckTestMove)), 'command kind name');
   CheckText('Command1022', WideString(CommandKindName(1022)), 'unregistered kind name');
   RunSessionFlagTests;
+  RunFailedCommandTests;
 end;
 
 end.

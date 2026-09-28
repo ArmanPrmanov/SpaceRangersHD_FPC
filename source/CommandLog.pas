@@ -39,6 +39,9 @@ type
 // Records from the next loaded save on, into Path.
 procedure StartCommandRecording(const Path: AnsiString);
 procedure StopCommandRecording;
+// CHANGE: BUGFIX - The commands the recorder has open (0 between two commands, and when it does
+// not record); for the unit tests.
+function RecordingCommandDepth: Integer;
 function RunCommandReplay(const Options: TReplayOptions): Integer;
 implementation
 uses
@@ -123,6 +126,7 @@ type
     procedure GameLoaded(const FileName: WideString);
     procedure BeforeCommand(const Command: TPlayerCommand);
     procedure AfterCommand(const Command: TPlayerCommand);
+    procedure CommandFailed(const Command: TPlayerCommand);
     procedure JobStarting(AJob: TTurnCalculationJob);
     procedure JobFinished;
     procedure WaitChanged(Starting, Talk: Boolean);
@@ -321,6 +325,29 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - A command that raised is not recorded: the replay would raise as well.
+// Whatever it changed before it raised is not a command, so the next boundary writes a
+// checkpoint. Without this the depth stayed raised and no later command was recorded.
+procedure TRecorder.CommandFailed(const Command: TPlayerCommand);
+begin
+  Lock.Enter;
+  try
+    Dec(CommandDepth);
+    if CommandDepth > 0 then
+      Exit;
+    CommandAnswers.Clear;
+    CommandAnswerCount := 0;
+    if Stream = nil then
+      Exit;
+    ResyncNeeded := True;
+    AppendLogLineThreadSafe(
+        'Command log: ' + CommandKindName(Command.Kind) + ' failed and is not recorded'
+    );
+  finally
+    Lock.Leave;
+  end;
+end;
+
 procedure TRecorder.JobStarting(AJob: TTurnCalculationJob);
 begin
   Lock.Enter;
@@ -481,6 +508,11 @@ begin
   Recorder.AfterCommand(Command);
 end;
 
+procedure RecorderCommandFailed(const Command: TPlayerCommand);
+begin
+  Recorder.CommandFailed(Command);
+end;
+
 procedure RecorderJob(Job: TTurnCalculationJob; Starting: Boolean);
 begin
   if Starting then
@@ -506,6 +538,7 @@ begin
   GameLoadedHook := @RecorderGameLoaded;
   BeforeCommandHook := @RecorderBeforeCommand;
   AfterCommandHook := @RecorderAfterCommand;
+  CommandFailedHook := @RecorderCommandFailed;
   TurnJobHook := @RecorderJob;
   TurnWaitHook := @RecorderWait;
   QueryAnswerHook := @RecorderAnswer;
@@ -519,11 +552,20 @@ begin
   GameLoadedHook := nil;
   BeforeCommandHook := nil;
   AfterCommandHook := nil;
+  CommandFailedHook := nil;
   TurnJobHook := nil;
   TurnWaitHook := nil;
   QueryAnswerHook := nil;
   LocalHumanHook := nil;
   FreeAndNil(Recorder);
+end;
+
+function RecordingCommandDepth: Integer;
+begin
+  if Recorder = nil then
+    Result := 0
+  else
+    Result := Recorder.CommandDepth;
 end;
 
 { Replay }

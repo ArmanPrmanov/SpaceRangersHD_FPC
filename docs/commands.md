@@ -76,7 +76,10 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
   ([network.md](network.md), Remote dialogue).
 - `SubmitCommand` tells `BeforeCommandHook` and `AfterCommandHook` (the command
   log) and then `NetworkCommandHook` (a client sends the command to its host,
-  [network.md](network.md)).
+  [network.md](network.md)). A command that raises tells `CommandFailedHook`
+  instead of the last two and the exception goes on to the caller; the log
+  does not record it (the replay would raise too), and the next boundary
+  writes a checkpoint for whatever it changed before it raised.
 - Keep the `aCalc.WaitForTurnCalculationUI` calls the screen already makes
   before changing the game.
 

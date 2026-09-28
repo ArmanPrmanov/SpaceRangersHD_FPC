@@ -53,6 +53,10 @@ var
   // network can both listen: a client's network session sends the command to the host
   // (ROADMAP.md, Phase 5; docs/network.md, Commands).
   NetworkCommandHook: TCommandHook;
+  // CHANGE: BUGFIX - Called instead of AfterCommandHook when the command raises, before the
+  // exception goes on to the caller, so that the command log closes what BeforeCommandHook
+  // opened (a remote command the host drops, docs/network.md, Commands).
+  CommandFailedHook: TCommandHook;
 
 function NewCommand(Kind: TCommandKind): TPlayerCommand;
 // Names Instance by kind and id; nil names nothing.
@@ -327,7 +331,13 @@ begin
   end;
   if Assigned(BeforeCommandHook) then
     BeforeCommandHook(Command);
-  ExecuteCommand(Command);
+  try
+    ExecuteCommand(Command);
+  except
+    if Assigned(CommandFailedHook) then
+      CommandFailedHook(Command);
+    raise;
+  end;
   if Assigned(AfterCommandHook) then
     AfterCommandHook(Command);
   if Assigned(NetworkCommandHook) then
