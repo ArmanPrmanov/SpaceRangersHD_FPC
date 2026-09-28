@@ -11,14 +11,13 @@ has got.
 
 ## Status
 
-- Phase: 0-4 done (Phase 3 minus the arcade checkpoint and the recorded-session
-  exit test; Phase 4's hot-seat UI still needs a hand check). Phase 5 under way:
-  the headless networking core is done and tested over loopback.
-- Next: Phase 5 UI (waiting screens, client film playback, applying state
-  between screens), remote dialogue, host/join menus, poisoned frees.
+- Phase: 0-5 done in code. Phase 5 (networking) still owes game runs: the
+  owner paused them; the list is in the Phase 5 entry's Close section.
+- Next: the owed `tools/test.py` run, then the hand checks (Phase 4 hot-seat,
+  Phase 5 UI, remote dialogue, menus).
 - Open issues: chaotic mode is seeded from the clock (Phase 1 entry); a
   loaded game drifts from the live one (Phase 3 entry); no converted
-  screen has been exercised in the UI yet; the gaps in the Phase 5 entry.
+  screen has been exercised in the UI yet; the Phase 5 known gaps.
 - Latest entry: [2026-09-28-phase5.md](2026-09-28-phase5.md)
 
 ## Session entry format
