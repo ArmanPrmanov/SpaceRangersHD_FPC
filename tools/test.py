@@ -11,9 +11,12 @@ import concurrent.futures
 import hashlib
 import os
 import platform
+import statistics
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +35,14 @@ REPLAYS = ROOT / "tests" / "replays"
 HOTSEAT_DAYS = 10
 # The command kind of EndTurn (source/game/aPlayerActions.pas).
 END_TURN_KIND = 43
+# Networked play (ROADMAP.md, Phase 5; docs/network.md, Tests): a headless host and this many
+# headless clients over loopback, for this many days. With one client, a third run has the
+# client leave after NET_LEAVE_DAY days and join again.
+NET_CLIENT_COUNTS = (1, 7)
+NET_DAYS = 10
+NET_LEAVE_DAY = 3
+# A networked process that runs longer than this has hung.
+NET_TIMEOUT = 600
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import split_commands  # noqa: E402
@@ -232,6 +243,195 @@ def check_respawns(output: str) -> str:
     return ""
 
 
+class GameProcess:
+    """A game process whose output is collected line by line while it runs."""
+
+    def __init__(self, binary: Path, game_dir: Path, options: list[str]):
+        self.profile = tempfile.TemporaryDirectory(prefix="rangers-net-")
+        command = [str(binary), f"--game-dir={game_dir}", f"--user-dir={self.profile.name}", *options]
+        self.process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=self.profile.name
+        )
+        self.lines: list[str] = []
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
+
+    def _read(self) -> None:
+        for raw in self.process.stdout:
+            self.lines.append(raw.decode("utf-8", "replace").rstrip("\r\n"))
+
+    def wait_line(self, prefix: str, timeout: float) -> str:
+        """The first line starting with prefix, waiting up to timeout seconds; '' if none."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            for line in list(self.lines):
+                if line.startswith(prefix):
+                    return line
+            if self.process.poll() is not None and not self.reader.is_alive():
+                break
+            time.sleep(0.05)
+        return ""
+
+    def finish(self, timeout: float = NET_TIMEOUT) -> int:
+        try:
+            self.process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+        self.reader.join(timeout=10)
+        self.profile.cleanup()
+        return self.process.returncode
+
+    @property
+    def output(self) -> str:
+        return "\n".join(self.lines)
+
+
+def fields(line: str) -> dict[str, str]:
+    return dict(part.split("=", 1) for part in line.split() if "=" in part)
+
+
+def net_lines(output: str, prefix: str) -> list[dict[str, str]]:
+    return [fields(line) for line in output.splitlines() if line.startswith(prefix)]
+
+
+def run_network(args, binary: Path, save: Path, count: int, log: Path | None = None, leave: bool = False):
+    """One networked session: a host with `count` clients (Net1..NetN) for NET_DAYS days.
+
+    With leave, Net1 leaves after NET_LEAVE_DAY days; once the host has run a day without it,
+    Net1 joins again. Returns (problem, host output, client outputs); problem is '' when every
+    process ended cleanly.
+    """
+    host_options = [
+        f"--sim-save={save}", "--sim-net-host=0", f"--sim-net-clients={count}",
+        f"--sim-turns={NET_DAYS}", f"--sim-seed={args.seed}",
+    ]  # fmt: skip
+    if log is not None:
+        host_options.append(f"--record-commands={log}")
+    host = GameProcess(binary, args.game_dir, host_options)
+    port_line = host.wait_line("net host port=", NET_TIMEOUT)
+    if not port_line:
+        host.finish(10)
+        return "the host did not listen:" + output_tail(host.output), host.output, []
+    port = fields(port_line)["port"]
+    clients = []
+    for index in range(count):
+        options = [f"--sim-net-join=127.0.0.1:{port}", f"--sim-net-name=Net{index + 1}"]
+        if leave and index == 0:
+            options.append(f"--sim-net-leave-at={NET_LEAVE_DAY}")
+        clients.append(GameProcess(binary, args.game_dir, options))
+    codes = []
+    if leave:
+        codes.append(clients[0].finish())
+        # The days go on while it is away: wait for a day the host runs without it.
+        deadline = time.monotonic() + NET_TIMEOUT
+        while time.monotonic() < deadline and host.process.poll() is None and not any(
+            line.get("away") == "1" for line in net_lines(host.output, "net host day=")
+        ):
+            time.sleep(0.05)
+        rejoin = [f"--sim-net-join=127.0.0.1:{port}", "--sim-net-name=Net1"]
+        clients.append(GameProcess(binary, args.game_dir, rejoin))
+        codes.extend(client.finish() for client in clients[1:])
+    else:
+        codes.extend(client.finish() for client in clients)
+    host_code = host.finish()
+    outputs = [client.output for client in clients]
+    if host_code != 0:
+        return "the host failed:" + output_tail(host.output), host.output, outputs
+    for code, output in zip(codes, outputs):
+        if code != 0:
+            return "a client failed:" + output_tail(output), host.output, outputs
+    return "", host.output, outputs
+
+
+def compare_client_hashes(host_output: str, outputs: list[str]) -> str:
+    """Every state a client applied has the host's hash. Returns what is wrong."""
+    host_hashes = {line["serial"]: line["hash"] for line in net_lines(host_output, "net host day=")}
+    for output in outputs:
+        for line in net_lines(output, "net client day="):
+            expected = host_hashes.get(line["serial"])
+            if line["match"] != "1" or (expected is not None and expected != line["hash"]):
+                return f"client state {line['serial']} hash {line['hash']} differs from the host's"
+    return ""
+
+
+def median(values: list[int]) -> int:
+    return int(statistics.median(values)) if values else 0
+
+
+def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, list[str]]:
+    """Networked play over loopback (ROADMAP.md, Phase 5; docs/network.md, Tests).
+
+    A headless host (--sim-net-host) and `count` headless clients (--sim-net-join), each its
+    own process: every client's hash equals the host's for every state it applies; two runs
+    give the host the same hashes however the commands arrived; the host's command log replays
+    to its final hash. With one client, a client that leaves after NET_LEAVE_DAY days gets its
+    human back when it joins again, and the days go on while it is away.
+    """
+    label = f"{count + 1} humans networked"
+    runs = []
+    with tempfile.TemporaryDirectory(prefix="rangers-net-log-") as directory:
+        log = Path(directory) / "host.srcl"
+        for run in range(2):
+            problem, host_output, outputs = run_network(
+                args, binary, save, count, log if run == 0 else None
+            )
+            if not problem:
+                problem = compare_client_hashes(host_output, outputs)
+            if problem:
+                return False, [f"{label}: {problem}"]
+            days = [f"{line['serial']} {line['hash']}" for line in net_lines(host_output, "net host day=")]
+            if len(days) != NET_DAYS:
+                return False, [f"{label}: the host ran {len(days)} days"]
+            runs.append((days, host_output, outputs))
+        if runs[0][0] != runs[1][0]:
+            return False, [f"{label} nondeterministic: " + first_divergence(runs[0][0], runs[1][0])]
+        expected = fields(last_line(runs[0][1], "done net host "))["hash"]
+        code, output = run_game(
+            binary, args.game_dir, [f"--replay-commands={log}", f"--sim-seed={args.seed}"]
+        )
+        summary = last_line(output, "done ")
+        if code != 0 or f"hash={expected}" not in summary or " diverged=0 " not in summary:
+            return False, [f"{label}: the host's command log does not replay:" + output_tail(output)]
+    _, host_output, outputs = runs[0]
+    host_days = net_lines(host_output, "net host day=")
+    client_days = [line for output in outputs for line in net_lines(output, "net client day=")]
+    notes = [
+        f"{label}: {NET_DAYS} days, client hashes match the host's, deterministic, "
+        "the host's log replays",
+        "  sizes: whole state {} bytes, {} compressed; median delta {}; median films of a day {}; "
+        "median load {} ms (client), take {} ms (host)".format(
+            host_days[-1]["state"], host_days[-1]["whole"],
+            median([int(line["delta"]) for line in host_days if int(line["delta"]) > 0]),
+            median([int(line["film"]) for line in host_days if int(line["film"]) > 0]),
+            median([int(line["load"]) for line in client_days]),
+            median([int(line["take"]) for line in host_days]),
+        ),
+    ]  # fmt: skip
+    if count == 1:
+        problem, host_output, outputs = run_network(args, binary, save, count, leave=True)
+        if not problem:
+            problem = compare_client_hashes(host_output, outputs)
+        if problem:
+            return False, [*notes, f"{label} leave and rejoin: {problem}"]
+        left = [line for line in outputs[0].splitlines() if line.startswith("net client left ")]
+        first = fields(last_line(outputs[0], "done net client "))
+        second = fields(last_line(outputs[1], "done net client "))
+        away = [line for line in net_lines(host_output, "net host day=") if line["away"] == "1"]
+        if not left or first.get("human") in (None, "-1") or first.get("human") != second.get("human"):
+            return False, [
+                *notes,
+                f"{label}: the rejoined client got human {second.get('human')}, not {first.get('human')}",
+            ]
+        if not away:
+            return False, [*notes, f"{label}: no day ran while the client was away"]
+        notes.append(
+            f"{label}: a client that leaves after day {NET_LEAVE_DAY} gets human {first['human']} "
+            f"back; {len(away)} days ran without it"
+        )
+    return True, notes
+
+
 def check_humans(args, binary: Path, save: Path, count: int) -> tuple[bool, str]:
     """Play with extra humans: no crash, a clean round trip, the same hashes twice.
 
@@ -365,6 +565,11 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
         passed_hotseat, note = check_hotseat(args, binary, save, count)
         notes.append(note)
         passed = passed and passed_hotseat
+
+    for count in NET_CLIENT_COUNTS:
+        passed_network, network_notes = check_network(args, binary, save, count)
+        notes.extend(network_notes)
+        passed = passed and passed_network
 
     golden = GOLDEN / target_name() / f"{save_digest(save)}.txt"
     header = f"# {save.name}: {args.turns} turns, seed {args.seed}"

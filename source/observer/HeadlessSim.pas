@@ -6,6 +6,8 @@ unit HeadlessSim;
 // a window and prints one line per result. The state hash covers the bytes
 // TGalaxy.SaveToBuffer writes, so the save writer is the only serialiser.
 interface
+uses
+  aHuman;
 type
   TSimulationOptions = record
     SavePath: AnsiString;
@@ -33,8 +35,21 @@ type
     // Hot-seat: every human plays this many days from its own commands, and each day waits
     // for every human's end turn (RunHotSeat; 0: no).
     HotSeatDays: Integer;
+    // CHANGE: ENHANCEMENT - Networked play over loopback (ROADMAP.md, Phase 5; HeadlessNet).
+    // The host listens on NetHostPort (0 picks one; -1: no host) and waits for NetClients
+    // clients; a client joins NetJoin (host:port) as NetName and leaves after NetLeaveAt days
+    // (0: stays to the end).
+    NetHostPort: Integer;
+    NetClients: Integer;
+    NetJoin: AnsiString;
+    NetName: AnsiString;
+    NetLeaveAt: Integer;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
+// Shared with the networked runner (HeadlessNet).
+procedure Emit(const Line: AnsiString);
+procedure LoadSave(const FileName: AnsiString; Seed: Cardinal);
+procedure PlayHumanTurn(Human: THuman; Day, Index: Integer; var Plan: AnsiString);
 implementation
 uses
   SysUtils,
@@ -48,7 +63,6 @@ uses
   aGalaxyEvent,
   aGalaxyStruct,
   aHold,
-  aHuman,
   aCommands,
   aShopActions,
   EC_Struct,
@@ -953,8 +967,10 @@ begin
       Plan := Plan + 'b';
     if (Day + Index) mod 3 <> 0 then
     begin
+      // The shop's stock goes back, as the screens give it back on leaving (fPanelRuins); a
+      // shop left open in space does not survive a load (TGalaxy.LoadFromBuffer).
       Command := NewCommand(ckTakeoff);
-      AddInt(Command, tfEndAutomaticControl);
+      AddInt(Command, tfEndAutomaticControl or tfReturnShopStock);
       SubmitFor(Human, Command);
       Plan := Plan + 't';
     end
@@ -967,7 +983,7 @@ begin
   else if P.DockedTo <> nil then
   begin
     Command := NewCommand(ckTakeoff);
-    AddInt(Command, tfEndAutomaticControl);
+    AddInt(Command, tfEndAutomaticControl or tfReturnShopStock);
     SubmitFor(Human, Command);
     Plan := Plan + 't';
   end

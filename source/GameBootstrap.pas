@@ -64,6 +64,7 @@ uses
   aSaveLoad,
   ObserverHost,
   HeadlessSim,
+  HeadlessNet,
   CommandLog,
   HotSeat,
   SimEventHandlers,
@@ -166,6 +167,7 @@ begin
       SysUtils.GetEnvironmentVariable('HOME') + '/Library/Application Support/SpaceRangersHD';
 {$ENDIF}
   SelectedLanguage := 'russian';
+  Simulation.NetHostPort := -1;
   for I := 1 to ParamCount do
   begin
     Argument := ParamStr(I);
@@ -231,6 +233,21 @@ begin
       StartupSave := ExpandFileName(Copy(Argument, 13, MaxInt))
     else if Pos('--sim-hotseat=', Argument) = 1 then
       Simulation.HotSeatDays := StrToInt(Copy(Argument, 15, MaxInt))
+    // CHANGE: ENHANCEMENT - Networked play over loopback (ROADMAP.md, Phase 5): a headless
+    // host with --sim-save, and headless clients that join it.
+    else if Pos('--sim-net-host=', Argument) = 1 then
+      Simulation.NetHostPort := StrToInt(Copy(Argument, 16, MaxInt))
+    else if Pos('--sim-net-clients=', Argument) = 1 then
+      Simulation.NetClients := StrToInt(Copy(Argument, 19, MaxInt))
+    else if Pos('--sim-net-join=', Argument) = 1 then
+    begin
+      SimulationMode := True;
+      Simulation.NetJoin := Copy(Argument, 16, MaxInt)
+    end
+    else if Pos('--sim-net-name=', Argument) = 1 then
+      Simulation.NetName := Copy(Argument, 16, MaxInt)
+    else if Pos('--sim-net-leave-at=', Argument) = 1 then
+      Simulation.NetLeaveAt := StrToInt(Copy(Argument, 20, MaxInt))
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then
@@ -270,6 +287,10 @@ begin
       raise Exception.Create('--record-commands cannot be combined with --replay-commands');
     if HotSeatHumans <> 0 then
       raise Exception.Create('--hotseat is for the game; headless, use --sim-humans and --sim-hotseat');
+    if (Simulation.NetJoin <> '') and ((Simulation.SavePath <> '') or (Simulation.NetName = '')) then
+      raise Exception.Create('--sim-net-join takes --sim-net-name and no --sim-save');
+    if (Simulation.NetHostPort >= 0) and (Simulation.SavePath = '') then
+      raise Exception.Create('--sim-net-host needs --sim-save');
     Replay.Seed := Simulation.Seed;
     GpuRendererRequested := False;
     sr_renderer_select(0);
@@ -601,7 +622,12 @@ begin
         // Recording a headless run tests the command log itself.
         if RecordCommandsPath <> '' then
           StartCommandRecording(RecordCommandsPath);
-        System.ExitCode := RunHeadlessSimulation(Simulation);
+        if Simulation.NetJoin <> '' then
+          System.ExitCode := RunNetClient(Simulation)
+        else if Simulation.NetHostPort >= 0 then
+          System.ExitCode := RunNetHost(Simulation)
+        else
+          System.ExitCode := RunHeadlessSimulation(Simulation);
         StopCommandRecording;
       end
       else if ObserverSave <> '' then
