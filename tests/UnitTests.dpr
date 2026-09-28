@@ -17,7 +17,8 @@ uses
   TestExpression,
   TestCodecs,
   TestCommands,
-  TestNet;
+  TestNet,
+  TestPoisonFrees;
 var
   WorkDirectory: string;
 
@@ -52,6 +53,7 @@ begin
   RunSuite('Expression', RunExpressionTests);
   RunSuite('Commands', RunCommandTests);
   RunSuite('Net', RunNetTests);
+  RunSuite('PoisonFrees', RunPoisonFreesTests);
   RunSuite('Codecs', RunCodecSuite);
   WriteLn(Format('%d checks, %d failed', [CheckCount, FailureCount]));
   if FailureCount > 0 then

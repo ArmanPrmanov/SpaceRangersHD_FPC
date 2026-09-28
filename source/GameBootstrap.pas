@@ -15,6 +15,7 @@ uses
   fIntroduction,
   fGameSettings2,
   CrashSymbols,
+  PoisonFrees,
   WorkerErrors,
   {$IFDEF UNIX}
   BaseUnix,
@@ -86,6 +87,7 @@ var
   RecordCommandsPath: AnsiString;
   StartupSave: AnsiString;
   Replay: TReplayOptions;
+  PoisonQuarantineMB: Integer;
 
 procedure Log(const Text: AnsiString);
 begin
@@ -111,6 +113,9 @@ begin
   Log('  ' + DescribeCodeAddress(ExceptAddr));
   for I := 0 to ExceptFrameCount - 1 do
     Log('  ' + DescribeCodeAddress(ExceptFrames[I]));
+  // CHANGE: ENHANCEMENT - Say whether a fault touched a poisoned address (--poison-frees).
+  if PoisonFaultHint(ExceptObject) <> '' then
+    Log('  ' + PoisonFaultHint(ExceptObject));
   DumpExceptionBackTrace(StdErr);
 end;
 
@@ -278,6 +283,16 @@ begin
     end
     else if Argument = '--sim-roundtrip' then
       Simulation.RoundTrip := True
+    // CHANGE: ENHANCEMENT - Poisoned frees (ROADMAP.md, Phase 5): a debug build fills freed
+    // memory with a pattern and holds it back from reuse, so a stale reference fails at once.
+    else if Argument = '--poison-frees' then
+      PoisonQuarantineMB := DefaultPoisonQuarantineMB
+    else if Pos('--poison-frees=', Argument) = 1 then
+    begin
+      PoisonQuarantineMB := StrToInt(Copy(Argument, 16, MaxInt));
+      if PoisonQuarantineMB <= 0 then
+        raise Exception.Create('--poison-frees takes a quarantine size in MB');
+    end
     else if Pos('--game-dir=', Argument) = 1 then
       GameDirectory := Copy(Argument, 12, MaxInt)
     else if Pos('--user-dir=', Argument) = 1 then
@@ -289,6 +304,14 @@ begin
     end
     else
       raise Exception.Create('Unknown argument: ' + Argument);
+  end;
+  // Installed before the game allocates anything else. Blocks allocated earlier are the wrapped
+  // manager's too, so the wrapper frees them like its own.
+  if PoisonQuarantineMB > 0 then
+  begin
+    if not PoisonFreesAvailable then
+      raise Exception.Create('--poison-frees needs a debug build (tools/build.py without --release)');
+    InstallPoisonFrees(PtrUInt(PoisonQuarantineMB) * 1024 * 1024);
   end;
   GameDirectory := ExpandFileName(GameDirectory);
   UserDirectory := ExcludeTrailingPathDelimiter(ExpandFileName(UserDirectory));
@@ -576,6 +599,14 @@ begin
   Application.OnActivate := nil;
   Application.OnDeactivate := nil;
   ReleaseObject(ApplicationEvents, 'application events');
+  // Every block still in the quarantine is checked for writes after it was freed.
+  if PoisonFreesInstalled then
+  begin
+    FlushPoisonQuarantine;
+    Log(PoisonFreesSummary);
+    if SimulationMode and (PoisonFreesStats.WritesAfterFree > 0) then
+      WriteLn(StdErr, PoisonFreesSummary);
+  end;
   Log('Rangers: shutdown complete');
   LogReady := False;
   ReleaseObject(SessionLogLock, 'log lock');
@@ -604,6 +635,8 @@ begin
       LogReady := True;
       Log('Game directory: ' + GameDirectory);
       Log('User directory: ' + UserDirectory);
+      if PoisonFreesInstalled then
+        Log('Poisoned frees: ' + IntToStr(PoisonQuarantineMB) + ' MB quarantine');
       Application.Initialize;
       ApplicationEvents := TAD.Create;
       Application.OnActivate := ApplicationEvents.ApplicationActivated;

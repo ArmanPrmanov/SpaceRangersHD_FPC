@@ -1106,6 +1106,7 @@ uses
   aSession,
   ZLib,
   CrashSymbols,
+  PoisonFrees,
   GameNative,
   SDLRenderer,
   GI_Main,
@@ -1144,6 +1145,9 @@ begin
   AppendLogLineThreadSafe(DescribeCodeAddress(ExceptAddr));
   for I := 0 to ExceptFrameCount - 1 do
     AppendLogLineThreadSafe(DescribeCodeAddress(ExceptFrames[I]));
+  // CHANGE: ENHANCEMENT - Say whether a fault touched a poisoned address (--poison-frees).
+  if PoisonFaultHint(ExceptObject) <> '' then
+    AppendLogLineThreadSafe(PoisonFaultHint(ExceptObject));
 end;
 procedure LogMemoryUsage;
 begin
