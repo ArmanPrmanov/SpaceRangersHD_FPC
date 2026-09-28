@@ -80,11 +80,17 @@ end;
 
 procedure FreeStarFilms;
 var
-  I: Integer;
+  Entry: TStarFilmEntry;
 begin
-  for I := 0 to Entries.Count - 1 do
-    TStarFilmEntry(Entries[I]).Free;
-  Entries.Clear;
+  // CHANGE: FIX - Each entry leaves the list before it is freed, as in KeepStarFilms: a
+  // scene object the film frees last releases itself from every listed film
+  // (ReleaseStarFilmReferences), which must not reach this film or one already freed.
+  while Entries.Count > 0 do
+  begin
+    Entry := TStarFilmEntry(Entries[0]);
+    Entries.Delete(0);
+    Entry.Free;
+  end;
 end;
 
 procedure ExchangeLocalStarFilm(var Local: TEFilm; OldStar, NewStar: TObject);
