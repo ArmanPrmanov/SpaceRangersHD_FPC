@@ -82,7 +82,14 @@ def main() -> int:
     except (OSError, RuntimeError) as error:
         parser.exit(1, f"{error}\n")
     scratch = program.parent / "scratch"
-    return subprocess.run([program, scratch], env=env, check=False).returncode
+    # The test program is a console program; keep it from opening a window on Windows.
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    result = subprocess.run(
+        [program, scratch], env=env, check=False, capture_output=True, creationflags=no_window
+    )
+    sys.stdout.write(result.stdout.decode("utf-8", "replace"))
+    sys.stdout.write(result.stderr.decode("utf-8", "replace"))
+    return result.returncode
 
 
 if __name__ == "__main__":

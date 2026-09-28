@@ -20,6 +20,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# The game is a console program; keep its runs from opening a window on Windows.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 GOLDEN = ROOT / "tests" / "golden"
 ROUNDTRIP_TURNS = 5
 LOG_TURNS = 10
@@ -46,6 +48,9 @@ NET_LEAVE_DAY = 3
 NET_TALK_DAY = 2
 # A networked process that runs longer than this has hung.
 NET_TIMEOUT = 600
+# Any other game run that takes longer than this has hung (the longest, 100 turns of a save,
+# takes a few minutes in the debug build, more with --poison-frees).
+GAME_TIMEOUT = 1800
 # Options every game run gets, such as --poison-frees (set in main).
 GAME_OPTIONS: list[str] = []
 
@@ -83,13 +88,27 @@ def save_digest(save: Path) -> str:
     return hashlib.sha256(save.read_bytes()).hexdigest()[:16]
 
 
+def timeout_note(seconds: float, command: list[str]) -> str:
+    return f"TIMEOUT: killed after {seconds:.0f} s: " + subprocess.list2cmdline(command)
+
+
 def run_game(binary: Path, game_dir: Path, options: list[str]) -> tuple[int, str]:
+    """Runs the game to its end; a run that hangs is killed after GAME_TIMEOUT seconds and
+    fails with a TIMEOUT line, the last of its output, naming the command."""
     # A throwaway profile keeps the player's settings and logs out of the test.
     with tempfile.TemporaryDirectory(prefix="rangers-test-") as profile:
         command = [
             str(binary), f"--game-dir={game_dir}", f"--user-dir={profile}", *GAME_OPTIONS, *options
         ]
-        result = subprocess.run(command, capture_output=True, cwd=profile)
+        try:
+            result = subprocess.run(
+                command, capture_output=True, cwd=profile, creationflags=NO_WINDOW,
+                timeout=GAME_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as expired:
+            output = (expired.stdout or b"").decode("utf-8", "replace")
+            output += (expired.stderr or b"").decode("utf-8", "replace")
+            return -1, output + "\n" + timeout_note(GAME_TIMEOUT, command)
     output = result.stdout.decode("utf-8", "replace") + result.stderr.decode("utf-8", "replace")
     return result.returncode, output
 
@@ -251,16 +270,20 @@ def check_respawns(output: str) -> str:
 
 
 class GameProcess:
-    """A game process whose output is collected line by line while it runs."""
+    """A game process whose output is collected line by line while it runs. One still running
+    NET_TIMEOUT seconds after it started has hung: finish kills it and adds a TIMEOUT line,
+    naming the command, to its output."""
 
     def __init__(self, binary: Path, game_dir: Path, options: list[str]):
         self.profile = tempfile.TemporaryDirectory(prefix="rangers-net-")
-        command = [
+        self.command = [
             str(binary), f"--game-dir={game_dir}", f"--user-dir={self.profile.name}",
             *GAME_OPTIONS, *options,
         ]  # fmt: skip
+        self.started = time.monotonic()
         self.process = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=self.profile.name
+            self.command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=self.profile.name,
+            creationflags=NO_WINDOW,
         )
         self.lines: list[str] = []
         self.reader = threading.Thread(target=self._read, daemon=True)
@@ -282,12 +305,17 @@ class GameProcess:
             time.sleep(0.05)
         return ""
 
-    def finish(self, timeout: float = NET_TIMEOUT) -> int:
+    def finish(self, timeout: float | None = None) -> int:
+        """Waits for the end, up to timeout seconds or what is left of NET_TIMEOUT."""
+        if timeout is None:
+            timeout = max(0.0, self.started + NET_TIMEOUT - time.monotonic())
         try:
             self.process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait()
+            self.reader.join(timeout=10)
+            self.lines.append(timeout_note(time.monotonic() - self.started, self.command))
         self.reader.join(timeout=10)
         self.profile.cleanup()
         return self.process.returncode
