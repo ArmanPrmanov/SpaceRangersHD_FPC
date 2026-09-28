@@ -77,6 +77,12 @@ type
 
 function MessageKindName(Kind: TNetMessageKind): AnsiString;
 
+var
+  // Also told every network event NetLog writes; the headless runner prints them.
+  NetLogHook: procedure(const Text: AnsiString);
+// Writes a network event (a join, a refusal, a disconnect) to the game's log.
+procedure NetLog(const Text: AnsiString);
+
 procedure EncodeHello(const Message: THelloMessage; Buffer: TBufEC);
 function DecodeHello(Buffer: TBufEC): THelloMessage;
 procedure EncodeWelcome(const Message: TWelcomeMessage; Buffer: TBufEC);
@@ -136,6 +142,13 @@ begin
   else
     Result := 'Kind' + IntToStr(Kind);
   end;
+end;
+
+procedure NetLog(const Text: AnsiString);
+begin
+  AppendLogLineThreadSafe('Network: ' + Text);
+  if Assigned(NetLogHook) then
+    NetLogHook(Text);
 end;
 
 procedure AddQWord(Buffer: TBufEC; Value: QWord);
@@ -312,7 +325,8 @@ begin
     HashText(Hash, '<missing>');
     Exit;
   end;
-  Stream := TFileStream.Create(NativePath(Name), fmOpenRead or fmShareDenyWrite);
+  // The game has its packages open already.
+  Stream := TFileStream.Create(NativePath(Name), fmOpenRead or fmShareDenyNone);
   try
     Size := Stream.Size;
     Hash := sr_hash64(@Size, SizeOf(Size), Hash);

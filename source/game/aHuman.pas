@@ -250,6 +250,11 @@ procedure RemoveHuman(Player: TPlayer);
 // Rebuilds the list from the TPlayer instances in Galaxy.Rangers, keeping the local
 // human's state for Local.
 procedure RebuildHumans(Galaxy: TGalaxy; Local: TPlayer);
+// CHANGE: ENHANCEMENT - Forgets every human and gives the local one a new THuman, as at
+// startup. A load fills the local human's state into the THuman that is local; a client that
+// loads the host's state (written with the host's human local) calls this first, so that
+// nothing of its own human's state stays in the host's (ROADMAP.md, Phase 5).
+procedure ResetHumans(Galaxy: TGalaxy);
 // Ends the game for Human alone (THuman.Finished), as a quest script's EndGame does in
 // multiplayer. The human leaves play: its ranger holds position, it counts as having pressed
 // end turn, and aCommands.ExecuteCommand refuses its commands. It stays in Session.Humans.
@@ -570,6 +575,19 @@ begin
       if Ranger is TPlayer then
         AddHuman(TPlayer(Ranger));
     end;
+end;
+
+procedure ResetHumans(Galaxy: TGalaxy);
+var
+  Old: THuman;
+begin
+  if Galaxy <> nil then
+    SetPlayer(nil, Galaxy)
+  else
+    RebuildHumans(nil, nil);
+  Old := LocalHuman;
+  LocalHuman := THuman.Create;
+  Old.Free;
 end;
 
 procedure THuman.ClearBubbles;

@@ -1,0 +1,104 @@
+{$EXCESSPRECISION OFF}
+unit NetSession;
+
+// CHANGE: ENHANCEMENT - What the rest of the game calls for multiplayer (ROADMAP.md, Phase 5;
+// docs/network.md): whether this machine hosts or joins, the pump, and the game-layer hooks
+// the session sets. Without a session every hook stays nil and the game is as before.
+interface
+uses
+  NetHost,
+  NetClient;
+type
+  TNetRole = (nrNone, nrHost, nrClient);
+
+function NetRole: TNetRole;
+function CurrentHost: TNetHost;
+function CurrentClient: TNetClient;
+// Hosts the running game on Port (0 picks a free one; CurrentHost.Thread.ListenPort says
+// which). Sets the host's hooks: the film of each star after its day, and the day's end.
+function StartHosting(Port: Integer; const HostName: WideString): TNetHost;
+// Joins the game at Address:Port as Name. Sets the client's hooks: every command the local
+// human submits goes to the host. CurrentClient.Connected is False when it could not connect.
+function JoinGame(const Address: AnsiString; Port: Integer; const Name: WideString): TNetClient;
+// Leaves the session (Bye to the peers), clears the hooks and frees the host or client.
+procedure StopNetwork;
+// Takes what arrived. The UI calls it every frame and at safe points; the headless runner
+// while it waits.
+procedure NetPump;
+implementation
+uses
+  aCommands,
+  ThreadCalc;
+
+var
+  Host: TNetHost;
+  Client: TNetClient;
+
+function NetRole: TNetRole;
+begin
+  if Host <> nil then
+    Result := nrHost
+  else if Client <> nil then
+    Result := nrClient
+  else
+    Result := nrNone;
+end;
+
+function CurrentHost: TNetHost;
+begin
+  Result := Host;
+end;
+
+function CurrentClient: TNetClient;
+begin
+  Result := Client;
+end;
+
+function StartHosting(Port: Integer; const HostName: WideString): TNetHost;
+begin
+  StopNetwork;
+  Host := TNetHost.Create(Port, HostName);
+  StarDayHook := @HostStarDay;
+  DayCompletedHook := @HostDayCompleted;
+  Result := Host;
+end;
+
+function JoinGame(const Address: AnsiString; Port: Integer; const Name: WideString): TNetClient;
+begin
+  StopNetwork;
+  Client := TNetClient.Create(Address, Port, Name);
+  NetworkCommandHook := @ClientCommandSubmitted;
+  Result := Client;
+end;
+
+procedure StopNetwork;
+const
+  ByeTimeoutMs = 5000;
+begin
+  StarDayHook := nil;
+  DayCompletedHook := nil;
+  NetworkCommandHook := nil;
+  if Host <> nil then
+  begin
+    Host.Shutdown(ByeTimeoutMs);
+    Host.Free;
+    Host := nil;
+  end;
+  if Client <> nil then
+  begin
+    if Client.Connected then
+      Client.Leave(ByeTimeoutMs);
+    Client.Free;
+    Client := nil;
+  end;
+end;
+
+procedure NetPump;
+begin
+  if Host <> nil then
+    Host.Pump
+  else if Client <> nil then
+    Client.Pump;
+end;
+
+end.
