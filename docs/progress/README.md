@@ -11,17 +11,15 @@ has got.
 
 ## Status
 
-- Phase: 0-2 done. Phase 3 done except the arcade checkpoint (needs the
-  owner's go-ahead) and the recorded-session exit test. Phase 4 done in
-  code and headless tests (Milestone 3, hot-seat, `--hotseat=N`); the
-  hot-seat UI still needs a hand check (see the Phase 4 entry).
-- Next: the hot-seat hand check, then Phase 5 (networking). The 49
-  `// HUMANS:` markers left are Phase 5 or presentation: film viewpoint,
-  remote dialogue, event human id in scripts, probe orbits, shared shop.
+- Phase: 0-4 done (Phase 3 minus the arcade checkpoint and the recorded-session
+  exit test; Phase 4's hot-seat UI still needs a hand check). Phase 5 under way:
+  the headless networking core is done and tested over loopback.
+- Next: Phase 5 UI (waiting screens, client film playback, applying state
+  between screens), remote dialogue, host/join menus, poisoned frees.
 - Open issues: chaotic mode is seeded from the clock (Phase 1 entry); a
   loaded game drifts from the live one (Phase 3 entry); no converted
-  screen has been exercised in the UI yet.
-- Latest entry: [2026-09-26-phase4.md](2026-09-26-phase4.md)
+  screen has been exercised in the UI yet; the gaps in the Phase 5 entry.
+- Latest entry: [2026-09-28-phase5.md](2026-09-28-phase5.md)
 
 ## Session entry format
 
