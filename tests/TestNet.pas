@@ -164,6 +164,7 @@ var
   Film: TFilmHeader;
   Status, StatusBack: TStatusMessage;
   Chat: TChatMessage;
+  Talk, TalkBack: TTalkRequestMessage;
   Command, CommandBack: TPlayerCommand;
 begin
   Buffer := TBufEC.Create;
@@ -254,6 +255,24 @@ begin
     Buffer.SetPosition(0);
     Chat := DecodeChat(Buffer);
     Check((Chat.SenderId = 5) and (Chat.Text = 'привет') and Buffer.IsAtEnd, 'Chat round trips');
+
+    Buffer.Clear;
+    Talk.HumanId := 77;
+    Talk.ShipId := 1234;
+    Talk.PlanetId := 0;
+    Talk.Scripted := True;
+    Talk.TalkType := 2;
+    Talk.Amount := 500;
+    Talk.Text := 'Сдавайся';
+    EncodeTalkRequest(Talk, Buffer);
+    Buffer.SetPosition(0);
+    TalkBack := DecodeTalkRequest(Buffer);
+    Check(
+        (TalkBack.HumanId = 77) and (TalkBack.ShipId = 1234) and (TalkBack.PlanetId = 0)
+            and TalkBack.Scripted and (TalkBack.TalkType = 2) and (TalkBack.Amount = 500)
+            and (TalkBack.Text = 'Сдавайся') and Buffer.IsAtEnd,
+        'TalkRequest round trips'
+    );
 
     Buffer.Clear;
     Command := Default(TPlayerCommand);

@@ -730,8 +730,16 @@ type
     procedure ApplyNanoArtefactRepair;
     function CanContactShip(OtherShip: TShip): Boolean;
     function LookupTalkText(const Path: WideString): WideString;
-    function OpenPlayerConversation(RespectChameleon: Boolean): Boolean;
-    function ShowPlayerDialogue(Kind: Byte; const Text: WideString; Amount: Integer): Byte;
+    // CHANGE: ENHANCEMENT - Player is the human's ranger that is asked: the local one, or a
+    // remote one through aHuman.RemoteTalkHook (docs/network.md, Remote dialogue). Callers ask
+    // aHuman.CanAskHuman first.
+    function OpenPlayerConversation(Player: TShip; RespectChameleon: Boolean): Boolean;
+    function ShowPlayerDialogue(
+        Player: TShip;
+        Kind: Byte;
+        const Text: WideString;
+        Amount: Integer
+    ): Byte;
     procedure NotifyMoneyDemand(OtherShip: TShip; Response: WideString; Amount: Integer);
     procedure NotifyCargoDemand(OtherShip: TShip; Response: WideString);
     procedure NotifyFearCargoDrop(OtherShip: TShip);
@@ -7041,16 +7049,20 @@ begin
   begin
     if TypeId = stRanger then
       (Self as TRanger).AddPirateCareerActivity(2);
-    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
-    // answer is automatic, as when the local one has automatic control.
-    Dialogue := (Target = LocalPlayer) and not LocalHuman.PlayerAutomaticControl;
+    // CHANGE: ENHANCEMENT - Target's human is asked, at this machine or at its client
+    // (docs/network.md, Remote dialogue); a human who cannot be asked answers automatically,
+    // as on automatic control.
+    Dialogue :=
+        IsHuman(Target)
+            and not HumanOf(Target).PlayerAutomaticControl
+            and CanAskHuman(HumanOf(Target));
     if Dialogue then
     begin
       if Cardinal(ReservedMessageCounter) < 7 then
         Exit;
       ReservedMessageCounter := 0;
-      Inc(LocalHuman.PlayerDialogueRequestCount);
-      if LocalHuman.PlayerDialogueRequestCount > 1 then
+      Inc(HumanOf(Target).PlayerDialogueRequestCount);
+      if HumanOf(Target).PlayerDialogueRequestCount > 1 then
         Exit;
     end;
     if (GetCargoHook <> nil)
@@ -7223,16 +7235,20 @@ begin
                 or not (Target is TNormalShip)
                 or (Target.OwnerId <> Byte(oiPirate))) then
         begin
-          // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another
-          // human's answer is automatic, as when the local one has automatic control.
-          Dialogue := (Other = LocalPlayer) and not LocalHuman.PlayerAutomaticControl;
+          // CHANGE: ENHANCEMENT - Other's human is asked, at this machine or at its client
+          // (docs/network.md, Remote dialogue); a human who cannot be asked answers
+          // automatically, as on automatic control.
+          Dialogue :=
+              IsHuman(Other)
+                  and not HumanOf(Other).PlayerAutomaticControl
+                  and CanAskHuman(HumanOf(Other));
           if Dialogue then
           begin
             if Cardinal(ReservedMessageCounter) < 7 then
               Continue;
             ReservedMessageCounter := 0;
-            Inc(LocalHuman.PlayerDialogueRequestCount);
-            if LocalHuman.PlayerDialogueRequestCount > 1 then
+            Inc(HumanOf(Other).PlayerDialogueRequestCount);
+            if HumanOf(Other).PlayerDialogueRequestCount > 1 then
               Continue;
           end;
           if (Other.BuildAttackRequestResponse(Self, Response, Target)
@@ -16382,34 +16398,57 @@ begin
         );
 end;
 
-function TShip.OpenPlayerConversation(RespectChameleon: Boolean): Boolean;
+function TShip.OpenPlayerConversation(Player: TShip; RespectChameleon: Boolean): Boolean;
 var
   Handles: array[0..1] of Windows.THandle;
   WaitResult: Cardinal;
+  Human: THuman;
+  Answered: Boolean;
 begin
-  // CHANGE: CLEANUP - The conversation screen is this machine's, so it opens for the local
-  // human only. Callers route other humans to the automatic answer (docs/humans.md).
+  // CHANGE: ENHANCEMENT - The human asked is Player's: the local one on this machine's
+  // screens, or a remote one on its client's (docs/network.md, Remote dialogue). The screen
+  // this machine shows only holds back the local one; a client that cannot show the talk
+  // says so at once.
+  Human := HumanOf(Player);
+  if (Human = nil) or ((Human <> LocalHuman) and not Assigned(RemoteTalkHook)) then
+  begin
+    Result := False;
+    Exit;
+  end;
   if ExitScreenLoop
-      or not LocalPlayer.InNormalSpace
-      or (LocalPlayer.CurrentStar <> CurrentStar)
+      or not Player.InNormalSpace
+      or (Player.CurrentStar <> CurrentStar)
       or (TurnCalculationPhase
           in [tcpIdle, tcpGalaxyFinished, tcpPlayerStarFinished, tcpPlayerStarPrepared])
-      or (HumanScreen <> screenStarMap)
+      or ((Human = LocalHuman) and (HumanScreen <> screenStarMap))
       or (Galaxy.SpecialSimulationMode <> 0) then
   begin
     Result := False;
     Exit;
   end;
-  if ((Byte(RespectChameleon) and Byte(LocalPlayer.ChameleonActive)) <> 0)
-      and IsChameleonEffectiveAgainstSelf(LocalPlayer)
+  if ((Byte(RespectChameleon) and Byte(Player.ChameleonActive)) <> 0)
+      and IsChameleonEffectiveAgainstSelf(Player)
       and ((ScriptShip = nil) or not HasScriptControl) then
   begin
     Result := False;
     Exit;
   end;
-  LocalHuman.TalkShip := Self;
-  LocalHuman.TalkPlanet := nil;
-  LocalHuman.TalkScripted := RespectChameleon;
+  Human.TalkShip := Self;
+  Human.TalkPlanet := nil;
+  Human.TalkScripted := RespectChameleon;
+  if Human <> LocalHuman then
+  begin
+    // The turn thread waits while the human's client answers; its commands run meanwhile.
+    BeginTurnWaitForUi(True);
+    try
+      Answered := RemoteTalkHook(Human);
+    finally
+      EndTurnWaitForUi(True);
+    end;
+    Human.TalkScripted := False;
+    Result := RemoteTalkAnswer(Answered);
+    Exit;
+  end;
   ResetEvent(Session.TalkCompletedEvent);
   Handles[0] := Session.TalkCompletedEvent;
   Handles[1] := Session.ScriptUiAbortEvent;
@@ -16425,28 +16464,39 @@ begin
   if WaitResult <> WAIT_OBJECT_0 then
   begin
     Result := False;
-    LocalHuman.TalkScripted := False;
+    Human.TalkScripted := False;
     ResetEvent(Session.TalkRequestEvent);
   end
   else
   begin
     ResetEvent(Session.ScriptUiRequestEvent);
-    LocalHuman.TalkScripted := False;
+    Human.TalkScripted := False;
     SysUtils.Sleep(10);
     Result := True;
   end;
 end;
 
-function TShip.ShowPlayerDialogue(Kind: Byte; const Text: WideString; Amount: Integer): Byte;
+function TShip.ShowPlayerDialogue(
+    Player: TShip;
+    Kind: Byte;
+    const Text: WideString;
+    Amount: Integer
+): Byte;
+var
+  Human: THuman;
 begin
-  LocalHuman.TalkType := Kind;
-  if Amount > 0 then
-    LocalHuman.TalkAmount := Amount;
-  LocalHuman.TalkResponse := 0;
-  LocalHuman.TalkText := Text;
+  // CHANGE: ENHANCEMENT - The talk fields are those of the human asked (Player's).
+  Human := HumanOf(Player);
   Result := 0;
-  if OpenPlayerConversation(True) then
-    Result := LocalHuman.TalkResponse;
+  if Human = nil then
+    Exit;
+  Human.TalkType := Kind;
+  if Amount > 0 then
+    Human.TalkAmount := Amount;
+  Human.TalkResponse := 0;
+  Human.TalkText := Text;
+  if OpenPlayerConversation(Player, True) then
+    Result := Human.TalkResponse;
 end;
 
 // CHANGE: CLEANUP - Every human who overhears the demand gets the bubble.
@@ -16696,14 +16746,14 @@ begin
     Player := Human.Player;
     if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
       Continue;
-    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
-    // answer is automatic, as when the local one has automatic control.
+    // CHANGE: ENHANCEMENT - Leader's human is asked, at this machine or at its client
+    // (docs/network.md, Remote dialogue); one who cannot be asked gets the bubble.
     if (Player = Leader)
-        and (Player = LocalPlayer)
-        and not LocalHuman.PlayerAutomaticControl
-        and not Leader.NoTalk then
+        and not Human.PlayerAutomaticControl
+        and not Leader.NoTalk
+        and CanAskHuman(Human) then
     begin
-      ShowPlayerDialogue(tkPartnerBreak, LookupTalkText('Talk.Partner.MateBreak'), 0);
+      ShowPlayerDialogue(Player, tkPartnerBreak, LookupTalkText('Talk.Partner.MateBreak'), 0);
       Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
     else if HumanOverhears(Player, Self, Leader)
@@ -16746,17 +16796,22 @@ begin
     Player := Human.Player;
     if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
       Continue;
-    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
-    // answer is automatic, as when the local one has automatic control.
+    // CHANGE: ENHANCEMENT - Leader's human is asked, at this machine or at its client
+    // (docs/network.md, Remote dialogue); one who cannot be asked gets the bubble.
     if (Player = Leader)
-        and (Player = LocalPlayer)
-        and not LocalHuman.PlayerAutomaticControl
-        and not Leader.NoTalk then
+        and not Human.PlayerAutomaticControl
+        and not Leader.NoTalk
+        and CanAskHuman(Human) then
     begin
       if Player.GetEffectiveSkillLevel(psLeadership) > Player.CountWingmen then
-        ShowPlayerDialogue(tkPartnerEnd, LookupTalkText('Talk.Partner.MateTheEnd'), 0)
+        ShowPlayerDialogue(Player, tkPartnerEnd, LookupTalkText('Talk.Partner.MateTheEnd'), 0)
       else
-        ShowPlayerDialogue(tkPartnerEnd, LookupTalkText('Talk.Partner.MateTheEndLowLeadership'), 0);
+        ShowPlayerDialogue(
+            Player,
+            tkPartnerEnd,
+            LookupTalkText('Talk.Partner.MateTheEndLowLeadership'),
+            0
+        );
       Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
     else if HumanOverhears(Player, Self, Leader)
@@ -16803,14 +16858,14 @@ begin
     Player := Human.Player;
     if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
       Continue;
-    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
-    // answer is automatic, as when the local one has automatic control.
+    // CHANGE: ENHANCEMENT - Leader's human is asked, at this machine or at its client
+    // (docs/network.md, Remote dialogue); one who cannot be asked gets the bubble.
     if (Player = Leader)
-        and (Player = LocalPlayer)
-        and not LocalHuman.PlayerAutomaticControl
-        and not Leader.NoTalk then
+        and not Human.PlayerAutomaticControl
+        and not Leader.NoTalk
+        and CanAskHuman(Human) then
     begin
-      ShowPlayerDialogue(tkPartnerRiot, LookupTalkText('Talk.Partner.MateRiot'), 0);
+      ShowPlayerDialogue(Player, tkPartnerRiot, LookupTalkText('Talk.Partner.MateRiot'), 0);
       Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
     else if HumanOverhears(Player, Self, Leader)
@@ -16874,14 +16929,19 @@ begin
     Player := Human.Player;
     if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
       Continue;
-    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
-    // answer is automatic, as when the local one has automatic control.
+    // CHANGE: ENHANCEMENT - Leader's human is asked, at this machine or at its client
+    // (docs/network.md, Remote dialogue); one who cannot be asked gets the bubble.
     if (Player = Leader)
-        and (Player = LocalPlayer)
-        and not LocalHuman.PlayerAutomaticControl
-        and not Leader.NoTalk then
+        and not Human.PlayerAutomaticControl
+        and not Leader.NoTalk
+        and CanAskHuman(Human) then
     begin
-      ShowPlayerDialogue(tkPartnerBreak, LookupTalkText('Talk.Pirate.MateBreakRelation'), 0);
+      ShowPlayerDialogue(
+          Player,
+          tkPartnerBreak,
+          LookupTalkText('Talk.Pirate.MateBreakRelation'),
+          0
+      );
       Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
     else if HumanOverhears(Player, Self, Leader)
@@ -16924,14 +16984,14 @@ begin
     Player := Human.Player;
     if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
       Continue;
-    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
-    // answer is automatic, as when the local one has automatic control.
+    // CHANGE: ENHANCEMENT - Leader's human is asked, at this machine or at its client
+    // (docs/network.md, Remote dialogue); one who cannot be asked gets the bubble.
     if (Player = Leader)
-        and (Player = LocalPlayer)
-        and not LocalHuman.PlayerAutomaticControl
-        and not Leader.NoTalk then
+        and not Human.PlayerAutomaticControl
+        and not Leader.NoTalk
+        and CanAskHuman(Human) then
     begin
-      ShowPlayerDialogue(tkPartnerBreak, LookupTalkText('Talk.Pirate.MateBreakRating'), 0);
+      ShowPlayerDialogue(Player, tkPartnerBreak, LookupTalkText('Talk.Pirate.MateBreakRating'), 0);
       Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
     else if HumanOverhears(Player, Self, Leader)
@@ -16974,17 +17034,22 @@ begin
     Player := Human.Player;
     if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
       Continue;
-    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
-    // answer is automatic, as when the local one has automatic control.
+    // CHANGE: ENHANCEMENT - Leader's human is asked, at this machine or at its client
+    // (docs/network.md, Remote dialogue); one who cannot be asked gets the bubble.
     if (Player = Leader)
-        and (Player = LocalPlayer)
-        and not LocalHuman.PlayerAutomaticControl
-        and not Leader.NoTalk then
+        and not Human.PlayerAutomaticControl
+        and not Leader.NoTalk
+        and CanAskHuman(Human) then
     begin
       if Player.GetEffectiveSkillLevel(psLeadership) > Player.CountWingmen then
-        ShowPlayerDialogue(tkPartnerEnd, LookupTalkText('Talk.Pirate.MateTheEnd'), 0)
+        ShowPlayerDialogue(Player, tkPartnerEnd, LookupTalkText('Talk.Pirate.MateTheEnd'), 0)
       else
-        ShowPlayerDialogue(tkPartnerEnd, LookupTalkText('Talk.Pirate.MateTheEndLowLeadership'), 0);
+        ShowPlayerDialogue(
+            Player,
+            tkPartnerEnd,
+            LookupTalkText('Talk.Pirate.MateTheEndLowLeadership'),
+            0
+        );
       Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
     else if HumanOverhears(Player, Self, Leader)
@@ -17031,14 +17096,14 @@ begin
     Player := Human.Player;
     if (Player = nil) or (Player.CurrentStar <> CurrentStar) or not Player.InNormalSpace then
       Continue;
-    // HUMANS: remote dialogue (Phase 5). Only the local human is asked; another human's
-    // answer is automatic, as when the local one has automatic control.
+    // CHANGE: ENHANCEMENT - Leader's human is asked, at this machine or at its client
+    // (docs/network.md, Remote dialogue); one who cannot be asked gets the bubble.
     if (Player = Leader)
-        and (Player = LocalPlayer)
-        and not LocalHuman.PlayerAutomaticControl
-        and not Leader.NoTalk then
+        and not Human.PlayerAutomaticControl
+        and not Leader.NoTalk
+        and CanAskHuman(Human) then
     begin
-      ShowPlayerDialogue(tkPartnerRiot, LookupTalkText('Talk.Pirate.MateRiot'), 0);
+      ShowPlayerDialogue(Player, tkPartnerRiot, LookupTalkText('Talk.Pirate.MateRiot'), 0);
       Player.ScriptItemsAct(satOnShipTalkedWithPlayer, Self, nil, 0);
     end
     else if HumanOverhears(Player, Self, Leader)

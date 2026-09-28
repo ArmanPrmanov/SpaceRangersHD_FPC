@@ -6,13 +6,14 @@ unit NetHost;
 // peer's commands and applies the queues in Session.Humans order once every peer is ready,
 // sends the film of each star to the clients in it, and after the day a state to every
 // client, as a delta against the state that client acknowledged. Everything here runs on the
-// UI thread, except StarDay, which the turn thread calls.
+// UI thread, except StarDay and RemoteTalk, which the turn thread calls.
 interface
 uses
   Classes,
   SyncObjs,
   EC_Buf,
   aCommands,
+  aHuman,
   NetTransport,
   NetThread,
   NetProtocol;
@@ -32,6 +33,12 @@ type
     Base: TNetState;
     // The connection closed or the peer said Bye; handled at the next quiet point.
     Leaving: Boolean;
+    // CHANGE: ENHANCEMENT - The turn thread reads the peer's inbox while its human answers a
+    // dialogue (RemoteTalk); the pump leaves it alone. Set under TNetHost.FTalkLock.
+    InTalk: Boolean;
+    // Messages the turn thread took during a talk and left for the pump (TNetMessage), in
+    // arrival order; the pump handles them before the inbox.
+    Deferred: TList;
     destructor Destroy; override;
     function EndTurnIndex: Integer;
   end;
@@ -54,7 +61,17 @@ type
     FJoinJobs: TList;
     // The player-star job has run a day (DayCompletedHook); the pump sends its films.
     FDayRan: Boolean;
+    // Guards THostPeer.InTalk against the pump's reads of that peer's inbox.
+    FTalkLock: TCriticalSection;
+    // The turn thread is in RemoteTalk; Shutdown ends it (FStopping) and waits for it.
+    FTalking: Boolean;
+    FStopping: Boolean;
     function FindPeer(PeerId: Integer): THostPeer;
+    function ReceiveUnlessInTalk(
+        Peer: THostPeer;
+        out Kind: TNetMessageKind;
+        Payload: TBufEC
+    ): Boolean;
     procedure HandleMessage(Peer: THostPeer; Kind: TNetMessageKind; Payload: TBufEC);
     procedure Refuse(Peer: THostPeer; const Reason: WideString);
     procedure ProcessLeaving;
@@ -99,6 +116,12 @@ type
     function AllAcked(Serial: Integer): Boolean;
     // Says Bye to every peer and waits up to TimeoutMs for the bytes to leave.
     procedure Shutdown(TimeoutMs: Integer);
+    // On the turn thread: asks Human, whose talk fields are set, through its
+    // client (docs/network.md, Remote dialogue). Sends TalkRequest, then reads only that
+    // peer's inbox: each Command of the human runs at once through SubmitCommand, recorded as
+    // the UI's commands in a talk are, and TalkDone ends the talk. False when the human has no
+    // peer, the peer leaves, or no TalkDone comes within RemoteTalkTimeoutMs.
+    function RemoteTalk(Human: THuman): Boolean;
     property Thread: TNetThread read FThread;
     property LastSerial: Integer read FSerial;
     // How long taking the last state took (checkpoint and hash).
@@ -108,21 +131,26 @@ type
 var
   // The running host, for the turn-thread hook.
   ActiveHost: TNetHost;
+  // How long a remote dialogue waits for the client's TalkDone.
+  RemoteTalkTimeoutMs: Integer = 10 * 60 * 1000;
 // StarDayHook of a host: encodes the film of a star that holds a joined peer's human.
 procedure HostStarDay(Star, Film: TObject; Recorded: Boolean);
 // DayCompletedHook of a host: the films of the day are ready to send.
 procedure HostDayCompleted;
+// aHuman.RemoteTalkHook of a host (TNetHost.RemoteTalk).
+function HostRemoteTalk(Human: THuman): Boolean;
 implementation
 uses
   SysUtils,
   aEFilm,
   aGalaxy,
-  aHuman,
   aObjectRefs,
   aPlanet,
   aPlayerActions,
   aSession,
   aSaveLoad,
+  GR_Main,
+  SimulationThread,
   ThreadCalc;
 
 const
@@ -145,9 +173,15 @@ begin
 end;
 
 destructor THostPeer.Destroy;
+var
+  I: Integer;
 begin
   if Base <> nil then
     Base.Release;
+  if Deferred <> nil then
+    for I := 0 to Deferred.Count - 1 do
+      TObject(Deferred[I]).Free;
+  Deferred.Free;
   inherited;
 end;
 
@@ -173,6 +207,7 @@ begin
   FFilmLock := TCriticalSection.Create;
   FLastStatus := TBufEC.Create;
   FJoinJobs := TList.Create;
+  FTalkLock := TCriticalSection.Create;
   FThread := TNetThread.Create(Port);
   NewHumansConnected := False;
   for I := 0 to Session.Humans.Count - 1 do
@@ -202,6 +237,7 @@ begin
     TObject(FFilms[I]).Free;
   FFilms.Free;
   FFilmLock.Free;
+  FTalkLock.Free;
   FLastStatus.Free;
   NewHumansConnected := True;
   for I := 0 to Session.Humans.Count - 1 do
@@ -341,6 +377,7 @@ begin
     Peer := THostPeer.Create;
     Peer.PeerId := Id;
     Peer.HumanId := -1;
+    Peer.Deferred := TList.Create;
     FPeers.Add(Peer);
   end;
   Payload := TBufEC.Create;
@@ -348,7 +385,7 @@ begin
     for I := 0 to FPeers.Count - 1 do
     begin
       Peer := THostPeer(FPeers[I]);
-      while not Peer.Leaving and FThread.Receive(Peer.PeerId, Kind, Payload) do
+      while not Peer.Leaving and ReceiveUnlessInTalk(Peer, Kind, Payload) do
         try
           HandleMessage(Peer, Kind, Payload);
         except
@@ -384,6 +421,44 @@ begin
   // A job may free a ranger whose name the status reads.
   if not IsTurnCalculationRunning then
     SendStatus(False);
+end;
+
+// The peer's next message for the pump: a message the turn thread left during a talk, then
+// the inbox; none while the turn thread reads the inbox (THostPeer.InTalk). Under the lock, a
+// message the pump takes was in the inbox before a TalkRequest went, so it is no answer.
+function TNetHost.ReceiveUnlessInTalk(
+    Peer: THostPeer;
+    out Kind: TNetMessageKind;
+    Payload: TBufEC
+): Boolean;
+var
+  Message: TNetMessage;
+begin
+  FTalkLock.Enter;
+  try
+    Result := False;
+    Kind := 0;
+    if Peer.InTalk then
+      Exit;
+    if Peer.Deferred.Count > 0 then
+    begin
+      Message := TNetMessage(Peer.Deferred[0]);
+      Peer.Deferred.Delete(0);
+      try
+        Kind := Message.Kind;
+        Payload.Clear;
+        if Message.Payload.DataSize > 0 then
+          Payload.AddBytes(Message.Payload.Data, Message.Payload.DataSize);
+        Payload.SetPosition(0);
+      finally
+        Message.Free;
+      end;
+      Exit(True);
+    end;
+    Result := FThread.Receive(Peer.PeerId, Kind, Payload);
+  finally
+    FTalkLock.Leave;
+  end;
 end;
 
 function TNetHost.Quiet: Boolean;
@@ -713,6 +788,144 @@ begin
     ActiveHost.FDayRan := True;
 end;
 
+// A command of the remote human in a talk, on the turn thread. The UI thread runs a local
+// human's answer while the turn thread waits for it, and the command log records it in that
+// wait; the turn thread runs the remote human's the same way, as not part of the job.
+procedure SubmitTalkCommand(const Command: TPlayerCommand);
+begin
+  InTurnJob := False;
+  try
+    SubmitCommand(Command);
+  finally
+    InTurnJob := True;
+  end;
+end;
+
+function TNetHost.RemoteTalk(Human: THuman): Boolean;
+const
+  PollMs = 5;
+var
+  Peer: THostPeer;
+  Request: TTalkRequestMessage;
+  Payload: TBufEC;
+  Kind: TNetMessageKind;
+  Command: TPlayerCommand;
+  Deadline: QWord;
+  Commands: Integer;
+  Outcome: AnsiString;
+begin
+  Result := False;
+  // Joins and disconnects wait for quiet points, so the peers do not change during the job.
+  Peer := PeerOfHuman(FPeers, Human.Id);
+  if (Peer = nil) or Peer.Leaving or FThread.IsClosed(Peer.PeerId) then
+    Exit;
+  Request.HumanId := Human.Id;
+  if Human.TalkShip <> nil then
+    Request.ShipId := Human.TalkShip.Id
+  else
+    Request.ShipId := 0;
+  if Human.TalkPlanet <> nil then
+    Request.PlanetId := Human.TalkPlanet.Id
+  else
+    Request.PlanetId := 0;
+  Request.Scripted := Human.TalkScripted;
+  Request.TalkType := Human.TalkType;
+  Request.Amount := Human.TalkAmount;
+  Request.Text := Human.TalkText;
+  Commands := 0;
+  Outcome := '';
+  Payload := TBufEC.Create;
+  FTalkLock.Enter;
+  Peer.InTalk := True;
+  FTalking := True;
+  FTalkLock.Leave;
+  try
+    EncodeTalkRequest(Request, Payload);
+    FThread.Send(Peer.PeerId, nkTalkRequest, Payload);
+    NetLog(
+        Format(
+            'talk with human %d: ship %d, planet %d, kind %d',
+            [Human.Id, Request.ShipId, Request.PlanetId, Request.TalkType]
+        )
+    );
+    Deadline := GetTickCount64 + QWord(RemoteTalkTimeoutMs);
+    repeat
+      while (Outcome = '') and FThread.Receive(Peer.PeerId, Kind, Payload) do
+        case Kind of
+          nkCommand:
+            begin
+              Command := DecodeCommandMessage(Payload);
+              if Integer(Command.Actor) <> Peer.HumanId then
+                NetLog(
+                    Format(
+                        'refused %s from human %d in a talk: it names human %d',
+                        [CommandKindName(Command.Kind), Peer.HumanId, Command.Actor]
+                    )
+                )
+              else if Command.Kind = ckEndTurn then
+                // Not an answer: it waits for the next day with the rest of the queue.
+                Peer.Deferred.Add(TNetMessage.Create(Kind, Payload.Data, Payload.DataSize))
+              else
+              begin
+                Inc(Commands);
+                try
+                  SubmitTalkCommand(Command);
+                except
+                  on E: Exception do
+                    NetLog(
+                        Format(
+                            '%s of human %d in a talk failed: %s',
+                            [CommandKindName(Command.Kind), Peer.HumanId, E.Message]
+                        )
+                    );
+                end;
+              end;
+            end;
+          nkTalkDone:
+            begin
+              Result := True;
+              Outcome := 'answered';
+            end;
+          nkBye:
+            begin
+              Peer.Deferred.Add(TNetMessage.Create(Kind, Payload.Data, Payload.DataSize));
+              Outcome := 'left';
+            end;
+        else
+          // Acknowledgements and chat: the pump takes them after the talk.
+          Peer.Deferred.Add(TNetMessage.Create(Kind, Payload.Data, Payload.DataSize));
+        end;
+      if Outcome <> '' then
+        Break;
+      if FThread.IsClosed(Peer.PeerId) then
+        Outcome := 'disconnected'
+      else if FStopping or ExitScreenLoop then
+        Outcome := 'the host stops'
+      else if GetTickCount64 > Deadline then
+        Outcome := 'no answer in time'
+      else
+        NetInboxEvent.WaitFor(PollMs);
+    until Outcome <> '';
+  finally
+    FTalkLock.Enter;
+    Peer.InTalk := False;
+    FTalking := False;
+    FTalkLock.Leave;
+    Payload.Free;
+  end;
+  NetLog(
+      Format(
+          'talk with human %d ended: %s, %d commands, response %d',
+          [Human.Id, Outcome, Commands, Human.TalkResponse]
+      )
+  );
+end;
+
+function HostRemoteTalk(Human: THuman): Boolean;
+begin
+  Result := (ActiveHost <> nil) and ActiveHost.RemoteTalk(Human);
+end;
+
 function TNetHost.SendFilms: Integer;
 var
   Films: TList;
@@ -818,7 +1031,13 @@ procedure TNetHost.Shutdown(TimeoutMs: Integer);
 var
   I: Integer;
   Peer: THostPeer;
+  Deadline: QWord;
 begin
+  // A remote dialogue the turn thread waits for ends first: it reads the network thread.
+  FStopping := True;
+  Deadline := GetTickCount64 + QWord(TimeoutMs);
+  while FTalking and (GetTickCount64 < Deadline) do
+    Sleep(5);
   for I := 0 to FPeers.Count - 1 do
   begin
     Peer := THostPeer(FPeers[I]);

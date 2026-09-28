@@ -3189,8 +3189,10 @@ begin
   av[0].SetInt(0);
   if ExitScreenLoop then
     Exit;
-  // HUMANS: remote dialogue (Phase 5). The dialogue opens on this machine's screens, so
-  // only a script of the local human opens one.
+  // CHANGE: ENHANCEMENT - A script dialogue stays with the local human (docs/network.md,
+  // Remote dialogue): its text and answers are written into this machine's talk screen while
+  // the day runs (DText, DAnswer), and its answers run the script's answer code, so a client
+  // could not show it from its own state. A remote human's script opens none.
   if (ScriptHuman <> LocalHuman) or (LocalPlayer = nil) then
     Exit;
   if (High(av) = 1) and (av[1].GetDword = 0) then
@@ -3216,7 +3218,7 @@ begin
       StarMapScreen.RunTalkDialogs;
       av[0].SetInt(1);
     end
-    else if TShip(av[1].GetDword).OpenPlayerConversation(False) then
+    else if TShip(av[1].GetDword).OpenPlayerConversation(LocalPlayer, False) then
       av[0].SetInt(1);
     ScriptUnSnap(Snapshot);
     Exit;
@@ -3245,7 +3247,7 @@ begin
               StarMapScreen.RunTalkDialogs;
               av[0].SetInt(1);
             end
-            else if Binding.Ship.OpenPlayerConversation(False) then
+            else if Binding.Ship.OpenPlayerConversation(LocalPlayer, False) then
               av[0].SetInt(1);
             ScriptUnSnap(Snapshot);
             Exit;
@@ -3266,7 +3268,7 @@ begin
           StarMapScreen.RunTalkDialogs;
           av[0].SetInt(1);
         end
-        else if TShip(Obj).OpenPlayerConversation(False) then
+        else if TShip(Obj).OpenPlayerConversation(LocalPlayer, False) then
           av[0].SetInt(1);
         ScriptUnSnap(Snapshot);
         Exit;
@@ -8151,8 +8153,9 @@ begin
     else if av[2].RealVType = vkString then
       Request.BackgroundMapName := av[2].GetString;
   end;
-  // HUMANS: remote dialogue (Phase 5). The battle shows on this machine, whoever the
-  // script's human is.
+  // CHANGE: ENHANCEMENT - The battle shows on this machine, whoever the script's human is: a
+  // queued battle is not a dialogue a client can answer, and arcade battles are not offered to a
+  // client (docs/network.md, Remote dialogue).
   QueuedArcadeBattles.Add(Request);
   if CurrentScript <> nil then
     CurrentScript.InitCode.LocalVar.GetVar('GABStatus').SetInt(1);
@@ -8180,8 +8183,9 @@ begin
   else
     Request.StartText := '621' + Request.StartText;
   Request.Script := CurrentScript;
-  // HUMANS: remote dialogue (Phase 5). The battle shows on this machine, whoever the
-  // script's human is.
+  // CHANGE: ENHANCEMENT - The battle shows on this machine, whoever the script's human is: a
+  // queued battle is not a dialogue a client can answer, and planet battles are not offered to
+  // a client (docs/network.md, Remote dialogue).
   QueuedPlanetaryBattles.Add(Request);
   if CurrentScript <> nil then
     CurrentScript.InitCode.LocalVar.GetVar('GRobotStatus').SetInt(1);
@@ -14115,8 +14119,9 @@ begin
       ScriptPlayer.RuinsStatusText := av[2].GetString
     else
       ScriptPlayer.RuinsStatusText := '';
-    // HUMANS: remote dialogue (Phase 5). EnterRuinsMode and CloseRuinsModeScreen request
-    // the ruins screens on this machine, whoever the script's human is.
+    // CHANGE: ENHANCEMENT - EnterRuinsMode and CloseRuinsModeScreen request the ruins screens
+    // on this machine, whoever the script's human is; they open screens, not a dialogue a
+    // client could answer mid-day (docs/network.md, Remote dialogue).
     if Mode > 0 then
       ScriptPlayer.EnterRuinsMode(Mode)
     else
@@ -15504,8 +15509,9 @@ begin
             TKling(Other).DetectAttackingPlayer(ScriptPlayer);
         end;
     end
-    // HUMANS: remote dialogue (Phase 5). Docked, the ship is deployed through this machine's
-    // ship screen, so only for the local human.
+    // CHANGE: ENHANCEMENT - Docked, the ship is deployed through this machine's ship screen,
+    // so only for the local human; it is a screen, not a dialogue a client could answer
+    // (docs/network.md, Remote dialogue).
     else if ScriptHuman <> LocalHuman then
       Exit
     else if ShipScreen.TryDeployTranclucator(Ship) then

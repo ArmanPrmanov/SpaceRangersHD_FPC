@@ -3660,11 +3660,12 @@ begin
   if (not IsHuman(OtherShip) or HumanOf(OtherShip).PlayerAutomaticControl)
       and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
     EnemyShip := OtherShip;
-  // HUMANS: How does an NPC's offer or demand reach a human at another machine: sent to
-  // their client with the day waiting, or answered for them? Until then only the local one sees it.
-  if (GetPlayer = Self) and not HumanOf(Self).PlayerAutomaticControl then
+  // CHANGE: ENHANCEMENT - The human is asked at this machine or at its client, with the day
+  // waiting (docs/network.md, Remote dialogue); one who cannot be asked answers automatically.
+  if IsHuman(Self) and not HumanOf(Self).PlayerAutomaticControl and CanAskHuman(HumanOf(Self)) then
   begin
     if OtherShip.ShowPlayerDialogue(
+            Self,
             tkMoneyDemand,
             FormatText1(
                 OtherShip.LookupTalkText('Talk.Money.Send'),
@@ -3780,11 +3781,15 @@ begin
   if (not IsHuman(OtherShip) or HumanOf(OtherShip).PlayerAutomaticControl)
       and ((EnemyShip = nil) or (CurrentStar <> EnemyShip.CurrentStar)) then
     EnemyShip := OtherShip;
-  // HUMANS: How does an NPC's offer or demand reach a human at another machine: sent to
-  // their client with the day waiting, or answered for them? Until then only the local one sees it.
-  if (GetPlayer = Self) and not HumanOf(Self).PlayerAutomaticControl then
+  // CHANGE: ENHANCEMENT - The human is asked at this machine or at its client, with the day
+  // waiting (docs/network.md, Remote dialogue); one who cannot be asked answers automatically.
+  if IsHuman(Self) and not HumanOf(Self).PlayerAutomaticControl and CanAskHuman(HumanOf(Self)) then
   begin
-    if OtherShip.ShowPlayerDialogue(tkGoodsDemand, OtherShip.LookupTalkText('Talk.Goods.Send'), 0)
+    if OtherShip.ShowPlayerDialogue(
+            Self,
+            tkGoodsDemand,
+            OtherShip.LookupTalkText('Talk.Goods.Send'),
+            0)
         <> 0 then
     begin
       AcceptCargoDemand;
@@ -3868,14 +3873,15 @@ begin
   NextDemandTurn := LastPlayerExtortionTurn + 30;
   if OtherShip is TRanger then
     (OtherShip as TRanger).AddTraderCareerActivity(1);
-  // HUMANS: How does an NPC's offer or demand reach a human at another machine: sent to
-  // their client with the day waiting, or answered for them? Until then only the local one sees it.
-  if (GetPlayer = Self) and not HumanOf(Self).PlayerAutomaticControl then
+  // CHANGE: ENHANCEMENT - The human is asked at this machine or at its client, with the day
+  // waiting (docs/network.md, Remote dialogue); one who cannot be asked answers automatically.
+  if IsHuman(Self) and not HumanOf(Self).PlayerAutomaticControl and CanAskHuman(HumanOf(Self)) then
   begin
     if Cardinal(ReservedMessageCounter) < 7 then
       Exit;
     Text := OtherShip.LookupTalkText('Talk.Truce.' + OtherShip.GetTypeNameKey + 'Send');
     if OtherShip.ShowPlayerDialogue(
+            Self,
             tkTruceOffer,
             FormatText1(Text, '<color=255,240,100>', '<Money>', IntToStr(OfferedAmount)),
             0)
@@ -3933,11 +3939,12 @@ begin
     else
       (Requester as TRanger).AddPirateCareerActivity(8);
   end;
-  // HUMANS: How does an NPC's offer or demand reach a human at another machine: sent to
-  // their client with the day waiting, or answered for them? Until then only the local one sees it.
-  if (GetPlayer = Self) and not HumanOf(Self).PlayerAutomaticControl then
+  // CHANGE: ENHANCEMENT - The human is asked at this machine or at its client, with the day
+  // waiting (docs/network.md, Remote dialogue); one who cannot be asked answers automatically.
+  if IsHuman(Self) and not HumanOf(Self).PlayerAutomaticControl and CanAskHuman(HumanOf(Self)) then
   begin
     if Requester.ShowPlayerDialogue(
+            Self,
             tkAttack,
             FormatText1(
                 Requester.LookupTalkText('Talk.Attack.' + Requester.GetTypeNameKey + 'Send'),

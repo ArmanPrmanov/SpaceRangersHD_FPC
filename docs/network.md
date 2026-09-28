@@ -33,7 +33,7 @@ units set them. `tools/check_layers.py` keeps that direction.
 | `ThreadCalc.StarDayHook` | host | the film of each filmed star after its `NextDay`, on the turn thread |
 | `ThreadCalc.DayCompletedHook` | host | the player-star job has run the day; the pump sends the films |
 | `aCommands.NetworkCommandHook` | client | every command the client submits goes to the host; called after `AfterCommandHook`, so the command log and the network both listen |
-| `aHuman.RemoteTalkHook` | remote-dialogue package | declared, nil, called nowhere yet (Remote dialogue) |
+| `aHuman.RemoteTalkHook` | host; the command log's replay | the turn thread asks a remote human something (Remote dialogue) |
 | `aHuman.NewHumansConnected` | host | humans a load or a join adds start disconnected |
 | `aCalc.TurnWaitPumpHook` | `NetPlay` | the UI thread pumps while it waits for a job (`WaitForTurnCalculationUI`, `Calculate*AndWait`) |
 | `ThreadCalc.TurnJobsForbidden` | `NetPlay`, client | starting a job raises: a client never runs one |
@@ -63,7 +63,9 @@ once per message-loop iteration.
   `HostStarDay`), and so does `Status` (a job may free a ranger whose name it
   reads). Commands, joins and leaves wait for a quiet point as before.
 - **The turn thread**, on the host, reads one peer's inbox only while it waits
-  for that peer's human to answer a dialogue (Remote dialogue).
+  for that peer's human to answer a dialogue (Remote dialogue). The pump leaves
+  that inbox alone meanwhile (`THostPeer.InTalk`, under a lock), and handles
+  what the turn thread left for it (`THostPeer.Deferred`) first afterwards.
 - Sending is thread-safe: it appends to the peer's outbox under the lock.
 
 ## Messages
@@ -85,10 +87,10 @@ protocol; never renumber one, add new ones at the end and bump
 
 The host numbers its states from 1. A day number cannot name a base: a join
 between two days sends a state of the same day as the one before it.
-`ProtocolVersion` is 1.
+`ProtocolVersion` is 2 (2: `TalkRequest` has its payload).
 | `Status` | host → client | per human: id, name, connected, holds the day; whether a day is running |
-| `TalkRequest` | host → client | the dialogue the host's day asks the client's human (Remote dialogue) |
-| `TalkDone` | client → host | the client's answer is complete |
+| `TalkRequest` | host → client | human id, ship id, planet id (0: none), scripted, talk kind, amount, text: the human's talk fields (Remote dialogue) |
+| `TalkDone` | client → host | nothing: the client's answer is complete, or it cannot show the talk |
 | `Chat` | both | sender human id, text; the host relays it to every client |
 | `Bye` | both | the sender leaves |
 
@@ -317,28 +319,65 @@ finds out at its end turn.
 
 ## Remote dialogue
 
-During the host's day an NPC or a script may ask a human something: a hail, a
-demand, an offer, a partner's complaint (`TShip.OpenPlayerConversation`,
-`ShowPlayerDialogue`, `TPlanet.RequestDialog`). For the local human the turn
-thread waits while the UI thread shows the talk screen. For a remote human:
+During the host's day an NPC may ask a human something: a demand for money or
+cargo, a truce offer, a request to attack, a partner's complaint
+(`TShip.ShowPlayerDialogue`, `OpenPlayerConversation`). The conversation
+machinery addresses the human asked, not the local one: the talk fields and
+`TalkResponse` are that human's `THuman`'s, `PlayerDialogueRequestCount` too,
+and every talk command acts on its actor's. For the local human the turn thread
+waits while the UI thread shows the talk screen, as before. For a remote one:
 
-1. The turn thread sets the talk fields on that human's `THuman` (`TalkShip`,
-   `TalkPlanet`, `TalkType`, `TalkAmount`, `TalkText`, `TalkScripted`), and calls
-   the net hook, which sends `TalkRequest` to the human's client and waits.
-2. The client, which is waiting for the day, opens the talk screen over its
-   previous-day state for the ship or planet the request names. Every answer is a
-   command (kinds 300-399), predicted locally and sent to the host as usual.
-   When the talk screen closes, it sends `TalkDone`.
-3. On the host, the waiting turn thread reads that peer's inbox itself: it
-   executes each `Command` through the same path the pump uses (recorded, actor
-   checked), and returns on `TalkDone`. The day goes on with the answer in the
-   human's `TalkResponse`.
-4. When the client cannot show the talk (the ship or planet is not in its state,
-   or it is not waiting) it sends `TalkDone` at once, and when the peer
-   disconnects the wait ends; either way the talk ends as it does for a human
-   on automatic control.
+1. **Who is asked.** A site asks `aHuman.CanAskHuman`: the local human, or,
+   where a session can ask remote humans (`RemoteTalkHook` is set), a connected
+   human who has not finished. That answer is recorded (the query
+   `sqRemoteTalk`). A human who cannot be asked answers automatically, as on
+   automatic control, as before. The entry conditions are the local human's
+   (in normal space in the ship's star, a job running, no special mode), except
+   the screen: the host's screen holds back only its own human.
+2. **Host.** The turn thread sets the human's talk fields (`TalkShip`,
+   `TalkPlanet`, `TalkType`, `TalkAmount`, `TalkText`, `TalkScripted`) and,
+   inside `BeginTurnWaitForUi`, calls `RemoteTalkHook`
+   (`NetHost.TNetHost.RemoteTalk`). It sends `TalkRequest` and reads that peer's
+   inbox only: each `Command` of the human runs at once through `SubmitCommand`
+   with `InTurnJob` off, so it is actor checked and the command log records it in
+   the talk's wait exactly as a local human's answer (a command that raises is
+   logged and dropped); an `EndTurn` waits for the next day; acknowledgements,
+   chat and `Bye` wait for the pump. `TalkDone` ends the talk and the day goes
+   on with the answer in the human's `TalkResponse`.
+3. **Client.** The request is kept until the client's wait takes it
+   (`NetPlay.WaitModal`, which also covers the wait at the film's end): the box
+   closes, the star map's talk screen opens on the state before the day for the
+   ship the request names (`TfStarMap.RunTalkDialogs`, as for a local talk), its
+   answers are commands, predicted and sent as usual, then `TalkDone`, and the
+   wait opens again. When it cannot show the talk (the ship is not in its state,
+   its ranger is not in normal space in that star, the star map is not the open
+   screen, or no wait is open) it sends `TalkDone` at once. The headless client
+   answers a scripted talk with its first answer (`AcceptScriptedTalk`).
+4. **The end.** When the peer leaves (`Bye`), its connection closes, the host
+   stops, or no `TalkDone` comes within 10 minutes (`RemoteTalkTimeoutMs`), the
+   talk ends; the host logs how (`talk with human N ended: ...`).
+   `OpenPlayerConversation` then returns False and the talk ends as one the
+   screen could not show: the caller gets no answer (0), whatever commands had
+   already run. It is not answered automatically afterwards: the NPC's side
+   has already been decided by then.
+5. **Replay.** The host's log holds the `sqRemoteTalk` answers (who was asked,
+   and whether the talk ended with `TalkDone`) in the job's answers, and the
+   human's commands in the job's talk wait. The replay sets its own
+   `RemoteTalkHook`, which asks for the talk as the local one does, so
+   `ReplayJob` runs the recorded commands; the recorded answers decide the rest.
+   A log without a session (hot-seat) never asked, and the replay takes that as
+   "nobody remote is asked".
 
 Every other human waits meanwhile, as for any dialogue: the day is paused.
+
+**What stays with the local human.** A script's dialogue (`SF_Dialog`, and
+`TPlanet.RequestDialog`, which only it calls) opens only for a script of the
+local human, as before: its text and answers are written into this machine's
+talk screen by the script's `DText`/`DAnswer` builtins while the day runs, and
+its answers run the script's answer code, so a client could not show it from
+its own state. So do the queued arcade and planet battles, `EnterRuinsMode` and
+`CloseRuinsModeScreen`, and deploying a tranclucator while docked: they open
+screens, not a dialogue a client could answer mid-day.
 
 ## Disconnects
 
@@ -379,7 +418,12 @@ client plays scripted days (take off, fly, land, buy) and ends its turn; the hos
 runs the days. Every client's state hash must equal the host's for every day;
 two runs must give the host the same hashes, however the commands arrived; the
 host's command log must replay to the host's final hash; and a client that
-drops and rejoins must get its human back. The runs print the sizes of whole
+drops and rejoins must get its human back. From day 2 the host's day asks the
+remote humans of one star something (`--sim-net-talk=2`): each must answer on
+its client, the host must see the answer, and the replay of the host's log
+(with the same flag) must ask and answer the same; a client that leaves in the
+middle of such a talk (`--sim-net-talk-leave`) must not hang the host, and gets
+its human back when it rejoins. The runs print the sizes of whole
 states, deltas and films, and the load time, per day.
 
 The headless runner (`HeadlessNet`):
@@ -393,7 +437,17 @@ The headless runner (`HeadlessNet`):
   last state (a client that left may join again at the end).
 - **Client.** Joins, and after each state it applies plays the same turn for its
   own human when that human holds the day (once a day), then ends it. It
-  decodes each film (`TEFilm.LoadFromBuffer`) and counts it.
+  decodes each film (`TEFilm.LoadFromBuffer`) and counts it. It answers each
+  `TalkRequest` with the talk screen's first answer to a scripted talk
+  (`AcceptScriptedTalk`) and prints `net client talk ship= kind= answered=
+  response= human=`.
+- **The talk probe** (`--sim-net-talk=DAY`, `HeadlessNet.InstallNetTalkProbe`):
+  from the DAY-th day the player-star job runs, right after the day of the first
+  filmed star that holds remote humans who can be asked, the first ship of that
+  star that is no human's offers each of them a truce (`ShowPlayerDialogue`),
+  once in the run; an answer that agrees gives the human one credit, so the
+  state shows it. It prints `net talk day= human= ship= response=`. The replay
+  installs it with the same flag, so the log's talk is asked again.
 - One line per day: host `net host day= serial= hash= state= whole= delta= film=
   take= compress= humans= away= plan=` (state: the uncompressed checkpoint;
   whole: it compressed; delta: the largest delta sent; film: the bytes of the
@@ -430,8 +484,11 @@ star's day is about as large as a delta.
   runs when it opens and closes (`RunScriptItemsAct` `$18`/`$19`) and
   `CancelInvalidTravelOrder` run once a day more than in single player; they go
   to the host as commands.
-- Remote dialogue: `RemoteTalkHook`, `TalkRequest` and `TalkDone` are
-  reserved; nothing sends them.
+- Remote dialogue: a script's dialogue stays with the local human; the NPC's
+  line is in the host's language (the host builds the text); the other
+  clients' waits say the day runs, not whose talk it waits for; a talk a client
+  cannot show (it plays the film, or is on another screen) is declined, not
+  queued.
 - Chat is in the protocol (the host relays it); nothing shows it.
 - `ContinueUntilArrival` and `EndedTurn` are not in a state, so a client does
   not know that its human continues until arrival; the host does.

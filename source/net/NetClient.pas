@@ -59,6 +59,10 @@ type
     FFilms: TList;
     FStatus: TStatusMessage;
     FError: AnsiString;
+    // CHANGE: ENHANCEMENT - The dialogue the host's day asks this client's human, not answered
+    // yet (docs/network.md, Remote dialogue).
+    FTalk: TTalkRequestMessage;
+    FHasTalk: Boolean;
     procedure HandleMessage(Kind: TNetMessageKind; Payload: TBufEC);
     procedure GiveUp(const Text: AnsiString);
   public
@@ -81,6 +85,12 @@ type
     procedure Leave(TimeoutMs: Integer);
     // The films received since the last state applied; the caller takes them.
     function TakeFilm: TNetClientFilm;
+    // Whether the host's day waits for this client's human to answer a dialogue.
+    function HasTalkRequest: Boolean;
+    // Takes the dialogue; the caller answers it with commands and then TalkDone.
+    function TakeTalkRequest(out Request: TTalkRequestMessage): Boolean;
+    // The answer is complete (or the talk cannot be shown here): the host's day goes on.
+    procedure SendTalkDone;
     property HumanId: Integer read FHumanId;
     property HostName: WideString read FHostName;
     property Refused: Boolean read FRefused;
@@ -240,7 +250,11 @@ begin
         FHostLeft := True;
         NetLog('the host left');
       end;
-    // TalkRequest: the remote dialogue, a later package.
+    nkTalkRequest:
+      begin
+        FTalk := DecodeTalkRequest(Payload);
+        FHasTalk := True;
+      end;
   end;
 end;
 
@@ -373,6 +387,24 @@ begin
     Exit(nil);
   Result := TNetClientFilm(FFilms[0]);
   FFilms.Delete(0);
+end;
+
+function TNetClient.HasTalkRequest: Boolean;
+begin
+  Result := FHasTalk;
+end;
+
+function TNetClient.TakeTalkRequest(out Request: TTalkRequestMessage): Boolean;
+begin
+  Result := FHasTalk;
+  Request := FTalk;
+  FHasTalk := False;
+end;
+
+procedure TNetClient.SendTalkDone;
+begin
+  if Connected then
+    FThread.Send(FPeerId, nkTalkDone, nil, 0);
 end;
 
 procedure ClientCommandSubmitted(const Command: TPlayerCommand);

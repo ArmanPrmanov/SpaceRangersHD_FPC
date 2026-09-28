@@ -562,6 +562,13 @@ procedure TakeAnswer(var List: TAnswerList; Query: TSimQuery; var Value: PtrInt)
 begin
   if (List.Next > High(List.Items)) or (List.Items[List.Next].Query <> Query) then
   begin
+    // CHANGE: ENHANCEMENT - A log recorded without a network session (hot-seat) never asked
+    // whether a remote human can be asked: nobody remote was.
+    if Query = sqRemoteTalk then
+    begin
+      Value := 0;
+      Exit;
+    end;
     // The replay asks something the recording did not: it has diverged already.
     Inc(AnswerMismatches);
     Exit;
@@ -579,6 +586,18 @@ begin
     TakeAnswer(JobReplayAnswers, Query, Value)
   else if ReplayingCommand then
     TakeAnswer(CommandReplayAnswers, Query, Value);
+end;
+
+// CHANGE: ENHANCEMENT - The job asks a remote human something as the host's did (the recorded
+// sqRemoteTalk answers say whom and whether it answered; docs/network.md, Remote dialogue).
+// The host ran that human's commands inside the talk's wait, so the log holds them as a
+// conversation's; the replay answers it as a local one's (ReplayJob).
+function ReplayRemoteTalk(Human: THuman): Boolean;
+begin
+  ResetEvent(Session.TalkCompletedEvent);
+  SetEvent(Session.TalkRequestEvent);
+  WaitForSingleObject(Session.TalkCompletedEvent, INFINITE);
+  Result := True;
 end;
 
 type
@@ -1171,6 +1190,7 @@ begin
   Payload := TBufEC.Create;
   Stream := TFileStream.Create(LogPath, fmOpenRead or fmShareDenyWrite);
   QueryAnswerHook := @ReplayAnswer;
+  RemoteTalkHook := @ReplayRemoteTalk;
   try
     Replay.Options := Options;
     Stream.ReadBuffer(Magic, 4);
@@ -1202,6 +1222,7 @@ begin
       Result := 0;
   finally
     QueryAnswerHook := nil;
+    RemoteTalkHook := nil;
     Stream.Free;
     Payload.Free;
     Replay.Free;

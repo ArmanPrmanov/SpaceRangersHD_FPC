@@ -15,7 +15,8 @@ function NetRole: TNetRole;
 function CurrentHost: TNetHost;
 function CurrentClient: TNetClient;
 // Hosts the running game on Port (0 picks a free one; CurrentHost.Thread.ListenPort says
-// which). Sets the host's hooks: the film of each star after its day, and the day's end.
+// which). Sets the host's hooks: the film of each star after its day, the day's end, and the
+// dialogues the day asks a remote human (aHuman.RemoteTalkHook).
 function StartHosting(Port: Integer; const HostName: WideString): TNetHost;
 // Joins the game at Address:Port as Name. Sets the client's hooks: every command the local
 // human submits goes to the host. CurrentClient.Connected is False when it could not connect.
@@ -28,6 +29,7 @@ procedure NetPump;
 implementation
 uses
   aCommands,
+  aHuman,
   ThreadCalc;
 
 var
@@ -60,6 +62,7 @@ begin
   Host := TNetHost.Create(Port, HostName);
   StarDayHook := @HostStarDay;
   DayCompletedHook := @HostDayCompleted;
+  RemoteTalkHook := @HostRemoteTalk;
   Result := Host;
 end;
 
@@ -77,6 +80,7 @@ const
 begin
   StarDayHook := nil;
   DayCompletedHook := nil;
+  RemoteTalkHook := nil;
   NetworkCommandHook := nil;
   if Host <> nil then
   begin

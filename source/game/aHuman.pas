@@ -307,13 +307,21 @@ procedure SetLocalHuman(Human: THuman);
 type
   // CHANGE: ENHANCEMENT - Remote dialogue (ROADMAP.md, Phase 5; docs/network.md, Remote
   // dialogue): on a host, the turn thread asks a remote human something (a hail, a demand, an
-  // offer) through the network session, which sends TalkRequest to that human's client and
-  // waits for TalkDone. Returns whether the talk ran; False ends it as for a human on
-  // automatic control. The sites marked "HUMANS: remote dialogue (Phase 5)" will call it, and
-  // the network package that implements it sets it; until then it is nil and nothing calls it.
+  // offer) through the network session, which sends TalkRequest to that human's client, runs
+  // the answer's commands as they come and returns on TalkDone. The human's talk fields
+  // (THuman.TalkShip and the rest) are set; the answer is in its TalkResponse. Returns whether
+  // the talk ran; False (the peer left, or did not answer in time) ends it as a talk the
+  // screen could not show. TShip.OpenPlayerConversation calls it, inside the turn thread's
+  // wait for the UI. A host sets it; the command log's replay sets its own, which answers
+  // the talk from the log.
   TRemoteTalkHook = function(Human: THuman): Boolean;
 var
   RemoteTalkHook: TRemoteTalkHook;
+// CHANGE: ENHANCEMENT - Whether a dialogue can reach Human (docs/network.md, Remote dialogue):
+// the local human, or, where a network session can ask remote humans (RemoteTalkHook), a
+// connected human who plays on. The answer about a remote human is recorded
+// (SimEvents.RemoteTalkAnswer). Without a session only the local human is asked, as before.
+function CanAskHuman(Human: THuman): Boolean;
 // A planet where a joining human can start: an inhabited coalition planet in a coalition star
 // that holds no human, the first in galaxy order; nil when there is none. The choice depends
 // only on the galaxy, so runs repeat.
@@ -325,7 +333,8 @@ uses
   aMissile,
   aTranclucator,
   aGalaxyStruct,
-  aSession;
+  aSession,
+  SimEvents;
 
 function THumanList.GetHuman(Index: Integer): THuman;
 begin
@@ -1187,6 +1196,18 @@ begin
   SetLocalRanger(Human.Player, Galaxy);
   if Assigned(LocalHumanHook) then
     LocalHumanHook(Human, False);
+end;
+
+function CanAskHuman(Human: THuman): Boolean;
+begin
+  if Human = nil then
+    Exit(False);
+  if Human = LocalHuman then
+    Exit(True);
+  if not Assigned(RemoteTalkHook) then
+    Exit(False);
+  Result :=
+      RemoteTalkAnswer(Human.Connected and not Human.Finished and (Human.Player <> nil));
 end;
 
 function FindJoinPlanet: TPlanet;

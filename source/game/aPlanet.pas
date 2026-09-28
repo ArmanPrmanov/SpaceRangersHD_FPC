@@ -3588,7 +3588,8 @@ var
   WaitResult: Cardinal;
 begin
   // CHANGE: CLEANUP - The conversation screen is this machine's, so it opens for the local
-  // human only, as TShip.OpenPlayerConversation does.
+  // human only. Only a script dialogue asks for it, and those stay with the local human
+  // (aScriptFun.SF_Dialog; docs/network.md, Remote dialogue).
   if ExitScreenLoop or not LocalPlayer.InNormalSpace then
   begin
     Result := False;

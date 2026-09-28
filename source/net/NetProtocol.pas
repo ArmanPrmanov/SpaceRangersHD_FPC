@@ -11,7 +11,8 @@ uses
   aCommands,
   NetTransport;
 const
-  ProtocolVersion = 1;
+  // CHANGE: ENHANCEMENT - 2: TalkRequest has a payload (remote dialogue).
+  ProtocolVersion = 2;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 
@@ -74,6 +75,19 @@ type
     SenderId: Integer;
     Text: WideString;
   end;
+  // host -> client: the host's day asks the client's human something (docs/network.md, Remote
+  // dialogue). The fields are the human's talk fields (THuman) as the turn thread set them;
+  // the ship or planet is named by id (0: none). The client answers with commands and then
+  // TalkDone, which has no payload.
+  TTalkRequestMessage = record
+    HumanId: Integer;
+    ShipId: Integer;
+    PlanetId: Integer;
+    Scripted: Boolean;
+    TalkType: Byte;
+    Amount: Integer;
+    Text: WideString;
+  end;
 
 function MessageKindName(Kind: TNetMessageKind): AnsiString;
 
@@ -105,6 +119,8 @@ procedure EncodeStatus(const Message: TStatusMessage; Buffer: TBufEC);
 function DecodeStatus(Buffer: TBufEC): TStatusMessage;
 procedure EncodeChat(const Message: TChatMessage; Buffer: TBufEC);
 function DecodeChat(Buffer: TBufEC): TChatMessage;
+procedure EncodeTalkRequest(const Message: TTalkRequestMessage; Buffer: TBufEC);
+function DecodeTalkRequest(Buffer: TBufEC): TTalkRequestMessage;
 
 // The hash of the game data a host and its clients must share (Hello): the packages
 // INSTALL.TXT lists, CFG\Main.dat and CFG\CacheData.dat, the selected mods' names and their
@@ -296,6 +312,29 @@ end;
 function DecodeChat(Buffer: TBufEC): TChatMessage;
 begin
   Result.SenderId := Buffer.GetInt32;
+  Result.Text := Buffer.ReadWideString;
+end;
+
+procedure EncodeTalkRequest(const Message: TTalkRequestMessage; Buffer: TBufEC);
+begin
+  Buffer.AddInt32(Message.HumanId);
+  Buffer.AddInt32(Message.ShipId);
+  Buffer.AddInt32(Message.PlanetId);
+  Buffer.AddBoolean(Message.Scripted);
+  Buffer.AddByte(Message.TalkType);
+  Buffer.AddInt32(Message.Amount);
+  Buffer.AddWideStringZ(Message.Text);
+end;
+
+function DecodeTalkRequest(Buffer: TBufEC): TTalkRequestMessage;
+begin
+  Result := Default(TTalkRequestMessage);
+  Result.HumanId := Buffer.GetInt32;
+  Result.ShipId := Buffer.GetInt32;
+  Result.PlanetId := Buffer.GetInt32;
+  Result.Scripted := Buffer.GetBoolean;
+  Result.TalkType := Buffer.GetByte;
+  Result.Amount := Buffer.GetInt32;
   Result.Text := Buffer.ReadWideString;
 end;
 

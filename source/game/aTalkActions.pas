@@ -9,7 +9,9 @@ unit aTalkActions;
 //
 // A conversation the UI starts (a click on a ship) begins with BeginTalk. One the turn thread
 // asks for (TShip.OpenPlayerConversation, TPlanet.RequestDialog) is set up by the turn thread,
-// and the commands the UI then submits are recorded in that wait. Either way the conversation
+// and the commands the UI then submits are recorded in that wait; for a remote human the
+// host's turn thread runs its client's commands in that wait (NetHost, docs/network.md,
+// Remote dialogue). Every executor acts on its actor's talk fields. Either way the conversation
 // ends with EndTalk when the screen closes for good. The ship talked to is the human's
 // TalkShip (THuman). Script dialog code adds its answers to the open screen, as before;
 // injected answers (ScriptDialogInjections) are named by their index in that list.

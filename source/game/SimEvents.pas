@@ -17,7 +17,16 @@ type
   TObjectQueryHandler = function: TObject;
   TBooleanQueryHandler = function: Boolean;
   // Questions the simulation asks the UI. Values are part of the command log format.
-  TSimQuery = (sqHumanScreen = 0, sqInspectedShip = 1, sqTalkScreenOpen = 2, sqIsFilm = 3);
+  // CHANGE: ENHANCEMENT - sqRemoteTalk: whether a remote human can be asked something, and
+  // whether it answered (aHuman.CanAskHuman, TShip.OpenPlayerConversation; docs/network.md,
+  // Remote dialogue). The network session decides; the replay gives the recorded answer.
+  TSimQuery = (
+      sqHumanScreen = 0,
+      sqInspectedShip = 1,
+      sqTalkScreenOpen = 2,
+      sqIsFilm = 3,
+      sqRemoteTalk = 4
+  );
   // Sees every answer and may replace it: the command log records answers and the replay
   // gives the recorded ones back.
   TQueryAnswerHook = procedure(Query: TSimQuery; var Value: PtrInt);
@@ -55,6 +64,9 @@ function HumanScreen: TGameScreenId;
 function InspectedShip: TObject;
 function TalkScreenOpen: Boolean;
 function FilmPlaying: Boolean;
+// Value, the network session's answer about a remote human's dialogue, as the command log
+// records it; the replay gives the recorded one back (sqRemoteTalk).
+function RemoteTalkAnswer(Value: Boolean): Boolean;
 implementation
 
 function Answer(Query: TSimQuery; Value: PtrInt): PtrInt;
@@ -134,5 +146,10 @@ begin
   else
     Result := False;
   Result := Answer(sqIsFilm, Ord(Result)) <> 0;
+end;
+
+function RemoteTalkAnswer(Value: Boolean): Boolean;
+begin
+  Result := Answer(sqRemoteTalk, Ord(Value)) <> 0;
 end;
 end.

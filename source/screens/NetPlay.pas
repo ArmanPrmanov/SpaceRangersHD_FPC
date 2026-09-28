@@ -12,8 +12,9 @@ unit NetPlay;
 // applies their commands and starts the day from the same screen, and the state goes out at
 // the first quiet point after the day. A client never runs a day: its end turn sends EndTurn
 // and waits; in space it plays the host's film of its star on the star map, and the state is
-// applied between two screens, where the human's screen then opens. Without a session every
-// function here does what the game did before.
+// applied between two screens, where the human's screen then opens. A dialogue the host's day
+// asks the client's human opens over the waiting star map. Without a session every function
+// here does what the game did before.
 interface
 uses
   GI_MessageLoop,
@@ -142,6 +143,9 @@ var
   ScreenClosing: Boolean;
   Notice: WideString;
   InPump: Boolean;
+  // CHANGE: ENHANCEMENT - A client's wait for the host's day is open (WaitModal): a dialogue
+  // the host asks can be shown there. Outside one, the client declines it at once.
+  ClientTalkWaits: Integer;
 
 function MultiplayerText(const Key, English: WideString): WideString;
 begin
@@ -261,6 +265,9 @@ var
 begin
   if ExitScreenLoop then
     Exit(True);
+  // The host's day asks a dialogue: the box closes and the talk opens (WaitModal).
+  if (Kind <> nwHostPeers) and (CurrentClient <> nil) and CurrentClient.HasTalkRequest then
+    Exit(True);
   case Kind of
     nwHostPeers:
       Result := (CurrentHost = nil) or CurrentHost.PeersReady;
@@ -349,13 +356,96 @@ begin
     BreakUiMessage;
 end;
 
-// Waits, modal over the open screen, until what Kind waits for has come or the window closes.
-procedure WaitModal(Kind: TNetWaitKind);
+// CHANGE: ENHANCEMENT - A client answers the dialogue the host's day asks its human
+// (docs/network.md, Remote dialogue): the talk screen opens over the waiting star map, on the
+// state before the day, for the ship the request names; its answers are commands, predicted
+// here and sent to the host as usual. TalkDone follows, also when the talk cannot be shown
+// here (no such ship, not in its star, not on the star map).
+procedure AnswerClientTalk;
+var
+  Client: TNetClient;
+  Request: TTalkRequestMessage;
+  Ship: TShip;
+  SavedScreen: TGameScreenId;
+  SavedResume: TStarMapResumeMode;
+  Shown: Boolean;
 begin
-  NetFrame;
-  while not WaitDone(Kind) do
-    if RunWaitBox(Kind, WaitText(Kind)) <> WaitRetext then
-      Break;
+  Client := CurrentClient;
+  if not Client.TakeTalkRequest(Request) then
+    Exit;
+  Shown := False;
+  try
+    Ship := nil;
+    if (Galaxy <> nil) and (Request.ShipId <> 0) then
+      Ship := TShip(Galaxy.IdToShip(Cardinal(Request.ShipId), False));
+    if (ClientTalkWaits > 0)
+        and not ExitScreenLoop
+        and (Request.HumanId = Client.HumanId)
+        and (Request.PlanetId = 0)
+        and (Ship <> nil)
+        and (LocalPlayer <> nil)
+        and (Ship <> LocalPlayer)
+        and LocalPlayer.InNormalSpace
+        and (Ship.CurrentStar = LocalPlayer.CurrentStar)
+        and (CurrentScreenId = screenStarMap)
+        and (GetInnermostScreenLoop = StarMapScreen) then
+    begin
+      LocalHuman.TalkShip := Ship;
+      LocalHuman.TalkPlanet := nil;
+      LocalHuman.TalkScripted := Request.Scripted;
+      LocalHuman.TalkType := Request.TalkType;
+      LocalHuman.TalkAmount := Request.Amount;
+      LocalHuman.TalkResponse := 0;
+      LocalHuman.TalkText := Request.Text;
+      Session.ScriptDialogIndex := -1;
+      SavedScreen := RequestedScreenId;
+      SavedResume := StarMapScreen.ResumeMode;
+      StarMapScreen.RunTalkDialogs;
+      // The talk screen returns to the star map, which still waits for the day.
+      if RequestedScreenId in [screenTalk, screenStarMap] then
+        RequestedScreenId := SavedScreen;
+      StarMapScreen.ResumeMode := SavedResume;
+      LocalHuman.TalkScripted := False;
+      Shown := True;
+    end;
+  finally
+    Client.SendTalkDone;
+  end;
+  NetLog(
+      Format(
+          'talk from ship %d: %s, response %d',
+          [Request.ShipId, BoolToStr(Shown, 'answered', 'cannot be shown here'),
+              LocalHuman.TalkResponse]
+      )
+  );
+end;
+
+// Waits, modal over the open screen, until what Kind waits for has come or the window closes.
+// A client answers the dialogues the host's day asks meanwhile.
+procedure WaitModal(Kind: TNetWaitKind);
+var
+  Closed: Cardinal;
+begin
+  if Kind <> nwHostPeers then
+    Inc(ClientTalkWaits);
+  try
+    NetFrame;
+    repeat
+      if (Kind <> nwHostPeers) and not ExitScreenLoop and CurrentClient.HasTalkRequest then
+        AnswerClientTalk
+      else if WaitDone(Kind) then
+        Break
+      else
+      begin
+        Closed := RunWaitBox(Kind, WaitText(Kind));
+        if (Closed <> mbgResultOK) and (Closed <> WaitRetext) then
+          Break;
+      end;
+    until False;
+  finally
+    if Kind <> nwHostPeers then
+      Dec(ClientTalkWaits);
+  end;
 end;
 
 procedure FreeSentStates;
@@ -422,7 +512,12 @@ begin
           end;
         end;
       nrClient:
-        CurrentClient.Pump;
+        begin
+          CurrentClient.Pump;
+          // A client that does not wait for the day cannot show the host's dialogue.
+          if (ClientTalkWaits = 0) and CurrentClient.HasTalkRequest then
+            AnswerClientTalk;
+        end;
     end;
   finally
     InPump := False;

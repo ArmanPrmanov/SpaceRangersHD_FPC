@@ -70,7 +70,10 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
   them while the turn thread waits for it, which happens during a
   conversation (`BeginTurnWaitForUi`).
 - A command submitted on the turn thread is part of the job and is not
-  recorded.
+  recorded. The exception is a remote human's answer to a dialogue: the host's
+  turn thread submits its client's commands with `InTurnJob` off, so they are
+  recorded in the talk's wait as a local human's answer is
+  ([network.md](network.md), Remote dialogue).
 - `SubmitCommand` tells `BeforeCommandHook` and `AfterCommandHook` (the command
   log) and then `NetworkCommandHook` (a client sends the command to its host,
   [network.md](network.md)).

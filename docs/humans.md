@@ -104,10 +104,11 @@ Converting the script functions (`aScriptFun`):
 - UI builtins (dialogues, dialogue text and answers, screens, the star map's
   path overlay, sounds, the arcade ship, Steam achievements) stay on the local
   human (`LocalPlayer`, `LocalHuman`). A builtin that opens a dialogue or a
-  screen does so only when `ScriptHuman` is the local human, and is marked
-  `// HUMANS: remote dialogue (Phase 5)`; so are the queued battles. Text
-  quests are off in multiplayer (ROADMAP.md, Phase 6), so they follow the
-  local human.
+  screen does so only when `ScriptHuman` is the local human; so do the queued
+  battles. A script's dialogue is not sent to a remote human's client
+  ([network.md](network.md), Remote dialogue, says why); an NPC's offer or
+  demand is. Text quests are off in multiplayer (ROADMAP.md, Phase 6), so they
+  follow the local human.
 
 ## Respawn and game end
 
