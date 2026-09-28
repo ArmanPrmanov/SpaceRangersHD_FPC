@@ -44,6 +44,9 @@ var
   TurnJobHook: TTurnJobHook;
   StarDayHook: TStarDayHook;
   DayCompletedHook: TDayCompletedHook;
+  // CHANGE: ENHANCEMENT - A networked client never runs a job: the host runs every day
+  // (ROADMAP.md, Phase 5; docs/network.md). Starting one then is a bug, and raises.
+  TurnJobsForbidden: Boolean;
 procedure StartGalaxyTurnCalculation;
 procedure StartPlayerStarTurnCalculation;
 procedure StartPlayerStarPreparation;
@@ -72,6 +75,8 @@ uses
   Classes;
 procedure StartJob(Job: TTurnCalculationJob);
 begin
+  if TurnJobsForbidden then
+    raise Exception.Create('A networked client never runs a turn job');
   if Assigned(TurnJobHook) then
     TurnJobHook(Job, True);
   Session.TurnCalculationThread.Job := Job;

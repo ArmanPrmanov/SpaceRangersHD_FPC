@@ -154,6 +154,9 @@ var
   BuildVersionMismatch: Boolean = False;
   SessionLogLock: TCriticalSection = nil;
   DebugKeyCallback: TDebugKeyCallbackGR = nil;
+  // CHANGE: ENHANCEMENT - Called once per message-loop iteration; a networked game takes what
+  // arrived here (ROADMAP.md, Phase 5; docs/network.md, Threads). Nil without a session.
+  FramePumpHook: TRuntimeCallbackGR = nil;
   CustomCursorEnabled: Boolean = True;
   DirectXVersion: Cardinal = 0;
   RecordingFrameCount: Integer = 0;
@@ -3527,6 +3530,8 @@ begin
     Result := 0
   else
     Result := 1;
+  if Assigned(FramePumpHook) then
+    FramePumpHook;
 
   // The continuous loop accounts for its own sleep. An active-window sleep
   // here falls outside that clock and makes film playback slower than real time.

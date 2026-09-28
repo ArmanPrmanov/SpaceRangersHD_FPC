@@ -54,7 +54,7 @@ numbers are part of the log format.
 
 | Range | Unit |
 | --- | --- |
-| 0–99 | `aPlayerActions`: travel, orders, the day, session flags (42 `SetSessionFlag`), end turn (43 `EndTurn`, 45 `StopContinuing`), joining (44 `JoinHuman`) |
+| 0–99 | `aPlayerActions`: travel, orders, the day, session flags (42 `SetSessionFlag`), end turn (43 `EndTurn`, 45 `StopContinuing`), joining (44 `JoinHuman`), a disconnected human holding position (46 `HoldPosition`) |
 | 100–199 | shops: equipment, goods, hangar |
 | 200–299 | the ship and hold screen (`fShip2`), awards (`fRewards`, 250–252) |
 | 300–399 | conversations (`fTalk`, script dialogs) |

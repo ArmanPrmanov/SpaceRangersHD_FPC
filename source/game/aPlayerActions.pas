@@ -55,6 +55,7 @@ const
   ckEndTurn = 43;
   ckJoinHuman = 44;
   ckStopContinuing = 45;
+  ckHoldPosition = 46;
 type
   TSlotList = array of Integer;
 procedure AddWeaponSlot(var Slots: TSlotList; Slot: Integer);
@@ -1157,6 +1158,19 @@ begin
     SubmitCommand(NewCommand(ckStopContinuing));
 end;
 
+// CHANGE: ENHANCEMENT - A disconnected human's ranger holds position (ROADMAP.md, Phase 5;
+// docs/network.md, Disconnects): automatic control ends as well as the order, so that it does
+// not fly on without its player. Nothing is restored when the human rejoins.
+procedure ExecuteHoldPosition(const Command: TPlayerCommand);
+var
+  H: THuman;
+begin
+  H := ActorHuman(Command);
+  H.PlayerAutomaticControl := False;
+  H.PendingPlayerFollowTarget := nil;
+  Actor(Command).OrderNone(False);
+end;
+
 var
   JoinedHuman: THuman;
 
@@ -1254,4 +1268,5 @@ initialization
   RegisterCommand(ckEndTurn, 'EndTurn', @ExecuteEndTurn);
   RegisterCommand(ckJoinHuman, 'JoinHuman', @ExecuteJoinHuman);
   RegisterCommand(ckStopContinuing, 'StopContinuing', @ExecuteStopContinuing);
+  RegisterCommand(ckHoldPosition, 'HoldPosition', @ExecuteHoldPosition);
 end.

@@ -74,6 +74,8 @@ type
     procedure Pump;
     // No turn job runs and no day is under way (BeginDay .. SendState).
     function Quiet: Boolean;
+    // A day has begun (BeginDay) and its state has not been sent yet.
+    property DayUnderWay: Boolean read FDayUnderWay;
     function PendingJoinCount: Integer;
     function JoinedCount: Integer;
     // Every joined peer is ready: its queue holds an EndTurn, or its human does not hold
@@ -333,7 +335,8 @@ var
   Kind: TNetMessageKind;
   Payload: TBufEC;
 begin
-  while FThread.TakeNewPeer(Id) do
+  // The turn thread reads the peer list (HostStarDay) while a job runs; new peers wait for it.
+  while not IsTurnCalculationRunning and FThread.TakeNewPeer(Id) do
   begin
     Peer := THostPeer.Create;
     Peer.PeerId := Id;
@@ -362,8 +365,9 @@ begin
   finally
     Payload.Free;
   end;
-  // The film goes first: it is small and needed first (docs/network.md, Films).
-  if FDayRan and not IsTurnCalculationRunning then
+  // The film goes first: it is small and needed first (docs/network.md, Films). Every film of
+  // the day is in once the day has run, so it goes while the galaxy job runs.
+  if FDayRan then
     SendFilms;
   for I := FJoinJobs.Count - 1 downto 0 do
     if TNetStateJob(FJoinJobs[I]).Done then
@@ -377,7 +381,9 @@ begin
     if not HoldJoins then
       ProcessJoins;
   end;
-  SendStatus(False);
+  // A job may free a ranger whose name the status reads.
+  if not IsTurnCalculationRunning then
+    SendStatus(False);
 end;
 
 function TNetHost.Quiet: Boolean;
@@ -406,7 +412,8 @@ begin
 end;
 
 // Disconnects the peers that left, in Session.Humans order: each joined one's human stops
-// holding the day and its ranger holds position, by the stop order as that human.
+// holding the day and its ranger holds position (HoldPosition as that human: no order, no
+// automatic control).
 procedure TNetHost.ProcessLeaving;
 var
   I: Integer;
@@ -427,7 +434,7 @@ begin
     NetLog(Format('human %d (%s) disconnected', [Human.Id, UTF8Encode(Peer.Hello.Name)]));
     if (Human.Player <> nil) and not Human.Player.InHyperspace and not Human.Finished then
     begin
-      Command := NewCommand(ckOrderStop);
+      Command := NewCommand(ckHoldPosition);
       Command.Actor := Cardinal(Human.Id);
       SubmitCommand(Command);
     end;
