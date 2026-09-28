@@ -257,6 +257,12 @@ begin
       CommandLineName := Copy(Argument, 8, MaxInt)
     else if Pos('--sim-net-leave-at=', Argument) = 1 then
       Simulation.NetLeaveAt := StrToInt(Copy(Argument, 20, MaxInt))
+    // CHANGE: ENHANCEMENT - Remote dialogue (ROADMAP.md, Phase 5): the host's day asks a remote
+    // human something from day N on; a replay of the host's log with the same flag asks it too.
+    else if Pos('--sim-net-talk=', Argument) = 1 then
+      Simulation.NetTalkDay := StrToInt(Copy(Argument, 16, MaxInt))
+    else if Argument = '--sim-net-talk-leave' then
+      Simulation.NetTalkLeave := True
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then
@@ -638,6 +644,8 @@ begin
       if SimulationMode and (Replay.LogPath <> '') then
       begin
         Stage('command replay');
+        if Simulation.NetTalkDay > 0 then
+          InstallNetTalkProbe(Simulation.NetTalkDay);
         System.ExitCode := RunCommandReplay(Replay);
       end
       else if SimulationMode then

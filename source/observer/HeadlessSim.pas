@@ -44,6 +44,12 @@ type
     NetJoin: AnsiString;
     NetName: AnsiString;
     NetLeaveAt: Integer;
+    // CHANGE: ENHANCEMENT - Remote dialogue (docs/network.md, Tests): from this day on, the
+    // host's day asks the remote humans of the first star where it can something
+    // (HeadlessNet.InstallNetTalkProbe; 0: never). A client with NetTalkLeave leaves when the
+    // host asks it something, without answering.
+    NetTalkDay: Integer;
+    NetTalkLeave: Boolean;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 // Shared with the networked runner (HeadlessNet).

@@ -7,12 +7,23 @@ unit HeadlessNet;
 // applies their commands, runs the player-star job, sends the films, runs the galaxy job and
 // sends the state. A client process joins, and each day plays the turn --sim-hotseat plays
 // for its human, sends it, and waits for the film and the state. Both print one line per day
-// with the state hash, the sizes and the load time.
+// with the state hash, the sizes and the load time. A client answers the dialogues the host's
+// day asks its human with the talk screen's first answer.
 interface
 uses
   HeadlessSim;
 function RunNetHost(const Options: TSimulationOptions): Integer;
 function RunNetClient(const Options: TSimulationOptions): Integer;
+// CHANGE: ENHANCEMENT - --sim-net-talk=DAY (docs/network.md, Tests): from the FromDay-th day
+// the player-star job runs (counting from 1, so a host and the replay of its log agree), right
+// after the day of the first filmed star that holds remote humans who can be asked (in normal
+// space, not on automatic control), the first ship of that star that is no human's asks each
+// of them a truce offer (TShip.ShowPlayerDialogue), once in the run. An answer that agrees
+// gives the human 1 credit, so the state shows it. It prints one line per human asked. The
+// host installs it after it starts hosting; a replay of the host's log installs it too, and
+// asks the same.
+procedure InstallNetTalkProbe(FromDay: Integer);
+procedure RemoveNetTalkProbe;
 implementation
 uses
   SysUtils,
@@ -25,6 +36,9 @@ uses
   aObjectRefs,
   aPlayer,
   aSession,
+  aShip,
+  aGalaxyStruct,
+  aTalkActions,
   ThreadCalc,
   WorkerErrors,
   NetThread,
@@ -57,6 +71,95 @@ begin
       Inc(Result);
 end;
 
+var
+  ProbeFromDay: Integer;
+  // The days the player-star job has run since the probe was installed, and the last one.
+  ProbeDays: Integer;
+  ProbeLastTurn: Integer;
+  ProbeDone: Boolean;
+  ProbePrevious: TStarDayHook;
+
+// StarDayHook of the probe, on the turn thread (InstallNetTalkProbe).
+procedure NetTalkProbe(Star, Film: TObject; Recorded: Boolean);
+var
+  I, J: Integer;
+  Human: THuman;
+  Ship, Other: TShip;
+  Response: Byte;
+  Asked: Boolean;
+begin
+  if Assigned(ProbePrevious) then
+    ProbePrevious(Star, Film, Recorded);
+  if Galaxy.CurrentTurn <> ProbeLastTurn then
+  begin
+    ProbeLastTurn := Galaxy.CurrentTurn;
+    Inc(ProbeDays);
+  end;
+  if ProbeDone or (ProbeDays < ProbeFromDay) then
+    Exit;
+  Asked := False;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if (Human = LocalHuman)
+        or (Human.Player = nil)
+        or (Human.PlayerStar <> Star)
+        or (Human.Player.CurrentStar <> Star)
+        or not Human.Player.InNormalSpace
+        or Human.PlayerAutomaticControl
+        or not CanAskHuman(Human) then
+      Continue;
+    Ship := nil;
+    for J := 0 to TStar(Star).Ships.Count - 1 do
+    begin
+      Other := TShip(TStar(Star).Ships[J]);
+      if not IsHuman(Other) and Other.InNormalSpace then
+      begin
+        Ship := Other;
+        Break;
+      end;
+    end;
+    if Ship = nil then
+      Continue;
+    Response :=
+        Ship.ShowPlayerDialogue(
+            Human.Player,
+            tkTruceOffer,
+            Ship.LookupTalkText('Talk.Truce.' + Ship.GetTypeNameKey + 'Send'),
+            0
+        );
+    if Response <> 0 then
+      Human.Player.SetMoney(Human.Player.Money + 1);
+    Emit(
+        Format(
+            'net talk day=%d human=%d ship=%d response=%d',
+            [Galaxy.CurrentTurn, Human.Id, Ship.Id, Response]
+        )
+    );
+    Asked := True;
+  end;
+  if Asked then
+    ProbeDone := True;
+end;
+
+procedure InstallNetTalkProbe(FromDay: Integer);
+begin
+  RemoveNetTalkProbe;
+  ProbeFromDay := FromDay;
+  ProbeDays := 0;
+  ProbeLastTurn := -1;
+  ProbeDone := False;
+  ProbePrevious := StarDayHook;
+  StarDayHook := @NetTalkProbe;
+end;
+
+procedure RemoveNetTalkProbe;
+begin
+  if @StarDayHook = @NetTalkProbe then
+    StarDayHook := ProbePrevious;
+  ProbePrevious := nil;
+end;
+
 function RunNetHost(const Options: TSimulationOptions): Integer;
 var
   Host: TNetHost;
@@ -72,6 +175,8 @@ begin
   NetLogHook := @EmitNetEvent;
   try
     Host := StartHosting(Options.NetHostPort, 'Host');
+    if Options.NetTalkDay > 0 then
+      InstallNetTalkProbe(Options.NetTalkDay);
     Emit(Format('net host port=%d clients=%d', [Host.Thread.ListenPort, Options.NetClients]));
     // Every client first, then the joins by name, so that the humans are the same each run.
     Host.HoldJoins := True;
@@ -173,6 +278,7 @@ begin
         )
     );
   finally
+    RemoveNetTalkProbe;
     StopNetwork;
     NetLogHook := nil;
   end;
@@ -206,6 +312,59 @@ begin
   end;
 end;
 
+// The dialogue the host's day asks this client's human: the talk screen's first answer to a
+// scripted talk is to agree (AcceptScriptedTalk), predicted here and sent to the host; then
+// TalkDone. A talk about a ship this state does not have is declined, as the screens decline
+// it; the screens also need the star map of the ship's star, which a headless client does not
+// have. With Leave the client leaves instead; returns whether it did.
+function AnswerTalk(Client: TNetClient; Leave: Boolean): Boolean;
+var
+  Request: TTalkRequestMessage;
+  Ship: TShip;
+  Answered: Boolean;
+begin
+  Result := False;
+  if not Client.TakeTalkRequest(Request) then
+    Exit;
+  if Leave then
+  begin
+    Client.Leave(5000);
+    Emit(Format('net client left in a talk ship=%d human=%d', [Request.ShipId, Client.HumanId]));
+    Exit(True);
+  end;
+  Ship := nil;
+  if (Galaxy <> nil) and (Request.ShipId <> 0) then
+    Ship := TShip(Galaxy.IdToShip(Cardinal(Request.ShipId), False));
+  Answered :=
+      (Request.HumanId = Client.HumanId)
+          and (Request.PlanetId = 0)
+          and (Ship <> nil)
+          and (LocalPlayer <> nil);
+  try
+    if Answered then
+    begin
+      LocalHuman.TalkShip := Ship;
+      LocalHuman.TalkPlanet := nil;
+      LocalHuman.TalkScripted := Request.Scripted;
+      LocalHuman.TalkType := Request.TalkType;
+      LocalHuman.TalkAmount := Request.Amount;
+      LocalHuman.TalkResponse := 0;
+      LocalHuman.TalkText := Request.Text;
+      if Request.Scripted then
+        AcceptScriptedTalk;
+      LocalHuman.TalkScripted := False;
+    end;
+  finally
+    Client.SendTalkDone;
+  end;
+  Emit(
+      Format(
+          'net client talk ship=%d kind=%d answered=%d response=%d human=%d',
+          [Request.ShipId, Request.TalkType, Ord(Answered), LocalHuman.TalkResponse, Client.HumanId]
+      )
+  );
+end;
+
 function RunNetClient(const Options: TSimulationOptions): Integer;
 var
   Client: TNetClient;
@@ -236,6 +395,8 @@ begin
     while not Client.HostLeft do
     begin
       Client.Pump;
+      if Client.HasTalkRequest and AnswerTalk(Client, Options.NetTalkLeave) then
+        Break;
       if not Client.HasState then
       begin
         if GetTickCount64 > Deadline then

@@ -37,10 +37,13 @@ HOTSEAT_DAYS = 10
 END_TURN_KIND = 43
 # Networked play (ROADMAP.md, Phase 5; docs/network.md, Tests): a headless host and this many
 # headless clients over loopback, for this many days. With one client, a third run has the
-# client leave after NET_LEAVE_DAY days and join again.
+# client leave after NET_LEAVE_DAY days and join again, and a fourth has it leave in the middle
+# of a remote dialogue and join again. From day NET_TALK_DAY the host's day asks the remote
+# humans of one star something (--sim-net-talk); the clients answer.
 NET_CLIENT_COUNTS = (1, 7)
 NET_DAYS = 10
 NET_LEAVE_DAY = 3
+NET_TALK_DAY = 2
 # A networked process that runs longer than this has hung.
 NET_TIMEOUT = 600
 
@@ -295,16 +298,18 @@ def net_lines(output: str, prefix: str) -> list[dict[str, str]]:
     return [fields(line) for line in output.splitlines() if line.startswith(prefix)]
 
 
-def run_network(args, binary: Path, save: Path, count: int, log: Path | None = None, leave: bool = False):
+def run_network(args, binary: Path, save: Path, count: int, log: Path | None = None, leave: str = ""):
     """One networked session: a host with `count` clients (Net1..NetN) for NET_DAYS days.
 
-    With leave, Net1 leaves after NET_LEAVE_DAY days; once the host has run a day without it,
-    Net1 joins again. Returns (problem, host output, client outputs); problem is '' when every
-    process ended cleanly.
+    The host asks remote humans something from day NET_TALK_DAY (--sim-net-talk). With leave
+    "day", Net1 leaves after NET_LEAVE_DAY days; with leave "talk", it leaves when the host asks
+    it something, without answering. Once the host has run a day without it, Net1 joins again.
+    Returns (problem, host output, client outputs); problem is '' when every process ended
+    cleanly.
     """
     host_options = [
         f"--sim-save={save}", "--sim-net-host=0", f"--sim-net-clients={count}",
-        f"--sim-turns={NET_DAYS}", f"--sim-seed={args.seed}",
+        f"--sim-turns={NET_DAYS}", f"--sim-seed={args.seed}", f"--sim-net-talk={NET_TALK_DAY}",
     ]  # fmt: skip
     if log is not None:
         host_options.append(f"--record-commands={log}")
@@ -317,8 +322,10 @@ def run_network(args, binary: Path, save: Path, count: int, log: Path | None = N
     clients = []
     for index in range(count):
         options = [f"--sim-net-join=127.0.0.1:{port}", f"--sim-net-name=Net{index + 1}"]
-        if leave and index == 0:
+        if leave == "day" and index == 0:
             options.append(f"--sim-net-leave-at={NET_LEAVE_DAY}")
+        elif leave == "talk" and index == 0:
+            options.append("--sim-net-talk-leave")
         clients.append(GameProcess(binary, args.game_dir, options))
     codes = []
     if leave:
@@ -355,6 +362,23 @@ def compare_client_hashes(host_output: str, outputs: list[str]) -> str:
     return ""
 
 
+def check_talks(host_output: str, outputs: list[str]) -> tuple[str, list[dict[str, str]]]:
+    """The remote dialogues of a run (--sim-net-talk): the host asked some human, every human
+    it asked answered on its client, and the host saw the answer (response=1). Returns what is
+    wrong, and the host's talk lines."""
+    talks = net_lines(host_output, "net talk day=")
+    if not talks:
+        return "the host asked no remote human anything", talks
+    answers = [line for output in outputs for line in net_lines(output, "net client talk ")]
+    for talk in talks:
+        answered = [line for line in answers if line["human"] == talk["human"] and line["answered"] == "1"]
+        if not answered:
+            return f"human {talk['human']} did not answer the host's talk on its client", talks
+        if talk["response"] != "1":
+            return f"the host did not see human {talk['human']}'s answer (response {talk['response']})", talks
+    return "", talks
+
+
 def median(values: list[int]) -> int:
     return int(statistics.median(values)) if values else 0
 
@@ -365,8 +389,11 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
     A headless host (--sim-net-host) and `count` headless clients (--sim-net-join), each its
     own process: every client's hash equals the host's for every state it applies; two runs
     give the host the same hashes however the commands arrived; the host's command log replays
-    to its final hash. With one client, a client that leaves after NET_LEAVE_DAY days gets its
-    human back when it joins again, and the days go on while it is away.
+    to its final hash. From day NET_TALK_DAY the host's day asks remote humans something: each
+    answers on its client, the host sees the answer, and the replay of the host's log asks and
+    answers the same. With one client, a client that leaves after NET_LEAVE_DAY days gets its
+    human back when it joins again, and the days go on while it is away; so does one that
+    leaves in the middle of a talk, which ends the talk without hanging the host.
     """
     label = f"{count + 1} humans networked"
     runs = []
@@ -378,6 +405,8 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
             )
             if not problem:
                 problem = compare_client_hashes(host_output, outputs)
+            if not problem:
+                problem, _ = check_talks(host_output, outputs)
             if problem:
                 return False, [f"{label}: {problem}"]
             days = [f"{line['serial']} {line['hash']}" for line in net_lines(host_output, "net host day=")]
@@ -388,17 +417,28 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
             return False, [f"{label} nondeterministic: " + first_divergence(runs[0][0], runs[1][0])]
         expected = fields(last_line(runs[0][1], "done net host "))["hash"]
         code, output = run_game(
-            binary, args.game_dir, [f"--replay-commands={log}", f"--sim-seed={args.seed}"]
+            binary,
+            args.game_dir,
+            [f"--replay-commands={log}", f"--sim-seed={args.seed}", f"--sim-net-talk={NET_TALK_DAY}"],
         )
         summary = last_line(output, "done ")
         if code != 0 or f"hash={expected}" not in summary or " diverged=0 " not in summary:
             return False, [f"{label}: the host's command log does not replay:" + output_tail(output)]
+        host_talks = [line for line in runs[0][1].splitlines() if line.startswith("net talk day=")]
+        replay_talks = [line for line in output.splitlines() if line.startswith("net talk day=")]
+        if replay_talks != host_talks:
+            return False, [
+                f"{label}: the replay's talks differ from the host's: {replay_talks} != {host_talks}"
+            ]
     _, host_output, outputs = runs[0]
     host_days = net_lines(host_output, "net host day=")
     client_days = [line for output in outputs for line in net_lines(output, "net client day=")]
+    _, talks = check_talks(host_output, outputs)
     notes = [
         f"{label}: {NET_DAYS} days, client hashes match the host's, deterministic, "
         "the host's log replays",
+        f"{label}: {len(talks)} remote talks on day {talks[0]['day']}, answered on the clients, "
+        "seen by the host and by the replay",
         "  sizes: whole state {} bytes, {} compressed; median delta {}; median films of a day {}; "
         "median load {} ms (client), take {} ms (host)".format(
             host_days[-1]["state"], host_days[-1]["whole"],
@@ -409,7 +449,7 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
         ),
     ]  # fmt: skip
     if count == 1:
-        problem, host_output, outputs = run_network(args, binary, save, count, leave=True)
+        problem, host_output, outputs = run_network(args, binary, save, count, leave="day")
         if not problem:
             problem = compare_client_hashes(host_output, outputs)
         if problem:
@@ -429,6 +469,27 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
             f"{label}: a client that leaves after day {NET_LEAVE_DAY} gets human {first['human']} "
             f"back; {len(away)} days ran without it"
         )
+        problem, host_output, outputs = run_network(args, binary, save, count, leave="talk")
+        if not problem:
+            problem = compare_client_hashes(host_output, outputs)
+        if problem:
+            return False, [*notes, f"{label} leave in a talk: {problem}"]
+        left = [line for line in outputs[0].splitlines() if line.startswith("net client left in a talk ")]
+        ended = [line for line in host_output.splitlines() if " ended: " in line and "net talk with human" in line]
+        first = fields(last_line(outputs[0], "done net client "))
+        second = fields(last_line(outputs[1], "done net client "))
+        if not left:
+            return False, [*notes, f"{label} leave in a talk: the host asked the client nothing"]
+        if not ended or not any(word in ended[-1] for word in (" left,", " disconnected,")):
+            return False, [*notes, f"{label} leave in a talk: the host's talk did not end: {ended}"]
+        if first.get("human") in (None, "-1") or first.get("human") != second.get("human"):
+            return False, [
+                *notes,
+                f"{label} leave in a talk: the rejoined client got human {second.get('human')}, "
+                f"not {first.get('human')}",
+            ]
+        notes.append(f"{label}: a client that leaves in a talk ends it ({ended[-1].split(' ended: ')[1]}); "
+                     "the day goes on and the client gets its human back")
     return True, notes
 
 
