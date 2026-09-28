@@ -27,6 +27,11 @@ var
   CommandLineJoin: AnsiString;
   CommandLineName: AnsiString;
 
+const
+  // CHANGE: ENHANCEMENT - The port the menus propose, and the one an address without a port
+  // (--join=HOST, the main menu's join) connects to.
+  DefaultNetPort = 47300;
+
 // The screen loop calls this between two screens, after the hot-seat pass: it starts hosting
 // or joins as the command line asks, applies a client's state and chooses the screen that
 // opens for it, and ends the session on the way to the main menu.
@@ -58,6 +63,27 @@ function NetScreenClosing: Boolean;
 function TakeNetNotice: WideString;
 // WaitForMultipleObjects without a timeout; in a session a loop that pumps the network.
 function NetWaitForEvents(Count: Cardinal; Handles: Pointer): Cardinal;
+// CHANGE: ENHANCEMENT - What the menus call (NetMenus; docs/network.md, Hosting and joining).
+// The language data's Multiplayer.Key, or English when it has none.
+function MultiplayerText(const Key, English: WideString): WideString;
+// Splits HOST or HOST:PORT; a missing port is DefaultNetPort. False when it is malformed.
+function ParseNetAddress(const Text: AnsiString; out Host: AnsiString; out Port: Integer): Boolean;
+// Joins Address (HOST or HOST:PORT) as Name between screens, as --join does: the caller closes
+// the main menu with screenMainMenu requested. A failure opens the main menu again with a
+// message (TakeNetNotice).
+procedure RequestJoin(const Address: AnsiString; const Name: WideString);
+// Why the running game cannot be hosted from the in-game menu now; '' when it can.
+function HostingRefusal: WideString;
+// Hosts the running game on Port (0 picks one), as --host does; returns the port it listens on.
+// Raises when it cannot listen.
+function HostRunningGame(Port: Integer): Integer;
+// Stops hosting: the peers' humans are disconnected (their rangers hold position), the peers
+// get Bye, and the game goes on without a session.
+procedure StopHostingGame;
+// The host's state for the in-game menu: port, addresses, who is connected.
+function HostStatusText: WideString;
+// The humans connected to this host (not the host's own), by name; '' when none.
+function ConnectedPlayerNames: WideString;
 implementation
 uses
   SysUtils,
@@ -87,6 +113,7 @@ uses
   ThreadCalc,
   NetThread,
   NetProtocol,
+  NetTransport,
   NetHost,
   NetClient,
   NetSession,
@@ -951,22 +978,51 @@ begin
   OpenClientScreen((Star = nil) or (Star.Id <> OldStarId));
 end;
 
-procedure JoinFromCommandLine;
 var
-  Colon, Port: Integer;
+  // CHANGE: ENHANCEMENT - The join the command line or the main menu asks for; it runs between
+  // screens on the way to the main menu.
+  PendingJoinAddress: AnsiString;
+  PendingJoinName: WideString;
+
+function ParseNetAddress(const Text: AnsiString; out Host: AnsiString; out Port: Integer): Boolean;
+var
+  Colon: Integer;
+begin
+  Host := Trim(Text);
+  Port := DefaultNetPort;
+  Colon := LastDelimiter(':', Host);
+  if Colon > 0 then
+  begin
+    Port := StrToIntDef(Copy(Host, Colon + 1, MaxInt), -1);
+    Host := Copy(Host, 1, Colon - 1);
+  end;
+  Result := (Host <> '') and (Port > 0) and (Port <= 65535);
+end;
+
+procedure RequestJoin(const Address: AnsiString; const Name: WideString);
+begin
+  PendingJoinAddress := Address;
+  PendingJoinName := Name;
+end;
+
+procedure JoinPending;
+var
+  Address: AnsiString;
+  Port: Integer;
   Client: TNetClient;
   Deadline: QWord;
 begin
-  Colon := LastDelimiter(':', CommandLineJoin);
-  Port := StrToIntDef(Copy(CommandLineJoin, Colon + 1, MaxInt), -1);
-  if (Colon <= 1) or (Port <= 0) then
+  if not ParseNetAddress(PendingJoinAddress, Address, Port) then
   begin
-    Notice := WideString('--join=' + CommandLineJoin + ': expected HOST:PORT');
-    CommandLineJoin := '';
+    Notice :=
+        MultiplayerText('BadAddress', 'Expected an address as HOST or HOST:PORT:')
+            + ' '
+            + WideString(PendingJoinAddress);
+    PendingJoinAddress := '';
     Exit;
   end;
-  Client := JoinGame(Copy(CommandLineJoin, 1, Colon - 1), Port, WideString(CommandLineName));
-  CommandLineJoin := '';
+  PendingJoinAddress := '';
+  Client := JoinGame(Address, Port, PendingJoinName);
   BeginNetSession(True);
   Deadline := GetTickCount64 + JoinTimeoutMs;
   while Client.Connected and not Client.HasState and not ExitScreenLoop do
@@ -993,15 +1049,94 @@ begin
   ApplyClientState;
 end;
 
-procedure StartHostingGame;
+function HostRunningGame(Port: Integer): Integer;
 var
   Host: TNetHost;
 begin
   WaitForTurnCalculation;
-  Host := StartHosting(CommandLineHostPort, LocalPlayer.Name);
-  CommandLineHostPort := -1;
+  Host := StartHosting(Port, LocalPlayer.Name);
   BeginNetSession(False);
-  NetLog(Format('hosting on port %d as %s', [Host.Thread.ListenPort, UTF8Encode(LocalPlayer.Name)]));
+  Result := Host.Thread.ListenPort;
+  NetLog(Format('hosting on port %d as %s', [Result, UTF8Encode(LocalPlayer.Name)]));
+end;
+
+procedure StartHostingGame;
+var
+  Port: Integer;
+begin
+  Port := CommandLineHostPort;
+  CommandLineHostPort := -1;
+  HostRunningGame(Port);
+end;
+
+function HostingRefusal: WideString;
+begin
+  Result := '';
+  if NetRole = nrClient then
+    Result := MultiplayerText('HostOnClient', 'You play in another player''s game.')
+  else if (Galaxy = nil) or (LocalPlayer = nil) or (LocalHuman = nil) or MemorySnapshotActive then
+    Result := MultiplayerText('HostNoGame', 'There is no game to host now.')
+  else if Galaxy.SpecialSimulationMode <> 0 then
+    Result := MultiplayerText('HostMode', 'This kind of game cannot be hosted.')
+  // Hot-seat hands the screen from human to human; a host is one human at one machine.
+  else if (HotSeatHumans > 1) or (PendingHuman <> nil) or (LocalHuman <> HostHuman) then
+    Result := MultiplayerText('HostHotSeat', 'A hot-seat game cannot be hosted.');
+end;
+
+procedure StopHostingGame;
+begin
+  if NetRole <> nrHost then
+    Exit;
+  WaitForTurnCalculation;
+  CurrentHost.DisconnectHumans;
+  NetLog('stopped hosting');
+  EndNetSession;
+end;
+
+function ConnectedPlayerNames: WideString;
+var
+  I: Integer;
+  Human: THuman;
+begin
+  Result := '';
+  if NetRole <> nrHost then
+    Exit;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if (Human <> LocalHuman) and Human.Connected and (Human.Player <> nil) then
+      AddName(Result, HumanName(Human));
+  end;
+end;
+
+function HostStatusText: WideString;
+var
+  Names, Addresses: WideString;
+begin
+  if NetRole <> nrHost then
+    Exit('');
+  Result := MultiplayerText('Hosting', 'Hosting this game on port <Port>.');
+  ReplaceTextToken(
+      Result,
+      '<Port>',
+      WideString(IntToStr(CurrentHost.Thread.ListenPort)),
+      '<color=255,240,100>'
+  );
+  Addresses := WideString(LocalAddressText);
+  if Addresses <> '' then
+    Result :=
+        Result
+            + #13#10
+            + NamedLine(
+                'Addresses',
+                'This computer: <Players>.',
+                WideString(StringReplace(AnsiString(Addresses), ',', ', ', [rfReplaceAll]))
+            );
+  Names := ConnectedPlayerNames;
+  if Names = '' then
+    Result := Result + #13#10 + MultiplayerText('NoneConnected', 'No player has joined yet.')
+  else
+    Result := Result + #13#10 + NamedLine('Connected', 'Connected: <Players>.', Names);
 end;
 
 procedure NetBetweenScreens;
@@ -1013,7 +1148,13 @@ begin
     EndNetSession;
   if (CommandLineJoin <> '') and (RequestedScreenId = screenMainMenu) then
   begin
-    JoinFromCommandLine;
+    RequestJoin(CommandLineJoin, WideString(CommandLineName));
+    CommandLineJoin := '';
+  end;
+  // CHANGE: ENHANCEMENT - The main menu's join takes the same way as --join.
+  if (PendingJoinAddress <> '') and (RequestedScreenId = screenMainMenu) then
+  begin
+    JoinPending;
     if (RequestedScreenId = screenMainMenu) and (NetRole <> nrNone) then
       EndNetSession;
   end;

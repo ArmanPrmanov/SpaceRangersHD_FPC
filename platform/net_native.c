@@ -21,6 +21,7 @@ typedef SOCKET sr_socket;
 static int last_socket_error(void) { return WSAGetLastError(); }
 static int would_block(int e) { return e == WSAEWOULDBLOCK || e == WSAEINPROGRESS; }
 #else
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -268,6 +269,65 @@ int sr_net_wait_many(const int64_t *handles, int count, int timeout_ms) {
 void sr_net_close(int64_t handle) {
   if (handle >= 0)
     sr_close_socket((sr_socket)handle);
+}
+
+static void append_address(char *out, int capacity, const struct in_addr *address) {
+  char text[INET_ADDRSTRLEN];
+  if (inet_ntop(AF_INET, (void *)address, text, sizeof text) == NULL)
+    return;
+  // Loopback is no use to another machine; a duplicate says nothing new.
+  if (strncmp(text, "127.", 4) == 0 || strstr(out, text) != NULL)
+    return;
+  size_t used = strlen(out);
+  if (used + strlen(text) + 2 >= (size_t)capacity)
+    return;
+  if (used > 0)
+    strcat(out, ",");
+  strcat(out, text);
+}
+
+// The machine's IPv4 addresses that other machines may reach it by, comma-separated, for the
+// host's menu (ROADMAP.md, Phase 5). The host name's addresses, else the address of the
+// interface a route to the internet would take (a UDP connect sends nothing). Returns their
+// number; out may be empty.
+int sr_net_local_addresses(char *out, int capacity) {
+  if (capacity <= 0)
+    return 0;
+  out[0] = 0;
+  char name[256];
+  if (gethostname(name, sizeof name) == 0) {
+    name[sizeof name - 1] = 0;
+    struct addrinfo hints, *found = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(name, NULL, &hints, &found) == 0) {
+      for (struct addrinfo *entry = found; entry != NULL; entry = entry->ai_next)
+        append_address(out, capacity, &((struct sockaddr_in *)entry->ai_addr)->sin_addr);
+      freeaddrinfo(found);
+    }
+  }
+  if (out[0] == 0) {
+    sr_socket s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s != SR_INVALID) {
+      struct sockaddr_in address;
+      memset(&address, 0, sizeof address);
+      address.sin_family = AF_INET;
+      address.sin_port = htons(53);
+      address.sin_addr.s_addr = htonl(0x08080808);
+      if (connect(s, (struct sockaddr *)&address, sizeof address) == 0) {
+        socklen_t size = sizeof address;
+        if (getsockname(s, (struct sockaddr *)&address, &size) == 0)
+          append_address(out, capacity, &address.sin_addr);
+      }
+      sr_close_socket(s);
+    }
+  }
+  int count = out[0] == 0 ? 0 : 1;
+  for (const char *p = out; *p != 0; p++)
+    if (*p == ',')
+      count++;
+  return count;
 }
 
 // XXH64 (xxHash, 64-bit) of one block with a seed. The data hash of a game install chains

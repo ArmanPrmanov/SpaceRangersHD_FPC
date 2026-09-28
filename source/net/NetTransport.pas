@@ -71,6 +71,9 @@ var
 
 procedure InitializeNetwork;
 function NetworkErrorText: AnsiString;
+// The machine's IPv4 addresses other machines may reach it by, comma-separated; '' when none
+// is known.
+function LocalAddressText: AnsiString;
 implementation
 uses
   SysUtils,
@@ -91,6 +94,15 @@ end;
 function NetworkErrorText: AnsiString;
 begin
   Result := AnsiString(sr_net_error);
+end;
+
+function LocalAddressText: AnsiString;
+var
+  Buffer: array[0..511] of AnsiChar;
+begin
+  InitializeNetwork;
+  sr_net_local_addresses(@Buffer[0], Length(Buffer));
+  Result := AnsiString(PAnsiChar(@Buffer[0]));
 end;
 
 constructor TNetConnection.Create(Handle: Int64);

@@ -74,6 +74,7 @@ type
     ): Boolean;
     procedure HandleMessage(Peer: THostPeer; Kind: TNetMessageKind; Payload: TBufEC);
     procedure Refuse(Peer: THostPeer; const Reason: WideString);
+    procedure DisconnectHuman(Human: THuman; Peer: THostPeer);
     procedure ProcessLeaving;
     procedure ProcessJoins;
     procedure SendStatus(Force: Boolean);
@@ -116,6 +117,11 @@ type
     function AllAcked(Serial: Integer): Boolean;
     // Says Bye to every peer and waits up to TimeoutMs for the bytes to leave.
     procedure Shutdown(TimeoutMs: Integer);
+    // CHANGE: ENHANCEMENT - The host stops hosting (the in-game menu): every joined peer's human
+    // is disconnected as a leaver's is (docs/network.md, Disconnects), in Session.Humans order,
+    // and the peers' queued commands are dropped. At a quiet point on the UI thread, before
+    // Shutdown says Bye.
+    procedure DisconnectHumans;
     // On the turn thread: asks Human, whose talk fields are set, through its
     // client (docs/network.md, Remote dialogue). Sends TalkRequest, then reads only that
     // peer's inbox: each Command of the human runs at once through SubmitCommand, recorded as
@@ -489,12 +495,26 @@ end;
 // Disconnects the peers that left, in Session.Humans order: each joined one's human stops
 // holding the day and its ranger holds position (HoldPosition as that human: no order, no
 // automatic control).
+procedure TNetHost.DisconnectHuman(Human: THuman; Peer: THostPeer);
+var
+  Command: TPlayerCommand;
+begin
+  Peer.State := hpHello;
+  Human.Connected := False;
+  NetLog(Format('human %d (%s) disconnected', [Human.Id, UTF8Encode(Peer.Hello.Name)]));
+  if (Human.Player <> nil) and not Human.Player.InHyperspace and not Human.Finished then
+  begin
+    Command := NewCommand(ckHoldPosition);
+    Command.Actor := Cardinal(Human.Id);
+    SubmitCommand(Command);
+  end;
+end;
+
 procedure TNetHost.ProcessLeaving;
 var
   I: Integer;
   Human: THuman;
   Peer: THostPeer;
-  Command: TPlayerCommand;
 begin
   I := 0;
   while I < Session.Humans.Count do
@@ -504,15 +524,7 @@ begin
     Peer := PeerOfHuman(FPeers, Human.Id);
     if (Peer = nil) or not Peer.Leaving then
       Continue;
-    Peer.State := hpHello;
-    Human.Connected := False;
-    NetLog(Format('human %d (%s) disconnected', [Human.Id, UTF8Encode(Peer.Hello.Name)]));
-    if (Human.Player <> nil) and not Human.Player.InHyperspace and not Human.Finished then
-    begin
-      Command := NewCommand(ckHoldPosition);
-      Command.Actor := Cardinal(Human.Id);
-      SubmitCommand(Command);
-    end;
+    DisconnectHuman(Human, Peer);
   end;
   for I := FPeers.Count - 1 downto 0 do
   begin
@@ -1025,6 +1037,25 @@ begin
       Exit(False);
   end;
   Result := True;
+end;
+
+procedure TNetHost.DisconnectHumans;
+var
+  I: Integer;
+  Human: THuman;
+  Peer: THostPeer;
+begin
+  I := 0;
+  while I < Session.Humans.Count do
+  begin
+    Human := Session.Humans[I];
+    Inc(I);
+    Peer := PeerOfHuman(FPeers, Human.Id);
+    if Peer = nil then
+      Continue;
+    SetLength(Peer.Queue, 0);
+    DisconnectHuman(Human, Peer);
+  end;
 end;
 
 procedure TNetHost.Shutdown(TimeoutMs: Integer);

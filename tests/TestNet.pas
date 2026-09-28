@@ -13,6 +13,7 @@ uses
   NetDelta,
   NetProtocol,
   NetThread,
+  NetPlay,
   TestSupport;
 
 // A state-like buffer: repetitive records with varying fields.
@@ -415,12 +416,35 @@ begin
   end;
 end;
 
+// The menus' address parsing (NetPlay.ParseNetAddress) and the host's addresses.
+procedure RunAddressTests;
+var
+  Host, Addresses: AnsiString;
+  Port: Integer;
+begin
+  Check(ParseNetAddress('192.168.1.5:4000', Host, Port), 'HOST:PORT parses');
+  CheckText('192.168.1.5', WideString(Host), 'the host of HOST:PORT');
+  CheckInt(4000, Port, 'the port of HOST:PORT');
+  Check(ParseNetAddress('  example.org ', Host, Port), 'HOST alone parses');
+  CheckText('example.org', WideString(Host), 'the host is trimmed');
+  CheckInt(DefaultNetPort, Port, 'HOST alone takes the default port');
+  Check(not ParseNetAddress('', Host, Port), 'an empty address is refused');
+  Check(not ParseNetAddress(':4000', Host, Port), 'a port without a host is refused');
+  Check(not ParseNetAddress('host:', Host, Port), 'an empty port is refused');
+  Check(not ParseNetAddress('host:port', Host, Port), 'a port that is no number is refused');
+  Check(not ParseNetAddress('host:0', Host, Port), 'port 0 is refused for a join');
+  Check(not ParseNetAddress('host:70000', Host, Port), 'a port above 65535 is refused');
+  Addresses := LocalAddressText;
+  Check(Pos('127.', Addresses) = 0, 'the host''s addresses leave out loopback');
+end;
+
 procedure RunNetTests;
 begin
   RunDeltaTests;
   RunTransportTests;
   RunProtocolTests;
   RunThreadTests;
+  RunAddressTests;
 end;
 
 end.
