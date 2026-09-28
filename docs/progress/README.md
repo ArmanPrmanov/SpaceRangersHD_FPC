@@ -11,10 +11,11 @@ has got.
 
 ## Status
 
-- Phase: 0-5 done in code. Phase 5 (networking) still owes game runs: the
-  owner paused them; the list is in the Phase 5 entry's Close section.
-- Next: the owed `tools/test.py` run, then the hand checks (Phase 4 hot-seat,
-  Phase 5 UI, remote dialogue, menus).
+- Phase: 0-5 done. Phase 5 (networking) passes `tools/test.py` with and
+  without `--poison-frees` (3/3, goldens unchanged, networked checks with 2
+  and 8 humans, remote talks); see the Phase 5 entry's last section.
+- Next: the hand checks in the real game (Phase 4 hot-seat, Phase 5 UI,
+  remote dialogue, menus), first host and client on one machine, then LAN.
 - Open issues: chaotic mode is seeded from the clock (Phase 1 entry); a
   loaded game drifts from the live one (Phase 3 entry); no converted
   screen has been exercised in the UI yet; the Phase 5 known gaps.
