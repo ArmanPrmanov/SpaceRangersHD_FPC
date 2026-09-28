@@ -61,7 +61,9 @@ The macOS runtime uses `/usr/bin/atos` when FPC cannot resolve an address itself
 
 Saves/settings default to `~/Library/Application Support/SpaceRangersHD/`.
 Game options include `--user-dir=/path/to/profile`, `--language=english`,
-`--renderer=sdl`, and `--transitions=original`.
+`--renderer=sdl`, and `--transitions=original`. A debug build also takes
+`--poison-frees[=MB]`: freed memory is filled with `$DE` bytes and held back from reuse
+(128 MB by default), so a stale reference faults at once (docs/network.md, Applying state).
 
 To open a save in the galaxy observer:
 

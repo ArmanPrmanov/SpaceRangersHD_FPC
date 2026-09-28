@@ -296,8 +296,35 @@ to ships, planets and items. So a client applies a state only at a safe point:
 - **In hyperspace** the host runs the client's steps and does not wait for it;
   the jump screen applies each state that comes (`ClientTravelTick`) and opens
   again, until the ranger arrives.
-- A debug build started with `--poison-frees` fills freed memory with a pattern
-  and holds it back from reuse for a while, so a stale reference fails at once.
+- **Poisoned frees.** A debug build started with `--poison-frees` fills freed
+  memory with a pattern and holds it back from reuse for a while, so a stale
+  reference fails at once instead of following a new object at the same address
+  (as a script's reference to a freed item did, ef2e7da).
+  [PoisonFrees](../platform/PoisonFrees.pas) wraps the memory manager as the
+  first thing `ReadOptions` does: a freed block is filled with `$DE` bytes and
+  queued in a FIFO quarantine of 128 MB (`--poison-frees=MB` for another size)
+  before it is really freed; a block larger than a quarter of the quarantine is
+  poisoned and freed at once. A block that moves when it is resized is
+  poisoned too; one that shrinks by at most half stays and has its tail
+  poisoned. The wrapper has no header of its own, so blocks allocated before
+  it free like its own; one lock guards the quarantine, since the UI, turn and
+  network threads all free. Release builds compile it out and refuse the flag.
+  `python tools/test.py --poison-frees` passes it to every game run.
+  - **Recognising it.** A freed object's VMT reads `$DEDEDEDEDEDEDEDE`, which is
+    not a valid x64 address, so a virtual call, `is`, `as` or `Free` through a
+    stale reference, or a pointer or string field read from it, faults at once.
+    Windows reports a fault on such a non-canonical address at
+    `$FFFFFFFFFFFFFFFF`; the session log's backtrace is followed by a
+    `Poisoned frees:` line that says whether the address was poisoned (the
+    pattern plus an offset, or `$FFFFFFFFFFFFFFFF`). A value read from a freed
+    object is `$DEDEDEDE` (-555819298) as an Integer, `$DEDE` (57054) as a
+    Word, 222 as a Byte, about -1.2e148 as a Double: seen in a log, a hash or a
+    dump, it came from freed memory.
+  - A block freed twice while in the quarantine raises `EInvalidPointer` ("was
+    freed twice") at the second free. A write to a quarantined block is found
+    when the block leaves the quarantine; shutdown flushes it and logs
+    `Poisoned frees: ... N written after free (first at $ADDRESS, offset K)`,
+    also on stderr in a headless run when N is not 0.
 
 ## Waiting
 
