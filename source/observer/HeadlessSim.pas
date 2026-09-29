@@ -50,6 +50,17 @@ type
     // host asks it something, without answering.
     NetTalkDay: Integer;
     NetTalkLeave: Boolean;
+    // CHANGE: ENHANCEMENT - LAN-session checks (docs/network.md, Tests). The host's talk probe
+    // sends the day's films before it asks (NetTalkAfterFilm), so the talk comes while a
+    // client plays its film; a client plays each film of its star for NetFilmMs (0: none)
+    // and keeps a dialogue that comes meanwhile for the film's end. A client with
+    // NetCancelJoin cancels its join once the host has let it in, before the state is
+    // applied. The host stops hosting after NetStopAt days (0: never), as the in-game menu's
+    // Stop hosting does.
+    NetTalkAfterFilm: Boolean;
+    NetFilmMs: Integer;
+    NetCancelJoin: Boolean;
+    NetStopAt: Integer;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 // Shared with the networked runner (HeadlessNet).

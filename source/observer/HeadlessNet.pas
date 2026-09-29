@@ -9,6 +9,10 @@ unit HeadlessNet;
 // for its human, sends it, and waits for the film and the state. Both print one line per day
 // with the state hash, the sizes and the load time. A client answers the dialogues the host's
 // day asks its human with the talk screen's first answer.
+// CHANGE: ENHANCEMENT - The LAN-session checks (docs/network.md, Tests): a client joins with
+// the connect on its own thread and prints each phase of its join, can cancel it, plays each
+// film of its star for a while and keeps a dialogue that comes meanwhile for the film's end;
+// the host can send the films before its probe asks, and can stop hosting.
 interface
 uses
   HeadlessSim;
@@ -78,6 +82,11 @@ var
   ProbeLastTurn: Integer;
   ProbeDone: Boolean;
   ProbePrevious: TStarDayHook;
+  // CHANGE: ENHANCEMENT - --sim-net-talk-after-film: the films of the day so far go before the
+  // probe asks, so a client plays its film when the talk comes. The bytes they had, for the
+  // host's day line.
+  ProbeSendsFilms: Boolean;
+  ProbeFilmBytes: Integer;
 
 // StarDayHook of the probe, on the turn thread (InstallNetTalkProbe).
 procedure NetTalkProbe(Star, Film: TObject; Recorded: Boolean);
@@ -121,6 +130,9 @@ begin
     end;
     if Ship = nil then
       Continue;
+    // The films go from the turn thread; the headless host does not pump while the job runs.
+    if ProbeSendsFilms and not Asked and (ActiveHost <> nil) then
+      Inc(ProbeFilmBytes, ActiveHost.SendFilms);
     Response :=
         Ship.ShowPlayerDialogue(
             Human.Player,
@@ -167,7 +179,7 @@ var
   Day: Integer;
   Plan: AnsiString;
   Job: TNetStateJob;
-  FilmBytes, StateBytes: Integer;
+  FilmBytes, StateBytes, Away: Integer;
 begin
   Result := 0;
   LoadSave(Options.SavePath, Options.Seed);
@@ -177,6 +189,7 @@ begin
     Host := StartHosting(Options.NetHostPort, 'Host');
     if Options.NetTalkDay > 0 then
       InstallNetTalkProbe(Options.NetTalkDay);
+    ProbeSendsFilms := Options.NetTalkAfterFilm;
     Emit(Format('net host port=%d clients=%d', [Host.Thread.ListenPort, Options.NetClients]));
     // Every client first, then the joins by name, so that the humans are the same each run.
     Host.HoldJoins := True;
@@ -221,10 +234,11 @@ begin
         Exit(1);
       end;
       Host.BeginDay;
+      ProbeFilmBytes := 0;
       StartPlayerStarTurnCalculation;
       WaitForTurnCalculation;
       RaisePendingWorkerError;
-      FilmBytes := Host.SendFilms;
+      FilmBytes := ProbeFilmBytes + Host.SendFilms;
       if (LocalPlayer <> nil) and not LocalPlayer.InHyperspace then
       begin
         StartGalaxyTurnCalculation;
@@ -256,6 +270,35 @@ begin
       finally
         Job.Free;
       end;
+      // CHANGE: ENHANCEMENT - --sim-net-stop-at: once every client has the state, the host
+      // stops hosting as the in-game menu does: the clients' humans are disconnected, then Bye.
+      // The clients must notice it by themselves.
+      if (Options.NetStopAt > 0) and (Day >= Options.NetStopAt) then
+      begin
+        Deadline := GetTickCount64 + StallTimeoutMs;
+        while not Host.AllAcked(Host.LastSerial) do
+        begin
+          if GetTickCount64 > Deadline then
+          begin
+            Emit('net host failed: the clients did not take the state before the stop');
+            Exit(1);
+          end;
+          Host.Pump;
+          NetInboxEvent.WaitFor(5);
+        end;
+        Host.DisconnectHumans;
+        // Counted before StopNetwork, which counts every human connected again.
+        Away := AwayCount;
+        Emit(Format('net host stopped hosting day=%d tick=%d', [Galaxy.CurrentTurn, GetTickCount64]));
+        StopNetwork;
+        Emit(
+            Format(
+                'done net host stopped days=%d humans=%d away=%d day=%d',
+                [Day, Session.Humans.Count, Away, Galaxy.CurrentTurn]
+            )
+        );
+        Exit(0);
+      end;
     end;
     // The end: every client there has the last state, and as many as came at the start are
     // there (one that left may rejoin at the end).
@@ -279,20 +322,21 @@ begin
     );
   finally
     RemoveNetTalkProbe;
+    ProbeSendsFilms := False;
     StopNetwork;
     NetLogHook := nil;
   end;
 end;
 
 // Decodes each film the host sent, as the star map would before playing it; returns the
-// bytes and counts them.
-function TakeFilms(Client: TNetClient; out Count: Integer): Integer;
+// bytes and adds them to Count. OwnStar says whether one was of this client's star.
+function TakeFilms(Client: TNetClient; var Count: Integer; out OwnStar: Boolean): Integer;
 var
   Film: TNetClientFilm;
   Decoded: TEFilm;
 begin
   Result := 0;
-  Count := 0;
+  OwnStar := False;
   Decoded := TEFilm.Create;
   try
     repeat
@@ -303,6 +347,9 @@ begin
         Decoded.LoadFromBuffer(Film.Bytes);
         Inc(Result, Film.Bytes.DataSize);
         Inc(Count);
+        if (LocalHuman <> nil) and (LocalHuman.PlayerStar <> nil)
+            and (Film.Header.StarId = Integer(LocalHuman.PlayerStar.Id)) then
+          OwnStar := True;
       finally
         Film.Free;
       end;
@@ -316,14 +363,17 @@ end;
 // scripted talk is to agree (AcceptScriptedTalk), predicted here and sent to the host; then
 // TalkDone. A talk about a ship this state does not have is declined, as the screens decline
 // it; the screens also need the star map of the ship's star, which a headless client does not
-// have. With Leave the client leaves instead; returns whether it did.
-function AnswerTalk(Client: TNetClient; Leave: Boolean): Boolean;
+// have. With Leave the client leaves instead; returns whether it did. Held says that the talk
+// waited for the end of the client's film.
+function AnswerTalk(Client: TNetClient; Leave, Held: Boolean): Boolean;
 var
   Request: TTalkRequestMessage;
   Ship: TShip;
   Answered: Boolean;
+  Age: Integer;
 begin
   Result := False;
+  Age := Client.TalkRequestAge;
   if not Client.TakeTalkRequest(Request) then
     Exit;
   if Leave then
@@ -359,20 +409,27 @@ begin
   end;
   Emit(
       Format(
-          'net client talk ship=%d kind=%d answered=%d response=%d human=%d',
-          [Request.ShipId, Request.TalkType, Ord(Answered), LocalHuman.TalkResponse, Client.HumanId]
+          'net client talk ship=%d kind=%d answered=%d response=%d human=%d held=%d wait=%d',
+          [Request.ShipId, Request.TalkType, Ord(Answered), LocalHuman.TalkResponse, Client.HumanId,
+              Ord(Held), Age]
       )
   );
 end;
+
+const
+  JoinPhaseNames: array[TNetJoinPhase] of AnsiString = ('connecting', 'joining', 'receiving', 'joined');
 
 function RunNetClient(const Options: TSimulationOptions): Integer;
 var
   Client: TNetClient;
   Address: AnsiString;
   Port, Colon, Days, Day, Mismatches, FilmBytes, FilmCount, LastPlayedDay, Index: Integer;
-  Deadline: QWord;
+  Have, Size: Integer;
+  Deadline, FilmUntil: QWord;
   Report: TNetApplyReport;
   Plan: AnsiString;
+  Phase, ShownPhase: TNetJoinPhase;
+  OwnFilm, FilmPlaying, TalkHeld: Boolean;
 begin
   Result := 0;
   Colon := LastDelimiter(':', Options.NetJoin);
@@ -382,22 +439,56 @@ begin
   Days := -1;
   Mismatches := 0;
   LastPlayedDay := -1;
+  FilmBytes := 0;
+  FilmCount := 0;
+  FilmUntil := 0;
+  TalkHeld := False;
   try
-    Client := JoinGame(Address, Port, WideString(Options.NetName));
-    if not Client.Connected then
-    begin
-      Emit('net client failed: ' + Client.Error);
-      Exit(1);
-    end;
+    // The connect runs on its own thread, as the game's join does; each phase is printed.
+    Client := JoinGame(Address, Port, WideString(Options.NetName), False);
+    ShownPhase := jpJoined;
     CurrentScreenId := screenPlanet;
     RequestedScreenId := screenNone;
     Deadline := GetTickCount64 + StallTimeoutMs;
     while not Client.HostLeft do
     begin
       Client.Pump;
-      if Client.HasTalkRequest and AnswerTalk(Client, Options.NetTalkLeave) then
-        Break;
-      if not Client.HasState then
+      Phase := Client.JoinPhase;
+      if (Days < 0) and (Phase <> ShownPhase) then
+      begin
+        Client.ReceiveProgress(Have, Size);
+        Emit(Format('net client join phase=%s have=%d size=%d', [JoinPhaseNames[Phase], Have, Size]));
+        ShownPhase := Phase;
+      end;
+      // A join cancelled once the host has let the client in, before the state is applied.
+      if Options.NetCancelJoin and (Phase >= jpReceiving) then
+      begin
+        Client.ReceiveProgress(Have, Size);
+        Emit(
+            Format(
+                'net client join cancelled phase=%s have=%d size=%d human=%d',
+                [JoinPhaseNames[Phase], Have, Size, Client.HumanId]
+            )
+        );
+        StopNetwork;
+        Emit('done net client cancelled');
+        Exit(0);
+      end;
+      FilmBytes := FilmBytes + TakeFilms(Client, FilmCount, OwnFilm);
+      if OwnFilm and (Options.NetFilmMs > 0) then
+        FilmUntil := GetTickCount64 + QWord(Options.NetFilmMs);
+      // A dialogue that comes while the client plays its film waits for the film's end, as
+      // the star map's wait at the film's end answers it (NetPlay).
+      FilmPlaying := GetTickCount64 < FilmUntil;
+      if Client.HasTalkRequest and Client.MayHoldTalk(FilmPlaying) then
+        TalkHeld := True
+      else if Client.HasTalkRequest then
+      begin
+        if AnswerTalk(Client, Options.NetTalkLeave, TalkHeld) then
+          Break;
+        TalkHeld := False;
+      end;
+      if not Client.HasState or FilmPlaying then
       begin
         if GetTickCount64 > Deadline then
         begin
@@ -407,7 +498,6 @@ begin
         NetInboxEvent.WaitFor(5);
         Continue;
       end;
-      FilmBytes := TakeFilms(Client, FilmCount);
       Report := Client.ApplyState;
       Inc(Days);
       if Report.Hash <> Report.HostHash then
@@ -420,6 +510,8 @@ begin
                   FilmBytes, FilmCount, Report.LoadMs]
           )
       );
+      FilmBytes := 0;
+      FilmCount := 0;
       if (Options.NetLeaveAt > 0) and (Days >= Options.NetLeaveAt) then
       begin
         Client.Leave(5000);
@@ -438,7 +530,14 @@ begin
       Deadline := GetTickCount64 + StallTimeoutMs;
     end;
     if Client.Refused or (Client.Error <> '') then
+    begin
+      Emit('net client failed: ' + Client.Error);
       Result := 1;
+    end
+    // CHANGE: ENHANCEMENT - The host stopped hosting or quit: noticed by the pump, not by a
+    // wait for something that never comes.
+    else if Client.HostSaidBye then
+      Emit(Format('net client host left bye=1 tick=%d', [GetTickCount64]));
     if Mismatches > 0 then
       Result := 1;
     if Galaxy <> nil then
