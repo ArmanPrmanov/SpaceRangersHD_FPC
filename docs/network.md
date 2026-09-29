@@ -66,7 +66,13 @@ once per message-loop iteration.
 - **The turn thread**, on the host, reads one peer's inbox only while it waits
   for that peer's human to answer a dialogue (Remote dialogue). The pump leaves
   that inbox alone meanwhile (`THostPeer.InTalk`, under a lock), and handles
-  what the turn thread left for it (`THostPeer.Deferred`) first afterwards.
+  what the turn thread left for it (`THostPeer.Deferred`) first afterwards. It
+  also sends `Status` before the talk and after it (the pump sends none while a
+  job runs, so the two never overlap).
+- **A client's connect** runs on a thread of its own (`TNetConnectAttempt`), so
+  that the join can show its progress and be cancelled; the connection then
+  goes to the network thread (`TNetThread.AddConnection`). A cancelled connect
+  closes its connection when it comes.
 - Sending is thread-safe: it appends to the peer's outbox under the lock.
 
 ## Messages
@@ -88,8 +94,9 @@ protocol; never renumber one, add new ones at the end and bump
 
 The host numbers its states from 1. A day number cannot name a base: a join
 between two days sends a state of the same day as the one before it.
-`ProtocolVersion` is 2 (2: `TalkRequest` has its payload).
-| `Status` | host → client | per human: id, name, connected, holds the day; whether a day is running |
+`ProtocolVersion` is 3 (2: `TalkRequest` has its payload; 3: `Status` names
+the human whose answer to a dialogue the day waits for).
+| `Status` | host → client | per human: id, name, connected, holds the day; whether a day is running; the human whose answer to a dialogue the day waits for (0: none) |
 | `TalkRequest` | host → client | human id, ship id, planet id (0: none), scripted, talk kind, amount, text: the human's talk fields (Remote dialogue) |
 | `TalkDone` | client → host | nothing: the client's answer is complete, or it cannot show the talk |
 | `Chat` | both | sender human id, text; the host relays it to every client |
@@ -188,6 +195,15 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   and ends the next turn by itself: `EndTurn` only, as the automatic continue
   sends no orders and no `BeginSpaceDay`. So the host waits for a travelling
   client every day, briefly.
+- **Why the missing flags are harmless.** A state carries neither
+  `ContinueUntilArrival` nor `EndedTurn`. On the client nothing reads them for
+  another human, and its own human is a fresh `THuman` after each state
+  (`ResetHumans`), so both are false: it holds the day, as it must before its
+  automatic end turn, and the star map's break (`StopContinuing`) finds nothing
+  to stop. The client's star map never ends a turn with `ContinueUntilArrival`
+  (`UpdateTurnCalculation` returns at once on a client), and the host's copy of
+  the client's human never gets the flag either, so the two agree: the host
+  waits for the client's own `EndTurn` each day, and its `Status` says so.
 - Hot-seat passes nothing in a session (`TurnPassesToAnother` is false): the
   other humans play on their own machines.
 - A disconnected human does not hold the day (`THuman.Connected`, see
@@ -332,7 +348,13 @@ A screen that waits for the day shows who it waits for (from `Status`: the
 humans who hold the day, and who is disconnected), stays modal and does not
 change the game. On the host it waits for the barrier; on a client it waits
 for the film or the state. A remote dialogue can open above a waiting client
-screen.
+screen. While the host's day waits for a remote human's answer to a dialogue,
+every other client's wait says so ("Waiting for Guest to answer a hail",
+`Status.TalkHumanId`), and so does the host: its waits for a job (the star
+map's `NetWaitForEvents`, `aCalc.TurnWaitPumpHook`) open a box
+(`NetPlay.HostTalkWait`) until the talk ends, only over a screen that runs
+(`RunningScreenLoop`: the loop on top of `MessageLoopStack` is the innermost
+screen's).
 
 The wait is a message box without buttons (`NetPlay.TNetWaitBoxGI`) over the
 innermost screen; it pumps every 20 ms, closes by itself, and opens again with
@@ -340,13 +362,26 @@ the new text when the text changes. The texts come from the language data with
 an English fallback, as `Multiplayer.Turn` does: `Multiplayer.Waiting`
 ("Waiting for <Players>."), `Multiplayer.Away` ("Away: <Players>."),
 `Multiplayer.DayRuns`, `Multiplayer.WaitingHost`, `Multiplayer.WaitingPlayers`,
-and for the main menu `Multiplayer.Refused`, `Multiplayer.Lost`,
-`Multiplayer.HostLeft`, `Multiplayer.NoState`. None is in the game's language
-data yet.
+`Multiplayer.WaitingTalk` ("Waiting for <Players> to answer a hail."), the
+join's `Multiplayer.JoinConnecting`, `JoinWaiting`, `JoinReceivingStart`,
+`JoinReceiving`, and for the main menu `Multiplayer.Refused`,
+`Multiplayer.Lost`, `Multiplayer.HostLeft`, `Multiplayer.NoState`. None is in
+the game's language data. The only way to add texts to it is a mod: a selected
+mod's `Mods\<mod>\CFG\<language>\Lang.dat` is merged into it
+(`GR_Main.LoadDatConfigAndModOverrides`), in the game's binary `.dat` format. The port
+ships no data files of its own (the build places the executable and its
+libraries only), and a mod the players must select is not a fit for a few
+texts, so the English fallbacks stay.
 
 A client that loses its host, or is refused, shows why on the main menu and
 the session ends there. A client that loses its host while it plays its turn
-finds out at its end turn.
+notices it in the per-frame pump (`NetFrame`) and goes to the main menu, which
+says why, at the next safe point: when a screen that starts a day is the one
+running (the star map, the planet, uninhabited planet, station, hangar or
+jump screen, with no box or dialogue above it, `LostHostLeaveScreens`), not
+while the star map plays a film (its end leaves anyway), and never from a shop
+or the ship screen, which move goods when they close. It does not offer to play
+on offline: the client's copy is a prediction the host no longer backs.
 
 ## Remote dialogue
 
@@ -380,10 +415,21 @@ waits while the UI thread shows the talk screen, as before. For a remote one:
    closes, the star map's talk screen opens on the state before the day for the
    ship the request names (`TfStarMap.RunTalkDialogs`, as for a local talk), its
    answers are commands, predicted and sent as usual, then `TalkDone`, and the
-   wait opens again. When it cannot show the talk (the ship is not in its state,
-   its ranger is not in normal space in that star, the star map is not the open
-   screen, or no wait is open) it sends `TalkDone` at once. The headless client
-   answers a scripted talk with its first answer (`AcceptScriptedTalk`).
+   wait opens again. A request that comes while the client plays the host's
+   film on the star map (`ClientFilmPlaying`) waits for the film's end, where
+   the wait for the state answers it; it waits `ClientTalkHoldMs` (60 s) at most
+   and is declined after that, so the host's day is not held for long
+   (`TNetClient.MayHoldTalk`). The film is not paused: it shows the day before,
+   and the talk screen needs the star map in order mode. When it cannot show the
+   talk (the ship is not in its state, its ranger is not in normal space in that
+   star, the star map is not the open screen, or no wait is open and no film
+   plays) it sends `TalkDone` at once. The headless client answers a scripted
+   talk with its first answer (`AcceptScriptedTalk`).
+   In the present flow a talk reaches a client before the film of that day (the
+   talk is in the player-star job, the films go after it), and the next day
+   waits for the client's end turn, so a talk during a film needs a client that
+   does not hold the day; the hold is for that case, and the tests make it
+   happen (Tests).
 4. **The end.** When the peer leaves (`Bye`), its connection closes, the host
    stops, or no `TalkDone` comes within 10 minutes (`RemoteTalkTimeoutMs`), the
    talk ends; the host logs how (`talk with human N ended: ...`).
@@ -435,7 +481,14 @@ screens, not a dialogue a client could answer mid-day.
   whole state (60 s at most), applies it and opens the human's screen. A refusal,
   a failed connection or no state go to the main menu with a message. `--join`
   takes no `--host` or `--load-save`. An address without a port takes
-  `NetPlay.DefaultNetPort` (47300), which the menus also propose.
+  `NetPlay.DefaultNetPort` (47300), which the menus also propose. The join
+  itself runs over the main menu (`NetPlay.RunPendingJoin`), for `--join` as
+  for the menu's entry: a box shows its progress (connecting to the address;
+  connected, waiting for the host to let the client in; receiving the game,
+  kilobytes received of the state's size) and has a Cancel (also Escape), which
+  ends the session (`Bye`) and stays on the main menu. The box gives up after
+  60 s without progress (no new phase and no new bytes). Once the whole state
+  has come the main menu closes and the state is applied between screens.
 - **The main menu joins** (`NetMenus`): a Network game entry in the row of
   Mods (a copy of the Mods button, which has the only fitting picture, and of
   its label; the J key too) opens a dialog for the address (`HOST` or
@@ -443,8 +496,8 @@ screens, not a dialogue a client could answer mid-day.
   settings (`NetJoinAddress`, `NetJoinName` in `cfg.txt`); the first name
   proposed is the new-game screen's. Join closes the menu and the join runs
   between screens exactly as `--join`'s does (`NetPlay.RequestJoin`), so its
-  failures come back to the main menu as a message box. The wait for the state
-  shows nothing and cannot be cancelled (up to 60 s, as on the command line).
+  failures come back to the main menu as a message box, and the join shows its
+  progress and can be cancelled as `--join`'s.
 - **The in-game menu hosts** (`NetMenus`): a button under the round menu (the
   new-game screen's caption button; the N key too) asks for the port (the last
   one, `NetHostPort`, else 47300; 0 picks one) and hosts the running game as
@@ -472,7 +525,8 @@ screens, not a dialogue a client could answer mid-day.
   `Multiplayer.*` keys with English fallbacks (`MultiplayerText`).
 - Headless, for tests: `--sim-net-host=PORT --sim-net-clients=N` with
   `--sim-save` and `--sim-turns=DAYS`, and `--sim-net-join=HOST:PORT
-  --sim-net-name=NAME` with `--sim-net-leave-at=DAY`; see Tests.
+  --sim-net-name=NAME` with `--sim-net-leave-at=DAY`; see Tests for the
+  others.
 
 ## Tests
 
@@ -487,8 +541,18 @@ remote humans of one star something (`--sim-net-talk=2`): each must answer on
 its client, the host must see the answer, and the replay of the host's log
 (with the same flag) must ask and answer the same; a client that leaves in the
 middle of such a talk (`--sim-net-talk-leave`) must not hang the host, and gets
-its human back when it rejoins. The runs print the sizes of whole
-states, deltas and films, and the load time, per day.
+its human back when it rejoins. In the two runs that are compared, the host
+sends the day's films before its probe asks (`--sim-net-talk-after-film`) and
+each client plays each film of its star for 500 ms (`--sim-net-film-ms=500`),
+so every talk comes while its client plays its film: it must wait for the
+film's end (`held=1`), and every client's `Status` must name the human asked.
+With one client, a join as the leaver's name that cancels itself once let in
+(`--sim-net-cancel-join`) comes before the rejoin: the host takes it as a leave,
+and the rejoin still gets the human back; and a fifth run has the host stop
+hosting after 3 days (`--sim-net-stop-at=3`), which must disconnect the client's
+human and which the client must notice by itself within 5 s (both print
+`GetTickCount64`, which is system-wide on Windows). The runs print the sizes of
+whole states, deltas and films, and the load time, per day.
 
 The headless runner (`HeadlessNet`):
 
@@ -499,12 +563,23 @@ The headless runner (`HeadlessNet`):
   queues, runs the player-star job, sends the films, runs the galaxy job, and
   sends the state. It ends when N clients are joined and have acknowledged the
   last state (a client that left may join again at the end).
-- **Client.** Joins, and after each state it applies plays the same turn for its
-  own human when that human holds the day (once a day), then ends it. It
-  decodes each film (`TEFilm.LoadFromBuffer`) and counts it. It answers each
-  `TalkRequest` with the talk screen's first answer to a scripted talk
-  (`AcceptScriptedTalk`) and prints `net client talk ship= kind= answered=
-  response= human=`.
+- **Client.** Joins with the connect on its own thread, as the game does, and
+  prints each phase (`net client join phase= have= size=`); with
+  `--sim-net-cancel-join` it cancels once let in (`net client join cancelled`).
+  After each state it applies it plays the same turn for its own human when
+  that human holds the day (once a day), then ends it. It decodes each film
+  (`TEFilm.LoadFromBuffer`) and counts it; with `--sim-net-film-ms=MS` it plays
+  a film of its star for MS ms, applies no state meanwhile, and keeps a talk
+  that comes then for the film's end, as the star map does (`MayHoldTalk`). It
+  answers each `TalkRequest` with the talk screen's first answer to a scripted
+  talk (`AcceptScriptedTalk`) and prints `net client talk ship= kind= answered=
+  response= human= held= wait=`. A `Status` that names a talk prints `net the
+  day waits for human N to answer a hail`; a host that says `Bye` prints `net
+  client host left bye=1 tick=`.
+- **Stopping.** `--sim-net-stop-at=DAY` on the host: after DAY days, once every
+  client has the state, it stops hosting as the in-game menu does
+  (`DisconnectHumans`, then `Bye`) and prints `net host stopped hosting day=
+  tick=`.
 - **The talk probe** (`--sim-net-talk=DAY`, `HeadlessNet.InstallNetTalkProbe`):
   from the DAY-th day the player-star job runs, right after the day of the first
   filmed star that holds remote humans who can be asked, the first ship of that
@@ -538,9 +613,10 @@ star's day is about as large as a delta.
 ## Not done yet
 
 - The `Multiplayer.*` texts in the language data (the menus and the waits show
-  their English fallbacks).
-- The join from the main menu shows no wait and cannot be cancelled; network
-  play has no picture of its own in the main menu (it wears the Mods button's).
+  their English fallbacks; only a selected mod's `Lang.dat` could add them,
+  Waiting).
+- Network play has no picture of its own in the main menu (it wears the Mods
+  button's).
 - A join takes the host's prepared day as it is: a human who joins in a star
   the preparation job did not see runs that star's first day without its
   preparation (no news, no planet day).
@@ -549,10 +625,11 @@ star's day is about as large as a delta.
   `CancelInvalidTravelOrder` run once a day more than in single player; they go
   to the host as commands.
 - Remote dialogue: a script's dialogue stays with the local human; the NPC's
-  line is in the host's language (the host builds the text); the other
-  clients' waits say the day runs, not whose talk it waits for; a talk a client
-  cannot show (it plays the film, or is on another screen) is declined, not
-  queued.
+  line is in the host's language (the host builds the text); a talk a client
+  cannot show (it is on another screen than the star map) is declined, not
+  queued; one held for a film's end is declined after 60 s.
+- A client that loses its host on a screen that does not start a day (a shop,
+  the ship, the galaxy map) finds out when it next opens one of those.
 - Chat is in the protocol (the host relays it); nothing shows it.
-- `ContinueUntilArrival` and `EndedTurn` are not in a state, so a client does
-  not know that its human continues until arrival; the host does.
+- `ContinueUntilArrival` and `EndedTurn` are not in a state; this is harmless
+  (The day).
