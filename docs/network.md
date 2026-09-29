@@ -94,13 +94,16 @@ protocol; never renumber one, add new ones at the end and bump
 
 The host numbers its states from 1. A day number cannot name a base: a join
 between two days sends a state of the same day as the one before it.
-`ProtocolVersion` is 3 (2: `TalkRequest` has its payload; 3: `Status` names
-the human whose answer to a dialogue the day waits for).
+`ProtocolVersion` is 4 (2: `TalkRequest` has its payload; 3: `Status` names
+the human whose answer to a dialogue the day waits for; 4: `NewHuman` and
+`Character`).
 | `Status` | host → client | per human: id, name, connected, holds the day; whether a day is running; the human whose answer to a dialogue the day waits for (0: none) |
 | `TalkRequest` | host → client | human id, ship id, planet id (0: none), scripted, talk kind, amount, text: the human's talk fields (Remote dialogue) |
 | `TalkDone` | client → host | nothing: the client's answer is complete, or it cannot show the talk |
 | `Chat` | both | sender human id, text; the host relays it to every client |
 | `Bye` | both | the sender leaves |
+| `NewHuman` | host → client | nothing: the name is new, so the client chooses its character |
+| `Character` | client → host | name, race, character preset, portrait, two starting skills, two starting items |
 
 ## Joining
 
@@ -113,9 +116,25 @@ the human whose answer to a dialogue the day waits for).
    under way. A join that arrives mid-day waits in the peer's inbox. Joins
    that wait together are taken in name order.
 4. **Rejoin.** When a disconnected human's ranger has the name the client
-   gives, the client takes that human back. Otherwise the host submits the
-   `JoinHuman` command (kind 44) as the host human, which adds a human landed
-   at a coalition planet (`FindJoinPlanet`). The command log records it.
+   gives, the client takes that human back. Otherwise it is a **first join**:
+   the host sends `NewHuman` (`TNetHost.AskCharacters`, at a quiet point even
+   while joins are held), and the join waits until the client's `Character`
+   comes (`JoinReady`). The client's join box closes and the new-game screen
+   opens (`NetPlay.NetCharacterScreen`, `TfGameSettings2`) without the
+   difficulty panel and the extended rules, which are the host's game's; the
+   name proposed is the join's. OK sends `Character` and the join goes on over
+   the main menu (the session stays on the way there, `JoinResumes`); Cancel
+   ends the join. The name in `Character` replaces Hello's, and is checked
+   again when the join is taken (another human's name is a rejoin or a
+   refusal). The host then submits the `JoinHuman` command (kind 44) as the
+   host human, which adds a human landed at a coalition planet
+   (`FindJoinPlanet`) of the chosen race if there is one, nearest the host's
+   ranger (a ranger's race is its home planet's), with the choices applied as
+   a new game applies them (`aHuman.JoinHuman`: portrait, the preset's careers,
+   skills, items, then the preset's ship). With no planet of that race the
+   portrait is the other race's first. The command carries the choices after
+   the preset, so an older log replays as before. The command log records it.
+   The headless test clients choose a fixed character.
 5. The host sends `Welcome` and a whole `State`. The client loads it, makes its
    human the local one and opens its screen (Applying state).
 
@@ -141,7 +160,9 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
 - A peer is **ready** when its queue holds an `EndTurn` (kind 43), or when its
   human does not hold the day anyway (`HumanHoldsDay` is false: continuing
   travel, in hyperspace, finished) or is disconnected. A queue without an
-  `EndTurn` is not applied; it waits for the day its `EndTurn` arrives. A
+  `EndTurn` is not applied; it waits for the day its `EndTurn` arrives,
+  except a `StopContinuing` (Continuing travel), and a continuing peer must have
+  applied the state before the last one. A
   command the peer sends while its human does not hold the day can race the
   host's apply, so it waits too rather than landing in whichever day it
   happened to reach.
@@ -187,25 +208,53 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
 - **Client.** A client never starts a day (`ThreadCalc.TurnJobsForbidden`). Its
   end turn sends `EndTurn` and its screen waits until the host's film or state
   comes (Films, Applying state).
-- **Client, continuing travel.** A client never sends `ContinueUntilArrival`:
-  the flag is not in a state, so the client could not tell when it stopped.
-  Instead, after the state of a day whose film it played, when the travel goes
-  on (`HumanTravelContinues` on the new state), the film showed no fight
-  (`PlayerCombatRecorded`) and the player did not break it, the star map opens
-  and ends the next turn by itself: `EndTurn` only, as the automatic continue
-  sends no orders and no `BeginSpaceDay`. So the host waits for a travelling
-  client every day, briefly.
-- **Why the missing flags are harmless.** A state carries neither
-  `ContinueUntilArrival` nor `EndedTurn`. On the client nothing reads them for
-  another human, and its own human is a fresh `THuman` after each state
-  (`ResetHumans`), so both are false: it holds the day, as it must before its
-  automatic end turn, and the star map's break (`StopContinuing`) finds nothing
-  to stop. The client's star map never ends a turn with `ContinueUntilArrival`
-  (`UpdateTurnCalculation` returns at once on a client), and the host's copy of
-  the client's human never gets the flag either, so the two agree: the host
-  waits for the client's own `EndTurn` each day, and its `Status` says so.
+- **Client, continuing travel.** See Continuing travel below: the client's end
+  turn asks the host to go on with its travel, and the host runs the next days
+  without waiting for it.
 - Hot-seat passes nothing in a session (`TurnPassesToAnother` is false): the
   other humans play on their own machines.
+
+## Continuing travel
+
+A travelling human's days follow one another without a click, as the star
+map's automatic continue does in single player. For a client that used to cost
+a round trip every day: the host waited for the client's end turn, which came
+only after the client had played the film and applied the state. Now the host
+does not wait for it:
+
+- **The end turn asks for it.** A client's end turn is `EndTurn` with
+  `ContinueUntilArrival` (not with the break key held, `BreakOnNextFilm`). The
+  host's copy of the human then ends every later day by itself
+  (`StartDayRound`) while `HumanTravelContinues` holds for it: a travel order
+  it has not reached, no fight, no interruption. So the peer is ready at once,
+  and the host starts the next day at its own film's end.
+- **The state says so.** A state (the checkpoint, version 2) carries each
+  human's `EndedTurn` and `ContinueUntilArrival`. After applying one, a client
+  whose human continues opens the star map, sends nothing (its human does not
+  hold the day) and waits for the next film (`OpenClientScreen`,
+  `DeferredNetContinue`). When the host has stopped the travel, the human holds
+  the day and the client is in order mode.
+- **The break.** A break in the client's film sends `StopContinuing` at once
+  (`TfStarMap.BreakTurnClicked`). The host applies a queued `StopContinuing` of
+  a human who continues, with what comes before it, at its next `ApplyQueues`,
+  without waiting for an `EndTurn`, so the next day holds for the client. When
+  it came after the host had begun that day, it holds the day after; the state
+  of the day it missed still says the human continues, and the client, whose
+  film was broken, sends `StopContinuing` again (harmless) and goes to order
+  mode. Its orders and end turn then wait in the host's queue for the day they
+  reach.
+- **Films ahead of the state.** The host may send the next day's film before
+  the client has applied the last state. Films are kept per day
+  (`TNetClient.TakeFilmOfDay`): the one to play after a state of day D is the
+  film of day D (films are recorded before the galaxy job counts the day);
+  films of earlier days go, and films of later days stay.
+- **One day ahead at most.** A peer whose human continues is ready only when
+  it has applied the state before the last one (`TNetHost.LagsBehind`), so the
+  host runs at most one day ahead of a client and the client's films are not
+  skipped. A client that falls behind anyway applies the newest state, drops
+  the films it missed and plays on from there. It keeps its last two states as
+  delta bases, since the host may take a state before the client's last
+  acknowledgement reaches it.
 - A disconnected human does not hold the day (`THuman.Connected`, see
   Disconnects).
 
@@ -252,7 +301,11 @@ map in order mode.
   screen does not prepare days (landed, docked, in hyperspace, headless),
   after the galaxy job. Only the star map prepares days (after its film), so on
   the star map the state waits for the preparation; on any other screen it goes
-  after the galaxy job (`NetPlay.QuietAfterDay`, from the frame hook). A day
+  after the galaxy job (`NetPlay.QuietAfterDay`, from the frame hook). A star
+  map whose travel goes on (`NetDayDeferred`) prepares no day, so its state goes
+  as soon as the galaxy job has run, while the film plays: the next day then
+  starts at the film's end without taking it, and the clients have it by the
+  end of theirs. A day
   taken off from the hangar or a station is sent there, before the star map
   prepares the next one. The next end turn sends a state that has not gone yet
   before it waits for the peers.
@@ -263,7 +316,12 @@ map in order mode.
   same base get the same bytes; the host compresses once per base. The
   compression runs on the network thread.
 - **Hash.** `State` carries the host's `GalaxyStateHash`, taken with the
-  host's human local. The client hashes right after `ReadGameCheckpoint`, while
+  host's human local. It is a second serialisation on each side every day, so
+  only debug builds and the headless tests take it (`NetProtocol.StateHashes`);
+  otherwise it is 0 and the client does not check it. `--net-dump=DIR` writes
+  the hashed bytes of each state on both sides (`host-state-N.bin`,
+  `client-state-N.bin`) with the offset of each object in them (`.index`), to
+  find where a desync starts. The client hashes right after `ReadGameCheckpoint`, while
   the host's human is still the local one, and only then makes its own human
   local; the hash starts with the local human, so hashing after the switch
   could never match. A difference is logged as a desync. It checks that the
