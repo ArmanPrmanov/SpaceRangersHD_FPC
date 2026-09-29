@@ -7,8 +7,8 @@ unit NetMenus;
 
 // CHANGE: ENHANCEMENT - The menus of networked play (ROADMAP.md, Phase 5; docs/network.md,
 // Hosting and joining). The main menu joins a game: a Network game entry beside Mods opens a
-// dialog for the address and the name, and the join runs between screens as --join's does
-// (NetPlay.RequestJoin). The in-game menu hosts the running game: a button under the menu
+// dialog for the address and the name, and the join runs over the menu as --join's does
+// (NetPlay.RunPendingJoin). The in-game menu hosts the running game: a button under the menu
 // asks for the port and hosts as --host does (NetPlay.HostRunningGame), shows the host's state
 // and stops hosting. The last address, name and port are kept in the user settings. The
 // dialogs are built in code with the message box's window, fonts and buttons; they change no
@@ -21,7 +21,8 @@ uses
 // The main menu (InitializeLayout): the Network game entry, a copy of the Mods button and its
 // label in the next place of that row.
 procedure AddMainMenuJoin(Screen: TMessageLoopGI);
-// The join dialog over the main menu; a join closes the menu (the J key and the entry).
+// The join dialog over the main menu, then the join over it; a join that succeeds closes the
+// menu (the J key and the entry).
 procedure ShowJoinDialog(Screen: TMessageLoopGI);
 // The in-game menu (InitializeLayout): the host button and the state under the menu.
 procedure AddGameMenuHost(Screen: TMessageLoopGI);
@@ -382,9 +383,9 @@ begin
   SaveUserSetting('NetJoinAddress', Fields.Values[0]);
   SaveUserSetting('NetJoinName', Fields.Values[1]);
   RequestJoin(UTF8Encode(Fields.Values[0]), Fields.Values[1]);
-  // The join runs between screens and opens the human's screen, or this menu again with why.
-  RequestedScreenId := screenMainMenu;
-  Screen.RequestClose(1);
+  // CHANGE: ENHANCEMENT - The join runs over this menu with its progress and a Cancel; once the
+  // state has come the menu closes and the human's screen opens.
+  RunPendingJoin(Screen);
 end;
 
 procedure AddMainMenuJoin(Screen: TMessageLoopGI);

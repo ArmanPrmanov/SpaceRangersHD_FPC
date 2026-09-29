@@ -68,10 +68,13 @@ function NetWaitForEvents(Count: Cardinal; Handles: Pointer): Cardinal;
 function MultiplayerText(const Key, English: WideString): WideString;
 // Splits HOST or HOST:PORT; a missing port is DefaultNetPort. False when it is malformed.
 function ParseNetAddress(const Text: AnsiString; out Host: AnsiString; out Port: Integer): Boolean;
-// Joins Address (HOST or HOST:PORT) as Name between screens, as --join does: the caller closes
-// the main menu with screenMainMenu requested. A failure opens the main menu again with a
-// message (TakeNetNotice).
+// Asks to join Address (HOST or HOST:PORT) as Name, as --join does; RunPendingJoin joins.
 procedure RequestJoin(const Address: AnsiString; const Name: WideString);
+// CHANGE: ENHANCEMENT - The join RequestJoin asked for, over Screen (the main menu): a box shows
+// its progress (connecting, waiting for the host, the bytes of the state received) with a
+// Cancel that stays on Screen. When the state has come, Screen closes and the state is applied
+// between screens; a failure says why over Screen.
+procedure RunPendingJoin(Screen: TMessageLoopGI);
 // Why the running game cannot be hosted from the in-game menu now; '' when it can.
 function HostingRefusal: WideString;
 // Hosts the running game on Port (0 picks one), as --host does; returns the port it listens on.
@@ -123,8 +126,20 @@ uses
 const
   // How often a wait in a session looks at the network.
   NetWaitMs = 10;
-  // How long a join from the command line waits for the host's state.
+  // How long a join waits without progress (a phase, or bytes of the state) before it gives up.
   JoinTimeoutMs = 60000;
+  // CHANGE: ENHANCEMENT - The join's box shows new progress at most this often.
+  JoinRetextMs = 500;
+  // The screens a client that lost its host leaves for the main menu from: those that start a
+  // day, which already leave that way (LeaveForMainMenu). Not a shop, the ship or another
+  // screen that moves goods on closing.
+  LostHostLeaveScreens = [
+      screenStarMap,
+      screenPlanet,
+      screenPlanetNO,
+      screenRuinsTalk,
+      screenHangar,
+      screenJump];
   // The wait box closes with this when its text has changed, and opens again with the new one.
   WaitRetext = 3;
   // The screens during which the host does not take joins, leaves or commands: no game, or one
@@ -144,12 +159,16 @@ const
       screenLoadArcade];
 
 type
-  TNetWaitKind = (nwHostPeers, nwClientDay, nwClientState);
+  // CHANGE: ENHANCEMENT - nwHostTalk: the host's day waits for a remote human's answer to a
+  // dialogue; nwJoin: a join waits for the host's state.
+  TNetWaitKind = (nwHostPeers, nwClientDay, nwClientState, nwHostTalk, nwJoin);
 
-  // A message box without buttons that closes by itself once what it waits for has come.
+  // A message box without buttons (a join's has Cancel) that closes by itself once what it
+  // waits for has come.
   TNetWaitBoxGI = class(TMessageBoxGI)
     Kind: TNetWaitKind;
     PollTimer: PCallbackTimerGI;
+    OpenedAt: QWord;
     procedure OnOpen; override;
     procedure OnClose; override;
     procedure Poll(Timer: PCallbackTimerGI; UserData: PtrInt);
@@ -171,8 +190,22 @@ var
   Notice: WideString;
   InPump: Boolean;
   // CHANGE: ENHANCEMENT - A client's wait for the host's day is open (WaitModal): a dialogue
-  // the host asks can be shown there. Outside one, the client declines it at once.
+  // the host asks can be shown there. Outside one, the client declines it at once, unless it
+  // plays its film (ClientFilmPlaying): then the dialogue waits for the film's end, where the
+  // wait for the state answers it.
   ClientTalkWaits: Integer;
+  // CHANGE: ENHANCEMENT - The star map plays the host's film (TakeClientFilm .. ClientFilmEnded).
+  ClientFilmPlaying: Boolean;
+  // A client has applied its first state: from then on, losing the host sends it to the main
+  // menu at the next safe screen (NetFrame).
+  ClientInGame: Boolean;
+  HostLossLogged: Boolean;
+  // The host's box for a remote dialogue is open (HostTalkWait).
+  HostTalkBoxOpen: Boolean;
+  // The join's progress: when it last changed, and what it was.
+  JoinProgressAt: QWord;
+  JoinProgressMark: Int64;
+  JoinAddressText: WideString;
 
 function MultiplayerText(const Key, English: WideString): WideString;
 begin
@@ -240,7 +273,7 @@ function ClientWaitText: WideString;
 var
   Client: TNetClient;
   Status: TStatusMessage;
-  Names, Away: WideString;
+  Names, Away, Talker: WideString;
   I: Integer;
 begin
   Client := CurrentClient;
@@ -255,7 +288,14 @@ begin
       else if Status.Humans[I].HoldsDay then
         AddName(Names, Status.Humans[I].Name);
     end;
-  if Status.DayRunning then
+  Talker := '';
+  for I := 0 to High(Status.Humans) do
+    if (Status.TalkHumanId <> 0) and (Status.Humans[I].Id = Status.TalkHumanId) then
+      Talker := Status.Humans[I].Name;
+  // CHANGE: ENHANCEMENT - The day waits for another human's answer to a hail (Status).
+  if Status.DayRunning and (Talker <> '') and (Status.TalkHumanId <> Client.HumanId) then
+    Result := NamedLine('WaitingTalk', 'Waiting for <Players> to answer a hail.', Talker)
+  else if Status.DayRunning then
     Result := MultiplayerText('DayRuns', 'The day is running.')
   else if Names <> '' then
     Result := NamedLine('Waiting', 'Waiting for <Players>.', Names)
@@ -263,6 +303,66 @@ begin
     Result := MultiplayerText('WaitingHost', 'Waiting for the host.');
   if Away <> '' then
     Result := Result + #13#10 + NamedLine('Away', 'Away: <Players>.', Away);
+end;
+
+// CHANGE: ENHANCEMENT - Whose answer to a dialogue the host's day waits for.
+function HostTalkText: WideString;
+begin
+  Result :=
+      NamedLine(
+          'WaitingTalk',
+          'Waiting for <Players> to answer a hail.',
+          HumanName(FindHuman(CurrentHost.TalkHumanId))
+      );
+end;
+
+function KilobytesText(Bytes: Integer): WideString;
+begin
+  Result := WideString(IntToStr((Bytes + 1023) div 1024)) + ' KB';
+end;
+
+// CHANGE: ENHANCEMENT - How far the join has come.
+function JoinWaitText: WideString;
+var
+  Client: TNetClient;
+  Have, Size: Integer;
+begin
+  Client := CurrentClient;
+  case Client.JoinPhase of
+    jpConnecting:
+      Result := NamedLine('JoinConnecting', 'Connecting to <Players>.', JoinAddressText);
+    jpJoining:
+      Result := MultiplayerText('JoinWaiting', 'Connected. Waiting for the host to let you in.');
+  else
+    begin
+      Client.ReceiveProgress(Have, Size);
+      if Size > 0 then
+        Result :=
+            NamedLine(
+                'JoinReceiving',
+                'Receiving the game: <Players>.',
+                KilobytesText(Have) + ' / ' + KilobytesText(Size)
+            )
+      else
+        Result := MultiplayerText('JoinReceivingStart', 'The host let you in. Receiving the game.');
+    end;
+  end;
+end;
+
+// Whether the join has made no progress (a phase, or bytes of the state) for JoinTimeoutMs.
+function JoinStalled: Boolean;
+var
+  Have, Size: Integer;
+  Mark: Int64;
+begin
+  CurrentClient.ReceiveProgress(Have, Size);
+  Mark := Int64(Ord(CurrentClient.JoinPhase)) shl 40 + Have;
+  if Mark <> JoinProgressMark then
+  begin
+    JoinProgressMark := Mark;
+    JoinProgressAt := GetTickCount64;
+  end;
+  Result := GetTickCount64 > JoinProgressAt + JoinTimeoutMs;
 end;
 
 // Takes the films that came: the one of the wanted star waits to be played, the rest go.
@@ -293,11 +393,19 @@ begin
   if ExitScreenLoop then
     Exit(True);
   // The host's day asks a dialogue: the box closes and the talk opens (WaitModal).
-  if (Kind <> nwHostPeers) and (CurrentClient <> nil) and CurrentClient.HasTalkRequest then
+  if (Kind in [nwClientDay, nwClientState]) and (CurrentClient <> nil) and CurrentClient.HasTalkRequest then
     Exit(True);
   case Kind of
     nwHostPeers:
       Result := (CurrentHost = nil) or CurrentHost.PeersReady;
+    nwHostTalk:
+      Result := (CurrentHost = nil) or (CurrentHost.TalkHumanId = 0);
+    nwJoin:
+      Result :=
+          (CurrentClient = nil)
+              or CurrentClient.HasState
+              or not CurrentClient.Connected
+              or JoinStalled;
     nwClientDay:
       begin
         Client := CurrentClient;
@@ -313,19 +421,28 @@ end;
 
 function WaitText(Kind: TNetWaitKind): WideString;
 begin
-  if Kind = nwHostPeers then
-    Result := HostWaitText
+  case Kind of
+    nwHostPeers:
+      Result := HostWaitText;
+    nwHostTalk:
+      Result := HostTalkText;
+    nwJoin:
+      Result := JoinWaitText;
   else
     Result := ClientWaitText;
+  end;
 end;
 
 // Pumps the network; on the host also frees the states sent and sends the state of a day that
 // has run once the host is quiet after it.
 procedure NetFrame; forward;
+// CHANGE: ENHANCEMENT - A client that lost its host goes to the main menu at a safe screen.
+procedure LeaveLostGame; forward;
 
 procedure TNetWaitBoxGI.OnOpen;
 begin
   inherited OnOpen;
+  OpenedAt := GetTickCount64;
   PollTimer := ScheduleCallbackTimer(NetWaitMs * 2, NetWaitMs * 2, Poll);
 end;
 
@@ -346,12 +463,14 @@ begin
   NetFrame;
   if WaitDone(Kind) then
     RequestClose(mbgResultOK)
-  else if WaitText(Kind) <> MessageText then
+  // A join's progress changes often; its box opens again at most every JoinRetextMs.
+  else if ((Kind <> nwJoin) or (GetTickCount64 >= OpenedAt + JoinRetextMs))
+      and (WaitText(Kind) <> MessageText) then
     RequestClose(WaitRetext);
 end;
 
-// ShowMessageBoxGI for a wait box, over the innermost screen.
-function RunWaitBox(Kind: TNetWaitKind; const Text: WideString): Cardinal;
+// ShowMessageBoxGI for a wait box, over the innermost screen; Options are its buttons (0: none).
+function RunWaitBox(Kind: TNetWaitKind; const Text: WideString; Options: Cardinal = 0): Cardinal;
 var
   Parent: TMessageLoopGI;
   Dialog: TNetWaitBoxGI;
@@ -368,7 +487,7 @@ begin
   Dialog.InitializeDefaults;
   try
     Dialog.MessageText := Text;
-    Dialog.Options := 0;
+    Dialog.Options := Options;
     Dialog.Kind := Kind;
     Result := Dialog.Run;
     Parent.InvalidateViewport;
@@ -396,8 +515,10 @@ var
   SavedScreen: TGameScreenId;
   SavedResume: TStarMapResumeMode;
   Shown: Boolean;
+  Age: Integer;
 begin
   Client := CurrentClient;
+  Age := Client.TalkRequestAge;
   if not Client.TakeTalkRequest(Request) then
     Exit;
   Shown := False;
@@ -440,9 +561,9 @@ begin
   end;
   NetLog(
       Format(
-          'talk from ship %d: %s, response %d',
+          'talk from ship %d: %s, response %d, %d ms after it came',
           [Request.ShipId, BoolToStr(Shown, 'answered', 'cannot be shown here'),
-              LocalHuman.TalkResponse]
+              LocalHuman.TalkResponse, Age]
       )
   );
 end;
@@ -453,12 +574,12 @@ procedure WaitModal(Kind: TNetWaitKind);
 var
   Closed: Cardinal;
 begin
-  if Kind <> nwHostPeers then
+  if Kind in [nwClientDay, nwClientState] then
     Inc(ClientTalkWaits);
   try
     NetFrame;
     repeat
-      if (Kind <> nwHostPeers) and not ExitScreenLoop and CurrentClient.HasTalkRequest then
+      if (Kind in [nwClientDay, nwClientState]) and not ExitScreenLoop and CurrentClient.HasTalkRequest then
         AnswerClientTalk
       else if WaitDone(Kind) then
         Break
@@ -470,8 +591,41 @@ begin
       end;
     until False;
   finally
-    if Kind <> nwHostPeers then
+    if Kind in [nwClientDay, nwClientState] then
       Dec(ClientTalkWaits);
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - The screen loop that runs now, when it is the innermost screen's
+// (no box or dialogue above it, and a screen is open, not between two); nil otherwise.
+function RunningScreenLoop: TMessageLoopGI;
+begin
+  Result := nil;
+  if (CurrentScreenId = screenNone)
+      or (RegisteredScreens[Ord(CurrentScreenId)] = nil)
+      or (MessageLoopStack = nil)
+      or (MessageLoopStack.Count = 0) then
+    Exit;
+  if TMessageLoopGI(MessageLoopStack[MessageLoopStack.Count - 1]) = GetInnermostScreenLoop then
+    Result := GetInnermostScreenLoop;
+end;
+
+// CHANGE: ENHANCEMENT - The host's UI waits for its day while the turn thread waits for a remote
+// human's answer to a dialogue: a box says whose (docs/network.md, Waiting). Only over a
+// screen that runs, from the waits of a day (NetWaitForEvents, TurnWaitPumpHook).
+procedure HostTalkWait;
+begin
+  if HostTalkBoxOpen
+      or (NetRole <> nrHost)
+      or (CurrentHost.TalkHumanId = 0)
+      or ExitScreenLoop
+      or (RunningScreenLoop = nil) then
+    Exit;
+  HostTalkBoxOpen := True;
+  try
+    WaitModal(nwHostTalk);
+  finally
+    HostTalkBoxOpen := False;
   end;
 end;
 
@@ -541,9 +695,16 @@ begin
       nrClient:
         begin
           CurrentClient.Pump;
-          // A client that does not wait for the day cannot show the host's dialogue.
-          if (ClientTalkWaits = 0) and CurrentClient.HasTalkRequest then
+          // A client that does not wait for the day cannot show the host's dialogue, except at
+          // the end of the film it plays, where the wait for the state answers it.
+          if (ClientTalkWaits = 0)
+              and CurrentClient.HasTalkRequest
+              and not CurrentClient.MayHoldTalk(ClientFilmPlaying and (CurrentScreenId = screenStarMap)) then
             AnswerClientTalk;
+          // CHANGE: ENHANCEMENT - The host left or stopped hosting while the client plays its
+          // turn: back to the main menu at the next safe screen, which says why.
+          if ClientInGame and not CurrentClient.Connected then
+            LeaveLostGame;
         end;
     end;
   finally
@@ -551,10 +712,17 @@ begin
   end;
 end;
 
+// TurnWaitPumpHook: the pump, and on the host the box of a remote dialogue.
+procedure NetTurnWait;
+begin
+  NetFrame;
+  HostTalkWait;
+end;
+
 procedure BeginNetSession(AsClient: Boolean);
 begin
   FramePumpHook := @NetFrame;
-  TurnWaitPumpHook := @NetFrame;
+  TurnWaitPumpHook := @NetTurnWait;
   TurnJobsForbidden := AsClient;
 end;
 
@@ -575,6 +743,9 @@ begin
   end;
   DropPendingFilm;
   ApplyPending := False;
+  ClientFilmPlaying := False;
+  ClientInGame := False;
+  HostLossLogged := False;
 end;
 
 // The client goes back to the main menu, which says Text. The session ends between screens.
@@ -583,6 +754,7 @@ begin
   Notice := Text;
   NetLog('leaving the game: ' + UTF8Encode(Text));
   ApplyPending := False;
+  ClientFilmPlaying := False;
   DropPendingFilm;
   RequestedScreenId := screenMainMenu;
   if Screen <> nil then
@@ -609,6 +781,7 @@ end;
 procedure RequestApply(Screen: TMessageLoopGI; AfterFilm, Broken, Combat: Boolean);
 begin
   ApplyPending := True;
+  ClientFilmPlaying := False;
   AppliedAfterFilm := AfterFilm;
   FilmBroken := Broken;
   FilmCombat := Combat;
@@ -648,6 +821,7 @@ var
 begin
   Client := CurrentClient;
   DropPendingFilm;
+  ClientFilmPlaying := False;
   P := LocalPlayer;
   // A film shows the human's own day: in space, or taking off.
   if (P <> nil) and (P.InNormalSpace or (P.Order = soTakeoff)) then
@@ -828,10 +1002,13 @@ begin
     DropPendingFilm;
   end;
   BindFilmToScene(Film, Star);
+  ClientFilmPlaying := True;
 end;
 
 procedure ClientFilmEnded(Screen: TMessageLoopGI; BreakRequested, CombatRecorded: Boolean);
 begin
+  // A dialogue that came during the film is answered in this wait.
+  ClientFilmPlaying := False;
   WaitModal(nwClientState);
   if ExitScreenLoop then
     Exit;
@@ -864,6 +1041,7 @@ begin
     if Result <> WAIT_TIMEOUT then
       Exit;
     NetFrame;
+    HostTalkWait;
   until False;
 end;
 
@@ -976,6 +1154,7 @@ begin
   else if Star <> nil then
     Galaxy.GenerateSpaceBackground(Star.BackgroundImage);
   OpenClientScreen((Star = nil) or (Star.Id <> OldStarId));
+  ClientInGame := True;
 end;
 
 var
@@ -1005,48 +1184,96 @@ begin
   PendingJoinName := Name;
 end;
 
-procedure JoinPending;
+procedure RunPendingJoin(Screen: TMessageLoopGI);
 var
   Address: AnsiString;
   Port: Integer;
   Client: TNetClient;
-  Deadline: QWord;
+  Closed: Cardinal;
+  Cancelled: Boolean;
+  Text: WideString;
 begin
+  if PendingJoinAddress = '' then
+    Exit;
   if not ParseNetAddress(PendingJoinAddress, Address, Port) then
   begin
-    Notice :=
+    Text :=
         MultiplayerText('BadAddress', 'Expected an address as HOST or HOST:PORT:')
             + ' '
             + WideString(PendingJoinAddress);
     PendingJoinAddress := '';
+    ShowMessageBoxGI(Screen, Text, mbgOK or mbgError);
     Exit;
   end;
   PendingJoinAddress := '';
-  Client := JoinGame(Address, Port, PendingJoinName);
+  JoinAddressText := WideString(Address) + ':' + WideString(IntToStr(Port));
+  NetLog(Format('joining %s:%d as %s', [Address, Port, UTF8Encode(PendingJoinName)]));
+  // The connect runs on its own thread, so the box can show it and Cancel can end it.
+  Client := JoinGame(Address, Port, PendingJoinName, False);
   BeginNetSession(True);
-  Deadline := GetTickCount64 + JoinTimeoutMs;
-  while Client.Connected and not Client.HasState and not ExitScreenLoop do
+  JoinProgressMark := -1;
+  JoinProgressAt := GetTickCount64;
+  Cancelled := False;
+  repeat
+    if WaitDone(nwJoin) then
+      Break;
+    Closed := RunWaitBox(nwJoin, JoinWaitText, mbgCancel);
+    if Closed = mbgResultCancel then
+      Cancelled := True
+    else if (Closed = mbgResultOK) or (Closed = WaitRetext) then
+      Continue;
+    Break;
+  until False;
+  if ExitScreenLoop or (Screen.ExitCode <> 0) then
   begin
-    if GetTickCount64 > Deadline then
-    begin
-      Notice := MultiplayerText('NoState', 'The host did not send the game.');
-      EndNetSession;
-      Exit;
-    end;
-    // Keeps the window answering; the frame hook pumps the network.
-    GR_WinMessage(nil);
-    NetInboxEvent.WaitFor(NetWaitMs);
-  end;
-  if ExitScreenLoop then
-    Exit;
-  if not Client.HasState then
-  begin
-    Notice := ClientGoneText;
     EndNetSession;
     Exit;
   end;
+  if Cancelled or not Client.HasState then
+  begin
+    if Cancelled then
+    begin
+      NetLog('the join was cancelled');
+      Text := '';
+    end
+    else if Client.Connected then
+      Text := MultiplayerText('NoState', 'The host did not send the game.')
+    else
+      Text := ClientGoneText;
+    EndNetSession;
+    if Text <> '' then
+      ShowMessageBoxGI(Screen, Text, mbgOK or mbgError);
+    Exit;
+  end;
   NetLog(Format('joined %s as human %d', [UTF8Encode(Client.HostName), Client.HumanId]));
-  ApplyClientState;
+  // The state is applied between screens; the human's screen opens after it.
+  RequestApply(Screen, False, False, False);
+end;
+
+// CHANGE: ENHANCEMENT - The client lost its host while it plays its turn (NetFrame). It leaves
+// for the main menu, which says why, once a screen that starts a day is the one open: not in a
+// shop, a dialogue or a box, and not while the star map plays a film, whose end leaves anyway.
+procedure LeaveLostGame;
+var
+  Screen: TMessageLoopGI;
+begin
+  if not HostLossLogged then
+  begin
+    HostLossLogged := True;
+    NetLog('the host is gone; the game goes back to the main menu at the next safe screen');
+  end;
+  if ScreenClosing
+      or (ClientFilmPlaying and (CurrentScreenId = screenStarMap))
+      or (ClientTalkWaits > 0)
+      or ExitScreenLoop
+      or not (CurrentScreenId in LostHostLeaveScreens) then
+    Exit;
+  Screen := RunningScreenLoop;
+  if (Screen = nil)
+      or (Screen <> TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]))
+      or (Screen.ExitCode <> 0) then
+    Exit;
+  LeaveForMainMenu(Screen, ClientGoneText);
 end;
 
 function HostRunningGame(Port: Integer): Integer;
@@ -1151,13 +1378,8 @@ begin
     RequestJoin(CommandLineJoin, WideString(CommandLineName));
     CommandLineJoin := '';
   end;
-  // CHANGE: ENHANCEMENT - The main menu's join takes the same way as --join.
-  if (PendingJoinAddress <> '') and (RequestedScreenId = screenMainMenu) then
-  begin
-    JoinPending;
-    if (RequestedScreenId = screenMainMenu) and (NetRole <> nrNone) then
-      EndNetSession;
-  end;
+  // CHANGE: ENHANCEMENT - The join itself runs over the main menu (RunPendingJoin), for the
+  // main menu's entry and for --join alike.
   // Hosting from the command line starts at the first screen of a game.
   if (CommandLineHostPort >= 0)
       and (Galaxy <> nil)

@@ -502,6 +502,8 @@ begin
   NetNotice := TakeNetNotice;
   if NetNotice <> '' then
     ShowMessageBoxGI(Self, NetNotice, mbgOK or mbgError);
+  // CHANGE: ENHANCEMENT - --join joins over the main menu, with its progress and a Cancel.
+  RunPendingJoin(Self);
 end;
 procedure TfMainForm.OnClose;
 begin
