@@ -66,6 +66,9 @@ type
     // The turn thread is in RemoteTalk; Shutdown ends it (FStopping) and waits for it.
     FTalking: Boolean;
     FStopping: Boolean;
+    // CHANGE: ENHANCEMENT - The human whose remote dialogue the turn thread waits for (0: none);
+    // Status carries it.
+    FTalkHumanId: Integer;
     function FindPeer(PeerId: Integer): THostPeer;
     function ReceiveUnlessInTalk(
         Peer: THostPeer;
@@ -128,6 +131,9 @@ type
     // the UI's commands in a talk are, and TalkDone ends the talk. False when the human has no
     // peer, the peer leaves, or no TalkDone comes within RemoteTalkTimeoutMs.
     function RemoteTalk(Human: THuman): Boolean;
+    // The human whose answer to a dialogue the running day waits for (RemoteTalk); 0 when
+    // none. Set on the turn thread; the host's own wait reads it.
+    property TalkHumanId: Integer read FTalkHumanId;
     property Thread: TNetThread read FThread;
     property LastSerial: Integer read FSerial;
     // How long taking the last state took (checkpoint and hash).
@@ -641,6 +647,8 @@ begin
   end;
 end;
 
+// On the UI thread, or on the turn thread in a remote dialogue: the pump sends no status while
+// a job runs, so the two never overlap.
 procedure TNetHost.SendStatus(Force: Boolean);
 var
   Status: TStatusMessage;
@@ -650,6 +658,7 @@ var
   Peer: THostPeer;
 begin
   Status.DayRunning := FDayUnderWay;
+  Status.TalkHumanId := FTalkHumanId;
   SetLength(Status.Humans, Session.Humans.Count);
   for I := 0 to Session.Humans.Count - 1 do
   begin
@@ -852,6 +861,10 @@ begin
   FTalking := True;
   FTalkLock.Leave;
   try
+    // CHANGE: ENHANCEMENT - Every client's wait says whose answer the day waits for; the
+    // status goes before the request, so the asked client has it too.
+    FTalkHumanId := Human.Id;
+    SendStatus(False);
     EncodeTalkRequest(Request, Payload);
     FThread.Send(Peer.PeerId, nkTalkRequest, Payload);
     NetLog(
@@ -919,6 +932,8 @@ begin
         NetInboxEvent.WaitFor(PollMs);
     until Outcome <> '';
   finally
+    FTalkHumanId := 0;
+    SendStatus(False);
     FTalkLock.Enter;
     Peer.InTalk := False;
     FTalking := False;

@@ -20,7 +20,14 @@ function CurrentClient: TNetClient;
 function StartHosting(Port: Integer; const HostName: WideString): TNetHost;
 // Joins the game at Address:Port as Name. Sets the client's hooks: every command the local
 // human submits goes to the host. CurrentClient.Connected is False when it could not connect.
-function JoinGame(const Address: AnsiString; Port: Integer; const Name: WideString): TNetClient;
+// CHANGE: ENHANCEMENT - Without Wait the connect runs on a thread of its own, and the pump
+// finishes it (TNetClient.JoinPhase), so that a join can show its progress and be cancelled.
+function JoinGame(
+    const Address: AnsiString;
+    Port: Integer;
+    const Name: WideString;
+    Wait: Boolean = True
+): TNetClient;
 // Leaves the session (Bye to the peers), clears the hooks and frees the host or client.
 procedure StopNetwork;
 // Takes what arrived. The UI calls it every frame and at safe points; the headless runner
@@ -66,10 +73,15 @@ begin
   Result := Host;
 end;
 
-function JoinGame(const Address: AnsiString; Port: Integer; const Name: WideString): TNetClient;
+function JoinGame(
+    const Address: AnsiString;
+    Port: Integer;
+    const Name: WideString;
+    Wait: Boolean
+): TNetClient;
 begin
   StopNetwork;
-  Client := TNetClient.Create(Address, Port, Name);
+  Client := TNetClient.Create(Address, Port, Name, Wait);
   NetworkCommandHook := @ClientCommandSubmitted;
   Result := Client;
 end;

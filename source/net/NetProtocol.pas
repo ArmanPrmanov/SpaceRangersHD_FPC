@@ -11,8 +11,9 @@ uses
   aCommands,
   NetTransport;
 const
-  // CHANGE: ENHANCEMENT - 2: TalkRequest has a payload (remote dialogue).
-  ProtocolVersion = 2;
+  // CHANGE: ENHANCEMENT - 2: TalkRequest has a payload (remote dialogue). 3: Status names the
+  // human whose answer to a dialogue the day waits for.
+  ProtocolVersion = 3;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 
@@ -70,6 +71,9 @@ type
   TStatusMessage = record
     Humans: array of TStatusHuman;
     DayRunning: Boolean;
+    // CHANGE: ENHANCEMENT - The human whose answer to a dialogue the running day waits for
+    // (docs/network.md, Remote dialogue); 0 when none.
+    TalkHumanId: Integer;
   end;
   TChatMessage = record
     SenderId: Integer;
@@ -282,6 +286,7 @@ begin
     Buffer.AddBoolean(Message.Humans[I].Connected);
     Buffer.AddBoolean(Message.Humans[I].HoldsDay);
   end;
+  Buffer.AddInt32(Message.TalkHumanId);
 end;
 
 function DecodeStatus(Buffer: TBufEC): TStatusMessage;
@@ -301,6 +306,7 @@ begin
     Result.Humans[I].Connected := Buffer.GetBoolean;
     Result.Humans[I].HoldsDay := Buffer.GetBoolean;
   end;
+  Result.TalkHumanId := Buffer.GetInt32;
 end;
 
 procedure EncodeChat(const Message: TChatMessage; Buffer: TBufEC);

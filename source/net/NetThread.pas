@@ -96,6 +96,9 @@ type
     // Connects on the calling thread, waiting up to TimeoutMs; the new peer's id, or -1
     // (LastConnectError says why).
     function Connect(const Host: AnsiString; Port, TimeoutMs: Integer): Integer;
+    // CHANGE: ENHANCEMENT - Takes a connection made elsewhere (TNetConnectAttempt); the new
+    // peer's id.
+    function AddConnection(Connection: TNetConnection): Integer;
     procedure Send(PeerId: Integer; Kind: TNetMessageKind; Payload: TBufEC); overload;
     procedure Send(PeerId: Integer; Kind: TNetMessageKind; Data: Pointer; Size: Integer); overload;
     // Takes the peer's next message; Payload gets its bytes, positioned at the start.
@@ -107,6 +110,10 @@ type
     function IsClosed(PeerId: Integer): Boolean;
     function PeerError(PeerId: Integer): AnsiString;
     procedure PeerTraffic(PeerId: Integer; out Sent, Received: Int64);
+    // CHANGE: ENHANCEMENT - The peer's message being received: the bytes of it that are here and
+    // its whole size (TNetConnection.IncomingProgress), as of the last time the thread moved
+    // its bytes.
+    procedure PeerIncoming(PeerId: Integer; out Have, Size: Integer);
     // Closes the connection once what is queued for it is sent.
     procedure ClosePeer(PeerId: Integer);
     // Forgets the peer and closes its connection at once.
@@ -118,6 +125,34 @@ type
     function IsIdle: Boolean;
     function WaitIdle(TimeoutMs: Integer): Boolean;
     property ListenPort: Integer read FListenPort;
+  end;
+
+  // CHANGE: ENHANCEMENT - A connection made on a thread of its own, so that a join can show its
+  // progress and be cancelled (docs/network.md, Hosting and joining): the blocking connect
+  // (TNetConnection.Connect, name lookup included) runs there. Counted: the thread and the
+  // caller each hold a reference. A caller that no longer wants it calls Abandon; the connection
+  // is then closed when it comes.
+  TNetConnectAttempt = class
+  private
+    FLock: TCriticalSection;
+    FReferences: Integer;
+    FHost: AnsiString;
+    FPort, FTimeoutMs: Integer;
+    FConnection: TNetConnection;
+    FError: AnsiString;
+    FDone, FAbandoned: Boolean;
+    procedure Finish(Connection: TNetConnection; const Error: AnsiString);
+  public
+    // Starts the connect; one reference, the caller's.
+    constructor Create(const Host: AnsiString; Port, TimeoutMs: Integer);
+    destructor Destroy; override;
+    procedure Release;
+    // Whether the connect has ended; then Take gives the connection (nil when it failed, and
+    // Error says why), once.
+    function Done: Boolean;
+    function Take(out Error: AnsiString): TNetConnection;
+    // The caller goes without it and releases its reference.
+    procedure Abandon;
   end;
 
 var
@@ -145,6 +180,8 @@ type
     // Bytes queued in the connection that the socket has not taken yet.
     Unsent: Integer;
     BytesSent, BytesReceived: Int64;
+    // The message being received (TNetConnection.IncomingProgress).
+    IncomingHave, IncomingSize: Integer;
     constructor Create;
     destructor Destroy; override;
   end;
@@ -339,6 +376,12 @@ begin
   AddPeer(Connection, False, Result);
 end;
 
+function TNetThread.AddConnection(Connection: TNetConnection): Integer;
+begin
+  AddPeer(Connection, False, Result);
+  NetInboxEvent.SetEvent;
+end;
+
 procedure TNetThread.Send(PeerId: Integer; Kind: TNetMessageKind; Payload: TBufEC);
 begin
   if Payload = nil then
@@ -450,6 +493,25 @@ begin
     begin
       Sent := Peer.BytesSent;
       Received := Peer.BytesReceived;
+    end;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TNetThread.PeerIncoming(PeerId: Integer; out Have, Size: Integer);
+var
+  Peer: TNetPeer;
+begin
+  FLock.Enter;
+  try
+    Peer := TNetPeer(FindPeer(PeerId));
+    Have := 0;
+    Size := 0;
+    if Peer <> nil then
+    begin
+      Have := Peer.IncomingHave;
+      Size := Peer.IncomingSize;
     end;
   finally
     FLock.Leave;
@@ -628,6 +690,7 @@ begin
         Peer.Unsent := Peer.Connection.PendingSendBytes;
         Peer.BytesSent := Peer.Connection.BytesSent;
         Peer.BytesReceived := Peer.Connection.BytesReceived;
+        Peer.Connection.IncomingProgress(Peer.IncomingHave, Peer.IncomingSize);
         if Peer.CloseRequested and (Peer.Outbox.Count = 0) and (Peer.Unsent = 0) then
           Peer.Connection.Close;
         if Peer.Connection.Closed then
@@ -757,6 +820,115 @@ begin
       JobLock.Leave;
     end;
   end;
+end;
+
+type
+  TNetConnectThread = class(TThread)
+    Attempt: TNetConnectAttempt;
+  protected
+    procedure Execute; override;
+  end;
+
+procedure TNetConnectThread.Execute;
+var
+  Connection: TNetConnection;
+  Error: AnsiString;
+begin
+  Error := '';
+  Connection := nil;
+  try
+    Connection := TNetConnection.Connect(Attempt.FHost, Attempt.FPort, Attempt.FTimeoutMs);
+    if Connection = nil then
+      Error := LastConnectError;
+  except
+    on E: Exception do
+      Error := AnsiString(E.Message);
+  end;
+  Attempt.Finish(Connection, Error);
+  Attempt.Release;
+end;
+
+constructor TNetConnectAttempt.Create(const Host: AnsiString; Port, TimeoutMs: Integer);
+var
+  Thread: TNetConnectThread;
+begin
+  inherited Create;
+  FLock := TCriticalSection.Create;
+  FHost := Host;
+  FPort := Port;
+  FTimeoutMs := TimeoutMs;
+  // The caller's reference and the thread's.
+  FReferences := 2;
+  InitializeNetwork;
+  Thread := TNetConnectThread.Create(True);
+  Thread.FreeOnTerminate := True;
+  Thread.Attempt := Self;
+  Thread.Start;
+end;
+
+destructor TNetConnectAttempt.Destroy;
+begin
+  FConnection.Free;
+  FLock.Free;
+  inherited;
+end;
+
+procedure TNetConnectAttempt.Release;
+begin
+  if InterLockedDecrement(FReferences) = 0 then
+    Free;
+end;
+
+procedure TNetConnectAttempt.Finish(Connection: TNetConnection; const Error: AnsiString);
+begin
+  FLock.Enter;
+  try
+    if FAbandoned then
+      Connection.Free
+    else
+    begin
+      FConnection := Connection;
+      FError := Error;
+    end;
+    FDone := True;
+  finally
+    FLock.Leave;
+  end;
+  NetInboxEvent.SetEvent;
+end;
+
+function TNetConnectAttempt.Done: Boolean;
+begin
+  FLock.Enter;
+  try
+    Result := FDone;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+function TNetConnectAttempt.Take(out Error: AnsiString): TNetConnection;
+begin
+  FLock.Enter;
+  try
+    Result := FConnection;
+    FConnection := nil;
+    Error := FError;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TNetConnectAttempt.Abandon;
+begin
+  FLock.Enter;
+  try
+    FAbandoned := True;
+    FreeAndNil(FConnection);
+  finally
+    FLock.Leave;
+  end;
+  Release;
 end;
 
 procedure TNetThread.WaitForSockets(TimeoutMs: Integer);

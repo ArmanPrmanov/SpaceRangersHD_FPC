@@ -38,11 +38,24 @@ type
     LoadMs: Integer;
   end;
 
+  // CHANGE: ENHANCEMENT - How far a join has come, for its progress (docs/network.md, Hosting
+  // and joining): connecting; said Hello, waiting for Welcome; welcomed, receiving the state;
+  // a state has come.
+  TNetJoinPhase = (jpConnecting, jpJoining, jpReceiving, jpJoined);
+
   TNetClient = class
   private
     FThread: TNetThread;
     FPeerId: Integer;
     FName: WideString;
+    // CHANGE: ENHANCEMENT - A connect that runs on its own thread (Create without Wait); nil
+    // once it has ended.
+    FAttempt: TNetConnectAttempt;
+    FAddress: AnsiString;
+    FPort: Integer;
+    FWelcomed: Boolean;
+    FStateReceived: Boolean;
+    FHostSaidBye: Boolean;
     FHumanId: Integer;
     FHostName: WideString;
     FRefused: Boolean;
@@ -63,13 +76,28 @@ type
     // yet (docs/network.md, Remote dialogue).
     FTalk: TTalkRequestMessage;
     FHasTalk: Boolean;
+    // When the dialogue came (GetTickCount64).
+    FTalkArrived: QWord;
     procedure HandleMessage(Kind: TNetMessageKind; Payload: TBufEC);
     procedure GiveUp(const Text: AnsiString);
+    procedure SayHello;
+    procedure TakeConnection;
   public
-    // Connects and says Hello; Connected is False when it could not (Error says why).
-    constructor Create(const Address: AnsiString; Port: Integer; const Name: WideString);
+    // Connects and says Hello; Connected is False when it could not (Error says why). Without
+    // Wait the connect runs on a thread of its own: Pump says Hello once it has connected,
+    // and Connected stays True meanwhile (JoinPhase is jpConnecting).
+    constructor Create(
+        const Address: AnsiString;
+        Port: Integer;
+        const Name: WideString;
+        Wait: Boolean = True
+    );
     destructor Destroy; override;
     function Connected: Boolean;
+    function JoinPhase: TNetJoinPhase;
+    // The message being received from the host: the bytes of it that are here and its whole
+    // size (0 and 0 when none has started).
+    procedure ReceiveProgress(out Have, Size: Integer);
     // Takes what arrived: Welcome, states (expanded, kept until ApplyState), films, status.
     procedure Pump;
     // Whether a state waits to be applied.
@@ -89,6 +117,12 @@ type
     function HasTalkRequest: Boolean;
     // Takes the dialogue; the caller answers it with commands and then TalkDone.
     function TakeTalkRequest(out Request: TTalkRequestMessage): Boolean;
+    // CHANGE: ENHANCEMENT - How long the dialogue has waited here, in ms (0 when none).
+    function TalkRequestAge: Integer;
+    // Whether the dialogue may wait for the end of the film the client plays (FilmPlaying):
+    // for ClientTalkHoldMs at most, so the host's day is not held for long; then it is
+    // declined (docs/network.md, Remote dialogue).
+    function MayHoldTalk(FilmPlaying: Boolean): Boolean;
     // The answer is complete (or the talk cannot be shown here): the host's day goes on.
     procedure SendTalkDone;
     property HumanId: Integer read FHumanId;
@@ -97,6 +131,9 @@ type
     property RefuseReason: WideString read FRefuseReason;
     // The host said Bye or the connection closed.
     property HostLeft: Boolean read FHostLeft;
+    // CHANGE: ENHANCEMENT - The host said Bye: it quit or stopped hosting; otherwise the
+    // connection was lost (Error).
+    property HostSaidBye: Boolean read FHostSaidBye;
     property Status: TStatusMessage read FStatus;
     property Error: AnsiString read FError;
   end;
@@ -104,6 +141,8 @@ type
 var
   // The running client, for NetworkCommandHook.
   ActiveClient: TNetClient;
+  // CHANGE: ENHANCEMENT - How long a dialogue may wait for the end of the client's film.
+  ClientTalkHoldMs: Integer = 60000;
 // NetworkCommandHook of a client: sends the command to the host.
 procedure ClientCommandSubmitted(const Command: TPlayerCommand);
 implementation
@@ -124,28 +163,67 @@ begin
   inherited;
 end;
 
-constructor TNetClient.Create(const Address: AnsiString; Port: Integer; const Name: WideString);
-var
-  Hello: THelloMessage;
-  Payload: TBufEC;
+constructor TNetClient.Create(
+    const Address: AnsiString;
+    Port: Integer;
+    const Name: WideString;
+    Wait: Boolean
+);
 begin
   inherited Create;
   FName := Name;
+  FAddress := Address;
+  FPort := Port;
   FHumanId := -1;
+  FPeerId := -1;
   FBase := TBufEC.Create;
   FPending := TBufEC.Create;
   FFilms := TList.Create;
   FThread := TNetThread.Create(-1);
+  ActiveClient := Self;
+  if not Wait then
+  begin
+    FAttempt := TNetConnectAttempt.Create(Address, Port, ConnectTimeoutMs);
+    Exit;
+  end;
   FPeerId := FThread.Connect(Address, Port, ConnectTimeoutMs);
   if FPeerId < 0 then
   begin
     GiveUp('cannot connect to ' + Address + ':' + IntToStr(Port) + ': ' + LastConnectError);
     Exit;
   end;
+  SayHello;
+end;
+
+// The connect on its own thread has ended: the peer, and Hello; or why it failed.
+procedure TNetClient.TakeConnection;
+var
+  Connection: TNetConnection;
+  Error: AnsiString;
+begin
+  if (FAttempt = nil) or not FAttempt.Done then
+    Exit;
+  Connection := FAttempt.Take(Error);
+  FAttempt.Release;
+  FAttempt := nil;
+  if Connection = nil then
+  begin
+    GiveUp('cannot connect to ' + FAddress + ':' + IntToStr(FPort) + ': ' + Error);
+    Exit;
+  end;
+  FPeerId := FThread.AddConnection(Connection);
+  SayHello;
+end;
+
+procedure TNetClient.SayHello;
+var
+  Hello: THelloMessage;
+  Payload: TBufEC;
+begin
   Hello.Protocol := ProtocolVersion;
   Hello.GameVersion := GameVersionText;
   Hello.DataHash := DataHash;
-  Hello.Name := Name;
+  Hello.Name := FName;
   Hello.Spectator := False;
   Payload := TBufEC.Create;
   try
@@ -154,7 +232,6 @@ begin
   finally
     Payload.Free;
   end;
-  ActiveClient := Self;
 end;
 
 destructor TNetClient.Destroy;
@@ -163,6 +240,10 @@ var
 begin
   if ActiveClient = Self then
     ActiveClient := nil;
+  // A connect still running closes its connection when it ends.
+  if FAttempt <> nil then
+    FAttempt.Abandon;
+  FAttempt := nil;
   FThread.Free;
   for I := 0 to FFilms.Count - 1 do
     TObject(FFilms[I]).Free;
@@ -182,7 +263,27 @@ end;
 
 function TNetClient.Connected: Boolean;
 begin
-  Result := (FPeerId >= 0) and not FHostLeft and not FRefused;
+  Result := ((FPeerId >= 0) or (FAttempt <> nil)) and not FHostLeft and not FRefused;
+end;
+
+function TNetClient.JoinPhase: TNetJoinPhase;
+begin
+  if FStateReceived then
+    Result := jpJoined
+  else if FWelcomed then
+    Result := jpReceiving
+  else if FPeerId >= 0 then
+    Result := jpJoining
+  else
+    Result := jpConnecting;
+end;
+
+procedure TNetClient.ReceiveProgress(out Have, Size: Integer);
+begin
+  Have := 0;
+  Size := 0;
+  if FPeerId >= 0 then
+    FThread.PeerIncoming(FPeerId, Have, Size);
 end;
 
 procedure TNetClient.HandleMessage(Kind: TNetMessageKind; Payload: TBufEC);
@@ -198,6 +299,7 @@ begin
         Welcome := DecodeWelcome(Payload);
         FHumanId := Welcome.HumanId;
         FHostName := Welcome.HostName;
+        FWelcomed := True;
         NetLog(Format('joined as human %d', [FHumanId]));
       end;
     nkRefuse:
@@ -227,6 +329,7 @@ begin
         FPendingHeader := Header;
         FPendingReceived := Payload.DataSize;
         FHasPending := True;
+        FStateReceived := True;
       end;
     nkFilm:
       begin
@@ -241,19 +344,26 @@ begin
         FFilms.Add(Film);
       end;
     nkStatus:
-      FStatus := DecodeStatus(Payload);
+      begin
+        FStatus := DecodeStatus(Payload);
+        // CHANGE: ENHANCEMENT - The waits say whose answer the day waits for; the log too.
+        if FStatus.TalkHumanId <> 0 then
+          NetLog(Format('the day waits for human %d to answer a hail', [FStatus.TalkHumanId]));
+      end;
     nkChat:
       with DecodeChat(Payload) do
         NetLog(Format('chat from human %d: %s', [SenderId, UTF8Encode(Text)]));
     nkBye:
       begin
         FHostLeft := True;
+        FHostSaidBye := True;
         NetLog('the host left');
       end;
     nkTalkRequest:
       begin
         FTalk := DecodeTalkRequest(Payload);
         FHasTalk := True;
+        FTalkArrived := GetTickCount64;
       end;
   end;
 end;
@@ -263,6 +373,7 @@ var
   Kind: TNetMessageKind;
   Payload: TBufEC;
 begin
+  TakeConnection;
   if FPeerId < 0 then
     Exit;
   Payload := TBufEC.Create;
@@ -373,6 +484,12 @@ end;
 
 procedure TNetClient.Leave(TimeoutMs: Integer);
 begin
+  if FAttempt <> nil then
+  begin
+    FAttempt.Abandon;
+    FAttempt := nil;
+    FHostLeft := True;
+  end;
   if FPeerId < 0 then
     Exit;
   FThread.Send(FPeerId, nkBye, nil, 0);
@@ -399,6 +516,18 @@ begin
   Result := FHasTalk;
   Request := FTalk;
   FHasTalk := False;
+end;
+
+function TNetClient.TalkRequestAge: Integer;
+begin
+  if not FHasTalk then
+    Exit(0);
+  Result := Integer(GetTickCount64 - FTalkArrived);
+end;
+
+function TNetClient.MayHoldTalk(FilmPlaying: Boolean): Boolean;
+begin
+  Result := FilmPlaying and FHasTalk and (TalkRequestAge < ClientTalkHoldMs);
 end;
 
 procedure TNetClient.SendTalkDone;

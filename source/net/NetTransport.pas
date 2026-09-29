@@ -40,6 +40,9 @@ type
     function FlushAll(TimeoutMs: Integer): Boolean;
     procedure Close;
     function PendingSendBytes: Integer;
+    // CHANGE: ENHANCEMENT - The message being received: the bytes of it that are here and its
+    // whole size with the length prefix (0 and 0 when none has started), for a join's progress.
+    procedure IncomingProgress(out Have, Size: Integer);
     property Closed: Boolean read FClosed;
     // The socket, for waiting on several at once (sr_net_wait_many); -1 once closed.
     property Handle: Int64 read FHandle;
@@ -176,6 +179,16 @@ end;
 function TNetConnection.PendingSendBytes: Integer;
 begin
   Result := FOutgoing.DataSize - FSentOffset;
+end;
+
+procedure TNetConnection.IncomingProgress(out Have, Size: Integer);
+begin
+  Have := FIncoming.DataSize;
+  Size := 0;
+  if Have >= 4 then
+    Size := 4 + FIncoming.GetInt32At(0);
+  if Size < Have then
+    Size := Have;
 end;
 
 // Drops the bytes already sent once they are most of the buffer.

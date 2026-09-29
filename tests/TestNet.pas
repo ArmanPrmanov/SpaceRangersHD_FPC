@@ -238,6 +238,7 @@ begin
     Status.Humans[1].Name := 'B';
     Status.Humans[1].Connected := False;
     Status.Humans[1].HoldsDay := True;
+    Status.TalkHumanId := 9;
     EncodeStatus(Status, Buffer);
     Buffer.SetPosition(0);
     StatusBack := DecodeStatus(Buffer);
@@ -245,7 +246,8 @@ begin
         StatusBack.DayRunning and (Length(StatusBack.Humans) = 2)
             and (StatusBack.Humans[1].Id = 9) and (StatusBack.Humans[1].Name = 'B')
             and not StatusBack.Humans[1].Connected and StatusBack.Humans[1].HoldsDay
-            and StatusBack.Humans[0].Connected and Buffer.IsAtEnd,
+            and StatusBack.Humans[0].Connected and (StatusBack.TalkHumanId = 9)
+            and Buffer.IsAtEnd,
         'Status round trips'
     );
 
