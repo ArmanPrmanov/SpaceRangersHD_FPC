@@ -32,8 +32,13 @@ procedure MarkScriptReferencesStale(Instance: TObject);
 function SerializeGalaxyState: TBufEC;
 function HashBytes(Data: PByte; Size: Integer): QWord;
 function GalaxyStateHash: QWord;
+// GalaxyStateHash; when StateDumpDirectory is set, also writes the hashed bytes to Name.bin
+// there and the offset of each object in them to Name.index, to find where two states differ.
+function GalaxyStateHashDumped(const Name: AnsiString): QWord;
 var
   UnresolvedObjectCount: Integer;
+  // --net-dump=DIR: where the host's and the clients' state hashes write their states.
+  StateDumpDirectory: AnsiString;
 implementation
 uses
   aHuman,
@@ -41,6 +46,7 @@ uses
   SysUtils,
   SyncObjs,
   contnrs,
+  SaveTrace,
   EC_Expression,
   Globals,
   aGalaxy,
@@ -509,6 +515,49 @@ begin
     Result := HashBytes(State.Data, State.DataSize);
   finally
     State.Free
+  end;
+end;
+
+var
+  DumpTrace: TStringList;
+
+procedure RecordDumpTrace(const Kind: AnsiString; Id: Cardinal; Offset: Integer);
+begin
+  DumpTrace.Add(Format('%d %s:%d', [Offset, Kind, Id]));
+end;
+
+function GalaxyStateHashDumped(const Name: AnsiString): QWord;
+var
+  State: TBufEC;
+  Stream: TFileStream;
+  Base: AnsiString;
+begin
+  if StateDumpDirectory = '' then
+    Exit(GalaxyStateHash);
+  ForceDirectories(StateDumpDirectory);
+  Base := IncludeTrailingPathDelimiter(StateDumpDirectory) + Name;
+  DumpTrace := TStringList.Create;
+  try
+    SaveTraceHook := @RecordDumpTrace;
+    try
+      State := SerializeGalaxyState;
+    finally
+      SaveTraceHook := nil;
+    end;
+    try
+      Result := HashBytes(State.Data, State.DataSize);
+      Stream := TFileStream.Create(Base + '.bin', fmCreate);
+      try
+        Stream.WriteBuffer(State.Data^, State.DataSize);
+      finally
+        Stream.Free
+      end;
+      DumpTrace.SaveToFile(Base + '.index');
+    finally
+      State.Free
+    end;
+  finally
+    FreeAndNil(DumpTrace);
   end;
 end;
 

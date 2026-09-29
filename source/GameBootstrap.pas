@@ -10,6 +10,7 @@ implementation
 
 uses
   aHuman,
+  aObjectRefs,
   aSession,
   RTLFileSystem,
   fIntroduction,
@@ -260,6 +261,8 @@ begin
       CommandLineJoin := Copy(Argument, 8, MaxInt)
     else if Pos('--name=', Argument) = 1 then
       CommandLineName := Copy(Argument, 8, MaxInt)
+    else if Pos('--net-dump=', Argument) = 1 then
+      StateDumpDirectory := ExpandFileName(Copy(Argument, 12, MaxInt))
     else if Pos('--sim-net-leave-at=', Argument) = 1 then
       Simulation.NetLeaveAt := StrToInt(Copy(Argument, 20, MaxInt))
     // CHANGE: ENHANCEMENT - Remote dialogue (ROADMAP.md, Phase 5): the host's day asks a remote

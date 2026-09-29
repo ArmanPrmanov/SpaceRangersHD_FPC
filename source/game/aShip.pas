@@ -3227,7 +3227,9 @@ begin
       Result :=
           'Bm.Captain.2'
               + OwnerInfo[Integer(RaceToOwner(PilotRace)) and $7F].InternalName
-              + IntToStr(PortraitFaceId);
+              // CHANGE: BUGFIX - A human who joined has no face chosen (-1), and there is no
+              // such picture; the first face of the race stands in.
+              + IntToStr(Max(PortraitFaceId, 0));
     Exit;
   end;
   if HasScriptStateText
