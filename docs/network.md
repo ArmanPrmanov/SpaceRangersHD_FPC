@@ -600,10 +600,10 @@ save):
 | --- | --- | --- | --- | --- | --- | --- |
 | AutoSave | 2 | 2.91 MB / 558 KB | 93 KB | 102 KB | 453 ms | 187 ms |
 | AutoSave | 8 | 2.98 MB / 561 KB | 95 KB | 650 KB | 938 ms | 289 ms |
-| Система Солнце (1) | 2 | 2.79 MB / 534 KB | 99 KB | 86 KB | 359 ms | 109 ms |
-| Система Солнце (1) | 8 | 2.84 MB / 539 KB | 98 KB | 613 KB | 765 ms | 273 ms |
-| Система Солнце | 2 | 2.77 MB / 531 KB | 90 KB | 99 KB | 344 ms | 164 ms |
-| Система Солнце | 8 | 2.84 MB / 535 KB | 91 KB | 509 KB | 734 ms | 258 ms |
+| РЎРёСЃС‚РµРјР° РЎРѕР»РЅС†Рµ (1) | 2 | 2.79 MB / 534 KB | 99 KB | 86 KB | 359 ms | 109 ms |
+| РЎРёСЃС‚РµРјР° РЎРѕР»РЅС†Рµ (1) | 8 | 2.84 MB / 539 KB | 98 KB | 613 KB | 765 ms | 273 ms |
+| РЎРёСЃС‚РµРјР° РЎРѕР»РЅС†Рµ | 2 | 2.77 MB / 531 KB | 90 KB | 99 KB | 344 ms | 164 ms |
+| РЎРёСЃС‚РµРјР° РЎРѕР»РЅС†Рµ | 8 | 2.84 MB / 535 KB | 91 KB | 509 KB | 734 ms | 258 ms |
 
 With 8 humans nine processes share the machine, which is most of the slower
 load. Every client with the same base gets the same delta, compressed once.
