@@ -823,8 +823,11 @@ end;
 // memory snapshot holds, plus the per-human and session state the simulation reads between
 // days. Unlike a save it does not prepare the galaxy, touch screens or count as a save or a
 // load, so writing one changes nothing and reading one gives back the same state.
+// CHANGE: ENHANCEMENT - Version 2 adds each human's end of turn (THuman.EndedTurn and
+// ContinueUntilArrival), so that a networked client knows whether the host continues its
+// travel (docs/network.md, Continuing travel).
 const
-  CheckpointVersion = 1;
+  CheckpointVersion = 2;
 
 procedure WriteShipId(Buffer: TBufEC; Ship: TShip);
 begin
@@ -1137,6 +1140,13 @@ begin
   else
     Buffer.AddDWord(0);
   WriteShipId(Buffer, LocalHuman.PendingPlayerFollowTarget);
+  Buffer.AddInt32(Session.Humans.Count);
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Buffer.AddInt32(Session.Humans[I].Id);
+    Buffer.AddBoolean(Session.Humans[I].EndedTurn);
+    Buffer.AddBoolean(Session.Humans[I].ContinueUntilArrival);
+  end;
 end;
 
 procedure ReadGameCheckpoint(Buffer: TBufEC);
@@ -1149,8 +1159,12 @@ var
   Prepared, WeaponPanelOpen, AutomaticControl, EquipmentBroken: Boolean;
   DialogueRequestCount: Byte;
   ChaoticState: Cardinal;
+  Version: Integer;
+  Human: THuman;
+  EndedTurn, ContinueUntilArrival: Boolean;
 begin
-  if Buffer.GetInt32 <> CheckpointVersion then
+  Version := Buffer.GetInt32;
+  if (Version < 1) or (Version > CheckpointVersion) then
     raise Exception.Create('Unknown checkpoint version');
   Prepared := Buffer.GetBoolean;
   WeaponPanelOpen := Buffer.GetBoolean;
@@ -1199,6 +1213,21 @@ begin
   LocalHuman.TalkShip := Galaxy.IdToShip(Buffer.GetUInt32, False);
   LocalHuman.TalkPlanet := Galaxy.IdToPlanet(Buffer.GetUInt32, False);
   LocalHuman.PendingPlayerFollowTarget := Galaxy.IdToShip(Buffer.GetUInt32, False);
+  if Version >= 2 then
+  begin
+    Count := Buffer.GetInt32;
+    for I := 0 to Count - 1 do
+    begin
+      Human := FindHuman(Buffer.GetInt32);
+      EndedTurn := Buffer.GetBoolean;
+      ContinueUntilArrival := Buffer.GetBoolean;
+      if Human <> nil then
+      begin
+        Human.EndedTurn := EndedTurn;
+        Human.ContinueUntilArrival := ContinueUntilArrival;
+      end;
+    end;
+  end;
   // Loading seeds the chaotic stream from the clock.
   ChaoticRandomState := ChaoticState;
 end;

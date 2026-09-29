@@ -9,11 +9,13 @@ interface
 uses
   EC_Buf,
   aCommands,
+  aHuman,
   NetTransport;
 const
   // CHANGE: ENHANCEMENT - 2: TalkRequest has a payload (remote dialogue). 3: Status names the
-  // human whose answer to a dialogue the day waits for.
-  ProtocolVersion = 3;
+  // human whose answer to a dialogue the day waits for. 4: NewHuman and Character (a first
+  // join chooses its character on the new-game screen).
+  ProtocolVersion = 4;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 
@@ -29,7 +31,17 @@ const
   nkTalkDone = 10;
   nkChat = 11;
   nkBye = 12;
+  // CHANGE: ENHANCEMENT - host -> client: the name is new here, so the client chooses its
+  // character (no payload); client -> host: the choice (TCharacterMessage).
+  nkNewHuman = 13;
+  nkCharacter = 14;
 type
+  // client -> host: the new-game screen's choices for a human who joins for the first time,
+  // and the name, which the screen may have changed.
+  TCharacterMessage = record
+    Name: WideString;
+    Character: TJoinCharacter;
+  end;
   // client -> host: who joins, with what.
   THelloMessage = record
     Protocol: Integer;
@@ -53,7 +65,8 @@ type
     BaseSerial: Integer;
     // The galaxy day (TGalaxy.CurrentTurn).
     Day: Integer;
-    // GalaxyStateHash of the state, taken on the host with its own human local.
+    // GalaxyStateHash of the state, taken on the host with its own human local; 0 when the
+    // host does not hash its states (StateHashes).
     Hash: QWord;
   end;
   // host -> client: the film of a star's day (TEFilm.SaveToBuffer) follows the header.
@@ -119,6 +132,8 @@ procedure EncodeCommandMessage(const Command: TPlayerCommand; Buffer: TBufEC);
 function DecodeCommandMessage(Buffer: TBufEC): TPlayerCommand;
 procedure EncodeAck(Day: Integer; Buffer: TBufEC);
 function DecodeAck(Buffer: TBufEC): Integer;
+procedure EncodeCharacter(const Message: TCharacterMessage; Buffer: TBufEC);
+function DecodeCharacter(Buffer: TBufEC): TCharacterMessage;
 procedure EncodeStatus(const Message: TStatusMessage; Buffer: TBufEC);
 function DecodeStatus(Buffer: TBufEC): TStatusMessage;
 procedure EncodeChat(const Message: TChatMessage; Buffer: TBufEC);
@@ -135,6 +150,11 @@ function DataHash: QWord;
 // The same over a list of files, in order: each file's name, size and bytes. Missing files
 // count by name. Exposed for the unit tests.
 function HashFiles(const Names: array of AnsiString): QWord;
+var
+  // CHANGE: ENHANCEMENT - Whether the host hashes each state it sends, and the client the state
+  // it loads, to find a desync: a full serialisation on each side every day, so only debug
+  // builds and the headless tests (which set it) do. A state without a hash is not checked.
+  StateHashes: Boolean = {$IFOPT C+}True{$ELSE}False{$ENDIF};
 implementation
 uses
   SysUtils,
@@ -159,6 +179,8 @@ begin
     nkTalkDone: Result := 'TalkDone';
     nkChat: Result := 'Chat';
     nkBye: Result := 'Bye';
+    nkNewHuman: Result := 'NewHuman';
+    nkCharacter: Result := 'Character';
   else
     Result := 'Kind' + IntToStr(Kind);
   end;
@@ -201,6 +223,36 @@ begin
   Result.DataHash := GetQWord(Buffer);
   Result.Name := Buffer.ReadWideString;
   Result.Spectator := Buffer.GetBoolean;
+end;
+
+procedure EncodeCharacter(const Message: TCharacterMessage; Buffer: TBufEC);
+var
+  I: Integer;
+begin
+  Buffer.AddWideStringZ(Message.Name);
+  Buffer.AddInt32(Message.Character.Race);
+  Buffer.AddInt32(Message.Character.Preset);
+  Buffer.AddInt32(Message.Character.Face);
+  for I := 0 to 1 do
+    Buffer.AddByte(Message.Character.Skills[I]);
+  for I := 0 to 1 do
+    Buffer.AddByte(Message.Character.Items[I]);
+end;
+
+function DecodeCharacter(Buffer: TBufEC): TCharacterMessage;
+var
+  I: Integer;
+begin
+  Result := Default(TCharacterMessage);
+  Result.Name := Buffer.ReadWideString;
+  Result.Character.Chosen := True;
+  Result.Character.Race := Buffer.GetInt32;
+  Result.Character.Preset := Buffer.GetInt32;
+  Result.Character.Face := Buffer.GetInt32;
+  for I := 0 to 1 do
+    Result.Character.Skills[I] := Buffer.GetByte;
+  for I := 0 to 1 do
+    Result.Character.Items[I] := Buffer.GetByte;
 end;
 
 procedure EncodeWelcome(const Message: TWelcomeMessage; Buffer: TBufEC);

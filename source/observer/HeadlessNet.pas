@@ -184,6 +184,8 @@ begin
   Result := 0;
   LoadSave(Options.SavePath, Options.Seed);
   Emit(Format('sim save=%s seed=%d day=%d', [Options.SavePath, Options.Seed, Galaxy.CurrentTurn]));
+  // The tests compare every state's hash with the host's, in release builds too.
+  StateHashes := True;
   NetLogHook := @EmitNetEvent;
   try
     Host := StartHosting(Options.NetHostPort, 'Host');
@@ -194,7 +196,8 @@ begin
     // Every client first, then the joins by name, so that the humans are the same each run.
     Host.HoldJoins := True;
     Deadline := GetTickCount64 + StallTimeoutMs;
-    while Host.PendingJoinCount < Options.NetClients do
+    // A first join sends its character before it can be taken (TNetHost.AskCharacters).
+    while Host.ReadyJoinCount < Options.NetClients do
     begin
       if GetTickCount64 > Deadline then
       begin
@@ -417,7 +420,8 @@ begin
 end;
 
 const
-  JoinPhaseNames: array[TNetJoinPhase] of AnsiString = ('connecting', 'joining', 'receiving', 'joined');
+  JoinPhaseNames: array[TNetJoinPhase] of AnsiString =
+      ('connecting', 'joining', 'character', 'receiving', 'joined');
 
 function RunNetClient(const Options: TSimulationOptions): Integer;
 var
@@ -430,11 +434,13 @@ var
   Plan: AnsiString;
   Phase, ShownPhase: TNetJoinPhase;
   OwnFilm, FilmPlaying, TalkHeld: Boolean;
+  Character: TJoinCharacter;
 begin
   Result := 0;
   Colon := LastDelimiter(':', Options.NetJoin);
   Address := Copy(Options.NetJoin, 1, Colon - 1);
   Port := StrToInt(Copy(Options.NetJoin, Colon + 1, MaxInt));
+  StateHashes := True;
   NetLogHook := @EmitNetEvent;
   Days := -1;
   Mismatches := 0;
@@ -459,6 +465,20 @@ begin
         Client.ReceiveProgress(Have, Size);
         Emit(Format('net client join phase=%s have=%d size=%d', [JoinPhaseNames[Phase], Have, Size]));
         ShownPhase := Phase;
+      end;
+      // A first join: the tests choose a fixed character (a Peleng warrior with a radar and a
+      // weapon), as the new-game screen would send it.
+      if Client.CharacterWanted then
+      begin
+        Character := PresetCharacter(1);
+        Character.Chosen := True;
+        Character.Race := 1;
+        Character.Face := 0;
+        Character.Skills[0] := 0;
+        Character.Skills[1] := 3;
+        Character.Items[0] := 45;
+        Character.Items[1] := 50;
+        Client.SendCharacter(WideString(Options.NetName), Character);
       end;
       // A join cancelled once the host has let the client in, before the state is applied.
       if Options.NetCancelJoin and (Phase >= jpReceiving) then

@@ -26,6 +26,11 @@ type
     Hello: THelloMessage;
     // The human the peer plays, once joined.
     HumanId: Integer;
+    // CHANGE: ENHANCEMENT - A first join: NewHuman went to the peer, and the character it chose
+    // on the new-game screen has come (docs/network.md, Joining).
+    CharacterAsked: Boolean;
+    HasCharacter: Boolean;
+    Character: TJoinCharacter;
     // Its commands, in arrival order, not yet applied.
     Queue: array of TPlayerCommand;
     // The last state it acknowledged (0: none), and that state while the host has it.
@@ -41,6 +46,8 @@ type
     Deferred: TList;
     destructor Destroy; override;
     function EndTurnIndex: Integer;
+    // CHANGE: ENHANCEMENT - The index of the first StopContinuing in the queue; -1 when none.
+    function StopIndex: Integer;
   end;
 
   TNetHost = class
@@ -80,8 +87,12 @@ type
     procedure DisconnectHuman(Human: THuman; Peer: THostPeer);
     procedure ProcessLeaving;
     procedure ProcessJoins;
+    procedure AskCharacters;
+    function FindNamedHuman(const Name: WideString): THuman;
+    function JoinReady(Peer: THostPeer): Boolean;
     procedure SendStatus(Force: Boolean);
     function TakeState: TNetState;
+    function LagsBehind(Peer: THostPeer; Human: THuman): Boolean;
   public
     // Joins wait while this is set; the headless host sets it until every client is there,
     // so that the humans join in the same order every run (by name).
@@ -98,15 +109,22 @@ type
     // A day has begun (BeginDay) and its state has not been sent yet.
     property DayUnderWay: Boolean read FDayUnderWay;
     function PendingJoinCount: Integer;
+    // CHANGE: ENHANCEMENT - The pending joins that can be taken now: a rejoin, or a first join
+    // whose character has come.
+    function ReadyJoinCount: Integer;
     function JoinedCount: Integer;
     // Every joined peer is ready: its queue holds an EndTurn, or its human does not hold
-    // the day.
+    // the day. CHANGE: ENHANCEMENT - A peer whose human does not hold the day (it continues its
+    // travel) must also have applied the state before the last one: the host runs at most one
+    // day ahead of a client (docs/network.md, Continuing travel).
     function PeersReady: Boolean;
     // The humans the day waits for, for a waiting screen or a log.
     function WaitingFor: AnsiString;
     // Applies the queues, human by human in Session.Humans order, each up to and including
     // its EndTurn, through SubmitCommand (so the command log records them). A queue without
-    // an EndTurn waits for the next day.
+    // an EndTurn waits for the next day. CHANGE: ENHANCEMENT - Except a StopContinuing of a
+    // human who continues its travel: it is applied, with what comes before it, so that the
+    // player's break holds the next day (docs/network.md, Continuing travel).
     procedure ApplyQueues;
     // The day starts: no join or disconnect until the state after it is sent.
     procedure BeginDay;
@@ -195,6 +213,16 @@ begin
       TObject(Deferred[I]).Free;
   Deferred.Free;
   inherited;
+end;
+
+function THostPeer.StopIndex: Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to High(Queue) do
+    if Queue[I].Kind = ckStopContinuing then
+      Exit(I);
+  Result := -1;
 end;
 
 function THostPeer.EndTurnIndex: Integer;
@@ -305,6 +333,7 @@ var
   Chat: TChatMessage;
   Serial, I: Integer;
   Other: THostPeer;
+  Character: TCharacterMessage;
 begin
   if Peer.Leaving then
     Exit;
@@ -371,6 +400,19 @@ begin
             FThread.Send(Other.PeerId, nkChat, Payload);
         end;
       end;
+    nkCharacter:
+      if (Peer.State = hpPendingJoin) and Peer.CharacterAsked and not Peer.HasCharacter then
+      begin
+        Character := DecodeCharacter(Payload);
+        if Character.Name = '' then
+          Refuse(Peer, 'no name')
+        else
+        begin
+          Peer.Hello.Name := Character.Name;
+          Peer.Character := Character.Character;
+          Peer.HasCharacter := True;
+        end;
+      end;
     nkBye:
       Peer.Leaving := True;
   end;
@@ -427,6 +469,7 @@ begin
   if Quiet then
   begin
     ProcessLeaving;
+    AskCharacters;
     if not HoldJoins then
       ProcessJoins;
   end;
@@ -486,6 +529,59 @@ begin
   for I := 0 to FPeers.Count - 1 do
     if (THostPeer(FPeers[I]).State = hpPendingJoin) and not THostPeer(FPeers[I]).Leaving then
       Inc(Result);
+end;
+
+function TNetHost.FindNamedHuman(const Name: WideString): THuman;
+var
+  I: Integer;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Result := Session.Humans[I];
+    if (Result.Player <> nil) and (Result.Player.Name = Name) then
+      Exit;
+  end;
+  Result := nil;
+end;
+
+// A pending join that can be taken: its name is a human's (a rejoin, or a refusal), or it is
+// a first join whose character has come.
+function TNetHost.JoinReady(Peer: THostPeer): Boolean;
+begin
+  Result := Peer.HasCharacter or (FindNamedHuman(Peer.Hello.Name) <> nil);
+end;
+
+function TNetHost.ReadyJoinCount: Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to FPeers.Count - 1 do
+    if (THostPeer(FPeers[I]).State = hpPendingJoin)
+        and not THostPeer(FPeers[I]).Leaving
+        and JoinReady(THostPeer(FPeers[I])) then
+      Inc(Result);
+end;
+
+// A first join (a name no human has) chooses its character on the new-game screen first.
+procedure TNetHost.AskCharacters;
+var
+  I: Integer;
+  Peer: THostPeer;
+begin
+  for I := 0 to FPeers.Count - 1 do
+  begin
+    Peer := THostPeer(FPeers[I]);
+    if (Peer.State = hpPendingJoin)
+        and not Peer.Leaving
+        and not Peer.CharacterAsked
+        and (FindNamedHuman(Peer.Hello.Name) = nil) then
+    begin
+      Peer.CharacterAsked := True;
+      FThread.Send(Peer.PeerId, nkNewHuman, nil, 0);
+      NetLog(Format('peer %d (%s) chooses its character', [Peer.PeerId, UTF8Encode(Peer.Hello.Name)]));
+    end;
+  end;
 end;
 
 function TNetHost.JoinedCount: Integer;
@@ -558,10 +654,11 @@ end;
 procedure TNetHost.ProcessJoins;
 var
   Pending: TList;
-  I, J: Integer;
+  I, Joined: Integer;
   Peer: THostPeer;
   Human, Found: THuman;
   Planet: TPlanet;
+  Character: TJoinCharacter;
   Welcome: TWelcomeMessage;
   Payload: TBufEC;
   State: TNetState;
@@ -571,24 +668,18 @@ begin
   Payload := TBufEC.Create;
   try
     for I := 0 to FPeers.Count - 1 do
-      if (THostPeer(FPeers[I]).State = hpPendingJoin) and not THostPeer(FPeers[I]).Leaving then
+      if (THostPeer(FPeers[I]).State = hpPendingJoin)
+          and not THostPeer(FPeers[I]).Leaving
+          and JoinReady(THostPeer(FPeers[I])) then
         Pending.Add(FPeers[I]);
     if Pending.Count = 0 then
       Exit;
     Pending.Sort(@CompareHelloNames);
+    Joined := 0;
     for I := 0 to Pending.Count - 1 do
     begin
       Peer := THostPeer(Pending[I]);
-      Found := nil;
-      for J := 0 to Session.Humans.Count - 1 do
-      begin
-        Human := Session.Humans[J];
-        if (Human.Player <> nil) and (Human.Player.Name = Peer.Hello.Name) then
-        begin
-          Found := Human;
-          Break;
-        end;
-      end;
+      Found := FindNamedHuman(Peer.Hello.Name);
       if Found <> nil then
       begin
         if (Found = LocalHuman) or Found.Connected then
@@ -601,13 +692,19 @@ begin
       end
       else
       begin
-        Planet := FindJoinPlanet;
+        Character := Peer.Character;
+        if (Character.Preset < 1) or (Character.Preset > 5) then
+          Character.Preset := 1 + Session.Humans.Count mod 5;
+        Planet := FindJoinPlanet(Character.Race);
         if Planet = nil then
         begin
           Refuse(Peer, 'no planet to join at');
           Continue;
         end;
-        Human := JoinHumanAt(Planet, Peer.Hello.Name, 1 + Session.Humans.Count mod 5);
+        // The portraits are the race's; with no planet of the chosen race it is another one.
+        if Planet.RaceId <> Character.Race then
+          Character.Face := 0;
+        Human := JoinHumanAt(Planet, Peer.Hello.Name, Character);
         NetLog(
             Format(
                 'human %d (%s) joined at planet %d in star %d',
@@ -625,7 +722,10 @@ begin
       Welcome.HostName := FName;
       EncodeWelcome(Welcome, Payload);
       FThread.Send(Peer.PeerId, nkWelcome, Payload);
+      Inc(Joined);
     end;
+    if Joined = 0 then
+      Exit;
     State := TakeState;
     try
       Job := TNetStateJob.Create(State);
@@ -690,6 +790,17 @@ begin
   end;
 end;
 
+function TNetHost.LagsBehind(Peer: THostPeer; Human: THuman): Boolean;
+begin
+  Result :=
+      (Human <> nil)
+          and Human.Connected
+          and Human.ContinueUntilArrival
+          and not HumanHoldsDay(Human)
+          and (Peer.AckedSerial > 0)
+          and (Peer.AckedSerial < FSerial - 1);
+end;
+
 function TNetHost.PeersReady: Boolean;
 var
   I: Integer;
@@ -703,6 +814,8 @@ begin
       Continue;
     Human := FindHuman(Peer.HumanId);
     if (Human <> nil) and HumanHoldsDay(Human) and (Peer.EndTurnIndex < 0) then
+      Exit(False);
+    if LagsBehind(Peer, Human) then
       Exit(False);
   end;
   Result := True;
@@ -718,10 +831,13 @@ begin
   for I := 0 to Session.Humans.Count - 1 do
   begin
     Human := Session.Humans[I];
-    if not HumanHoldsDay(Human) then
-      Continue;
     Peer := PeerOfHuman(FPeers, Human.Id);
-    if (Peer <> nil) and (Peer.EndTurnIndex >= 0) then
+    if not HumanHoldsDay(Human) then
+    begin
+      if (Peer = nil) or not LagsBehind(Peer, Human) then
+        Continue;
+    end
+    else if (Peer <> nil) and (Peer.EndTurnIndex >= 0) then
       Continue;
     if Result <> '' then
       Result := Result + ',';
@@ -740,6 +856,8 @@ begin
     if (Peer = nil) or Peer.Leaving then
       Continue;
     Last := Peer.EndTurnIndex;
+    if (Last < 0) and Session.Humans[I].ContinueUntilArrival then
+      Last := Peer.StopIndex;
     for J := 0 to Last do
       try
         SubmitCommand(Peer.Queue[J]);
@@ -1005,7 +1123,13 @@ var
 begin
   Start := GetTickCount64;
   Inc(FSerial);
-  Result := TNetState.Create(FSerial, Galaxy.CurrentTurn, GalaxyStateHash);
+  // CHANGE: ENHANCEMENT - The hash is a second serialisation, for finding desyncs only.
+  if StateHashes then
+    Result := TNetState.Create(
+        FSerial, Galaxy.CurrentTurn, GalaxyStateHashDumped(Format('host-state-%d', [FSerial]))
+    )
+  else
+    Result := TNetState.Create(FSerial, Galaxy.CurrentTurn, 0);
   WriteGameCheckpoint(Result.Bytes);
   FLastTakeMs := Integer(GetTickCount64 - Start);
   FStates.Add(Result.AddRef);

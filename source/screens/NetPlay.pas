@@ -19,7 +19,8 @@ interface
 uses
   GI_MessageLoop,
   aEFilm,
-  aGalaxy;
+  aGalaxy,
+  aHuman;
 var
   // --host=PORT: hosts the game once one runs (0 picks a port); -1 without it.
   CommandLineHostPort: Integer = -1;
@@ -75,6 +76,16 @@ procedure RequestJoin(const Address: AnsiString; const Name: WideString);
 // Cancel that stays on Screen. When the state has come, Screen closes and the state is applied
 // between screens; a failure says why over Screen.
 procedure RunPendingJoin(Screen: TMessageLoopGI);
+// CHANGE: ENHANCEMENT - A first join chooses its character (docs/network.md, Joining): when the
+// host asks, the join's box closes and the new-game screen opens without its difficulty
+// (TfGameSettings2). True while it is open for that.
+function NetCharacterScreen: Boolean;
+// The name the join gave, which the screen proposes.
+function NetJoinName: WideString;
+// The screen's choice goes to the host, and the join goes on over the main menu.
+procedure SendNetCharacter(const Name: WideString; const Character: TJoinCharacter);
+// The screen was cancelled: the join ends on the way to the main menu.
+procedure CancelNetCharacter;
 // Why the running game cannot be hosted from the in-game menu now; '' when it can.
 function HostingRefusal: WideString;
 // Hosts the running game on Port (0 picks one), as --host does; returns the port it listens on.
@@ -102,7 +113,6 @@ uses
   SE_Space,
   aCalc,
   aConst,
-  aHuman,
   aSession,
   aMyFunction,
   aAsteroid,
@@ -331,7 +341,7 @@ begin
   case Client.JoinPhase of
     jpConnecting:
       Result := NamedLine('JoinConnecting', 'Connecting to <Players>.', JoinAddressText);
-    jpJoining:
+    jpJoining, jpCharacter:
       Result := MultiplayerText('JoinWaiting', 'Connected. Waiting for the host to let you in.');
   else
     begin
@@ -365,20 +375,19 @@ begin
   Result := GetTickCount64 > JoinProgressAt + JoinTimeoutMs;
 end;
 
-// Takes the films that came: the one of the wanted star waits to be played, the rest go.
+// Takes the film of the next day in the wanted star, which waits to be played. CHANGE:
+// ENHANCEMENT - The next day's film is the one of the state's day (a film is recorded before
+// the galaxy job counts the day). Films of earlier days go; films of later days stay, since the
+// host runs the next day of a human who continues its travel while the client still plays the
+// last one (docs/network.md, Continuing travel).
 procedure CollectFilms;
-var
-  Film: TNetClientFilm;
 begin
-  repeat
-    Film := CurrentClient.TakeFilm;
-    if Film = nil then
-      Break;
-    if (PendingFilm = nil) and (WantedFilmStar >= 0) and (Film.Header.StarId = WantedFilmStar) then
-      PendingFilm := Film
-    else
-      Film.Free;
-  until False;
+  if Galaxy = nil then
+    Exit;
+  if (PendingFilm = nil) and (WantedFilmStar >= 0) then
+    PendingFilm := CurrentClient.TakeFilmOfDay(Galaxy.CurrentTurn, WantedFilmStar)
+  else
+    CurrentClient.DropFilmsBefore(Galaxy.CurrentTurn);
 end;
 
 procedure DropPendingFilm;
@@ -404,6 +413,7 @@ begin
       Result :=
           (CurrentClient = nil)
               or CurrentClient.HasState
+              or CurrentClient.CharacterWanted
               or not CurrentClient.Connected
               or JoinStalled;
     nwClientDay:
@@ -667,12 +677,16 @@ end;
 // The quiet point after a day (docs/network.md, States): no job runs, and the next day is
 // prepared, or the galaxy job has run and this screen does not prepare days. Only the star map
 // prepares days (after its film), so there the state waits for the preparation.
+// CHANGE: ENHANCEMENT - A star map whose travel goes on (TfStarMap.NetDayDeferred) prepares no
+// day: the next one starts at the film's end. Its state goes as soon as the galaxy job has run,
+// while the film plays, so that neither the host's next day nor the clients' wait for it.
 function QuietAfterDay: Boolean;
 begin
   Result :=
       not IsTurnCalculationRunning
           and ((TurnCalculationPhase = tcpPlayerStarPrepared)
-              or ((TurnCalculationPhase = tcpGalaxyFinished) and (CurrentScreenId <> screenStarMap)));
+              or ((TurnCalculationPhase = tcpGalaxyFinished)
+                  and ((CurrentScreenId <> screenStarMap) or StarMapScreen.NetDayDeferred)));
 end;
 
 procedure NetFrame;
@@ -860,7 +874,11 @@ begin
       end;
     nrClient:
       begin
-        EndTurn(False);
+        // CHANGE: ENHANCEMENT - The end turn asks the host to go on with the travel until it
+        // stops (THuman.ContinueUntilArrival), as the star map's automatic continue goes on:
+        // the host then runs the next days without waiting for this client, and the break
+        // stops it (docs/network.md, Continuing travel). Not with the break key held.
+        EndTurn(not ((Screen = StarMapScreen) and StarMapScreen.BreakOnNextFilm));
         ClientWaitForDay(Screen);
         Result := False;
       end;
@@ -1025,7 +1043,7 @@ begin
   NetFrame;
   // Films of the days in hyperspace are not shown (docs/network.md, Films).
   DropPendingFilm;
-  CollectFilms;
+  CurrentClient.DropFilmsBefore(High(Integer));
   if CurrentClient.HasState then
     RequestApply(Screen, False, False, False)
   else if not CurrentClient.Connected then
@@ -1075,10 +1093,13 @@ begin
     RequestedScreenId := screenRuinsTalk
   else
   begin
-    // Travel that goes on ends the next day's turn by itself, as the star map's automatic
-    // continue does, until the film shows a fight or the player breaks it.
-    Continues :=
-        AppliedAfterFilm and not FilmBroken and not FilmCombat and HumanTravelContinues(LocalHuman);
+    // CHANGE: ENHANCEMENT - The host goes on with the travel (the state says so: the human
+    // continues until arrival), so the star map waits for the next day's film at once, as the
+    // star map's automatic continue does, until the host stops it or the player breaks a film.
+    // A break asks the host to stop (it may have run the next day already).
+    Continues := LocalHuman.ContinueUntilArrival and not (AppliedAfterFilm and FilmBroken);
+    if LocalHuman.ContinueUntilArrival and not Continues then
+      StopContinuing;
     SpaceViewPosition := P.Position;
     StarMapScreen.SetMapCenterManually(TruncatePointF(P.Position));
     StarMapScreen.ResumeMode := smrNormal;
@@ -1124,7 +1145,6 @@ begin
       Background[I] := Galaxy.SpaceBackgroundEntries[I];
   end;
   DropPendingFilm;
-  CollectFilms;
   PendingHuman := nil;
   try
     Report := Client.ApplyState;
@@ -1162,6 +1182,10 @@ var
   // screens on the way to the main menu.
   PendingJoinAddress: AnsiString;
   PendingJoinName: WideString;
+  // CHANGE: ENHANCEMENT - The new-game screen is open for a first join's character; the join
+  // goes on over the main menu once it has been sent (the session stays on the way there).
+  CharacterScreenOpen: Boolean;
+  JoinResumes: Boolean;
 
 function ParseNetAddress(const Text: AnsiString; out Host: AnsiString; out Port: Integer): Boolean;
 var
@@ -1184,33 +1208,51 @@ begin
   PendingJoinName := Name;
 end;
 
-procedure RunPendingJoin(Screen: TMessageLoopGI);
+function NetCharacterScreen: Boolean;
+begin
+  Result := CharacterScreenOpen and (NetRole = nrClient);
+end;
+
+function NetJoinName: WideString;
+begin
+  Result := PendingJoinName;
+end;
+
+procedure SendNetCharacter(const Name: WideString; const Character: TJoinCharacter);
+begin
+  CharacterScreenOpen := False;
+  if CurrentClient = nil then
+    Exit;
+  CurrentClient.SendCharacter(Name, Character);
+  PendingJoinName := Name;
+  JoinResumes := True;
+  NetLog(
+      Format(
+          'character sent: race %d, preset %d, face %d',
+          [Character.Race, Character.Preset, Character.Face]
+      )
+  );
+end;
+
+procedure CancelNetCharacter;
+begin
+  CharacterScreenOpen := False;
+  JoinResumes := False;
+  NetLog('the join was cancelled on the new-game screen');
+end;
+
+// The join's box over Screen until the state has come, the host asks for a character (the
+// new-game screen opens), or the join fails or is cancelled.
+procedure FollowJoin(Screen: TMessageLoopGI);
 var
-  Address: AnsiString;
-  Port: Integer;
   Client: TNetClient;
   Closed: Cardinal;
   Cancelled: Boolean;
   Text: WideString;
 begin
-  if PendingJoinAddress = '' then
+  Client := CurrentClient;
+  if Client = nil then
     Exit;
-  if not ParseNetAddress(PendingJoinAddress, Address, Port) then
-  begin
-    Text :=
-        MultiplayerText('BadAddress', 'Expected an address as HOST or HOST:PORT:')
-            + ' '
-            + WideString(PendingJoinAddress);
-    PendingJoinAddress := '';
-    ShowMessageBoxGI(Screen, Text, mbgOK or mbgError);
-    Exit;
-  end;
-  PendingJoinAddress := '';
-  JoinAddressText := WideString(Address) + ':' + WideString(IntToStr(Port));
-  NetLog(Format('joining %s:%d as %s', [Address, Port, UTF8Encode(PendingJoinName)]));
-  // The connect runs on its own thread, so the box can show it and Cancel can end it.
-  Client := JoinGame(Address, Port, PendingJoinName, False);
-  BeginNetSession(True);
   JoinProgressMark := -1;
   JoinProgressAt := GetTickCount64;
   Cancelled := False;
@@ -1227,6 +1269,13 @@ begin
   if ExitScreenLoop or (Screen.ExitCode <> 0) then
   begin
     EndNetSession;
+    Exit;
+  end;
+  if not Cancelled and Client.Connected and Client.CharacterWanted then
+  begin
+    CharacterScreenOpen := True;
+    RequestedScreenId := screenNewGame;
+    Screen.RequestClose(1);
     Exit;
   end;
   if Cancelled or not Client.HasState then
@@ -1248,6 +1297,40 @@ begin
   NetLog(Format('joined %s as human %d', [UTF8Encode(Client.HostName), Client.HumanId]));
   // The state is applied between screens; the human's screen opens after it.
   RequestApply(Screen, False, False, False);
+end;
+
+procedure RunPendingJoin(Screen: TMessageLoopGI);
+var
+  Address: AnsiString;
+  Port: Integer;
+  Text: WideString;
+begin
+  if PendingJoinAddress = '' then
+  begin
+    if JoinResumes then
+    begin
+      JoinResumes := False;
+      FollowJoin(Screen);
+    end;
+    Exit;
+  end;
+  if not ParseNetAddress(PendingJoinAddress, Address, Port) then
+  begin
+    Text :=
+        MultiplayerText('BadAddress', 'Expected an address as HOST or HOST:PORT:')
+            + ' '
+            + WideString(PendingJoinAddress);
+    PendingJoinAddress := '';
+    ShowMessageBoxGI(Screen, Text, mbgOK or mbgError);
+    Exit;
+  end;
+  PendingJoinAddress := '';
+  JoinAddressText := WideString(Address) + ':' + WideString(IntToStr(Port));
+  NetLog(Format('joining %s:%d as %s', [Address, Port, UTF8Encode(PendingJoinName)]));
+  // The connect runs on its own thread, so the box can show it and Cancel can end it.
+  JoinGame(Address, Port, PendingJoinName, False);
+  BeginNetSession(True);
+  FollowJoin(Screen);
 end;
 
 // CHANGE: ENHANCEMENT - The client lost its host while it plays its turn (NetFrame). It leaves
@@ -1371,7 +1454,8 @@ begin
   ScreenClosing := False;
   if ApplyPending then
     ApplyClientState;
-  if (RequestedScreenId = screenMainMenu) and (NetRole <> nrNone) then
+  // CHANGE: ENHANCEMENT - Except a join that goes on after its character was chosen.
+  if (RequestedScreenId = screenMainMenu) and (NetRole <> nrNone) and not JoinResumes then
     EndNetSession;
   if (CommandLineJoin <> '') and (RequestedScreenId = screenMainMenu) then
   begin

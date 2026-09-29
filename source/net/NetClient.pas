@@ -11,6 +11,7 @@ uses
   Classes,
   EC_Buf,
   aCommands,
+  aHuman,
   NetTransport,
   NetThread,
   NetProtocol;
@@ -40,8 +41,9 @@ type
 
   // CHANGE: ENHANCEMENT - How far a join has come, for its progress (docs/network.md, Hosting
   // and joining): connecting; said Hello, waiting for Welcome; welcomed, receiving the state;
-  // a state has come.
-  TNetJoinPhase = (jpConnecting, jpJoining, jpReceiving, jpJoined);
+  // a state has come. CHANGE: ENHANCEMENT - jpCharacter: the host asks a first join to choose its
+  // character (NewHuman); it waits for SendCharacter.
+  TNetJoinPhase = (jpConnecting, jpJoining, jpCharacter, jpReceiving, jpJoined);
 
   TNetClient = class
   private
@@ -55,6 +57,7 @@ type
     FPort: Integer;
     FWelcomed: Boolean;
     FStateReceived: Boolean;
+    FCharacterWanted: Boolean;
     FHostSaidBye: Boolean;
     FHumanId: Integer;
     FHostName: WideString;
@@ -64,6 +67,10 @@ type
     // The last state applied here, uncompressed: the base of the next delta.
     FBase: TBufEC;
     FBaseSerial: Integer;
+    // CHANGE: ENHANCEMENT - The state applied before it: a state the host took before this
+    // client's last acknowledgement reached it is a delta against that one.
+    FPreviousBase: TBufEC;
+    FPreviousBaseSerial: Integer;
     // The newest state received and not applied yet.
     FPending: TBufEC;
     FPendingHeader: TStateHeader;
@@ -108,11 +115,21 @@ type
     function ApplyState: TNetApplyReport;
     // Sends a command this client's human submitted (NetworkCommandHook).
     procedure SendCommand(const Command: TPlayerCommand);
+    // CHANGE: ENHANCEMENT - The character chosen for a first join (CharacterWanted), and the
+    // name, which may differ from Hello's; the join goes on.
+    procedure SendCharacter(const Name: WideString; const Character: TJoinCharacter);
     procedure SendChat(const Text: WideString);
     // Says Bye and waits up to TimeoutMs for it to leave.
     procedure Leave(TimeoutMs: Integer);
     // The films received since the last state applied; the caller takes them.
     function TakeFilm: TNetClientFilm;
+    // CHANGE: ENHANCEMENT - The film of Day in the star StarId, or nil when it has not come.
+    // Films of earlier days, and of Day in other stars, go; films of later days stay: the host
+    // can run the next day of a human who continues its travel before this client has played
+    // the last one (docs/network.md, Continuing travel).
+    function TakeFilmOfDay(Day, StarId: Integer): TNetClientFilm;
+    // Drops the films of the days before Day.
+    procedure DropFilmsBefore(Day: Integer);
     // Whether the host's day waits for this client's human to answer a dialogue.
     function HasTalkRequest: Boolean;
     // Takes the dialogue; the caller answers it with commands and then TalkDone.
@@ -125,6 +142,8 @@ type
     function MayHoldTalk(FilmPlaying: Boolean): Boolean;
     // The answer is complete (or the talk cannot be shown here): the host's day goes on.
     procedure SendTalkDone;
+    // The host asked for a character (NewHuman) and none has been sent yet.
+    property CharacterWanted: Boolean read FCharacterWanted;
     property HumanId: Integer read FHumanId;
     property HostName: WideString read FHostName;
     property Refused: Boolean read FRefused;
@@ -149,7 +168,6 @@ implementation
 uses
   SysUtils,
   aGalaxy,
-  aHuman,
   aObjectRefs,
   aSaveLoad,
   NetDelta;
@@ -177,6 +195,7 @@ begin
   FHumanId := -1;
   FPeerId := -1;
   FBase := TBufEC.Create;
+  FPreviousBase := TBufEC.Create;
   FPending := TBufEC.Create;
   FFilms := TList.Create;
   FThread := TNetThread.Create(-1);
@@ -249,6 +268,7 @@ begin
     TObject(FFilms[I]).Free;
   FFilms.Free;
   FBase.Free;
+  FPreviousBase.Free;
   FPending.Free;
   inherited;
 end;
@@ -272,6 +292,8 @@ begin
     Result := jpJoined
   else if FWelcomed then
     Result := jpReceiving
+  else if FCharacterWanted then
+    Result := jpCharacter
   else if FPeerId >= 0 then
     Result := jpJoining
   else
@@ -315,6 +337,8 @@ begin
           Reference := nil
         else if Header.BaseSerial = FBaseSerial then
           Reference := FBase
+        else if (FPreviousBaseSerial <> 0) and (Header.BaseSerial = FPreviousBaseSerial) then
+          Reference := FPreviousBase
         else
           raise Exception.CreateFmt(
               'state %d is a delta against state %d; this client has %d',
@@ -358,6 +382,12 @@ begin
         FHostLeft := True;
         FHostSaidBye := True;
         NetLog('the host left');
+      end;
+    nkNewHuman:
+      if not FWelcomed then
+      begin
+        FCharacterWanted := True;
+        NetLog('the host asks for a character');
       end;
     nkTalkRequest:
       begin
@@ -421,8 +451,10 @@ begin
   ReadGameCheckpoint(FPending);
   Result.LoadMs := Integer(GetTickCount64 - Start);
   // The state was written with the host's human local, and the hash starts with the local
-  // human, so hash before this client's human becomes the local one again.
-  Result.Hash := GalaxyStateHash;
+  // human, so hash before this client's human becomes the local one again. A state the host
+  // did not hash is not checked.
+  if Result.HostHash <> 0 then
+    Result.Hash := GalaxyStateHashDumped(Format('client-state-%d', [FPendingHeader.Serial]));
   Human := FindHuman(FHumanId);
   if (Human = nil) or (Human.Player = nil) then
     raise Exception.CreateFmt('The host''s state has no human %d', [FHumanId]);
@@ -434,7 +466,9 @@ begin
             [Result.Serial, Result.Day, IntToHex(Result.Hash, 16), IntToHex(Result.HostHash, 16)]
         )
     );
-  Swap := FBase;
+  Swap := FPreviousBase;
+  FPreviousBase := FBase;
+  FPreviousBaseSerial := FBaseSerial;
   FBase := FPending;
   FPending := Swap;
   FPending.Clear;
@@ -459,6 +493,26 @@ begin
   try
     EncodeCommandMessage(Command, Payload);
     FThread.Send(FPeerId, nkCommand, Payload);
+  finally
+    Payload.Free;
+  end;
+end;
+
+procedure TNetClient.SendCharacter(const Name: WideString; const Character: TJoinCharacter);
+var
+  Message: TCharacterMessage;
+  Payload: TBufEC;
+begin
+  if not FCharacterWanted or not Connected then
+    Exit;
+  FCharacterWanted := False;
+  FName := Name;
+  Message.Name := Name;
+  Message.Character := Character;
+  Payload := TBufEC.Create;
+  try
+    EncodeCharacter(Message, Payload);
+    FThread.Send(FPeerId, nkCharacter, Payload);
   finally
     Payload.Free;
   end;
@@ -504,6 +558,42 @@ begin
     Exit(nil);
   Result := TNetClientFilm(FFilms[0]);
   FFilms.Delete(0);
+end;
+
+function TNetClient.TakeFilmOfDay(Day, StarId: Integer): TNetClientFilm;
+var
+  I: Integer;
+  Film: TNetClientFilm;
+begin
+  Result := nil;
+  DropFilmsBefore(Day);
+  I := 0;
+  while I < FFilms.Count do
+  begin
+    Film := TNetClientFilm(FFilms[I]);
+    if Film.Header.Day <> Day then
+      Inc(I)
+    else
+    begin
+      FFilms.Delete(I);
+      if (Result = nil) and (Film.Header.StarId = StarId) then
+        Result := Film
+      else
+        Film.Free;
+    end;
+  end;
+end;
+
+procedure TNetClient.DropFilmsBefore(Day: Integer);
+var
+  I: Integer;
+begin
+  for I := FFilms.Count - 1 downto 0 do
+    if TNetClientFilm(FFilms[I]).Header.Day < Day then
+    begin
+      TObject(FFilms[I]).Free;
+      FFilms.Delete(I);
+    end;
 end;
 
 function TNetClient.HasTalkRequest: Boolean;

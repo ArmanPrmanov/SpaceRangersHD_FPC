@@ -158,6 +158,12 @@ type
         InitialMoney: Integer;
         CharacterPreset: Integer
     );
+    // CHANGE: CLEANUP - The new-game screen's choices, for the new game and for a human who
+    // joins a networked game (aHuman.JoinHuman): one of the starting items the screen offers
+    // (an item type, t_FuelTanks .. t_Weapon5), improved for the difficulty and stored where
+    // the ranger is; and the careers of the character preset (1-5).
+    procedure AddStartingItem(ItemType: Byte);
+    procedure ApplyPresetCareer(CharacterPreset: Integer);
     function ComputeDepositAccruedValue: Integer;
     procedure RechargeTransmitters;
     procedure ApplyBioArtefactHealthEffects;
@@ -1015,6 +1021,179 @@ begin
   BaseSkills[3] := 0;
   BaseSkills[4] := 0;
   BaseSkills[5] := 0;
+end;
+
+procedure TPlayer.AddStartingItem(ItemType: Byte);
+var
+  Entry: PStorageEntry;
+  Item: TEquipment;
+begin
+  case ItemType of
+    43:
+    begin
+      Item := TFuelTanks.Create;
+      (Item as TFuelTanks)
+          .Init(Round(FuelTanksBaseSize * EquipmentSizeFactors[4]), 2, OwnerId);
+    end;
+    44:
+    begin
+      Item := TEngine.Create;
+      (Item as TEngine)
+          .Init(Round(EngineBaseSize * EquipmentSizeFactors[3]), 2, OwnerId);
+    end;
+    45:
+    begin
+      Item := TRadar.Create;
+      (Item as TRadar)
+          .Init(Round(RadarBaseSize * EquipmentSizeFactors[3]), 2, OwnerId);
+    end;
+    46:
+    begin
+      Item := TScaner.Create;
+      (Item as TScaner)
+          .Init(Round(ScannerBaseSize * EquipmentSizeFactors[4]), 2, OwnerId);
+    end;
+    47:
+    begin
+      Item := TRepairRobot.Create;
+      (Item as TRepairRobot)
+          .Init(Round(RepairRobotBaseSize * EquipmentSizeFactors[3]), 2, OwnerId);
+    end;
+    48:
+    begin
+      Item := TCargoHook.Create;
+      (Item as TCargoHook)
+          .Init(Round(CargoHookBaseSize * EquipmentSizeFactors[3]), 2, OwnerId);
+    end;
+    49:
+    begin
+      Item := TDefGenerator.Create;
+      (Item as TDefGenerator)
+          .Init(Round(DefGeneratorBaseSize * EquipmentSizeFactors[3]), 2, OwnerId);
+    end;
+    50:
+    begin
+      Item := TWeapon.Create;
+      (Item as TWeapon)
+          .Init(
+              t_Weapon1,
+              Round(WeaponInfos[Ord(t_Weapon1)].AverageSize * EquipmentSizeFactors[4]),
+              3,
+              OwnerId);
+    end;
+    51:
+    begin
+      Item := TWeapon.Create;
+      (Item as TWeapon)
+          .Init(
+              t_Weapon2,
+              Round(WeaponInfos[Ord(t_Weapon2)].AverageSize * EquipmentSizeFactors[3]),
+              2,
+              OwnerId);
+    end;
+    52:
+    begin
+      Item := TWeapon.Create;
+      (Item as TWeapon)
+          .Init(
+              t_Weapon3,
+              Round(WeaponInfos[Ord(t_Weapon3)].AverageSize * EquipmentSizeFactors[2]),
+              2,
+              OwnerId);
+    end;
+    53:
+    begin
+      Item := TWeapon.Create;
+      (Item as TWeapon)
+          .Init(
+              t_Weapon4,
+              Round(WeaponInfos[Ord(t_Weapon4)].AverageSize * EquipmentSizeFactors[3]),
+              1,
+              OwnerId);
+    end;
+    54:
+    begin
+      Item := TWeapon.Create;
+      (Item as TWeapon)
+          .Init(
+              t_Weapon5,
+              Round(WeaponInfos[Ord(t_Weapon5)].AverageSize * EquipmentSizeFactors[4]),
+              1,
+              OwnerId);
+    end;
+  else
+    Item := TRadar.Create;
+    (Item as TRadar).Init(Round(RadarBaseSize * EquipmentSizeFactors[4]), 2, OwnerId);
+  end;
+  case Galaxy.DifficultyLevels[7] of
+    0: Item.Improve(ikMajor);
+    1: Item.Improve(ikMedium);
+    2: Item.Improve(ikMinor);
+  end;
+  GetMem(Entry, SizeOf(Entry^));
+  StorageEntries.Add(Entry);
+  if DockedTo <> nil then
+    Entry.LocationOwner := DockedTo
+  else
+    Entry.LocationOwner := CurrentPlanet;
+  Entry.Item := Item;
+  Entry.SlotIndex := 0;
+end;
+
+procedure TPlayer.ApplyPresetCareer(CharacterPreset: Integer);
+begin
+  case CharacterPreset of
+    1:
+    begin
+      PreferredCareer := rcWarrior;
+      CareerStatus[Ord(rcWarrior)] := NextRandomIntRange(70, 90, Galaxy.RandomState);
+      CareerStatus[Ord(rcPirate)] :=
+          (100 - CareerStatus[Ord(rcWarrior)])
+              div NextRandomIntRange(2, 3, Galaxy.RandomState);
+      CareerStatus[Ord(rcTrader)] :=
+          100 - CareerStatus[Ord(rcWarrior)] - CareerStatus[Ord(rcPirate)];
+    end;
+    2:
+    begin
+      PreferredCareer := rcWarrior;
+      CareerStatus[Ord(rcWarrior)] := NextRandomIntRange(60, 70, Galaxy.RandomState);
+      CareerStatus[Ord(rcPirate)] :=
+          (100 - CareerStatus[Ord(rcWarrior)])
+              div NextRandomIntRange(3, 4, Galaxy.RandomState);
+      CareerStatus[Ord(rcTrader)] :=
+          100 - CareerStatus[Ord(rcWarrior)] - CareerStatus[Ord(rcPirate)];
+    end;
+    3:
+    begin
+      PreferredCareer := rcTrader;
+      CareerStatus[Ord(rcTrader)] := NextRandomIntRange(70, 90, Galaxy.RandomState);
+      CareerStatus[Ord(rcPirate)] :=
+          (100 - CareerStatus[Ord(rcTrader)])
+              div NextRandomIntRange(2, 3, Galaxy.RandomState);
+      CareerStatus[Ord(rcWarrior)] :=
+          100 - CareerStatus[Ord(rcTrader)] - CareerStatus[Ord(rcPirate)];
+    end;
+    4:
+    begin
+      PreferredCareer := rcPirate;
+      CareerStatus[Ord(rcPirate)] := NextRandomIntRange(60, 70, Galaxy.RandomState);
+      CareerStatus[Ord(rcTrader)] :=
+          (100 - CareerStatus[Ord(rcPirate)])
+              div NextRandomIntRange(2, 3, Galaxy.RandomState);
+      CareerStatus[Ord(rcWarrior)] :=
+          100 - CareerStatus[Ord(rcPirate)] - CareerStatus[Ord(rcTrader)];
+    end;
+    5:
+    begin
+      PreferredCareer := rcPirate;
+      CareerStatus[Ord(rcPirate)] := NextRandomIntRange(70, 90, Galaxy.RandomState);
+      CareerStatus[Ord(rcTrader)] :=
+          (100 - CareerStatus[Ord(rcPirate)])
+              div NextRandomIntRange(2, 3, Galaxy.RandomState);
+      CareerStatus[Ord(rcWarrior)] :=
+          100 - CareerStatus[Ord(rcPirate)] - CareerStatus[Ord(rcTrader)];
+    end;
+  end;
 end;
 
 // CHANGE: CLEANUP - Self, not GetPlayer: another human is not the local player.

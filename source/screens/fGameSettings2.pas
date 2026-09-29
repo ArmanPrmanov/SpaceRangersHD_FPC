@@ -161,7 +161,9 @@ uses
   aRuins,
   fIntroduction,
   ThreadCalc,
-  aScript;
+  aScript,
+  aHuman,
+  NetPlay;
 
 procedure TfGameSettings2.InitializeLayout;
 var
@@ -1283,6 +1285,22 @@ begin
   Owner.VerticalScrollBar.SetPageSize(Owner.ClientSize.Y);
   ActiveExtendedGroup := 0;
   RefreshExtendedGroup;
+  // CHANGE: ENHANCEMENT - A first join to a networked game chooses its character here
+  // (NetPlay.NetCharacterScreen; docs/network.md, Joining): the name, race, character, portrait,
+  // skills and items. The difficulty and the extended rules are the host's game's, so their
+  // panels are hidden; the name proposed is the join's.
+  GetByName('PanelLevel').SetActive(not NetCharacterScreen);
+  GetByName('ButExtended').SetActive(not NetCharacterScreen);
+  if NetCharacterScreen then
+  begin
+    (GetByName('ButExtended') as TGraphButtonGI).SetDown(False);
+    if NetJoinName <> '' then
+    begin
+      (GetByName('PlayerName') as TEditGI).SetText(NetJoinName);
+      ValidatePlayerName(NetJoinName);
+      PlayerNameEdited := True;
+    end;
+  end;
 end;
 procedure TfGameSettings2.OnClose;
 begin
@@ -1859,7 +1877,26 @@ procedure TfGameSettings2.ApplyClicked(Sender: TObjectGI);
 var
   I: Integer;
   FileName: WideString;
+  Character: TJoinCharacter;
 begin
+  // CHANGE: ENHANCEMENT - A first join sends its character to the host, and the join goes on
+  // over the main menu; no game is generated here.
+  if NetCharacterScreen and not (GetByName('Ok') as TGraphButtonGI).Disabled then
+  begin
+    Character := PresetCharacter(CharacterPreset);
+    Character.Chosen := True;
+    Character.Race := PlayerRace;
+    Character.Face := CaptainPortraitIndex;
+    for I := 0 to 1 do
+    begin
+      Character.Skills[I] := StartingSkills[I];
+      Character.Items[I] := ItemTypeByChoice[StartingItemChoices[I] - 1];
+    end;
+    SendNetCharacter((GetByName('PlayerName') as TEditGI).Text, Character);
+    RequestedScreenId := screenMainMenu;
+    RequestClose(1);
+    Exit;
+  end;
   if not (GetByName('Ok') as TGraphButtonGI).Disabled then
   begin
     if (GetByName('ButExtended') as TGraphButtonGI).Down
@@ -2001,6 +2038,9 @@ begin
     ToggleExtendedSettings(nil)
   else
   begin
+    // CHANGE: ENHANCEMENT - A first join that is cancelled here ends on the way to the menu.
+    if NetCharacterScreen then
+      CancelNetCharacter;
     RequestedScreenId := screenMainMenu;
     RequestClose(1);
   end;

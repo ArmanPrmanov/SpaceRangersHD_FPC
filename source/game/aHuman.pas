@@ -262,9 +262,34 @@ procedure FinishHuman(Human: THuman; Reason: Integer);
 // The human who issued Command, and its ranger; nil when the human is gone.
 function ActorHuman(const Command: TPlayerCommand): THuman;
 function Actor(const Command: TPlayerCommand): TPlayer;
+type
+  // CHANGE: ENHANCEMENT - What the new-game screen chose for a human who joins a networked game
+  // for the first time (docs/network.md, Joining). Without Chosen only the preset counts, as
+  // before; the race is the planet's (FindJoinPlanet looks for one of Race).
+  TJoinCharacter = record
+    Chosen: Boolean;
+    // The race (TPlanet.RaceId, the screen's PlayerRace); -1: any.
+    Race: Integer;
+    // The character preset, 1-5.
+    Preset: Integer;
+    // The portrait (PortraitFaceId); -1: none.
+    Face: Integer;
+    // The two starting skills (BaseSkills indexes) and items (item types, t_FuelTanks ..).
+    Skills: array[0..1] of Byte;
+    Items: array[0..1] of Byte;
+  end;
+// A character with only Preset chosen, as the hot-seat and headless joins give.
+function PresetCharacter(Preset: Integer): TJoinCharacter;
 // Adds a new human whose ranger starts landed at Planet, as new-game setup starts the first
 // one. CharacterPreset is the setup screen's choice (1-5).
-function JoinHuman(Planet: TPlanet; const Name: WideString; CharacterPreset: Integer): THuman;
+function JoinHuman(Planet: TPlanet; const Name: WideString; CharacterPreset: Integer): THuman; overload;
+// CHANGE: ENHANCEMENT - With the rest of the setup screen's choices, applied as a new game
+// applies them: the portrait, the careers of the preset, the starting skills and items.
+function JoinHuman(
+    Planet: TPlanet;
+    const Name: WideString;
+    const Character: TJoinCharacter
+): THuman; overload;
 // CHANGE: ENHANCEMENT - The one friendly-fire rule (ROADMAP.md, Phase 4, item 8, and Phase 6).
 // Whether Attacker may attack or damage Target: false when both are humans' rangers, they are
 // different humans and friendly fire is off (Session.FriendlyFireEnabled); true otherwise. A
@@ -323,9 +348,11 @@ var
 // (SimEvents.RemoteTalkAnswer). Without a session only the local human is asked, as before.
 function CanAskHuman(Human: THuman): Boolean;
 // A planet where a joining human can start: an inhabited coalition planet in a coalition star
-// that holds no human, the first in galaxy order; nil when there is none. The choice depends
-// only on the galaxy, so runs repeat.
-function FindJoinPlanet: TPlanet;
+// of a visible constellation that holds no human, in the star nearest the first human's ranger
+// (the first in galaxy order without one); nil when there is none. The choice depends only on
+// the galaxy, so runs repeat. CHANGE: ENHANCEMENT - With Race, a planet of that race when there
+// is one (the ranger's race is its home planet's).
+function FindJoinPlanet(Race: Integer = -1): TPlanet;
 implementation
 uses
   aConst,
@@ -1027,17 +1054,42 @@ begin
     Result := Human.Player;
 end;
 
+function PresetCharacter(Preset: Integer): TJoinCharacter;
+begin
+  Result := Default(TJoinCharacter);
+  Result.Race := -1;
+  Result.Preset := Preset;
+  Result.Face := -1;
+end;
+
 function JoinHuman(Planet: TPlanet; const Name: WideString; CharacterPreset: Integer): THuman;
+begin
+  Result := JoinHuman(Planet, Name, PresetCharacter(CharacterPreset));
+end;
+
+function JoinHuman(Planet: TPlanet; const Name: WideString; const Character: TJoinCharacter): THuman;
 var
   Player: TPlayer;
-  Money: Integer;
+  Money, I: Integer;
 begin
   Money := GalaxyDifficultyTuning[Galaxy.DifficultyLevels[1]].DifficultyValue18;
   Player := TPlayer.Create;
-  Player.InitializePlayerAtPlanet(Planet, Money, CharacterPreset);
+  if Character.Chosen and (Character.Face >= 0) then
+    Player.PortraitFaceId := Character.Face;
+  Player.InitializePlayerAtPlanet(Planet, Money, Character.Preset);
+  // In the new game's order (fGameSettings): the careers, the skills, the items, the preset.
+  if Character.Chosen then
+  begin
+    Player.ApplyPresetCareer(Character.Preset);
+    for I := 0 to 1 do
+      if Character.Skills[I] <= High(Player.BaseSkills) then
+        Inc(Player.BaseSkills[Character.Skills[I]]);
+    for I := 0 to 1 do
+      Player.AddStartingItem(Character.Items[I]);
+  end;
   Player.HomePlanet.ChangeRelationToRanger(Player, 100);
   Player.Name := Name;
-  Player.ApplyCharacterPreset(Planet, Money, CharacterPreset);
+  Player.ApplyCharacterPreset(Planet, Money, Character.Preset);
   if Player.RuinsProxy = nil then
     Player.CreateRuinsProxy;
   Galaxy.RefreshRangerWealthStats;
@@ -1210,19 +1262,49 @@ begin
       RemoteTalkAnswer(Human.Connected and not Human.Finished and (Human.Player <> nil));
 end;
 
-function FindJoinPlanet: TPlanet;
+function FindJoinPlanet(Race: Integer): TPlanet;
 var
-  I: Integer;
+  I, J: Integer;
+  Star: TStar;
   Planet: TPlanet;
-begin
-  for I := 0 to Galaxy.Planets.Count - 1 do
+  Origin: TStar;
+
+  function JoinPlanetIn(Star: TStar): TPlanet;
+  var
+    K: Integer;
   begin
-    Planet := TPlanet(Galaxy.Planets[I]);
-    if (Planet.OwnerId <= Byte(oiGaal))
-        and (Planet.CurrentStar.ControlFaction = sfCoalition)
-        and not StarHasHuman(Planet.CurrentStar) then
+    if (Star.ControlFaction = sfCoalition)
+        and ((Star.Constellation = nil) or Star.Constellation.Visible)
+        and not StarHasHuman(Star) then
+      for K := 0 to Star.Planets.Count - 1 do
+      begin
+        Result := TPlanet(Star.Planets[K]);
+        if (Result.OwnerId <= Byte(oiGaal)) and ((Race < 0) or (Result.RaceId = Race)) then
+          Exit;
+      end;
+    Result := nil;
+  end;
+
+begin
+  Origin := nil;
+  if (Session.Humans.Count > 0) and (Session.Humans[0].Player <> nil) then
+    Origin := Session.Humans[0].Player.CurrentStar;
+  if (Origin <> nil) and (Length(Origin.StarDistances) > 0) then
+    for I := 0 to High(Origin.StarDistances) do
+    begin
+      Result := JoinPlanetIn(Origin.StarDistances[I].Star);
+      if Result <> nil then
+        Exit;
+    end;
+  for J := 0 to Galaxy.Stars.Count - 1 do
+  begin
+    Star := TStar(Galaxy.Stars[J]);
+    Planet := JoinPlanetIn(Star);
+    if Planet <> nil then
       Exit(Planet);
   end;
+  if Race >= 0 then
+    Exit(FindJoinPlanet(-1));
   Result := nil;
 end;
 

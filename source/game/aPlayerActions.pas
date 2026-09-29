@@ -170,7 +170,10 @@ function EndTurn(ContinueUntilArrival: Boolean): Boolean;
 procedure StopContinuing;
 // Adds a human whose ranger starts landed at Planet (aHuman.JoinHuman), as a command so that a
 // command log replays it. Returns the new human.
-function JoinHumanAt(Planet: TObject; const Name: WideString; CharacterPreset: Integer): THuman;
+function JoinHumanAt(Planet: TObject; const Name: WideString; CharacterPreset: Integer): THuman; overload;
+// CHANGE: ENHANCEMENT - With the setup screen's choices (aHuman.TJoinCharacter); the command
+// carries them after the preset, so a log without them replays as before.
+function JoinHumanAt(Planet: TObject; const Name: WideString; const Character: TJoinCharacter): THuman; overload;
 // Runs the hyperspace step (HyperspaceStep) for every human whose step is due
 // (THuman.HyperspaceStepPending), as that human. The jump screen runs the local human's own step
 // after the player-star job; this does it for the humans whose jump screen is not shown, before
@@ -1178,18 +1181,47 @@ var
 // at the same point (ROADMAP.md, Phase 4, item 6). The command's actor is the human who adds
 // it (the host).
 procedure ExecuteJoinHuman(const Command: TPlayerCommand);
+var
+  Character: TJoinCharacter;
+  I: Integer;
 begin
-  JoinedHuman := JoinHuman(TPlanet(RefObject(Command, 0)), Command.Text, IntArg(Command, 0));
+  Character := PresetCharacter(IntArg(Command, 0));
+  if (Length(Command.Ints) >= 7) and (IntArg(Command, 1) <> 0) then
+  begin
+    Character.Chosen := True;
+    Character.Face := IntArg(Command, 2);
+    for I := 0 to 1 do
+    begin
+      Character.Skills[I] := Byte(IntArg(Command, 3 + I));
+      Character.Items[I] := Byte(IntArg(Command, 5 + I));
+    end;
+  end;
+  JoinedHuman := JoinHuman(TPlanet(RefObject(Command, 0)), Command.Text, Character);
 end;
 
 function JoinHumanAt(Planet: TObject; const Name: WideString; CharacterPreset: Integer): THuman;
+begin
+  Result := JoinHumanAt(Planet, Name, PresetCharacter(CharacterPreset));
+end;
+
+function JoinHumanAt(Planet: TObject; const Name: WideString; const Character: TJoinCharacter): THuman;
 var
   Command: TPlayerCommand;
+  I: Integer;
 begin
   JoinedHuman := nil;
   Command := NewCommand(ckJoinHuman);
   AddRef(Command, Planet);
-  AddInt(Command, CharacterPreset);
+  AddInt(Command, Character.Preset);
+  if Character.Chosen then
+  begin
+    AddInt(Command, 1);
+    AddInt(Command, Character.Face);
+    for I := 0 to 1 do
+      AddInt(Command, Character.Skills[I]);
+    for I := 0 to 1 do
+      AddInt(Command, Character.Items[I]);
+  end;
   Command.Text := Name;
   SubmitCommand(Command);
   Result := JoinedHuman;

@@ -7379,6 +7379,11 @@ procedure TfStarMap.BreakTurnClicked(Sender: TObjectGI);
 begin
   ShowLargeHelp(LookupLocalizedTextByKey('Help.MoveBreak'));
   BreakRequested := True;
+  // CHANGE: ENHANCEMENT - A networked client's break reaches the host at once, which may run
+  // the next day before this film ends: the travel stops there (docs/network.md, Continuing
+  // travel).
+  if NetRole = nrClient then
+    StopContinuing;
   (GetByName('PM_Break') as TGraphButtonGI).SetDisabled(True);
 end;
 procedure TfStarMap.UpdateFilmCamera;

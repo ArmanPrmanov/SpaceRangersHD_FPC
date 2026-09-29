@@ -93,8 +93,6 @@ var
   Distance, MaximumDistance: Integer;
   EdgeDistance, OtherEdgeDistance: Single;
   Skill: Byte;
-  Entry: PStorageEntry;
-  Item: TEquipment;
   Player: TPlayer;
   Stage, Value: Integer;
   Center: TPointF;
@@ -490,58 +488,7 @@ begin
         GalaxyDifficultyTuning[Galaxy.DifficultyLevels[1]].DifficultyValue18,
         CharacterPreset
     );
-    case CharacterPreset of
-      1:
-      begin
-        Player.PreferredCareer := rcWarrior;
-        Player.CareerStatus[Ord(rcWarrior)] := NextRandomIntRange(70, 90, Galaxy.RandomState);
-        Player.CareerStatus[Ord(rcPirate)] :=
-            (100 - Player.CareerStatus[Ord(rcWarrior)])
-                div NextRandomIntRange(2, 3, Galaxy.RandomState);
-        Player.CareerStatus[Ord(rcTrader)] :=
-            100 - Player.CareerStatus[Ord(rcWarrior)] - Player.CareerStatus[Ord(rcPirate)];
-      end;
-      2:
-      begin
-        Player.PreferredCareer := rcWarrior;
-        Player.CareerStatus[Ord(rcWarrior)] := NextRandomIntRange(60, 70, Galaxy.RandomState);
-        Player.CareerStatus[Ord(rcPirate)] :=
-            (100 - Player.CareerStatus[Ord(rcWarrior)])
-                div NextRandomIntRange(3, 4, Galaxy.RandomState);
-        Player.CareerStatus[Ord(rcTrader)] :=
-            100 - Player.CareerStatus[Ord(rcWarrior)] - Player.CareerStatus[Ord(rcPirate)];
-      end;
-      3:
-      begin
-        Player.PreferredCareer := rcTrader;
-        Player.CareerStatus[Ord(rcTrader)] := NextRandomIntRange(70, 90, Galaxy.RandomState);
-        Player.CareerStatus[Ord(rcPirate)] :=
-            (100 - Player.CareerStatus[Ord(rcTrader)])
-                div NextRandomIntRange(2, 3, Galaxy.RandomState);
-        Player.CareerStatus[Ord(rcWarrior)] :=
-            100 - Player.CareerStatus[Ord(rcTrader)] - Player.CareerStatus[Ord(rcPirate)];
-      end;
-      4:
-      begin
-        Player.PreferredCareer := rcPirate;
-        Player.CareerStatus[Ord(rcPirate)] := NextRandomIntRange(60, 70, Galaxy.RandomState);
-        Player.CareerStatus[Ord(rcTrader)] :=
-            (100 - Player.CareerStatus[Ord(rcPirate)])
-                div NextRandomIntRange(2, 3, Galaxy.RandomState);
-        Player.CareerStatus[Ord(rcWarrior)] :=
-            100 - Player.CareerStatus[Ord(rcPirate)] - Player.CareerStatus[Ord(rcTrader)];
-      end;
-      5:
-      begin
-        Player.PreferredCareer := rcPirate;
-        Player.CareerStatus[Ord(rcPirate)] := NextRandomIntRange(70, 90, Galaxy.RandomState);
-        Player.CareerStatus[Ord(rcTrader)] :=
-            (100 - Player.CareerStatus[Ord(rcPirate)])
-                div NextRandomIntRange(2, 3, Galaxy.RandomState);
-        Player.CareerStatus[Ord(rcWarrior)] :=
-            100 - Player.CareerStatus[Ord(rcPirate)] - Player.CareerStatus[Ord(rcTrader)];
-      end;
-    end;
+    Player.ApplyPresetCareer(CharacterPreset);
     SetPlayer(Player, Galaxy);
     LocalPlayer.HomePlanet.ChangeRelationToRanger(LocalPlayer, 100);
     LocalPlayer.Name := PlayerName;
@@ -788,118 +735,7 @@ begin
     for I := 0 to 1 do
       Inc(LocalPlayer.BaseSkills[StartingSkills[I]]);
     for I := 0 to 1 do
-    begin
-      case StartingItemTypes[I] of
-        43:
-        begin
-          Item := TFuelTanks.Create;
-          (Item as TFuelTanks)
-              .Init(Round(FuelTanksBaseSize * EquipmentSizeFactors[4]), 2, LocalPlayer.OwnerId);
-        end;
-        44:
-        begin
-          Item := TEngine.Create;
-          (Item as TEngine)
-              .Init(Round(EngineBaseSize * EquipmentSizeFactors[3]), 2, LocalPlayer.OwnerId);
-        end;
-        45:
-        begin
-          Item := TRadar.Create;
-          (Item as TRadar)
-              .Init(Round(RadarBaseSize * EquipmentSizeFactors[3]), 2, LocalPlayer.OwnerId);
-        end;
-        46:
-        begin
-          Item := TScaner.Create;
-          (Item as TScaner)
-              .Init(Round(ScannerBaseSize * EquipmentSizeFactors[4]), 2, LocalPlayer.OwnerId);
-        end;
-        47:
-        begin
-          Item := TRepairRobot.Create;
-          (Item as TRepairRobot)
-              .Init(Round(RepairRobotBaseSize * EquipmentSizeFactors[3]), 2, LocalPlayer.OwnerId);
-        end;
-        48:
-        begin
-          Item := TCargoHook.Create;
-          (Item as TCargoHook)
-              .Init(Round(CargoHookBaseSize * EquipmentSizeFactors[3]), 2, LocalPlayer.OwnerId);
-        end;
-        49:
-        begin
-          Item := TDefGenerator.Create;
-          (Item as TDefGenerator)
-              .Init(Round(DefGeneratorBaseSize * EquipmentSizeFactors[3]), 2, LocalPlayer.OwnerId);
-        end;
-        50:
-        begin
-          Item := TWeapon.Create;
-          (Item as TWeapon)
-              .Init(
-                  t_Weapon1,
-                  Round(WeaponInfos[Ord(t_Weapon1)].AverageSize * EquipmentSizeFactors[4]),
-                  3,
-                  LocalPlayer.OwnerId);
-        end;
-        51:
-        begin
-          Item := TWeapon.Create;
-          (Item as TWeapon)
-              .Init(
-                  t_Weapon2,
-                  Round(WeaponInfos[Ord(t_Weapon2)].AverageSize * EquipmentSizeFactors[3]),
-                  2,
-                  LocalPlayer.OwnerId);
-        end;
-        52:
-        begin
-          Item := TWeapon.Create;
-          (Item as TWeapon)
-              .Init(
-                  t_Weapon3,
-                  Round(WeaponInfos[Ord(t_Weapon3)].AverageSize * EquipmentSizeFactors[2]),
-                  2,
-                  LocalPlayer.OwnerId);
-        end;
-        53:
-        begin
-          Item := TWeapon.Create;
-          (Item as TWeapon)
-              .Init(
-                  t_Weapon4,
-                  Round(WeaponInfos[Ord(t_Weapon4)].AverageSize * EquipmentSizeFactors[3]),
-                  1,
-                  LocalPlayer.OwnerId);
-        end;
-        54:
-        begin
-          Item := TWeapon.Create;
-          (Item as TWeapon)
-              .Init(
-                  t_Weapon5,
-                  Round(WeaponInfos[Ord(t_Weapon5)].AverageSize * EquipmentSizeFactors[4]),
-                  1,
-                  LocalPlayer.OwnerId);
-        end;
-      else
-        Item := TRadar.Create;
-        (Item as TRadar).Init(Round(RadarBaseSize * EquipmentSizeFactors[4]), 2, LocalPlayer.OwnerId);
-      end;
-      case Galaxy.DifficultyLevels[7] of
-        0: Item.Improve(ikMajor);
-        1: Item.Improve(ikMedium);
-        2: Item.Improve(ikMinor);
-      end;
-      GetMem(Entry, SizeOf(Entry^));
-      LocalPlayer.StorageEntries.Add(Entry);
-      if LocalPlayer.DockedTo <> nil then
-        Entry.LocationOwner := LocalPlayer.DockedTo
-      else
-        Entry.LocationOwner := LocalPlayer.CurrentPlanet;
-      Entry.Item := Item;
-      Entry.SlotIndex := 0;
-    end;
+      LocalPlayer.AddStartingItem(StartingItemTypes[I]);
     Stage := 19;
 
     // Native code passes the last planet visited by the population loop above.
