@@ -819,6 +819,10 @@ begin
         WaitCommands[I].AddInt32(Size);
         WaitCommands[I].SetSize(WaitCommands[I].DataSize + Size);
         Buffer.ReadBytes(@PByte(WaitCommands[I].Data)[WaitCommands[I].DataSize - Size], Size);
+        // CHANGE: FIX - SetSize leaves the write position behind: without this the next
+        // command's size overwrote this one, so a talk of several commands (the talk screen's
+        // EnterTalk, answer, LeaveTalk) could not replay.
+        WaitCommands[I].SetPosition(WaitCommands[I].DataSize);
         Dec(CommandCount);
       end;
     end;

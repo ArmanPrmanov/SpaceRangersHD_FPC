@@ -39,6 +39,8 @@ type
     procedure Start;
     function IsRunning: Boolean;
     function WaitForIdle(TimeoutMs: Cardinal): Boolean;
+    // The caller runs on this thread, so waiting for it to go idle would never return.
+    function IsCurrentThread: Boolean;
   end;
 const
   ThreadPriorityLowest = 1;
@@ -235,5 +237,9 @@ begin
     Result := False
   else
     Result := True;
+end;
+function TThreadEC.IsCurrentThread: Boolean;
+begin
+  Result := (NativeThread <> nil) and (NativeThread.ThreadID = GetCurrentThreadId);
 end;
 end.

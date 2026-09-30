@@ -29,6 +29,9 @@ const
   TurnWaitPumpMs = 10;
 procedure WaitForTurnCalculationUI;
 begin
+  // CHANGE: FIX - On the turn thread (a remote human's talk answer) the job is the caller.
+  if (Session.TurnCalculationThread <> nil) and Session.TurnCalculationThread.IsCurrentThread then
+    Exit;
   if not Assigned(TurnWaitPumpHook) then
   begin
     WaitForTurnCalculation;

@@ -54,6 +54,9 @@ var
   TalkScreenOpenHandler: TBooleanQueryHandler;
   // Whether the star map is playing the day's film.
   FilmPlayingHandler: TBooleanQueryHandler;
+  // CHANGE: FIX - The host runs a remote human's answer to a talk (NetHost.RemoteTalk): that
+  // human's talk screen is open, on its client, as a local human's is here.
+  RemoteTalkOpen: Boolean;
 procedure RequestScreen(Screen: TGameScreenId);
 procedure NotifyTurnFailed;
 procedure RecordPlayerResult(Victory: Boolean);
@@ -132,7 +135,9 @@ end;
 
 function TalkScreenOpen: Boolean;
 begin
-  if Assigned(TalkScreenOpenHandler) then
+  if RemoteTalkOpen then
+    Result := True
+  else if Assigned(TalkScreenOpenHandler) then
     Result := TalkScreenOpenHandler
   else
     Result := False;

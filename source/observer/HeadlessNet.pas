@@ -403,8 +403,11 @@ begin
       LocalHuman.TalkAmount := Request.Amount;
       LocalHuman.TalkResponse := 0;
       LocalHuman.TalkText := Request.Text;
+      // As the talk screen does (fTalk): leaving runs on the host's turn thread, in its job.
+      EnterTalk(Ship);
       if Request.Scripted then
         AcceptScriptedTalk;
+      LeaveTalk(Ship);
       LocalHuman.TalkScripted := False;
     end;
   finally

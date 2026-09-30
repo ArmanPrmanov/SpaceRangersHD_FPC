@@ -180,6 +180,7 @@ uses
   aSession,
   aSaveLoad,
   GR_Main,
+  SimEvents,
   SimulationThread,
   ThreadCalc;
 
@@ -933,9 +934,11 @@ end;
 procedure SubmitTalkCommand(const Command: TPlayerCommand);
 begin
   InTurnJob := False;
+  RemoteTalkOpen := True;
   try
     SubmitCommand(Command);
   finally
+    RemoteTalkOpen := False;
     InTurnJob := True;
   end;
 end;

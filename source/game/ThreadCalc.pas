@@ -103,7 +103,11 @@ begin
 end;
 procedure WaitForTurnCalculation;
 begin
-  if (Session.TurnCalculationThread <> nil) and Session.TurnCalculationThread.IsRunning then
+  // CHANGE: FIX - The job itself may call this: a remote human's answer to a talk runs on
+  // the turn thread (NetHost.RemoteTalk), and leaving the talk waits for the job it is in.
+  if (Session.TurnCalculationThread <> nil)
+      and not Session.TurnCalculationThread.IsCurrentThread
+      and Session.TurnCalculationThread.IsRunning then
     Session.TurnCalculationThread.WaitForIdle(INFINITE);
 end;
 // CHANGE: ENHANCEMENT - Every star that holds a human runs its day in the player-star job,
