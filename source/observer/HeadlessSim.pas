@@ -8,6 +8,9 @@ unit HeadlessSim;
 interface
 uses
   aHuman;
+const
+  // --sim-new-game: the host generates a new game instead of loading a save.
+  NewGameSave = '<new game>';
 type
   TSimulationOptions = record
     SavePath: AnsiString;
@@ -99,7 +102,9 @@ uses
   aMissile,
   WorkerErrors,
   ObserverHooks,
-  ObserverSimulation;
+  ObserverSimulation,
+  fGameSettings,
+  fIntroduction;
 
 var
   // Where each object starts in the state being dumped (SaveTrace).
@@ -242,9 +247,38 @@ begin
     );
 end;
 
+// The new-game screen's defaults, on the generation thread as the introduction runs it.
+procedure GenerateNewGame;
+var
+  I: Integer;
+begin
+  FilmHistory.Clear;
+  NewGameGenerationThread := TThreadCreateNewGame.Create;
+  try
+    NewGameGenerationThread.PlayerName := 'Host';
+    NewGameGenerationThread.PlayerRace := 2;
+    NewGameGenerationThread.CharacterPreset := 3;
+    for I := 0 to 7 do
+      NewGameGenerationThread.DifficultyLevels[I] := 1;
+    NewGameGenerationThread.StartingItemTypes[0] := 43;
+    NewGameGenerationThread.StartingItemTypes[1] := 44;
+    NewGameGenerationThread.StartingSkills[0] := 0;
+    NewGameGenerationThread.StartingSkills[1] := 3;
+    NewGameGenerationThread.Start;
+    while NewGameGenerationThread.IsRunning do
+      Sleep(10);
+    if NewGameGenerationStage <> 8 then
+      raise Exception.Create('New game generation failed');
+  finally
+    FreeAndNil(NewGameGenerationThread);
+  end;
+end;
+
 procedure LoadSave(const FileName: AnsiString; Seed: Cardinal);
 begin
-  if not LoadGameFromFile(UTF8Decode(FileName)) then
+  if FileName = NewGameSave then
+    GenerateNewGame
+  else if not LoadGameFromFile(UTF8Decode(FileName)) then
     raise Exception.Create('Load failed: ' + UTF8Encode(LastSaveLoadError));
   WaitForTurnCalculation;
   // TGalaxy.Create reseeds the shared stream from the clock; pin it so that

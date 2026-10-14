@@ -341,8 +341,11 @@ def net_lines(output: str, prefix: str) -> list[dict[str, str]]:
     return [fields(line) for line in output.splitlines() if line.startswith(prefix)]
 
 
-def run_network(args, binary: Path, save: Path, count: int, log: Path | None = None, leave: str = ""):
-    """One networked session: a host with `count` clients (Net1..NetN) for NET_DAYS days.
+def run_network(
+    args, binary: Path, save: Path | None, count: int, log: Path | None = None, leave: str = ""
+):
+    """One networked session: a host with `count` clients (Net1..NetN) for NET_DAYS days. Without
+    a save the host plays a new game (--sim-new-game).
 
     The host asks remote humans something from day NET_TALK_DAY (--sim-net-talk). With leave
     "day", Net1 leaves after NET_LEAVE_DAY days; with leave "talk", it leaves when the host asks
@@ -354,7 +357,7 @@ def run_network(args, binary: Path, save: Path, count: int, log: Path | None = N
     process ended cleanly.
     """
     host_options = [
-        f"--sim-save={save}", "--sim-net-host=0", f"--sim-net-clients={count}",
+        f"--sim-save={save}" if save is not None else "--sim-new-game", "--sim-net-host=0", f"--sim-net-clients={count}",
         f"--sim-turns={NET_DAYS}", f"--sim-seed={args.seed}", f"--sim-net-talk={NET_TALK_DAY}",
     ]  # fmt: skip
     if not leave:
@@ -591,6 +594,23 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
     return True, notes
 
 
+def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
+    """A host that starts a new game instead of loading a save (--sim-new-game) and one client:
+    every state the client applies has the host's hash. A new game's galaxy is not one that a
+    load gave, so this checks that a load gives back what a new game saves (the outline of the
+    hidden constellation, for one)."""
+    label = "new game, 2 humans networked"
+    problem, host_output, outputs = run_network(args, binary, None, 1)
+    if not problem:
+        problem = compare_client_hashes(host_output, outputs)
+    if problem:
+        return False, [f"{label}: {problem}"]
+    days = net_lines(host_output, "net host day=")
+    if len(days) != NET_DAYS:
+        return False, [f"{label}: the host ran {len(days)} days"]
+    return True, [f"{label}: {NET_DAYS} days, client hashes match the host's"]
+
+
 def check_humans(args, binary: Path, save: Path, count: int) -> tuple[bool, str]:
     """Play with extra humans: no crash, a clean round trip, the same hashes twice.
 
@@ -798,14 +818,15 @@ def main() -> None:
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         futures = {save: pool.submit(check_save, args, binary, save) for save in saves}
         futures.update({log: pool.submit(check_replay, args, binary, log) for log in replays})
+        futures[Path("new game")] = pool.submit(check_new_game_network, args, binary)
         for path, future in futures.items():
             passed, notes = future.result()
             failed += not passed
             print(f"{'PASS' if passed else 'FAIL'} {path.name}")
             for note in notes:
                 print(f"  {note}")
-    total = len(saves) + len(replays)
-    print(f"{total - failed}/{total} saves and replays passed ({target_name()})")
+    total = len(futures)
+    print(f"{total - failed}/{total} saves, replays and the new game passed ({target_name()})")
     sys.exit(1 if failed else 0)
 
 

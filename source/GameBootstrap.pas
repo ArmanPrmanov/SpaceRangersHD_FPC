@@ -207,6 +207,12 @@ begin
       SimulationMode := True;
       Simulation.SavePath := ExpandFileName(Copy(Argument, 12, MaxInt))
     end
+    // CHANGE: ENHANCEMENT - A new game instead of a save, to test a host's new game.
+    else if Argument = '--sim-new-game' then
+    begin
+      SimulationMode := True;
+      Simulation.SavePath := NewGameSave
+    end
     else if Pos('--sim-turns=', Argument) = 1 then
       Simulation.Turns := StrToInt(Copy(Argument, 13, MaxInt))
     else if Pos('--sim-seed=', Argument) = 1 then

@@ -582,8 +582,8 @@ screens, not a dialogue a client could answer mid-day.
   window, font and OK/Cancel buttons, and `TEditGI` fields. Their texts are
   `Multiplayer.*` keys with English fallbacks (`MultiplayerText`).
 - Headless, for tests: `--sim-net-host=PORT --sim-net-clients=N` with
-  `--sim-save` and `--sim-turns=DAYS`, and `--sim-net-join=HOST:PORT
-  --sim-net-name=NAME` with `--sim-net-leave-at=DAY`; see Tests for the
+  `--sim-save` (or `--sim-new-game`: the new-game screen's defaults) and
+  `--sim-turns=DAYS`, and `--sim-net-join=HOST:PORT --sim-net-name=NAME` with `--sim-net-leave-at=DAY`; see Tests for the
   others.
 
 ## Tests
@@ -610,7 +610,11 @@ and the rejoin still gets the human back; and a fifth run has the host stop
 hosting after 3 days (`--sim-net-stop-at=3`), which must disconnect the client's
 human and which the client must notice by itself within 5 s (both print
 `GetTickCount64`, which is system-wide on Windows). The runs print the sizes of
-whole states, deltas and films, and the load time, per day.
+whole states, deltas and films, and the load time, per day. Once per run, a host
+that starts a new game (`--sim-new-game`) and one client check the hashes too: a
+new game's galaxy has not been through a load, so this checks that a load gives
+back what it saved (a hidden constellation has no outline, and the load once
+gave it the constructor's empty one, so every state of a new game differed).
 
 The headless runner (`HeadlessNet`):
 

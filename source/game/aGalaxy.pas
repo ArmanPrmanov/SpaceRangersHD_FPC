@@ -7588,6 +7588,10 @@ begin
     Segment^.EndPoint.Y := Buffer.GetSingle;
     Self.StarLinks.Add(Segment);
   end;
+  // CHANGE: BUGFIX - The chain as saved, also none (a hidden constellation,
+  // HideSpecialConstellation), not the constructor's empty polygon: a new game's state then
+  // loads and saves again unchanged.
+  FreeAndNil(Self.OutlinePolygons);
   Count := Buffer.GetWord;
   for i := 0 to Count - 1 do
   begin
