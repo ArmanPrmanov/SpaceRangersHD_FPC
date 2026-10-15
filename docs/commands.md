@@ -69,6 +69,15 @@ numbers are part of the log format.
 
 Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
 
+- **Changing a command's arguments.** The log stores the integers and
+  references a command had, and old logs must still replay. Add arguments at
+  the end, and let the executor treat a command without them as the old one did
+  (`Length(Command.Ints)`, `Length(Command.Refs)`). So far:
+  - `BuyMap` (413) names the constellation the government offered (a
+    reference); without it the map is the first uncharted neighbour, as before.
+  - `BuySatellite` (552) carries the offer's item id and the price shown;
+    without them it buys the offer as it stands, as before.
+
 ## Threads
 
 - The UI thread submits commands while no turn job runs. It also submits
@@ -89,14 +98,20 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
   by the same rule.
 - `SubmitCommand` tells `BeforeCommandHook` and `AfterCommandHook` (the command
   log) and then `NetworkCommandHook` (a client sends the command to its host,
-  [network.md](network.md)). A command that raises tells `CommandFailedHook`
+  [network.md](network.md)). `NetworkCommandHook` hears only a command submitted
+  while none executes on that thread: the host rebuilds the nested ones by
+  executing the outer one, as a replay does. A command that raises tells `CommandFailedHook`
   instead of the last two and the exception goes on to the caller; the log
   does not record it (the replay would raise too), and the next boundary
   writes a checkpoint for whatever it changed before it raised.
 - An executor that refuses a command for a reason the player should hear
   raises `ECommandRefused` with a `TRefusalReason` (out of stock, not enough
-  money, the item is gone); a host tells the client why
-  ([network.md](network.md), Commands). Raise it only before the executor's
+  money, the item is gone, the offer is gone, the target has changed, no room);
+  a host tells the client why ([network.md](network.md), Commands). Where
+  another human's command between days can change what a screen offered (a
+  shared shop, a one-off offer, a station's order, a constellation's map), the
+  executor checks again what the screen checked before it offered it, and
+  refuses before its first change. Raise it only before the executor's
   first change: the log writes no checkpoint after such a command (the next
   boundary still does if the hash changed). Never show a message box from an
   executor: on a host it would block the day.

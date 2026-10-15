@@ -202,13 +202,19 @@ const
       'Multiplayer.RefusedOther',
       'Multiplayer.RefusedOutOfStock',
       'Multiplayer.RefusedNoMoney',
-      'Multiplayer.RefusedItemGone'
+      'Multiplayer.RefusedItemGone',
+      'Multiplayer.RefusedOfferGone',
+      'Multiplayer.RefusedTargetGone',
+      'Multiplayer.RefusedNoRoom'
   );
   English: array[TRefusalReason] of WideString = (
       'The host refused your last action.',
       'The host refused your purchase: not enough in stock.',
-      'The host refused your purchase: not enough money.',
-      'The host refused your action: the item is gone.'
+      'The host refused your action: not enough money.',
+      'The host refused your action: the item is gone.',
+      'The host refused your action: the offer is no longer there.',
+      'The host refused your action: things changed before it arrived.',
+      'The host refused your sale: the buyer has no room for it.'
   );
 begin
   Result := LocalizedColorText(Keys[Reason]);

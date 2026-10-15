@@ -983,6 +983,14 @@ var
 begin
   H := ActorHuman(Command);
   Player := Actor(Command);
+  // CHANGE: BUGFIX - The talk screen offers protection from a ship the partner is after (fTalk).
+  // Between days another human's request may have called the partner off or turned it on
+  // something else, and the target was cast unchecked (docs/network.md, Commands).
+  if (H.TalkShip = nil)
+      or not (H.TalkShip.OrderTarget is TShip)
+      or (H.TalkShip.OrderTarget is TRuins)
+      or (H.TalkShip.OrderTarget = Player) then
+    raise ECommandRefused.CreateReason(rrTargetGone, 'RequestProtection: the ship has no target');
   if (not H.TalkShip.RecomputeFearState)
       and (H.TalkShip.GetRelationLevelToShip(Player) = rlHostile) then
   begin
@@ -1648,6 +1656,13 @@ begin
   H := ActorHuman(Command);
   Player := Actor(Command);
   ProgramIndex := IntArg(Command, 0);
+  // CHANGE: BUGFIX - As the talk screen offers it: a dominator no program has hacked yet, and a
+  // program the human still has. Between days two humans could hack one dominator, and
+  // Shipwreck dropped its loot twice (docs/network.md, Commands).
+  if not (H.TalkShip is TKling) or ((H.TalkShip as TKling).ActiveProgramAppliedTurn <> 0) then
+    raise ECommandRefused.CreateReason(rrTargetGone, 'RunDominatorProgram: the dominator was hacked');
+  if (ProgramIndex > High(Player.ProgramCounts)) or (Player.ProgramCounts[ProgramIndex] <= 0) then
+    raise ECommandRefused.CreateReason(rrOther, 'RunDominatorProgram: no such program left');
   Remaining := Player.ProgramCounts[ProgramIndex] - 1;
   Player.ProgramCounts[ProgramIndex] := Remaining;
   if (H.TalkShip as TKling).KlingType in [ktBoss, ktBertor] then

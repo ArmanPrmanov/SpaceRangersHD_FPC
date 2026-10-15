@@ -1819,13 +1819,18 @@ begin
           WideString(IntToStr(Cost))
       );
   ClearDialogChoices;
+  // The choice names the constellation offered (aPlanetActions.BuyMap).
   if LocalPlayer.Money >= Cost then
-    AddChoice(LocalizedColorText('FormGov.BuyMap.PlayerOk'), 0, BuyMap);
+    AddChoice(
+        LocalizedColorText('FormGov.BuyMap.PlayerOk'),
+        PtrInt(LocalPlayer.CurrentPlanet.FindUnchartedNeighborConstellation),
+        BuyMap
+    );
   AddChoice(LocalizedColorText('FormGov.BuyMap.PlayerNO'), 0, DeclineMapOffer);
 end;
 procedure TfGov.BuyMap(Action: PtrInt);
 begin
-  aPlanetActions.BuyMap;
+  aPlanetActions.BuyMap(TConstellation(Action));
   SoundManager.PlaySound('Sound.Sell');
   DialogText :=
       PickLocalizedTextVariant(

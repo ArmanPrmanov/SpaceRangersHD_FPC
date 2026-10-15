@@ -1253,10 +1253,14 @@ begin
     begin
       if PartnerCargoLimit < Result then
         Result := PartnerCargoLimit;
-      if Result * LocalHuman.TalkShip.ShopGoodsSellPrice(ShopGoodsOrder[Index - 10], nil)
+      // CHANGE: BUGFIX - The price the partner pays (aShopActions.TradeGoods) is the seller's,
+      // which the count dialog shows. Native asked the partner for its own price from the
+      // human's trade table, which a ship that is no human's does not have (it raised), and
+      // which let the partner pay more than it had when its trading skill was lower.
+      if Result * LocalPlayer.ShopGoodsSellPrice(ShopGoodsOrder[Index - 10], nil)
           > PartnerMoneyLimit then
         Result :=
-            PartnerMoneyLimit div LocalHuman.TalkShip.ShopGoodsSellPrice(ShopGoodsOrder[Index - 10], nil);
+            PartnerMoneyLimit div LocalPlayer.ShopGoodsSellPrice(ShopGoodsOrder[Index - 10], nil);
     end;
   end;
 end;

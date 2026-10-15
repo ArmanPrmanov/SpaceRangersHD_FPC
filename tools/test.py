@@ -224,6 +224,26 @@ def check_script_routing(args, binary: Path, save: Path) -> tuple[bool, str]:
     return True, f"script builtins act for the script's human ({defaults})"
 
 
+def check_stale_commands(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """Two humans send the same command from copies made before either acted (--sim-stale-commands).
+
+    Each part has the second human's command refused with its reason, its money unchanged, and
+    no item lost or in two places: a one-off special ship, a satellite offer, an investment in a
+    new station, building a ship at a Dominion with a shop part and relocating the Dominion (and
+    the orders after it), selling to a ranger in space that can pay one sale, buying a map, and
+    picking up surface loot (the second pickup of a moved entry goes through, found by its id).
+    """
+    code, output = simulate(binary, args.game_dir, save, ["--sim-stale-commands"])
+    lines = output.splitlines()
+    if code != 0 or "stale commands ok" not in lines:
+        return False, "stale commands failed:" + output_tail(output)
+    skipped = [line for line in lines if line.startswith("stale ") and " skipped:" in line]
+    note = "a second human's command from a stale copy is refused and changes nothing"
+    if skipped:
+        note += " (" + "; ".join(skipped) + ")"
+    return True, note
+
+
 def drop_end_turns(log: Path) -> None:
     """Removes the EndTurn commands from one human's log, so its human never ends a turn."""
     header, records = split_commands.read_records(log)
@@ -383,7 +403,7 @@ def net_lines(output: str, prefix: str) -> list[dict[str, str]]:
 
 def run_network(
     args, binary: Path, save: Path | None, count: int, log: Path | None = None, leave: str = "",
-    race: bool = False,
+    race: bool = False, nested: bool = False,
 ):
     """One networked session: a host with `count` clients (Net1..NetN) for NET_DAYS days. Without
     a save the host plays a new game (--sim-new-game).
@@ -396,8 +416,9 @@ def run_network(
     host stops hosting after NET_STOP_DAY days. Without leave the talk comes while the clients
     play their films. With race, the clients buy goods whose whole stock they could pay for, and
     the host buys that stock first, once, so that a client's purchase is refused
-    (--sim-net-buy-race). Returns (problem, host output, client outputs); problem is '' when every
-    process ended cleanly.
+    (--sim-net-buy-race). With nested, each client submits a command that submits another one
+    from inside it (--sim-net-nested). Returns (problem, host output, client outputs); problem is
+    '' when every process ended cleanly.
     """
     host_options = [
         f"--sim-save={save}" if save is not None else "--sim-new-game", "--sim-net-host=0", f"--sim-net-clients={count}",
@@ -411,6 +432,8 @@ def run_network(
         host_options.append(f"--record-commands={log}")
     if race:
         host_options.append("--sim-net-buy-race")
+    if nested:
+        host_options.append("--sim-net-nested")
     host = GameProcess(binary, args.game_dir, host_options)
     port_line = host.wait_line("net host port=", NET_TIMEOUT)
     if not port_line:
@@ -428,6 +451,8 @@ def run_network(
             options.append(f"--sim-net-film-ms={NET_FILM_MS}")
         if race:
             options.append("--sim-net-buy-race")
+        if nested:
+            options.append("--sim-net-nested")
         clients.append(GameProcess(binary, args.game_dir, options))
     codes = []
     if leave in ("day", "talk"):
@@ -707,10 +732,11 @@ def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
     every state the client applies has the host's hash. A new game's galaxy is not one that a
     load gave, so this checks that a load gives back what a new game saves (the outline of the
     hidden constellation, for one). The run also has the host refuse a client's purchase
-    (--sim-net-buy-race, check_refusal)."""
+    (--sim-net-buy-race, check_refusal), and the client submit a command that submits another
+    from inside it, which the host must run once (--sim-net-nested)."""
     label = "new game, 2 humans networked"
     # A new game loads no save, so its commands are not recorded (the log starts at a load).
-    problem, host_output, outputs = run_network(args, binary, None, 1, race=True)
+    problem, host_output, outputs = run_network(args, binary, None, 1, race=True, nested=True)
     if not problem:
         problem = compare_client_hashes(host_output, outputs)
     if problem:
@@ -721,7 +747,17 @@ def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
     problem, note = check_refusal(host_output, outputs, None)
     if problem:
         return False, [f"{label}: {problem}"]
-    return True, [f"{label}: {NET_DAYS} days, client hashes match the host's", f"{label}: {note}"]
+    nested = net_lines(host_output, "net host nested ")
+    sent = [line for output in outputs for line in net_lines(output, "net client nested ")]
+    if not sent or sent[0]["inner"] != "1":
+        return False, [f"{label}: the client did not run its nested command: {sent}"]
+    if not nested or nested[0]["outer"] != "1" or nested[0]["inner"] != "1":
+        return False, [f"{label}: the host did not run the client's nested command once: {nested}"]
+    return True, [
+        f"{label}: {NET_DAYS} days, client hashes match the host's",
+        f"{label}: {note}",
+        f"{label}: a command a client submits from inside another reaches the host once",
+    ]
 
 
 def check_humans(args, binary: Path, save: Path, count: int) -> tuple[bool, str]:
@@ -854,6 +890,10 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     passed_routing, note = check_script_routing(args, binary, save)
     notes.append(note)
     passed = passed and passed_routing
+
+    passed_stale, note = check_stale_commands(args, binary, save)
+    notes.append(note)
+    passed = passed and passed_stale
 
     for count in HUMAN_COUNTS:
         passed_humans, note = check_humans(args, binary, save, count)

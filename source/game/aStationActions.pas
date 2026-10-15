@@ -936,6 +936,10 @@ var
   P: TPlayer;
 begin
   P := Actor(Command);
+  // CHANGE: BUGFIX - The station makes this offer once. A second human who accepted it from a
+  // copy where it was still made between days got another hull (docs/network.md, Commands).
+  if not (P.DockedTo as TRuins).SpecialServiceActive then
+    raise ECommandRefused.CreateReason(rrOfferGone, 'BuySpecialShip: the offer was taken');
   (P.DockedTo as TRuins).SpecialServiceActive := False;
   Hull := THull.Create;
   if P.DockedTo.TypeId = Byte(rstPirateBase) then
@@ -1310,8 +1314,10 @@ begin
   Cost := IntArg(Command, 1);
   CarriedNodes := P.GetAvailableNodeCount(nil);
   StationOutcome := 0;
-  // NOTE: BaseNodes is never assigned (the native code reads an uninitialized local here,
-  // not P.BaseNodes). Kept as is; the purchase depends on whatever the local holds.
+  // CHANGE: BUGFIX - The nodes kept at the base, which the screen counts when it offers the
+  // program and the purchase then takes. The decompiled code read an uninitialised local here,
+  // so the outcome depended on the stack (and could differ between a host and its replay).
+  BaseNodes := P.BaseNodes;
   if CarriedNodes + BaseNodes >= Cost then
   begin
     if CarriedNodes > 0 then
@@ -1583,6 +1589,21 @@ var
 begin
   P := Actor(Command);
   Satellite := (P.DockedTo as TRuins).SatelliteOffer;
+  // CHANGE: BUGFIX - The command names the offer the screen showed and its price (a log from
+  // before has neither, and buys the offer as it stands). Between days another human may have
+  // bought it, and the station offers another one, which the player did not accept; nothing
+  // checked the money either (docs/network.md, Commands).
+  if Length(Command.Ints) >= 2 then
+  begin
+    if (Satellite = nil)
+        or (Integer(Satellite.Id) <> IntArg(Command, 0))
+        or (Satellite.Cost <> IntArg(Command, 1)) then
+      raise ECommandRefused.CreateReason(rrOfferGone, 'BuySatellite: the offer changed');
+    if Galaxy.CountExistingSatellites >= P.GetSatelliteLimit then
+      raise ECommandRefused.CreateReason(rrOfferGone, 'BuySatellite: no more satellites allowed');
+    if P.Money < Satellite.Cost then
+      raise ECommandRefused.CreateReason(rrNoMoney, 'BuySatellite: not enough money');
+  end;
   P.SetMoney(P.Money - Satellite.Cost);
   P.Inventory.Add(Satellite);
   (P.DockedTo as TRuins).SatelliteOffer := nil;
@@ -1590,8 +1611,11 @@ begin
 end;
 
 procedure PurchaseSatellite;
+var
+  Satellite: TItem;
 begin
-  SubmitSimple(ckBuySatellite);
+  Satellite := (LocalPlayer.DockedTo as TRuins).SatelliteOffer;
+  SubmitInt2(ckBuySatellite, Integer(Satellite.Id), Satellite.Cost);
 end;
 
 // Moved from TfRuinsTalk.IsResearchItemQuestLetter.
@@ -1877,6 +1901,77 @@ begin
   SubmitSimple(ckBuyMedicalPolicy);
 end;
 
+// CHANGE: BUGFIX - The rules TfRuinsTalk.ShowBusinessCenterInvestmentDialog offers an
+// investment by, as they stand now: the service is not used again too soon, the money is
+// there, and a new station's star and constellation still have no station of its kind and
+// room for one. Between days two humans could invest in the same new station from their
+// copies, and the galaxy got two (docs/network.md, Commands). The screen also scores the
+// stars; a star it chose that still passes these is kept.
+procedure CheckInvestment(P: TPlayer; Kind: Byte; Cost: Integer; Star: TStar);
+const
+  StationTypes = [Ord(rstRangerCenter)..Ord(rstDominion)];
+var
+  StationType: Byte;
+  Crowded: Boolean;
+  MaximumStations: Integer;
+begin
+  if P.StationServiceLastUseTurns[Kind] > Galaxy.CurrentTurn - StationServiceRepeatPeriods[Kind] then
+    raise ECommandRefused.CreateReason(rrOfferGone, 'Invest: the service was used too recently');
+  if P.Money < Cost then
+    raise ECommandRefused.CreateReason(rrNoMoney, 'Invest: not enough money');
+  if Kind > cpCreateMedicalBase then
+    Exit;
+  if Star = nil then
+    raise ECommandRefused.CreateReason(rrTargetGone, 'Invest: no star for the new station');
+  MaximumStations := 1;
+  case Kind of
+    cpCreateRangerCenter:
+    begin
+      StationType := Ord(rstRangerCenter);
+      Crowded :=
+          Galaxy.ShipTypeCounts[StationType] > Galaxy.CountFactionStars(Ord(sfCoalition)) * 0.33;
+      MaximumStations := 2;
+    end;
+    cpCreatePirateBase:
+    begin
+      StationType := Ord(rstPirateBase);
+      Crowded :=
+          Galaxy.ShipTypeCounts[StationType] > Galaxy.CountFactionStars(Ord(sfCoalition)) * 0.22;
+    end;
+    cpCreateMilitaryBase:
+    begin
+      StationType := Ord(rstMilitaryBase);
+      Crowded :=
+          Galaxy.ShipTypeCounts[StationType] > Galaxy.CountFactionStars(Ord(sfCoalition)) * 0.22;
+    end;
+    cpCreateScienceBase:
+    begin
+      StationType := Ord(rstScienceBase);
+      Crowded :=
+          Galaxy.ShipTypeCounts[StationType] > Galaxy.CountFactionStars(Ord(sfCoalition)) * 0.15;
+    end;
+    cpCreateBusinessCenter:
+    begin
+      StationType := Ord(rstBusinessCenter);
+      Crowded :=
+          Galaxy.ShipTypeCounts[StationType] > Galaxy.CountFactionStars(Ord(sfCoalition)) * 0.1;
+    end;
+  else
+    StationType := Ord(rstMedicalBase);
+    Crowded :=
+        Galaxy.ShipTypeCounts[StationType] > Galaxy.CountFactionStars(Ord(sfCoalition)) * 0.15;
+  end;
+  if Crowded
+      or (Star.Constellation.ShipTypeCounts[StationType] > 0)
+      or (Star.Constellation.CountShipsByTypeMask(StationTypes) >= Star.Constellation.Stars.Count)
+      or (Star.ShipTypeCounts[StationType] > 0)
+      or (Star.CountShipsByTypeMask(StationTypes) > MaximumStations) then
+    raise ECommandRefused.CreateReason(
+        rrOfferGone,
+        Format('Invest: star %d has no room for the station any more', [Star.Id])
+    );
+end;
+
 // Moved from TfRuinsTalk.AcceptBusinessCenterInvestment. The cost and the star or planet are
 // the quote the screen showed; the achievements stay in the screen.
 procedure ExecuteInvest(const Command: TPlayerCommand);
@@ -1909,6 +2004,7 @@ begin
     TargetStar := TStar(Target)
   else if Target is TPlanet then
     TargetPlanet := TPlanet(Target);
+  CheckInvestment(P, Kind, Cost, TargetStar);
   DialogText := '';
   P.StationServiceLastUseTurns[Kind] := Galaxy.CurrentTurn;
   case Kind of
@@ -2711,7 +2807,7 @@ var
   Ship: TPirate;
   Planet: TPlanet;
   TotalCost, Price: Integer;
-  I, Months, ShopItems: Integer;
+  I, J, Months, ShopItems: Integer;
   Item: TEquipment;
   P: TPlayer;
   procedure RemoveConstructionStoredItem(
@@ -2753,11 +2849,31 @@ var
     end
     // CHANGE: BUGFIX - The stock stays in the station's list while no grid shows it
     // (aShopStock): the part leaves it, and the grids of other humans there.
-    else if Station.EquipmentShop.IndexOf(Item) >= 0 then
+    else
+      TakeShopStockItem(ActorHuman(Command), Station, Item);
+  end;
+  // Whether the part is still where the screen found it: the actor's hold or storage, or the
+  // station's shop.
+  function IsPartAvailable(const Part: TConstructionPart): Boolean;
+  var
+    I: Integer;
+    Entry: PStorageEntry;
+  begin
+    if Part.Source = 0 then
+      Exit(P.Inventory.IndexOf(Part.Item) >= 0);
+    if Part.Source = 1 then
     begin
-      Station.EquipmentShop.Delete(Station.EquipmentShop.IndexOf(Item));
-      ShopStockChanged(Station);
+      for I := 0 to P.StorageEntries.Count - 1 do
+      begin
+        Entry := P.StorageEntries[I];
+        if (Entry <> nil) and (Entry.Item = Part.Item) then
+          Exit(True);
+      end;
+      Exit(False);
     end;
+    Result :=
+        (P.DockedTo is TRuins)
+            and (FindShopStockItem(P.DockedTo, Integer(Part.Item.Id)) = TItem(Part.Item));
   end;
 begin
   P := Actor(Command);
@@ -2772,13 +2888,40 @@ begin
     begin
       Parts[I].Item := TEquipment(Galaxy.IdToItem(Cardinal(IntArg(Command, 2 * I + 1)), False));
       if Parts[I].Item = nil then
-        raise Exception.Create(CommandKindName(Command.Kind) + ' names a missing part');
+        raise ECommandRefused.CreateReason(
+            rrItemGone,
+            CommandKindName(Command.Kind) + ' names a missing part'
+        );
     end;
   end;
+  // CHANGE: BUGFIX - Every part must still be where the screen found it, once, and the shop's
+  // parts paid for, before anything changes. Between days another human may have bought a
+  // shop part or built with it first (docs/network.md, Commands): native paid, then put a
+  // part already in another ship into this one too, or raised halfway when it was missing.
+  for I := 0 to ConstructionPartCount - 1 do
+    if Parts[I].Item <> nil then
+    begin
+      for J := 0 to I - 1 do
+        if Parts[J].Item = Parts[I].Item then
+          raise ECommandRefused.CreateReason(
+              rrItemGone,
+              CommandKindName(Command.Kind) + ' names a part twice'
+          );
+      if not IsPartAvailable(Parts[I]) then
+        raise ECommandRefused.CreateReason(
+            rrItemGone,
+            Format('%s: part %d is gone', [CommandKindName(Command.Kind), Parts[I].Item.Id])
+        );
+    end;
   Price := 0;
   for I := 0 to ConstructionPartCount - 1 do
     if (Parts[I].Item <> nil) and (Parts[I].Source = 2) then
       Inc(Price, Parts[I].Item.Cost);
+  if Price > P.Money then
+    raise ECommandRefused.CreateReason(
+        rrNoMoney,
+        CommandKindName(Command.Kind) + ': the parts cost more than the money'
+    );
   if Price > 0 then
     PayClampedMoney(P, Price);
   Ship := TPirate.Create;
@@ -2925,6 +3068,25 @@ begin
   SubmitSimple(ckDropDominionTravel);
 end;
 
+// CHANGE: BUGFIX - TfRuinsTalk.CheckDominionAvailable and the energy the war-plan dialogs ask
+// for, as they stand now, and the money for the order. Between days two humans docked at one
+// Dominion could both order it: both paid, the last order won, and two relocations left two
+// stars pointing at it (docs/network.md, Commands).
+procedure CheckDominionOrder(P: TPlayer; Star: TStar; Cost: Integer);
+begin
+  if not (P.DockedTo is TRuins)
+      or (TRuins(P.DockedTo).FlyToStar <> nil)
+      or (P.DockedTo.Order = soTeleport)
+      or P.DockedTo.HasScriptControl
+      or (TRuins(P.DockedTo).RelocationAge < 150) then
+    raise ECommandRefused.CreateReason(
+        rrTargetGone,
+        Format('Dominion order to star %d: the Dominion has other plans', [Star.Id])
+    );
+  if P.Money < Cost then
+    raise ECommandRefused.CreateReason(rrNoMoney, 'Dominion order: not enough money');
+end;
+
 // Moved from TfRuinsTalk.AcceptDominionRelocation.
 procedure ExecuteRelocateDominion(const Command: TPlayerCommand);
 var
@@ -2933,6 +3095,10 @@ var
 begin
   P := Actor(Command);
   Star := StarArg(Command, 0);
+  CheckDominionOrder(P, Star, GetDominionRelocationCost(P, Star));
+  // CHANGE: BUGFIX - Another human's relocation to this star made it the Dominion's.
+  if Star.Dominion <> nil then
+    raise ECommandRefused.CreateReason(rrTargetGone, 'RelocateDominion: the star has a Dominion');
   P.SetMoney(P.Money - GetDominionRelocationCost(P, Star));
   SpendDominionServiceCredit(P, 1);
   TRuins(P.DockedTo).RelocationAge := (TRuins(P.DockedTo).RelocationAge - 150) div 2;
@@ -3074,12 +3240,18 @@ procedure ExecuteOrderPirateAmbush(const Command: TPlayerCommand);
 var
   Star: TStar;
   Event: TGalaxyEvent;
-  Cost: Integer;
+  Cost, I: Integer;
   P: TPlayer;
 begin
   P := Actor(Command);
   Star := StarArg(Command, 0);
   Cost := ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(P, Star) * 1.5);
+  CheckDominionOrder(P, Star, Cost);
+  // CHANGE: BUGFIX - As the screen: no second ambush at the same star.
+  for I := 0 to Galaxy.Stars.Count - 1 do
+    if (TStar(Galaxy.Stars[I]).Dominion <> nil)
+        and (TRuins(TStar(Galaxy.Stars[I]).Dominion).FlyToStar = Star) then
+      raise ECommandRefused.CreateReason(rrTargetGone, 'OrderPirateAmbush: an ambush is under way');
   Event := AddGalaxyEvent('PlayerOrdersPirateAmbush');
   Event.AddData(Star.Id);
   P.SetMoney(P.Money - Cost);
@@ -3106,6 +3278,14 @@ var
 begin
   P := Actor(Command);
   Star := StarArg(Command, 0);
+  CheckDominionOrder(
+      P,
+      Star,
+      ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(P, Star) * 2.5)
+  );
+  // CHANGE: BUGFIX - Another human's relocation to this star made it the Dominion's.
+  if Star.Dominion <> nil then
+    raise ECommandRefused.CreateReason(rrTargetGone, 'OrderPirateAssault: the star has a Dominion');
   P.SetMoney(P.Money - ApplyRecentDominionOrderSurcharge(GetDominionRelocationCost(P, Star) * 2.5));
   SpendDominionServiceCredit(P, 1);
   TRuins(P.DockedTo).RelocationAge := (TRuins(P.DockedTo).RelocationAge - 150) div 2;

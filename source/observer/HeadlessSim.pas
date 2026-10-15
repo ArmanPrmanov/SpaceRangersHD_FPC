@@ -75,6 +75,12 @@ type
     // CHANGE: ENHANCEMENT - Script builtins act for the script's human, on that human's
     // machine (RunScriptRouting).
     ScriptRouting: Boolean;
+    // CHANGE: ENHANCEMENT - Two humans send the same command from copies made before either
+    // acted; the second is refused before it changes anything (RunStaleCommands).
+    StaleCommands: Boolean;
+    // CHANGE: ENHANCEMENT - A client submits a command that submits another from inside it;
+    // the host must run the inner one once (HeadlessNet).
+    NetNested: Boolean;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 // Shared with the networked runner (HeadlessNet).
@@ -103,6 +109,9 @@ uses
   aHold,
   aCommands,
   aShopActions,
+  aStationActions,
+  aPlanetActions,
+  aRuins,
   EC_Struct,
   aItem,
   aPlanet,
@@ -1859,6 +1868,637 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - Two humans act on one object from copies made before either acted, as
+// two clients do between days (--sim-stale-commands; docs/network.md, Commands): the host
+// applies the second command after the first, and must refuse it with its reason before it
+// changes anything. Each part has two humans at one place send the same command, built from
+// what both saw before the first acted: the second is refused, its human's money stays, and
+// no item is lost or in two places.
+function RunStaleCommands(const Options: TSimulationOptions): Integer;
+var
+  Joined: Integer;
+
+  procedure Fail(const Text: AnsiString);
+  begin
+    Emit('stale commands failed: ' + Text);
+    raise EAbort.Create(Text);
+  end;
+
+  procedure Expect(Condition: Boolean; const Text: AnsiString);
+  begin
+    if not Condition then
+      Fail(Text);
+  end;
+
+  // '' when Human's command ran, else the reason it was refused for.
+  function TryFor(Human: THuman; Command: TPlayerCommand): AnsiString;
+  begin
+    Result := '';
+    try
+      SubmitFor(Human, Command);
+    except
+      on E: ECommandRefused do
+        Result := RefusalReasonName(E.Reason);
+    end;
+  end;
+
+  procedure ExpectRefused(
+      Human: THuman;
+      const Command: TPlayerCommand;
+      Reason: TRefusalReason;
+      const What: AnsiString
+  );
+  var
+    Money: Integer;
+    Got: AnsiString;
+  begin
+    Money := Human.Player.Money;
+    Got := TryFor(Human, Command);
+    Expect(
+        Got = RefusalReasonName(Reason),
+        Format('%s: refused as "%s", not %s', [What, Got, RefusalReasonName(Reason)])
+    );
+    Expect(Human.Player.Money = Money, What + ': the refused human''s money changed');
+  end;
+
+  // The items in Lists and in the humans' holds, artefacts and storage, in Count; '' when none
+  // is in two places.
+  function CountItems(
+      const Lists: array of TList;
+      const Humans: array of THuman;
+      out Count: Integer
+  ): AnsiString;
+  var
+    Items: TList;
+    I, J: Integer;
+    P: TPlayer;
+  begin
+    Result := '';
+    Items := TList.Create;
+    try
+      for I := 0 to High(Lists) do
+        if Lists[I] <> nil then
+          for J := 0 to Lists[I].Count - 1 do
+            Items.Add(Lists[I][J]);
+      for I := 0 to High(Humans) do
+      begin
+        P := Humans[I].Player;
+        for J := 0 to P.Inventory.Count - 1 do
+          Items.Add(P.Inventory[J]);
+        for J := 0 to P.Artefacts.Count - 1 do
+          Items.Add(P.Artefacts[J]);
+        for J := 0 to P.StorageEntries.Count - 1 do
+          if PStorageEntry(P.StorageEntries[J]).Item <> nil then
+            Items.Add(PStorageEntry(P.StorageEntries[J]).Item);
+      end;
+      Count := Items.Count;
+      for I := 0 to Items.Count - 1 do
+        for J := I + 1 to Items.Count - 1 do
+          if Items[I] = Items[J] then
+            Exit(Format('item %d is in two places', [TItem(Items[I]).Id]));
+    finally
+      Items.Free;
+    end;
+  end;
+
+  // A planet of the coalition in Star, where humans can join; nil when there is none.
+  function JoinPlanetIn(Star: TStar): TPlanet;
+  var
+    I: Integer;
+  begin
+    Result := nil;
+    for I := 0 to Star.Planets.Count - 1 do
+      if TPlanet(Star.Planets[I]).OwnerId <= Byte(oiGaal) then
+        Exit(TPlanet(Star.Planets[I]));
+  end;
+
+  // A station of that type in a star with a planet humans can join at.
+  function FindStation(StationType: TStationType; out Planet: TPlanet): TRuins;
+  var
+    I, J: Integer;
+    Star: TStar;
+  begin
+    Result := nil;
+    Planet := nil;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+    begin
+      Star := TStar(Galaxy.Stars[I]);
+      for J := 0 to Star.Ships.Count - 1 do
+        if (TShip(Star.Ships[J]) is TRuins)
+            and (TShip(Star.Ships[J]).TypeId = Byte(StationType))
+            and not IsRuinsProxy(TShip(Star.Ships[J]))
+            and (JoinPlanetIn(Star) <> nil) then
+        begin
+          Planet := JoinPlanetIn(Star);
+          Exit(TRuins(Star.Ships[J]));
+        end;
+    end;
+  end;
+
+  procedure JoinPair(Planet: TPlanet; out A, B: THuman);
+  begin
+    Inc(Joined);
+    A := JoinHumanAt(Planet, WideString(Format('Stale%dA', [Joined])), 1);
+    B := JoinHumanAt(Planet, WideString(Format('Stale%dB', [Joined])), 2);
+    Expect((A <> nil) and (B <> nil), 'the humans did not join');
+    A.Player.SetMoney(100000000);
+    B.Player.SetMoney(100000000);
+  end;
+
+  procedure DockAt(Human: THuman; Station: TRuins);
+  begin
+    Human.Player.CurrentPlanet := nil;
+    Human.Player.DockedTo := Station;
+    Human.Player.Position := Station.Position;
+  end;
+
+  procedure CheckSpecialShip;
+  var
+    Station: TRuins;
+    Planet: TPlanet;
+    A, B: THuman;
+    Stored: Integer;
+  begin
+    Station := FindStation(rstPirateBase, Planet);
+    if Station = nil then
+      Station := FindStation(rstMilitaryBase, Planet);
+    if Station = nil then
+      Station := FindStation(rstScienceBase, Planet);
+    if Station = nil then
+    begin
+      Emit('stale special ship skipped: no station that sells one');
+      Exit;
+    end;
+    JoinPair(Planet, A, B);
+    DockAt(A, Station);
+    DockAt(B, Station);
+    Station.SpecialServiceActive := True;
+    Stored := A.Player.StorageEntries.Count;
+    Expect(TryFor(A, NewCommand(ckBuySpecialShip)) = '', 'the first special ship was refused');
+    Expect(A.Player.StorageEntries.Count = Stored + 1, 'the first buyer got no special ship');
+    Stored := B.Player.StorageEntries.Count;
+    ExpectRefused(B, NewCommand(ckBuySpecialShip), rrOfferGone, 'the second special ship');
+    Expect(B.Player.StorageEntries.Count = Stored, 'the second buyer got a special ship');
+    Emit(Format('stale special ship station=%d ok', [Station.Id]));
+  end;
+
+  procedure CheckSatellite;
+  var
+    Station: TRuins;
+    Planet: TPlanet;
+    A, B: THuman;
+    Command: TPlayerCommand;
+    Offer: TItem;
+    Before, After, Carried: Integer;
+    Problem: AnsiString;
+  begin
+    Station := FindStation(rstScienceBase, Planet);
+    if Station = nil then
+    begin
+      Emit('stale satellite skipped: no science base');
+      Exit;
+    end;
+    JoinPair(Planet, A, B);
+    DockAt(A, Station);
+    DockAt(B, Station);
+    A.Player.BaseSkills[Ord(psTechnical)] := 6;
+    B.Player.BaseSkills[Ord(psTechnical)] := 6;
+    if Station.SatelliteOffer = nil then
+      Station.RegenerateSatelliteOffer;
+    Offer := Station.SatelliteOffer;
+    if Galaxy.CountExistingSatellites + 1 >= A.Player.GetSatelliteLimit then
+    begin
+      Emit('stale satellite skipped: the galaxy has its satellites');
+      Exit;
+    end;
+    Command := NewCommand(ckBuySatellite);
+    AddInt(Command, Integer(Offer.Id));
+    AddInt(Command, Offer.Cost);
+    Problem := CountItems([], [A, B], Before);
+    Expect(Problem = '', Problem);
+    Expect(TryFor(A, Command) = '', 'the first satellite was refused');
+    Expect(A.Player.Inventory.IndexOf(Offer) >= 0, 'the first buyer has no satellite');
+    Carried := B.Player.Inventory.Count;
+    ExpectRefused(B, Command, rrOfferGone, 'the second satellite');
+    Expect(B.Player.Inventory.Count = Carried, 'the second buyer got a satellite');
+    Problem := CountItems([], [A, B], After);
+    Expect(Problem = '', Problem);
+    Expect(After = Before + 1, Format('the items went from %d to %d', [Before, After]));
+    Emit(Format('stale satellite station=%d item=%d ok', [Station.Id, Offer.Id]));
+  end;
+
+  procedure CheckInvestment;
+  var
+    Station: TRuins;
+    Planet: TPlanet;
+    A, B: THuman;
+    Command: TPlayerCommand;
+    Star: TStar;
+    I, Kind, Stations: Integer;
+    Done: Boolean;
+  begin
+    Station := FindStation(rstBusinessCenter, Planet);
+    if Station = nil then
+    begin
+      Emit('stale investment skipped: no business center');
+      Exit;
+    end;
+    JoinPair(Planet, A, B);
+    DockAt(A, Station);
+    DockAt(B, Station);
+    for Kind := cpCreateRangerCenter to cpCreateMedicalBase do
+    begin
+      A.Player.StationServiceLastUseTurns[Kind] := -100000;
+      B.Player.StationServiceLastUseTurns[Kind] := -100000;
+    end;
+    // The first new station a star can take: a refused investment changes nothing.
+    Done := False;
+    Star := nil;
+    Stations := 0;
+    for Kind := cpCreateRangerCenter to cpCreateMedicalBase do
+    begin
+      for I := 0 to Galaxy.Stars.Count - 1 do
+      begin
+        Star := TStar(Galaxy.Stars[I]);
+        if (Star = Station.CurrentStar) or (Star.Constellation.Id = 20) then
+          Continue;
+        Command := NewCommand(ckInvest);
+        AddInt(Command, Kind);
+        AddInt(Command, 1000);
+        AddRef(Command, Star);
+        Stations := Star.CountShipsByTypeMask([Ord(rstRangerCenter)..Ord(rstDominion)]);
+        if TryFor(A, Command) = '' then
+        begin
+          Done := True;
+          Break;
+        end;
+      end;
+      if Done then
+        Break;
+    end;
+    if not Done then
+    begin
+      Emit('stale investment skipped: no star can take a new station');
+      Exit;
+    end;
+    Expect(
+        Star.CountShipsByTypeMask([Ord(rstRangerCenter)..Ord(rstDominion)]) = Stations + 1,
+        'the first investment built no station'
+    );
+    ExpectRefused(B, Command, rrOfferGone, 'the second investment');
+    Expect(
+        Star.CountShipsByTypeMask([Ord(rstRangerCenter)..Ord(rstDominion)]) = Stations + 1,
+        'the second investment built a station'
+    );
+    Emit(Format('stale investment kind=%d star=%d ok', [Kind, Star.Id]));
+  end;
+
+  // A Dominion in a star humans can join in; one is made when the galaxy has none there.
+  function FindDominion(out Planet: TPlanet): TRuins;
+  var
+    I: Integer;
+    Star: TStar;
+  begin
+    Result := FindStation(rstDominion, Planet);
+    if Result <> nil then
+      Exit;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+    begin
+      Star := TStar(Galaxy.Stars[I]);
+      if (Star.Dominion = nil) and (JoinPlanetIn(Star) <> nil) then
+      begin
+        Planet := JoinPlanetIn(Star);
+        Result := TRuins.Create;
+        Result.Init(rstDominion, Star, '');
+        Emit(Format('stale dominion made star=%d', [Star.Id]));
+        Exit;
+      end;
+    end;
+  end;
+
+  function OtherFreeStar(Dominion: TRuins; Skip: TStar): TStar;
+  var
+    I: Integer;
+  begin
+    Result := nil;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+      if (TStar(Galaxy.Stars[I]) <> Dominion.CurrentStar)
+          and (TStar(Galaxy.Stars[I]) <> Skip)
+          and (TStar(Galaxy.Stars[I]).Dominion = nil) then
+        Exit(TStar(Galaxy.Stars[I]));
+  end;
+
+  function CountDominionStars(Dominion: TRuins): Integer;
+  var
+    I: Integer;
+  begin
+    Result := 0;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+      if TStar(Galaxy.Stars[I]).Dominion = Dominion then
+        Inc(Result);
+  end;
+
+  procedure CheckDominion;
+  var
+    Dominion: TRuins;
+    Planet: TPlanet;
+    A, B: THuman;
+    Hull: TItem;
+    Ship: TShip;
+    BuildA, BuildB, Command: TPlayerCommand;
+    I, Part, Before, After, Carried: Integer;
+    Problem: AnsiString;
+    Target, Other: TStar;
+    Built: TList;
+  begin
+    Dominion := FindDominion(Planet);
+    if Dominion = nil then
+    begin
+      Emit('stale dominion skipped: no star for a Dominion');
+      Exit;
+    end;
+    JoinPair(Planet, A, B);
+    DockAt(A, Dominion);
+    DockAt(B, Dominion);
+    // A hull in the Dominion's shop: both build with it; B also with a part from its hold.
+    Hull := THull.Create;
+    THull(Hull).Init(1000, 8, Dominion.OwnerId, 9, -1, False);
+    Dominion.EquipmentShop.Add(Hull);
+    BuildA := NewCommand(ckBuildPirateShip);
+    BuildB := NewCommand(ckBuildPirateShip);
+    Part := -1;
+    for I := 0 to B.Player.Inventory.Count - 1 do
+      if (Part < 0) and (Ord(TItem(B.Player.Inventory[I]).ItemType) in [43..49]) then
+        Part := I;
+    for I := 0 to ConstructionPartCount - 1 do
+      if I = 0 then
+      begin
+        AddInt(BuildA, 2);
+        AddInt(BuildA, Integer(Hull.Id));
+        AddInt(BuildB, 2);
+        AddInt(BuildB, Integer(Hull.Id));
+      end
+      else
+      begin
+        AddInt(BuildA, 0);
+        AddInt(BuildA, 0);
+        AddInt(BuildB, 0);
+        if (Part >= 0) and (I = Ord(TItem(B.Player.Inventory[Part]).ItemType) - 42) then
+          AddInt(BuildB, Integer(TItem(B.Player.Inventory[Part]).Id))
+        else
+          AddInt(BuildB, 0);
+      end;
+    AddInt(BuildA, ShopVisibleColumnCount);
+    AddInt(BuildB, ShopVisibleColumnCount);
+    Problem := CountItems([Dominion.EquipmentShop], [A, B], Before);
+    Expect(Problem = '', Problem);
+    Expect(TryFor(A, BuildA) = '', 'the first build was refused');
+    Expect(Dominion.EquipmentShop.IndexOf(Hull) < 0, 'the built hull is still in the shop');
+    Built := TList.Create;
+    try
+      for I := 0 to Dominion.CurrentStar.Ships.Count - 1 do
+      begin
+        Ship := TShip(Dominion.CurrentStar.Ships[I]);
+        if Ship.Inventory.IndexOf(Hull) >= 0 then
+          Built.Add(Ship);
+      end;
+      Expect(Built.Count = 1, Format('the hull is in %d ships', [Built.Count]));
+      Ship := TShip(Built[0]);
+    finally
+      Built.Free;
+    end;
+    Carried := B.Player.Inventory.Count;
+    ExpectRefused(B, BuildB, rrItemGone, 'the second build');
+    Expect(B.Player.Inventory.Count = Carried, 'the refused build took a part from the hold');
+    Expect(Ship.Inventory.IndexOf(Hull) >= 0, 'the refused build moved the hull');
+    Problem := CountItems([Dominion.EquipmentShop, Ship.Inventory], [A, B], After);
+    Expect(Problem = '', Problem);
+    Expect(After = Before, Format('the items went from %d to %d', [Before, After]));
+    Emit(Format('stale build dominion=%d hull=%d part=%d ok', [Dominion.Id, Hull.Id, Ord(Part >= 0)]));
+    // Relocation: B's orders to another star come after A's relocation.
+    Dominion.RelocationAge := 1000;
+    Dominion.FlyToStar := nil;
+    if (Dominion.Order = soTeleport) or Dominion.HasScriptControl then
+    begin
+      Emit('stale relocation skipped: the Dominion is busy');
+      Exit;
+    end;
+    Target := OtherFreeStar(Dominion, nil);
+    Other := OtherFreeStar(Dominion, Target);
+    Expect((Target <> nil) and (Other <> nil), 'no free star for the Dominion');
+    Command := NewCommand(ckRelocateDominion);
+    AddRef(Command, Target);
+    Expect(TryFor(A, Command) = '', 'the first relocation was refused');
+    Command := NewCommand(ckRelocateDominion);
+    AddRef(Command, Other);
+    ExpectRefused(B, Command, rrTargetGone, 'the second relocation');
+    Command := NewCommand(ckOrderPirateAmbush);
+    AddRef(Command, Other);
+    ExpectRefused(B, Command, rrTargetGone, 'an ambush after the relocation');
+    Command := NewCommand(ckOrderPirateAssault);
+    AddRef(Command, Other);
+    ExpectRefused(B, Command, rrTargetGone, 'an assault after the relocation');
+    Expect(Other.Dominion = nil, 'a refused order pointed a star at the Dominion');
+    Expect(
+        CountDominionStars(Dominion) = 1,
+        Format('%d stars point at the Dominion', [CountDominionStars(Dominion)])
+    );
+    Emit(Format('stale relocation dominion=%d star=%d ok', [Dominion.Id, Target.Id]));
+  end;
+
+  procedure CheckSaleInSpace;
+  var
+    I, J, Count, Cargo, PartnerCargo, Price: Integer;
+    Star: TStar;
+    Planet: TPlanet;
+    Partner, Ship: TShip;
+    A, B: THuman;
+    Command: TPlayerCommand;
+    Good: Byte;
+  begin
+    Partner := nil;
+    Planet := nil;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+    begin
+      Star := TStar(Galaxy.Stars[I]);
+      if (Partner <> nil) or (JoinPlanetIn(Star) = nil) then
+        Continue;
+      for J := 0 to Star.Ships.Count - 1 do
+      begin
+        Ship := TShip(Star.Ships[J]);
+        if (Partner = nil) and (Ship is TRanger) and not IsHuman(Ship) and Ship.InNormalSpace then
+        begin
+          Partner := Ship;
+          Planet := JoinPlanetIn(Star);
+        end;
+      end;
+    end;
+    if Partner = nil then
+    begin
+      Emit('stale sale skipped: no ranger in space');
+      Exit;
+    end;
+    JoinPair(Planet, A, B);
+    Good := 0;
+    Count := 1;
+    for I := 0 to 1 do
+    begin
+      if I = 0 then
+        Ship := A.Player
+      else
+        Ship := B.Player;
+      Ship.CurrentPlanet := nil;
+      Ship.DockedTo := nil;
+      Inc(Ship.CargoGoods[Good].Count, Count);
+    end;
+    A.TalkShip := Partner;
+    B.TalkShip := Partner;
+    Expect(A.Player.InNormalSpace and B.Player.InNormalSpace, 'the humans are not in space');
+    // Room for both sales, and money for the first only.
+    if Partner.GetCargoFreeSpace - Partner.GetDesiredCargoFreeSpace < 2 * Count then
+      Inc(Partner.GetHull.Weight, 100);
+    RefreshTradeRows(A, Partner);
+    Price := A.Player.ShopGoodsSellPrice(Good, nil);
+    Partner.SetMoney(Count * Price);
+    Command := NewCommand(ckTradeGoods);
+    AddRef(Command, Partner);
+    AddInt(Command, Good);
+    AddInt(Command, Count);
+    AddInt(Command, 1);
+    Expect(TryFor(A, Command) = '', 'the first sale was refused');
+    Expect(Partner.Money = 0, Format('the partner has %d after the first sale', [Partner.Money]));
+    Cargo := B.Player.CargoGoods[Good].Count;
+    PartnerCargo := Partner.CargoGoods[Good].Count;
+    ExpectRefused(B, Command, rrNoMoney, 'the second sale');
+    Expect(B.Player.CargoGoods[Good].Count = Cargo, 'the refused seller lost its goods');
+    Expect(
+        (Partner.Money = 0) and (Partner.CargoGoods[Good].Count = PartnerCargo),
+        'the refused sale changed the partner'
+    );
+    A.TalkShip := nil;
+    B.TalkShip := nil;
+    Emit(Format('stale sale partner=%d price=%d ok', [Partner.Id, Price]));
+  end;
+
+  procedure CheckMap;
+  var
+    I, J: Integer;
+    Star: TStar;
+    Planet: TPlanet;
+    Map, Next, Other: TConstellation;
+    A, B: THuman;
+    Command: TPlayerCommand;
+  begin
+    Planet := nil;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+      if (Planet = nil)
+          and (JoinPlanetIn(TStar(Galaxy.Stars[I])) <> nil)
+          and (JoinPlanetIn(TStar(Galaxy.Stars[I])).FindUnchartedNeighborConstellation <> nil) then
+        Planet := JoinPlanetIn(TStar(Galaxy.Stars[I]));
+    // Every neighbour is charted: one is hidden again for the test.
+    if Planet = nil then
+      for I := 0 to Galaxy.Stars.Count - 1 do
+      begin
+        Star := TStar(Galaxy.Stars[I]);
+        if (Planet <> nil) or (JoinPlanetIn(Star) = nil) then
+          Continue;
+        for J := 0 to Galaxy.Constellations.Count - 1 do
+        begin
+          Other := TConstellation(Galaxy.Constellations[J]);
+          if (Planet = nil)
+              and (Other <> Star.Constellation)
+              and (Other.Id <> 20)
+              and Other.SharesOutlineSegment(Star.Constellation) then
+          begin
+            Other.Visible := False;
+            Planet := JoinPlanetIn(Star);
+          end;
+        end;
+      end;
+    if Planet = nil then
+    begin
+      Emit('stale map skipped: no constellation to chart');
+      Exit;
+    end;
+    JoinPair(Planet, A, B);
+    Map := Planet.FindUnchartedNeighborConstellation;
+    Command := NewCommand(ckBuyMap);
+    AddRef(Command, Map);
+    Expect(TryFor(A, Command) = '', 'the first map was refused');
+    Expect(Map.Visible, 'the first map charted nothing');
+    Next := Planet.FindUnchartedNeighborConstellation;
+    ExpectRefused(B, Command, rrOfferGone, 'the second map');
+    Expect((Next = nil) or not Next.Visible, 'the refused map charted another constellation');
+    Emit(Format('stale map constellation=%d next=%d ok', [Map.Id, Ord(Next <> nil)]));
+  end;
+
+  procedure CheckSurfaceLoot;
+  var
+    I, Before, After: Integer;
+    Planet: TPlanet;
+    A, B: THuman;
+    Items: array[0..1] of TItem;
+    Entry: PPlanetSurfaceLootEntry;
+    Command: TPlayerCommand;
+    Problem: AnsiString;
+  begin
+    Planet := nil;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+      if Planet = nil then
+        Planet := JoinPlanetIn(TStar(Galaxy.Stars[I]));
+    Expect(Planet <> nil, 'no planet for the surface loot');
+    JoinPair(Planet, A, B);
+    // Two items on the surface, after what is there.
+    if Planet.SurfaceLootEntries = nil then
+      Planet.SurfaceLootEntries := TList.Create;
+    for I := 0 to 1 do
+    begin
+      Items[I] := THull.Create;
+      THull(Items[I]).Init(10, 1, 0, 1, -1, False);
+      New(Entry);
+      FillChar(Entry^, SizeOf(Entry^), 0);
+      Entry.Item := Items[I];
+      Planet.SurfaceLootEntries.Add(Entry);
+    end;
+    Problem := CountItems([], [A, B], Before);
+    Expect(Problem = '', Problem);
+    // Both saw the two items at I and I + 1.
+    I := Planet.SurfaceLootEntries.Count - 2;
+    Command := NewCommand(ckPickUpSurfaceLoot);
+    AddInt(Command, I);
+    AddInt(Command, Integer(Items[0].Id));
+    Expect(TryFor(A, Command) = '', 'the first pickup was refused');
+    ExpectRefused(B, Command, rrItemGone, 'the second pickup');
+    Command := NewCommand(ckPickUpSurfaceLoot);
+    AddInt(Command, I + 1);
+    AddInt(Command, Integer(Items[1].Id));
+    Expect(TryFor(B, Command) = '', 'the pickup of an item that moved was refused');
+    Expect(A.Player.Inventory.IndexOf(Items[0]) >= 0, 'the first item is not the first human''s');
+    Expect(B.Player.Inventory.IndexOf(Items[1]) >= 0, 'the second item is not the second human''s');
+    Problem := CountItems([], [A, B], After);
+    Expect(Problem = '', Problem);
+    Expect(After = Before + 2, Format('the items went from %d to %d', [Before, After]));
+    Emit(Format('stale surface loot planet=%d ok', [Planet.Id]));
+  end;
+
+begin
+  Result := 0;
+  Joined := 0;
+  try
+    CheckSpecialShip;
+    CheckSatellite;
+    CheckInvestment;
+    CheckDominion;
+    CheckSaleInSpace;
+    CheckMap;
+    CheckSurfaceLoot;
+    Emit('stale commands ok');
+  except
+    on E: EAbort do
+      Result := 1;
+  end;
+end;
+
 procedure EmitHumans(const Options: TSimulationOptions);
 var
   Lines: TStringList;
@@ -1891,6 +2531,11 @@ begin
   if Options.ScriptRouting then
   begin
     Result := RunScriptRouting(Options);
+    Exit;
+  end;
+  if Options.StaleCommands then
+  begin
+    Result := RunStaleCommands(Options);
     Exit;
   end;
   if Options.Pvp then

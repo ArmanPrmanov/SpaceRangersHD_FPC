@@ -465,6 +465,27 @@ begin
     end
     else
     begin
+      // CHANGE: BUGFIX - A sale the partner cannot take fails before the partner changes: the
+      // seller has the goods, the partner has room for them and can pay all of them. The goods
+      // screen sells no more than that, so it never fails there. Between days two humans could
+      // sell to one trader from their copies: its money stopped at 0 and both were paid in full
+      // (docs/network.md, Commands). A sale it can pay only part of is refused whole, as the
+      // player chose the count at the price shown.
+      if P.CargoGoods[Good].Count < Count then
+        raise ECommandRefused.CreateReason(
+            rrOther,
+            Format('SellGoods: %d of good %d wanted, %d carried', [Count, Good, P.CargoGoods[Good].Count])
+        );
+      if Count > Partner.GetCargoFreeSpace - Partner.GetDesiredCargoFreeSpace then
+        raise ECommandRefused.CreateReason(
+            rrNoRoom,
+            Format('SellGoods: no room for %d of good %d', [Count, Good])
+        );
+      if Int64(Count) * P.ShopGoodsSellPrice(Good, nil) > Partner.Money then
+        raise ECommandRefused.CreateReason(
+            rrNoMoney,
+            Format('SellGoods: %d of good %d cost more than %d', [Count, Good, Partner.Money])
+        );
       Partner.SetMoney(
           Partner.Money
               - Count

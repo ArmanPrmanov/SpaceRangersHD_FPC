@@ -128,7 +128,8 @@ procedure EnterPrison;
 procedure ChoosePrison;
 // Returns the bribe paid.
 function PayBribe: Integer;
-procedure BuyMap;
+// Constellation is the map the screen offered.
+procedure BuyMap(Constellation: TConstellation);
 // Returns whether Ship was released.
 function PayPrisonBail(Ship: TShip): Boolean;
 // Returns an rq outcome; a refusal leaves the answer in PlanetText.
@@ -608,6 +609,7 @@ procedure ExecuteBuyMap(const Command: TPlayerCommand);
 var
   Cost: Integer;
   P: TPlayer;
+  Constellation: TConstellation;
 begin
   P := Actor(Command);
   Cost :=
@@ -617,15 +619,40 @@ begin
                   Galaxy.ComputeScaledBigMoney(P.CurrentPlanet.OwnerId))
               + 50
       );
+  // CHANGE: BUGFIX - The command names the constellation the screen offered (a log from before
+  // names none: the map is the first uncharted neighbour, as it was). The government sells it
+  // while it is still an uncharted neighbour, before it takes the money. Between days another
+  // human may have bought it: the host charged and revealed the next one, or crashed when none
+  // was left (docs/network.md, Commands).
+  if Length(Command.Refs) > 0 then
+  begin
+    Constellation := RefObject(Command, 0) as TConstellation;
+    if (Constellation = nil)
+        or Constellation.Visible
+        or (Constellation.Id = 20)
+        or not Constellation.SharesOutlineSegment(P.CurrentPlanet.CurrentStar.Constellation) then
+      raise ECommandRefused.CreateReason(rrOfferGone, 'BuyMap: the constellation is charted');
+  end
+  else
+  begin
+    Constellation := P.CurrentPlanet.FindUnchartedNeighborConstellation;
+    if Constellation = nil then
+      raise ECommandRefused.CreateReason(rrOfferGone, 'BuyMap: no uncharted neighbour');
+  end;
+  if P.Money < Cost then
+    raise ECommandRefused.CreateReason(rrNoMoney, 'BuyMap: not enough money');
   P.SetMoney(P.Money - Cost);
-  (TObject(P.CurrentPlanet.FindUnchartedNeighborConstellation) as TConstellation).Visible :=
-      True;
+  Constellation.Visible := True;
   P.AchievementStats.CheckMapBuilderAchievement;
 end;
 
-procedure BuyMap;
+procedure BuyMap(Constellation: TConstellation);
+var
+  Command: TPlayerCommand;
 begin
-  SubmitSimple(ckBuyMap);
+  Command := NewCommand(ckBuyMap);
+  AddRef(Command, Constellation);
+  SubmitCommand(Command);
 end;
 
 // Preserve the native receiver evaluation before the bounded payment,
@@ -1165,6 +1192,30 @@ begin
   Result := PlanetOutcome;
 end;
 
+// The surface entry at Planet that holds the item with that id, or -1; Hint is where the
+// sender's screen showed it.
+function FindSurfaceLoot(Planet: TPlanet; Hint: Integer; Id: Cardinal): Integer;
+var
+  Entries: TList;
+  I: Integer;
+begin
+  Result := -1;
+  if Planet = nil then
+    Exit;
+  Entries := Planet.SurfaceLootEntries;
+  if Entries = nil then
+    Exit;
+  if (Hint >= 0)
+      and (Hint < Entries.Count)
+      and (PPlanetSurfaceLootEntry(Entries[Hint]).Item <> nil)
+      and (Cardinal(PPlanetSurfaceLootEntry(Entries[Hint]).Item.Id) = Id) then
+    Exit(Hint);
+  for I := 0 to Entries.Count - 1 do
+    if (PPlanetSurfaceLootEntry(Entries[I]).Item <> nil)
+        and (Cardinal(PPlanetSurfaceLootEntry(Entries[I]).Item.Id) = Id) then
+      Exit(I);
+end;
+
 // Moved from TfPlanetNO.ResearchMapMouseDown. The entry is named by its index in the
 // planet's list and its item's id.
 procedure ExecutePickUpSurfaceLoot(const Command: TPlayerCommand);
@@ -1174,14 +1225,16 @@ var
   P: TPlayer;
 begin
   P := Actor(Command);
-  I := IntArg(Command, 0);
-  if (P.CurrentPlanet.SurfaceLootEntries = nil)
-      or (I < 0)
-      or (I >= P.CurrentPlanet.SurfaceLootEntries.Count) then
-    raise Exception.Create(CommandKindName(Command.Kind) + ' names a missing surface item');
+  // CHANGE: BUGFIX - The item is found by its id; the index is where the sender's screen showed
+  // it. Between days another human may have picked up an entry before it, which moved this
+  // one, or picked up this one (docs/network.md, Commands).
+  I := FindSurfaceLoot(P.CurrentPlanet, IntArg(Command, 0), Cardinal(IntArg(Command, 1)));
+  if I < 0 then
+    raise ECommandRefused.CreateReason(
+        rrItemGone,
+        CommandKindName(Command.Kind) + ' names a surface item that is gone'
+    );
   Entry := P.CurrentPlanet.SurfaceLootEntries[I];
-  if (Entry.Item = nil) or (Cardinal(Entry.Item.Id) <> Cardinal(IntArg(Command, 1))) then
-    raise Exception.Create(CommandKindName(Command.Kind) + ' names another surface item');
   if Entry.Item is TArtefactTranclucator then
     (TObject((Entry.Item as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip := P;
   if Entry.Item is TGoods then

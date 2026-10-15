@@ -297,6 +297,12 @@ begin
     // CHANGE: ENHANCEMENT - Script builtins act for the right human (HeadlessSim.RunScriptRouting).
     else if Argument = '--sim-script-routing' then
       Simulation.ScriptRouting := True
+    // CHANGE: ENHANCEMENT - Commands from stale copies are refused (HeadlessSim.RunStaleCommands).
+    else if Argument = '--sim-stale-commands' then
+      Simulation.StaleCommands := True
+    // CHANGE: ENHANCEMENT - A nested command reaches the host once (HeadlessNet).
+    else if Argument = '--sim-net-nested' then
+      Simulation.NetNested := True
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then

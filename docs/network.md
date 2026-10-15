@@ -155,7 +155,12 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
 
 - The client's UI submits commands as always. `SubmitCommand` executes the
   command at once on the client, which is the prediction, and the client's
-  `AfterCommandHook` sends it to the host.
+  `NetworkCommandHook` sends it to the host. Only a command submitted while
+  none executes goes: one that a command submits from inside it (script code
+  it runs, a nested action) is submitted again when the host executes the outer
+  one, as the command log records only the outermost and its replay rebuilds the
+  rest ([commands.md](commands.md), Threads). The host's remote dialogue gets
+  only such commands too.
 - The host refuses a command whose actor is not the peer's human, and queues
   the rest per peer. It does not execute them as they arrive: arrival order
   depends on the network, and the day's outcome must not.
@@ -182,18 +187,27 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
 
   | Reason | Byte | Log | Raised by |
   | --- | --- | --- | --- |
-  | `rrOther` | 0 | `other` | any other exception |
+  | `rrOther` | 0 | `other` | any other exception; also a sale in space of goods the seller does not carry, and a dominator program the human has none of |
   | `rrOutOfStock` | 1 | `out-of-stock` | a purchase of goods beyond the stock (`TShip.CheckGoodsPurchase`) |
-  | `rrNoMoney` | 2 | `no-money` | a purchase of goods or equipment, a refuel, reload or rockets the human cannot pay |
-  | `rrItemGone` | 3 | `item-gone` | a shop command whose item (by id) the shop's stock no longer holds (`aShopActions.ShopItemArg`) |
+  | `rrNoMoney` | 2 | `no-money` | a purchase of goods or equipment, a refuel, reload or rockets the human cannot pay; a sale in space the partner cannot pay in full; a ship built at a Dominion, a map, a satellite, an investment or a Dominion order the human cannot pay |
+  | `rrItemGone` | 3 | `item-gone` | a shop command whose item (by id) the shop's stock no longer holds (`aShopActions.ShopItemArg`); a ship built at a Dominion with a part no longer in the shop, the hold or the storage, or named twice; surface loot (by id) no longer on the planet |
+  | `rrOfferGone` | 4 | `offer-gone` | a station's one-off special ship already sold; a satellite offer that is not the one the human accepted, or no more satellites allowed; an investment the business center would not offer now (too soon, or the star or its constellation has the station or no room for it); a map of a constellation that is charted or no longer an uncharted neighbour |
+  | `rrTargetGone` | 5 | `target-gone` | a request for protection when the partner is after no ship; a dominator a program already hacked; a Dominion relocation, ambush or assault when the Dominion has other plans (it flies or teleports, a script controls it, or it lacks the energy), the star has a Dominion, or an ambush at the star is under way |
+  | `rrNoRoom` | 6 | `no-room` | a sale in space that does not fit in the partner's hold |
 
-  A reason the client does not know reads as `rrOther`. The host logs
+  The checks are those the screens make before they offer the action, so they
+  never fire in a single-player game; they refuse a command a client predicted
+  from a copy another human's command has made stale (`--sim-stale-commands`,
+  `HeadlessSim.RunStaleCommands`, checks each). The values fit the byte that
+  always carried the reason, so the protocol did not change; a reason the client
+  does not know reads as `rrOther`. The host logs
   `command failed human= seq= kind= reason=`; the client logs `command refused
   seq= kind= reason=`, keeps the result for `TakeCommandResult`, and shows the
   refusal to its player as a message bubble of its human (`TNetClient.ShowRefusal`),
   with a `Multiplayer.Refused*` text: `RefusedOutOfStock` ("The host refused
   your purchase: not enough in stock."), `RefusedNoMoney`, `RefusedItemGone`,
-  `RefusedOther` (English fallbacks, as Waiting's texts). The next state
+  `RefusedOfferGone`, `RefusedTargetGone`, `RefusedNoRoom`, `RefusedOther`
+  (English fallbacks, as Waiting's texts). The next state
   replaces the human's bubbles, so the client shows the refusals of the day
   again after applying it. Today the host sends `CommandResult` for refusals
   only; the message can also say that a command was applied (`Ok`), for a
@@ -703,7 +717,10 @@ command log must hold as many purchases of remote humans as the host applied
 the refusal (`net client refused seq= reason= bubble=1`) and show it as a bubble,
 again after the next state (`net client refusal after state bubble=1`). A new
 game is not recorded (the command log starts at a load), so there only the
-refusal is checked.
+refusal is checked. In that run the client also submits, on its first day, a
+command whose executor submits another one (`--sim-net-nested`, two probe kinds
+registered only then): the client must send the outer one only, and the host
+must run each once (`net host nested outer=1 inner=1`).
 
 The headless runner (`HeadlessNet`):
 
@@ -783,9 +800,6 @@ star's film once; every client in that star gets it.
   line is in the host's language (the host builds the text); a talk a client
   cannot show (it is on another screen than the star map) is declined, not
   queued; one held for a film's end is declined after 60 s.
-- A client sends every command it submits, also one submitted while another
-  of its commands executes; the host runs the outer one, which submits the
-  inner one again, and then the inner one from the queue.
 - A video a client's command starts on the client's ship screen plays there at
   once, but the host queues it for the client's human (it cannot see the
   client's screen), and no report finishes it there.

@@ -52,7 +52,19 @@ type
   // other exception is rrOther. ECommandRefused means that the command changed nothing
   // before it raised, so the command log needs no checkpoint after it: raise it only before
   // the executor's first change.
-  TRefusalReason = (rrOther = 0, rrOutOfStock = 1, rrNoMoney = 2, rrItemGone = 3);
+  // rrOfferGone: an offer the player accepted is no longer made (taken by another human, or
+  // replaced); rrTargetGone: what the command acts on has changed since the player chose it;
+  // rrNoRoom: the other side has no room for what the player sells. A client of an older build
+  // reads a value it does not know as rrOther.
+  TRefusalReason = (
+      rrOther = 0,
+      rrOutOfStock = 1,
+      rrNoMoney = 2,
+      rrItemGone = 3,
+      rrOfferGone = 4,
+      rrTargetGone = 5,
+      rrNoRoom = 6
+  );
   ECommandRefused = class(Exception)
     Reason: TRefusalReason;
     constructor CreateReason(AReason: TRefusalReason; const Text: string);
@@ -113,6 +125,9 @@ const
 var
   Executors: array[0..MaximumCommandKind] of TCommandExecutor;
   KindNames: array[0..MaximumCommandKind] of AnsiString;
+threadvar
+  // The commands SubmitCommand is executing on this thread.
+  SubmitDepth: Integer;
 
 constructor ECommandRefused.CreateReason(AReason: TRefusalReason; const Text: string);
 begin
@@ -134,6 +149,9 @@ begin
     rrOutOfStock: Result := 'out-of-stock';
     rrNoMoney: Result := 'no-money';
     rrItemGone: Result := 'item-gone';
+    rrOfferGone: Result := 'offer-gone';
+    rrTargetGone: Result := 'target-gone';
+    rrNoRoom: Result := 'no-room';
   else
     Result := 'other';
   end;
@@ -375,6 +393,8 @@ begin
 end;
 
 procedure SubmitCommand(const Command: TPlayerCommand);
+var
+  Outermost: Boolean;
 begin
   // On the turn thread a command is part of the job that runs it, not something a human did.
   if InTurnJob then
@@ -384,16 +404,26 @@ begin
   end;
   if Assigned(BeforeCommandHook) then
     BeforeCommandHook(Command);
+  Outermost := SubmitDepth = 0;
+  Inc(SubmitDepth);
   try
-    ExecuteCommand(Command);
-  except
-    if Assigned(CommandFailedHook) then
-      CommandFailedHook(Command);
-    raise;
+    try
+      ExecuteCommand(Command);
+    except
+      if Assigned(CommandFailedHook) then
+        CommandFailedHook(Command);
+      raise;
+    end;
+  finally
+    Dec(SubmitDepth);
   end;
   if Assigned(AfterCommandHook) then
     AfterCommandHook(Command);
-  if Assigned(NetworkCommandHook) then
+  // CHANGE: BUGFIX - Only a command submitted while none executes goes to the network. A
+  // command submitted from inside another one is submitted again when the receiver executes
+  // the outer one, as the command log records only the outermost; a client sent both, and the
+  // host ran the inner one twice (docs/network.md, Commands).
+  if Outermost and Assigned(NetworkCommandHook) then
     NetworkCommandHook(Command);
 end;
 

@@ -319,6 +319,15 @@ begin
     PByte(Buffer.Data)[4 + 2 + 1] := 200;
     Buffer.SetPosition(0);
     Check(DecodeCommandResult(Buffer).Reason = rrOther, 'an unknown refusal reason is Other');
+    // The reasons of the stale-copy checks travel in the same byte.
+    Buffer.Clear;
+    Outcome.Reason := rrNoRoom;
+    EncodeCommandResult(Outcome, Buffer);
+    Buffer.SetPosition(0);
+    Check(DecodeCommandResult(Buffer).Reason = rrNoRoom, 'the last refusal reason round trips');
+    CheckText('offer-gone', WideString(RefusalReasonName(rrOfferGone)), 'reason names');
+    CheckText('target-gone', WideString(RefusalReasonName(rrTargetGone)), 'reason names');
+    CheckText('no-room', WideString(RefusalReasonName(rrNoRoom)), 'reason names');
     Refusal := ECommandRefused.CreateReason(rrNoMoney, 'x');
     Check(RefusalReasonOf(Refusal) = rrNoMoney, 'ECommandRefused carries its reason');
     Refusal.Free;

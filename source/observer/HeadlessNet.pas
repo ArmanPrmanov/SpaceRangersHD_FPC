@@ -241,6 +241,39 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - --sim-net-nested (docs/network.md, Tests): on its first day a client
+// submits a command whose executor submits another one. A client sends only the outer one, and
+// the host's run of it submits the inner one again, so the host runs each once.
+const
+  ckNetNestedOuter = 1001;
+  ckNetNestedInner = 1002;
+var
+  NestedRegistered: Boolean;
+  NestedOuterRuns: Integer;
+  NestedInnerRuns: Integer;
+
+procedure ExecuteNetNestedOuter(const Command: TPlayerCommand);
+begin
+  Inc(NestedOuterRuns);
+  SubmitCommand(NewCommand(ckNetNestedInner));
+end;
+
+procedure ExecuteNetNestedInner(const Command: TPlayerCommand);
+begin
+  Inc(NestedInnerRuns);
+end;
+
+procedure RegisterNestedProbe;
+begin
+  NestedOuterRuns := 0;
+  NestedInnerRuns := 0;
+  if NestedRegistered then
+    Exit;
+  RegisterCommand(ckNetNestedOuter, 'NetNestedOuter', @ExecuteNetNestedOuter);
+  RegisterCommand(ckNetNestedInner, 'NetNestedInner', @ExecuteNetNestedInner);
+  NestedRegistered := True;
+end;
+
 function RunNetHost(const Options: TSimulationOptions): Integer;
 var
   Host: TNetHost;
@@ -264,6 +297,8 @@ begin
     ProbeSendsFilms := Options.NetTalkAfterFilm;
     RaceDone := False;
     RemoteTrades := 0;
+    if Options.NetNested then
+      RegisterNestedProbe;
     if Options.NetBuyRace then
     begin
       PreviousAfterCommand := AfterCommandHook;
@@ -400,6 +435,8 @@ begin
     until False;
     if Options.NetBuyRace then
       Emit(Format('net host trades remote=%d host=%d', [RemoteTrades, LocalHuman.Id]));
+    if Options.NetNested then
+      Emit(Format('net host nested outer=%d inner=%d', [NestedOuterRuns, NestedInnerRuns]));
     Emit(
         Format(
             'done net host days=%d humans=%d day=%d hash=%s',
@@ -542,6 +579,8 @@ begin
   TalkHeld := False;
   RefusalShown := '';
   BuyWholeStockGood := Options.NetBuyRace;
+  if Options.NetNested then
+    RegisterNestedProbe;
   try
     // The connect runs on its own thread, as the game's join does; each phase is printed.
     Client := JoinGame(Address, Port, WideString(Options.NetName), False);
@@ -662,6 +701,11 @@ begin
       begin
         Plan := '';
         Index := Session.Humans.IndexOf(LocalHuman) + 1;
+        if Options.NetNested and (NestedOuterRuns = 0) then
+        begin
+          SubmitCommand(NewCommand(ckNetNestedOuter));
+          Emit(Format('net client nested outer=%d inner=%d', [NestedOuterRuns, NestedInnerRuns]));
+        end;
         PlayHumanTurn(LocalHuman, Galaxy.CurrentTurn, Index, Plan);
         LastPlayedDay := Galaxy.CurrentTurn;
       end;
