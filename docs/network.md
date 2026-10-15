@@ -185,7 +185,7 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   | `rrOther` | 0 | `other` | any other exception |
   | `rrOutOfStock` | 1 | `out-of-stock` | a purchase of goods beyond the stock (`TShip.CheckGoodsPurchase`) |
   | `rrNoMoney` | 2 | `no-money` | a purchase of goods or equipment, a refuel, reload or rockets the human cannot pay |
-  | `rrItemGone` | 3 | `item-gone` | a shop command whose slot no longer holds the item it names (`ShopSlotArg`) |
+  | `rrItemGone` | 3 | `item-gone` | a shop command whose item (by id) the shop's stock no longer holds (`aShopActions.ShopItemArg`) |
 
   A reason the client does not know reads as `rrOther`. The host logs
   `command failed human= seq= kind= reason=`; the client logs `command refused
@@ -207,6 +207,16 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   the executor keeps them in the actor's `THuman.ShopColumnCount`, which pads
   that human's grid (`ShopColumnCount`): a client's command does not change the
   host's own grid. It is layout and is not saved; the grid itself is.
+- **Shared shop stock.** The equipment a planet or station sells stays in its
+  list while humans shop there; each human's grid is a view of it
+  ([humans.md](humans.md), Shops). Two humans at one shop see the same items.
+  A shop command names its item by id, so the slots that another human's
+  purchase moved do not matter, and an item already bought is refused as
+  `rrItemGone` before anything changes. A change to a shop's stock rebuilds the
+  other humans' grids there (`aShopStock.ShopStockChanged`) and tells the local
+  equipment shop screen (`SimEvents.NotifyShopStockChanged`); a host that
+  applies a trade as it arrives, and a client that applies another human's
+  trade, refresh the open shop that way.
 - When the host's human has ended its turn and every peer is ready, the host
   applies the queued commands, human by human in `Session.Humans` order, each
   queue up to and including its `EndTurn`, through `SubmitCommand`, so the
@@ -380,11 +390,11 @@ map in order mode.
   first calls `aHuman.ResetHumans`, which gives the local human a new `THuman`,
   as at startup; otherwise its own human's lists (the shop, old quests) would
   mix into the host's.
-- **What a checkpoint cannot carry.** A shop left open while its human's ranger
-  is in space is dropped by a load (`TGalaxy.LoadFromBuffer` keeps the local
-  human's open shop only while landed or docked). The screens give the stock
-  back on leaving, so play never leaves one open; the headless turn takes off
-  with `tfReturnShopStock` for the same reason.
+- **What a checkpoint cannot carry.** A shop grid left open while its human's
+  ranger is in space is dropped by a load (`aShopStock.AdoptLoadedShopView`
+  keeps a grid only while landed or docked). Its items stay in the shop: a save
+  writes them there, not in a grid away from its ranger. The screens close the
+  grid on leaving anyway; the headless turn takes off with `tfReturnShopStock`.
 
 ## Applying state (the safe point)
 

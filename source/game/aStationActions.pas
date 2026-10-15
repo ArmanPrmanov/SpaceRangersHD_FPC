@@ -2739,17 +2739,24 @@ var
   var
     Station: TRuins;
   begin
+    Station := TRuins(P.DockedTo);
     if ActorHuman(Command).TemporaryShopSlots <> nil then
     begin
       // CHANGE: ENHANCEMENT - ReturnShopStock and OpenShopStock as they run inside this
       // command; the screen rebuilds the shop controls after it.
       RestoreTemporaryShopStock(ActorHuman(Command));
-      Station := TRuins(P.DockedTo);
       Station.EquipmentShop.Delete(Station.EquipmentShop.IndexOf(Item));
       // CHANGE: BUGFIX - The actor's columns, not this machine's (THuman.ShopColumnCount).
       ActorHuman(Command).ShopColumnCount := IntArg(Command, 2 * ConstructionPartCount);
       BuildTemporaryShopSlotGrid(ActorHuman(Command));
       Inc(ShopItems);
+    end
+    // CHANGE: BUGFIX - The stock stays in the station's list while no grid shows it
+    // (aShopStock): the part leaves it, and the grids of other humans there.
+    else if Station.EquipmentShop.IndexOf(Item) >= 0 then
+    begin
+      Station.EquipmentShop.Delete(Station.EquipmentShop.IndexOf(Item));
+      ShopStockChanged(Station);
     end;
   end;
 begin

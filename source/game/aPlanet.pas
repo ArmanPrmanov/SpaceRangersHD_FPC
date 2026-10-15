@@ -318,6 +318,8 @@ begin
     RangerRelations.Delete(i);
   if Graphic <> nil then
     ReleaseSpaceObject(TObjectSE(Graphic));
+  // CHANGE: BUGFIX - A shop grid open here shows items freed with the planet.
+  DropShopViewsAt(Self);
   EquipmentShop.Free;
   EquipmentShop := nil;
   if SurfaceLootEntries <> nil then
@@ -1900,11 +1902,18 @@ begin
   Buffer.AddWideChar(WideChar(Count));
   for i := 0 to Count - 1 do
     Buffer.AddAnsiChar(AnsiChar(Self.RangerRelations[i]));
-  Count := Self.EquipmentShop.Count;
+  // CHANGE: BUGFIX - The items a human's shop grid writes are left out, as native's grid
+  // held them outside this list (aShopStock).
+  Count := 0;
+  for i := 0 to Self.EquipmentShop.Count - 1 do
+    if not ShopItemSavedByView(TObject(Self.EquipmentShop[i])) then
+      Inc(Count);
   Buffer.AddWideChar(WideChar(Count));
-  for i := 0 to Count - 1 do
+  for i := 0 to Self.EquipmentShop.Count - 1 do
   begin
     Item := TItem(Self.EquipmentShop[i]);
+    if ShopItemSavedByView(Item) then
+      Continue;
     Buffer.AddAnsiChar(AnsiChar(Item.ItemType));
     Item.SaveToBuffer(Buffer);
   end;
@@ -5883,6 +5892,8 @@ begin
       end;
     end;
   end;
+  // CHANGE: BUGFIX - A human's shop grid open here shows the new stock, not freed items.
+  ShopStockChanged(Self);
 end;
 
 function TPlanet.GenerateHullOffer(Ship: Pointer): THull;

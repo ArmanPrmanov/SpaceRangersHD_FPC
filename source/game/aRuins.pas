@@ -302,6 +302,8 @@ begin
     if Ranger.LastDockedNonPlanetLocation = Self then
       Ranger.LastDockedNonPlanetLocation := nil;
   end;
+  // CHANGE: BUGFIX - A shop grid open here shows items freed with the station.
+  DropShopViewsAt(Self);
   EquipmentShop.Free;
   EquipmentShop := nil;
   if SatelliteOffer <> nil then
@@ -573,11 +575,18 @@ var
   Good: Byte;
 begin
   inherited SaveToBuffer(Buffer);
-  Count := EquipmentShop.Count;
+  // CHANGE: BUGFIX - The items a human's shop grid writes are left out, as native's grid
+  // held them outside this list (aShopStock).
+  Count := 0;
+  for I := 0 to EquipmentShop.Count - 1 do
+    if not ShopItemSavedByView(TObject(EquipmentShop[I])) then
+      Inc(Count);
   Buffer.AddWideChar(WideChar(Count));
-  for I := 0 to Count - 1 do
+  for I := 0 to EquipmentShop.Count - 1 do
   begin
     Item := TItem(EquipmentShop[I]);
+    if ShopItemSavedByView(Item) then
+      Continue;
     Buffer.AddAnsiChar(AnsiChar(Item.ItemType));
     Item.SaveToBuffer(Buffer);
   end;
@@ -1220,6 +1229,8 @@ begin
       RemoveSimilarShopItem(Item);
     end;
   end;
+  // CHANGE: BUGFIX - A human's shop grid open here shows the new stock, not freed items.
+  ShopStockChanged(Self);
 end;
 
 function TRuins.CalculateEquipmentShopTargetCount: Integer;

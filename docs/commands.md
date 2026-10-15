@@ -29,9 +29,12 @@ records the command, and the headless runner replays it.
 3. **Pass inputs as arguments.**
    - Objects are passed by id with `AddRef`: stars, planets, ships, items,
      holes, constellations, asteroids and missiles.
-   - Items in the open shop's grid (`LocalHuman.TemporaryShopSlots`) are not
-     in any galaxy list. Pass the slot index plus the item id, and check
-     both.
+   - Items in the open shop's grid (`LocalHuman.TemporaryShopSlots`) are in
+     their planet's or station's list; the grid is the human's view of it
+     ([humans.md](humans.md), Shops). Pass the slot index plus the item id. The
+     executor finds the item by its id in the shop's stock
+     (`aShopActions.ShopItemArg`) and refuses with `rrItemGone` when it is
+     gone; the slot only places it in the actor's grid.
    - Integers go in with `AddInt`, floats with `AddFloat`/`AddPoint` (sent
      bit for bit), and text with `Command.Text`.
    - A value the screen computed from UI state, such as a layout width or a

@@ -4440,7 +4440,7 @@ begin
   if RuinsMode = 0 then
   begin
     if HumanOf(Self).TemporaryShopSlots <> nil then
-      RestoreTemporaryShopStock;
+      RestoreTemporaryShopStock(HumanOf(Self));
     RuinsSavedPlanet := CurrentPlanet;
     RuinsSavedDockedTo := DockedTo;
     if RuinsProxy = nil then
@@ -4448,7 +4448,7 @@ begin
     DockedTo := RuinsProxy;
     CurrentPlanet := nil;
     RuinsProxy.CurrentStar := CurrentStar;
-    BuildTemporaryShopSlotGrid;
+    BuildTemporaryShopSlotGrid(HumanOf(Self));
   end;
   RuinsMode := SelectedMode;
   RequestScreen(screenRuinsTalk);
@@ -4466,7 +4466,7 @@ begin
       aCalc.WaitForTurnCalculationUI;
       CurrentPlanet := nil;
       DockedTo := RuinsProxy;
-      RestoreTemporaryShopStock;
+      RestoreTemporaryShopStock(HumanOf(Self));
       aCalc.WaitForTurnCalculationUI;
     end;
   end
@@ -4492,14 +4492,14 @@ begin
   begin
     CurrentPlanet := nil;
     DockedTo := RuinsProxy;
-    RestoreTemporaryShopStock;
+    RestoreTemporaryShopStock(HumanOf(Self));
   end;
   CurrentPlanet := RuinsSavedPlanet;
   RuinsSavedPlanet := nil;
   DockedTo := RuinsSavedDockedTo;
   RuinsSavedDockedTo := nil;
   RuinsMode := 0;
-  BuildTemporaryShopSlotGrid;
+  BuildTemporaryShopSlotGrid(HumanOf(Self));
   aCalc.WaitForTurnCalculationUI;
 end;
 

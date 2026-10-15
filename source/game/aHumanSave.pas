@@ -14,7 +14,10 @@ unit aHumanSave;
 //   local human only;
 // - the human each script is bound to (TScript.HumanId);
 // - the human each galaxy event is about (TGalaxyEvent.HumanId);
-// - since version 2, whether each human's game has ended (THuman.Finished, FinishReason).
+// - since version 2, whether each human's game has ended (THuman.Finished, FinishReason);
+// - since version 3, the items of the open shop grids that do not write them (aShopStock:
+//   a second grid at a location writes its slots empty), by id, so that a load shows them
+//   again.
 // It is written only when some of this differs from what a save without it loads as: more
 // than one human, a flag that is not its default, a cheat on record, or a script or event
 // bound to a human other than the first. A single-player save is therefore byte for byte as
@@ -57,7 +60,8 @@ uses
 const
   HumanBlockMagic = $55485253; // 'SRHU'
   // 2: whether each human's game has ended.
-  HumanBlockVersion = 2;
+  // 3: the items of the shop grids that write their slots empty.
+  HumanBlockVersion = 3;
 
 procedure ResetHumanSessionState;
 begin
@@ -197,7 +201,73 @@ begin
   begin
     Buffer.AddIntegerValue(Human.TemporaryShopSlots.Count);
     for I := 0 to Human.TemporaryShopSlots.Count - 1 do
-      TShopStockSlot(Human.TemporaryShopSlots[I]).SaveToBuffer(Buffer);
+      TShopStockSlot(Human.TemporaryShopSlots[I]).SaveToBuffer(
+          Buffer,
+          ShopViewSavesItems(Human)
+      );
+  end;
+end;
+
+// Version 3: for each human but the local one whose shop grid wrote its slots empty, the ids
+// of the items the slots show (0 for none), to find them again in the location's list.
+procedure SaveShopViewItems(Buffer: TBufEC);
+var
+  I, J, Count: Integer;
+  Human: THuman;
+  Slot: TShopStockSlot;
+begin
+  Count := 0;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if (Human <> LocalHuman)
+        and (Human.TemporaryShopSlots <> nil)
+        and not ShopViewSavesItems(Human) then
+      Inc(Count);
+  end;
+  Buffer.AddIntegerValue(Count);
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if (Human = LocalHuman)
+        or (Human.TemporaryShopSlots = nil)
+        or ShopViewSavesItems(Human) then
+      Continue;
+    Buffer.AddDWord(Cardinal(Human.Id));
+    Buffer.AddIntegerValue(Human.TemporaryShopSlots.Count);
+    for J := 0 to Human.TemporaryShopSlots.Count - 1 do
+    begin
+      Slot := TShopStockSlot(Human.TemporaryShopSlots[J]);
+      if (Slot.Item = nil) or (FindShopStockItem(ShopViewLocation(Human), Slot.Item.Id) = nil) then
+        Buffer.AddDWord(0)
+      else
+        Buffer.AddDWord(Cardinal(Slot.Item.Id));
+    end;
+  end;
+end;
+
+procedure LoadShopViewItems(Buffer: TBufEC);
+var
+  I, J, Count, SlotCount: Integer;
+  Human: THuman;
+  Id: Cardinal;
+begin
+  Count := Buffer.GetInt32;
+  for I := 0 to Count - 1 do
+  begin
+    Human := FindHuman(Integer(Buffer.GetUInt32));
+    SlotCount := Buffer.GetInt32;
+    for J := 0 to SlotCount - 1 do
+    begin
+      Id := Buffer.GetUInt32;
+      if (Human = nil)
+          or (Human.TemporaryShopSlots = nil)
+          or (Human.TemporaryShopSlots.Count <> SlotCount)
+          or (Id = 0) then
+        Continue;
+      TShopStockSlot(Human.TemporaryShopSlots[J]).Item :=
+          FindShopStockItem(ShopViewLocation(Human), Integer(Id));
+    end;
   end;
 end;
 
@@ -221,7 +291,6 @@ var
   OldQuest: PPlayerOldQuest;
   Entry: TPlayerHoldUnit;
   Slot: TShopStockSlot;
-  Player: TPlayer;
 begin
   Human.PlayerStar := Galaxy.IdToStar(Buffer.GetUInt32);
   Human.PendingPlayerFollowTarget := TShip(Galaxy.IdToShip(Buffer.GetUInt32, False));
@@ -274,14 +343,9 @@ begin
       Human.TemporaryShopSlots.Add(Slot);
       Slot.LoadFromBuffer(Buffer, Galaxy);
     end;
-    // Where the shop came from, as TGalaxy.LoadFromBuffer finds it for the local human.
-    Player := Human.Player;
-    if (Player <> nil) and (Player.CurrentPlanet <> nil) then
-      Human.TemporaryShopPlanet := Player.CurrentPlanet
-    else if (Player <> nil) and (Player.DockedTo <> nil) and (Player.DockedTo is TRuins) then
-      Human.TemporaryShopStation := TRuins(Player.DockedTo)
-    else
-      ClearTemporaryShopSlotGrid(Human);
+    // Where the shop came from, as TGalaxy.LoadFromBuffer finds it for the local human;
+    // the items the grid was saved with go back to it.
+    AdoptLoadedShopView(Human);
   end;
 end;
 
@@ -339,6 +403,8 @@ begin
     Buffer.AddBoolean(Human.Finished);
     Buffer.AddIntegerValue(Human.FinishReason);
   end;
+  // Version 3.
+  SaveShopViewItems(Buffer);
   Buffer.SetInt32At(SizeOffset, Buffer.Position - SizeOffset - 4);
 end;
 
@@ -450,6 +516,8 @@ begin
       end;
     end;
   end;
+  if Version >= 3 then
+    LoadShopViewItems(Buffer);
   Buffer.SetPosition(Start + Size);
 end;
 

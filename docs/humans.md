@@ -86,7 +86,8 @@ Converting the script functions (`aScriptFun`):
   `<Player>` text, the player's star in `Ether`. Messages and ether bubbles go
   to the script's human (`ScriptHuman.AddOrUpdateBubble`), as other bubbles go
   to their human. The open shop a script reads or changes is the script's
-  human's.
+  human's; a change to a shop's stock rebuilds the other humans' grids there
+  (see Shops).
 - "Is this ship the player", `Ship = GetPlayer`, is decided per function:
   - The script asks whether a ship is its own player, as in `IsPlayer(ship)`
     or a star requirement of the player: `Ship = ScriptPlayer`. Most scripts
@@ -138,8 +139,9 @@ shown the fatal hit. In multiplayer the ranger is not freed there:
 - `TShip.RespawnHuman` clears what the ranger's destruction would have cleared
   in other ships (enemy and truce targets, orders to it, interceptors, missiles,
   weapon targets, follow and land orders in the star) and its own orders and
-  targets. Partners and ships docked to it stay. The shop it had open takes its
-  stock back. The hull is repaired; equipment, cargo, money and quests are kept.
+  targets. Partners and ships docked to it stay. The shop grid it had open
+  closes (the stock never left the shop). The hull is repaired; equipment, cargo,
+  money and quests are kept.
 - It lands at the planet. In another star it travels through
   `Galaxy.ShipsInTransit` at the end of the turn job, like a ship that jumps. The
   human's `PlayerStar` follows, and the human gets a bubble
@@ -320,7 +322,9 @@ reference table:
 - the human each script is bound to (`TScript.HumanId`);
 - the human each galaxy event is about (`TGalaxyEvent.HumanId`);
 - from version 2, whether each human's game has ended (`Finished`,
-  `FinishReason`). A version 1 block loads with every human playing.
+  `FinishReason`). A version 1 block loads with every human playing;
+- from version 3, the items of the shop grids that write their slots empty, by
+  id (see Shops). An older block has none.
 
 The block is written only when a save without it would load differently: more
 than one human, a flag that is not its default, a cheat on record, a finished
@@ -344,6 +348,55 @@ change only through the `SetSessionFlag` command (`SetSessionFlagValue`):
 **Cheats.** `Human.RecordCheat(Name, Points)` records that a human used a
 cheat. A cheat command's executor calls it for the command's actor. Nothing
 calls it yet, since `CheatCode` is not built.
+
+## Shops
+
+A planet's or station's equipment stock is its `EquipmentShop` list, whoever
+looks at it (`source/game/aShopStock.pas`). Native moved the items into the
+player's grid while the shop was open, so a second human at the same place
+saw an empty shop, and one human's purchase moved the slots another's commands
+named.
+
+- A human's grid, `THuman.TemporaryShopSlots`, is a view of the list: the
+  slots point at the location's items and own none.
+  `BuildTemporaryShopSlotGrid` (the `OpenShopStock` command) sorts the list as
+  native sorted the grid (its exchange sort, ties included) and shows it in
+  that order, padded to the human's columns, so single player shows the same
+  grid. `RestoreTemporaryShopStock` (`ReturnShopStock`, a takeoff with
+  `tfReturnShopStock`, a respawn) only closes the grid.
+- A shop command names an item by its slot and its id. The executor finds it
+  by id in the stock of the shop the actor has open, else of the shop it is at
+  (`aShopActions.ShopItemArg`), and refuses with `rrItemGone` before changing
+  anything when another human took it. The slot only places it: a purchase
+  takes the item out of the list and leaves the buyer's slot empty, as native
+  did (`TakeShopStockItem`); a sale puts it in the list and builds the seller's
+  grid again.
+- `ShopStockChanged(Location, Actor)` rebuilds every other human's grid at the
+  location that no longer shows the list, in the list's order and without
+  sorting it (`RefreshShopView`), and tells the local screen
+  (`SimEvents.NotifyShopStockChanged`, which rebuilds the equipment shop's
+  controls). The purchase and sale commands, a grid that is built (it sorts the
+  list), the scripts' `AddItemToShop`/`GetItemFromShop`, the daily restocking of
+  planets and stations, a bank's deposit prize and a pirate ship built from
+  shop parts call it. An NPC that buys at a shop closes and builds the grids
+  there as before. A planet or station that is freed closes its grids
+  (`DropShopViewsAt`).
+- **Saving.** The original layout stays. While the galaxy is written
+  (`BeginShopStockSave`, also while the state hash collects identities), the
+  first grid at each location (the local human's first, then
+  `Session.Humans` order; only a grid at the place its ranger is) writes the
+  items it shows as native wrote its grid, and the location's list leaves them
+  out. A single-player save is therefore byte for byte what it was. Another
+  grid at the same place writes its slots empty, and the per-human block
+  (version 3) names its items by id. A load gives a grid's items back to the
+  place its ranger is, in front of the list in grid order
+  (`AdoptLoadedShopView`), so a save made before this change loads the same
+  way, and a round trip gives back the same list order.
+- The stock no longer leaves the list while a grid is open, so simulation code
+  that reads the list sees the whole stock. Play gives the stock back before
+  every day, so single player does not change; a headless run that keeps a
+  grid open over days (the observer's parked turns) restocks from the real
+  stock.
 
 ## Classifying a site
 
@@ -436,6 +489,13 @@ note in the progress entry.
   human and replayed from those, given in reverse order; it must reach the same final hash
   with no divergence and no day started early. With two humans, a log stripped of its
   human's end turns must make the replay report the barrier.
+- Each save also runs `--sim-shared-shop` (Shops): the save's open grids must
+  load with their items back in their shops; then two humans join at one
+  planet and open its shop. Both must see the whole stock; the second's
+  purchase of what the first bought is refused as `item-gone`, and its purchase
+  of another item by the slot its grid showed before (which has moved) goes
+  through; an item the first sells back shows in the second's grid and can be
+  bought; no item is lost or in two places; and a round trip keeps both grids.
 - The same counts run `--sim-pvp` on each save: a second human joins in the
   local human's star and the local one attacks it. With friendly fire on its
   hits must do damage; after the `SetSessionFlag` command turns it off, the

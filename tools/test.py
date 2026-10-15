@@ -191,6 +191,22 @@ def check_session(args, binary: Path, save: Path) -> tuple[bool, str]:
     return True, "session flags and cheats survive a save"
 
 
+def check_shared_shop(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """Two humans at one planet share its equipment stock (--sim-shared-shop).
+
+    The save's open shop grid must load with its items back in the shop. Both humans see the
+    whole stock; the second's purchase of what the first bought is refused as gone, and its
+    purchase of another item by a slot that moved goes through; an item sold back can be
+    bought; no item is lost or in two places; and both grids survive a round trip.
+    """
+    code, output = simulate(binary, args.game_dir, save, ["--sim-shared-shop"])
+    lines = output.splitlines()
+    if code != 0 or "shared shop ok" not in lines:
+        return False, "shared shop failed:" + output_tail(output)
+    loaded = last_line(output, "shared shop loaded ")
+    return True, f"two humans share a shop's stock ({loaded})"
+
+
 def drop_end_turns(log: Path) -> None:
     """Removes the EndTurn commands from one human's log, so its human never ends a turn."""
     header, records = split_commands.read_records(log)
@@ -813,6 +829,10 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     passed_session, note = check_session(args, binary, save)
     notes.append(note)
     passed = passed and passed_session
+
+    passed_shop, note = check_shared_shop(args, binary, save)
+    notes.append(note)
+    passed = passed and passed_shop
 
     for count in HUMAN_COUNTS:
         passed_humans, note = check_humans(args, binary, save, count)

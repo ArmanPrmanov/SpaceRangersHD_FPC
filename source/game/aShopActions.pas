@@ -3,8 +3,9 @@ unit aShopActions;
 
 // CHANGE: ENHANCEMENT - What a human does in the shops, as commands (docs/commands.md): the
 // equipment shop, the goods shop and the hangar. The code is moved from the screens; they
-// keep their dialogs, sounds and images. Items in the open shop's grid are in no galaxy
-// list, so a command names one by its slot in the human's TemporaryShopSlots and its id.
+// keep their dialogs, sounds and images. A command names a shop item by its slot in the
+// human's TemporaryShopSlots and its id; the item is found by its id in the stock of the
+// shop (aShopStock), and the slot only places it in the human's grid.
 interface
 uses
   aCommands,
@@ -85,27 +86,40 @@ begin
   AddInt(Command, Item.Id);
 end;
 
-// The slot the command names from Index on; its item must have the id the command names.
-function ShopSlotArg(const Command: TPlayerCommand; Index: Integer): TShopStockSlot;
+// CHANGE: BUGFIX - The item the command names from Index on (the slot the screen showed it
+// in, then its id), found by its id in the stock of the shop the actor has open, else of the
+// shop it is at. Another human may have bought it: the command is then refused before
+// anything changes. Slot is the actor's slot that shows it, or nil. The slot alone named the
+// item, and another human's purchase moved the slots.
+function ShopItemArg(
+    const Command: TPlayerCommand;
+    Index: Integer;
+    out Location: TObject;
+    out Slot: TShopStockSlot
+): TItem;
 var
   H: THuman;
   SlotIndex: Integer;
 begin
   H := ActorHuman(Command);
+  Location := ShopViewLocation(H);
+  if Location = nil then
+    Location := HumanShopLocation(H);
+  Result := FindShopStockItem(Location, IntArg(Command, Index + 1));
+  if Result = nil then
+    raise ECommandRefused.CreateReason(
+        rrItemGone,
+        CommandKindName(Command.Kind) + ' names an item the shop no longer has'
+    );
+  Slot := nil;
   SlotIndex := IntArg(Command, Index);
-  if (H.TemporaryShopSlots = nil)
-      or (SlotIndex < 0)
-      or (SlotIndex >= H.TemporaryShopSlots.Count) then
-    raise ECommandRefused.CreateReason(
-        rrItemGone,
-        CommandKindName(Command.Kind) + ' names a missing shop slot'
-    );
-  Result := TShopStockSlot(H.TemporaryShopSlots[SlotIndex]);
-  if (Result.Item = nil) or (Result.Item.Id <> IntArg(Command, Index + 1)) then
-    raise ECommandRefused.CreateReason(
-        rrItemGone,
-        CommandKindName(Command.Kind) + ' names another shop item'
-    );
+  if (H.TemporaryShopSlots <> nil)
+      and (SlotIndex >= 0)
+      and (SlotIndex < H.TemporaryShopSlots.Count)
+      and (TShopStockSlot(H.TemporaryShopSlots[SlotIndex]).Item = Result) then
+    Slot := TShopStockSlot(H.TemporaryShopSlots[SlotIndex])
+  else
+    Slot := ShopViewSlotOf(H, Result);
 end;
 
 // Moved from TfEquipmentShop.OnOpen.
@@ -148,8 +162,11 @@ begin
 end;
 
 procedure ExecuteShowShopItemInfo(const Command: TPlayerCommand);
+var
+  Location: TObject;
+  Slot: TShopStockSlot;
 begin
-  RunShopItemInfoScripts(Actor(Command), ShopSlotArg(Command, 0).Item);
+  RunShopItemInfoScripts(Actor(Command), ShopItemArg(Command, 0, Location, Slot));
 end;
 
 procedure ShowShopItemInfo(Item: TItem);
@@ -180,15 +197,17 @@ procedure ExecuteBuyEquipment(const Command: TPlayerCommand);
 var
   P: TPlayer;
   Slot: TShopStockSlot;
+  Item: TItem;
+  Location: TObject;
   Price: Integer;
   Event: TGalaxyEvent;
   Destination: PtrInt;
 begin
   P := Actor(Command);
-  Slot := ShopSlotArg(Command, 0);
-  Price := Slot.Item.GetConditionAdjustedCost;
+  Item := ShopItemArg(Command, 0, Location, Slot);
+  Price := Item.GetConditionAdjustedCost;
   P.GetCargoFreeSpace;
-  if (Slot.Item is THull)
+  if (Item is THull)
       and (P.Money < Price)
       and (P.GetHull.ScriptItem = nil)
       and (P.GetHull.NoDropFlag = 0) then
@@ -201,15 +220,15 @@ begin
         );
   if P.Money < Price then
     raise ECommandRefused.CreateReason(rrNoMoney, 'BuyEquipment: not enough money');
-  if not (Slot.Item is THull) and (P.CargoFreeSpace < Slot.Item.Weight) then
+  if not (Item is THull) and (P.CargoFreeSpace < Item.Weight) then
     raise Exception.Create('BuyEquipment: not enough cargo space');
   EquipmentPurchase := epDone;
-  PurchasedItem := Slot.Item;
+  PurchasedItem := Item;
   Event := AddGalaxyEvent('PlayerBuysEquipment');
-  Event.AddData(Ord(Slot.Item.ItemType));
-  Event.AddData(Slot.Item.GetConditionAdjustedCost);
-  Event.AddData(Slot.Item.Weight);
-  Event.AddData(Slot.Item.Id);
+  Event.AddData(Ord(Item.ItemType));
+  Event.AddData(Item.GetConditionAdjustedCost);
+  Event.AddData(Item.Weight);
+  Event.AddData(Item.Id);
   if P.CurrentPlanet <> nil then
   begin
     Event.AddData(0);
@@ -225,11 +244,11 @@ begin
     Event.AddData(2);
     Event.AddData(0);
   end;
-  Event.AddTextData(Slot.Item.GetDisplayName);
-  Event.AddTextData(Slot.Item.GetCategoryConfigName);
-  if Slot.Item is THull then
+  Event.AddTextData(Item.GetDisplayName);
+  Event.AddTextData(Item.GetCategoryConfigName);
+  if Item is THull then
   begin
-    if Slot.Item.GetConditionAdjustedCost > P.Money then
+    if Item.GetConditionAdjustedCost > P.Money then
     begin
       Event := AddGalaxyEvent('PlayerSellsEquipment');
       Event.AddData(Ord(P.GetHull.ItemType));
@@ -256,17 +275,17 @@ begin
       Event.AddTextData(P.GetHull.GetDisplayName);
       Event.AddTextData(P.GetHull.GetCategoryConfigName);
       P.SetMoney(P.Money - Price);
-      P.ScriptItemsAct(satOnPlayerChangeHull, Slot.Item, P.GetHull, 0);
+      P.ScriptItemsAct(satOnPlayerChangeHull, Item, P.GetHull, 0);
       P.Inventory.Delete(P.Inventory.IndexOf(P.GetHull));
       P.GetHull.Free;
-      P.Inventory.Insert(0, Slot.Item);
-      P.Hull := Slot.Item as THull;
+      P.Inventory.Insert(0, Item);
+      P.Hull := Item as THull;
       P.GetHull.OwnerShip := P;
       P.GetHull.AssignedSlotData := 0;
-      if Slot.Item.ScriptItem <> nil then
-        TScriptItem(Slot.Item.ScriptItem)
-            .RunActionCode(satOnPlayerChangeHull, P, Slot.Item, nil, 0);
-      Slot.Item := nil;
+      if Item.ScriptItem <> nil then
+        TScriptItem(Item.ScriptItem)
+            .RunActionCode(satOnPlayerChangeHull, P, Item, nil, 0);
+      TakeShopStockItem(ActorHuman(Command), Location, Item);
       P.RefreshAssignedItemSlots;
       P.RebuildEquipmentCache;
       P.RefreshDerivedStats(True);
@@ -279,12 +298,12 @@ begin
     end
     else
     begin
-      P.SetMoney(P.Money - Slot.Item.GetConditionAdjustedCost);
+      P.SetMoney(P.Money - Item.GetConditionAdjustedCost);
       if P.IsOnPlanet then
-        P.AddItemToPlayerStorage(Slot.Item, P.CurrentPlanet, -1)
+        P.AddItemToPlayerStorage(Item, P.CurrentPlanet, -1)
       else
-        P.AddItemToPlayerStorage(Slot.Item, P.DockedTo, -1);
-      Slot.Item := nil;
+        P.AddItemToPlayerStorage(Item, P.DockedTo, -1);
+      TakeShopStockItem(ActorHuman(Command), Location, Item);
       // The screen tells the player where the hull went before the rest runs.
       EquipmentPurchase := epHullStored;
       Exit;
@@ -293,12 +312,12 @@ begin
   else
   begin
     P.SetMoney(P.Money - Price);
-    TEquipment(Slot.Item).EquippedFlag := 0;
-    if Slot.Item is TArtefact then
-      P.Artefacts.Add(Slot.Item)
+    TEquipment(Item).EquippedFlag := 0;
+    if Item is TArtefact then
+      P.Artefacts.Add(Item)
     else
-      P.Inventory.Add(Slot.Item);
-    Slot.Item := nil;
+      P.Inventory.Add(Item);
+    TakeShopStockItem(ActorHuman(Command), Location, Item);
     Destination := PtrInt(P);
   end;
   P.ScriptItemsAct(satOnPlayerBuyEq, PurchasedItem, nil, Destination);

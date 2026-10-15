@@ -3738,8 +3738,8 @@ begin
   else if Obj is TPlanet then
   begin
     Planet := Obj as TPlanet;
-    // CHANGE: CLEANUP - While the script's human has the shop open, its stock is in the
-    // human's shop slots.
+    // CHANGE: CLEANUP - While the script's human has the shop open, the script sees the stock
+    // as the human's shop grid shows it.
     if (ScriptPlayer.CurrentPlanet = Planet) and (ScriptHuman.TemporaryShopSlots <> nil) then
     begin
       av[0].SetInt(0);
@@ -7139,8 +7139,8 @@ begin
   Shop := TObject(av[1].GetDword);
   Item := TItem(av[2].GetDword);
   av[0].SetInt(0);
-  // CHANGE: CLEANUP - The open shop is the script's human's.
-  // HUMANS: other humans with this shop open (aShopStock) keep their old stock.
+  // CHANGE: CLEANUP - The open shop is the script's human's; the other humans' grids there
+  // are rebuilt from the stock (aShopStock.ShopStockChanged).
   Refresh :=
       (ScriptHuman <> nil)
           and (ScriptHuman.TemporaryShopSlots <> nil)
@@ -7162,7 +7162,9 @@ begin
           EquipmentShopScreen.BuildGoodsControls;
           EquipmentShopScreen.UpdateScrollButtons;
         end;
-      end;
+      end
+      else
+        ShopStockChanged(Shop);
     end
     else if Shop is TRuins then
     begin
@@ -7179,7 +7181,9 @@ begin
           EquipmentShopScreen.BuildGoodsControls;
           EquipmentShopScreen.UpdateScrollButtons;
         end;
-      end;
+      end
+      else
+        ShopStockChanged(Shop);
     end;
   end;
 end;
@@ -7196,8 +7200,8 @@ begin
   av[0].SetDword(0);
   if Shop <> nil then
   begin
-    // CHANGE: CLEANUP - The open shop is the script's human's.
-    // HUMANS: other humans with this shop open (aShopStock) keep their old stock.
+    // CHANGE: CLEANUP - The open shop is the script's human's; the other humans' grids there
+    // are rebuilt from the stock (aShopStock.ShopStockChanged).
     Refresh :=
         (ScriptHuman <> nil)
             and (ScriptHuman.TemporaryShopSlots <> nil)
@@ -7237,7 +7241,9 @@ begin
         EquipmentShopScreen.BuildGoodsControls;
         EquipmentShopScreen.UpdateScrollButtons;
       end;
-    end;
+    end
+    else
+      ShopStockChanged(Shop);
   end;
 end;
 procedure SF_AddItemToStorage(av: array of TVarEC; code: TCodeEC);

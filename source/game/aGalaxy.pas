@@ -308,6 +308,8 @@ type
     destructor Destroy; override;
     procedure InitializeCampaignState;
     procedure SaveToBuffer(Buffer: TBufEC);
+    // SaveToBuffer's writer, inside the shop stock's save bracket (aShopStock).
+    procedure WriteToBuffer(Buffer: TBufEC);
     procedure LoadFromBuffer(Buffer: TBufEC);
     procedure SaveEditableState;
     procedure ApplyEditableState;
@@ -1156,7 +1158,19 @@ begin
   FinalizationName := '';
   SpecialSimulationMode := 0;
 end;
+// CHANGE: BUGFIX - The shop stock stays in its location's list while a human's grid shows
+// it; while the galaxy is written, the grids write it in the original layout (aShopStock).
 procedure TGalaxy.SaveToBuffer(Buffer: TBufEC);
+begin
+  BeginShopStockSave;
+  try
+    WriteToBuffer(Buffer);
+  finally
+    EndShopStockSave;
+  end;
+end;
+
+procedure TGalaxy.WriteToBuffer(Buffer: TBufEC);
 var
   I, J, Count: Integer;
   Star: TStar;
@@ -1314,7 +1328,7 @@ begin
   for I := 0 to Count - 1 do
   begin
     ShopSlot := LocalHuman.TemporaryShopSlots[I];
-    ShopSlot.SaveToBuffer(Buffer);
+    ShopSlot.SaveToBuffer(Buffer, ShopViewSavesItems(LocalHuman));
   end;
   Session.SharedScriptVariables.SaveToBuffer(Buffer);
   Count := Session.ScriptTemplates.Count;
@@ -1900,15 +1914,8 @@ begin
       Star.ResolveLoadedReferences(Self);
     end;
     // The local human's; the per-human save block (aHumanSave) holds the other humans'.
-    if LocalHuman.TemporaryShopSlots <> nil then
-    begin
-      if LocalPlayer.CurrentPlanet <> nil then
-        LocalHuman.TemporaryShopPlanet := LocalPlayer.CurrentPlanet
-      else if (LocalPlayer.DockedTo <> nil) and (LocalPlayer.DockedTo is TRuins) then
-        LocalHuman.TemporaryShopStation := TRuins(LocalPlayer.DockedTo)
-      else
-        ClearTemporaryShopSlotGrid;
-    end;
+    // The items the grid was saved with go back to the shop's list (aShopStock).
+    AdoptLoadedShopView(LocalHuman, LocalPlayer);
     Count := StoredItems.Count;
     for I := 0 to Count - 1 do
     begin
@@ -3623,7 +3630,8 @@ begin
       end;
     end;
   end;
-  // CHANGE: CLEANUP - Every human's open shop holds items.
+  // CHANGE: CLEANUP - Every human's open shop shows items; they are in their location's
+  // list, but a grid loaded from a save holds its items until AdoptLoadedShopView.
   for k := 0 to Session.Humans.Count - 1 do
   begin
     Human := Session.Humans[k];
@@ -9865,6 +9873,8 @@ begin
         if Item <> nil then
         begin
           Station.EquipmentShop.Delete(Station.EquipmentShop.IndexOf(Item));
+          // CHANGE: BUGFIX - A human's shop grid open there no longer shows the prize.
+          ShopStockChanged(Station);
           Player.AddItemToPlayerStorage(Item, Station, -1);
           Player.RefreshStorageBubbles;
           Text :=

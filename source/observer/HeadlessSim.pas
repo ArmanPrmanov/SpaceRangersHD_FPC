@@ -69,6 +69,9 @@ type
     // the queues, buys that stock first in the client's human's name, once: the client's
     // purchase is refused.
     NetBuyRace: Boolean;
+    // CHANGE: ENHANCEMENT - Two humans land at one planet and share its equipment stock
+    // (RunSharedShop; aShopStock).
+    SharedShop: Boolean;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 // Shared with the networked runner (HeadlessNet).
@@ -83,6 +86,9 @@ implementation
 uses
   SysUtils,
   Classes,
+  Math,
+  aConst,
+  aHoldActions,
   EC_Buf,
   EC_Expression,
   Globals,
@@ -1199,6 +1205,351 @@ begin
   );
 end;
 
+// '' when every open shop grid shows only items of its location's list and no list holds an
+// item twice; otherwise what is wrong.
+function CheckShopViews: AnsiString;
+var
+  I, J, K: Integer;
+  Human: THuman;
+  List: TList;
+  Slot: TShopStockSlot;
+begin
+  Result := '';
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if Human.TemporaryShopSlots = nil then
+      Continue;
+    List := ShopStockOf(ShopViewLocation(Human));
+    if List = nil then
+      Exit(Format('human %d has a grid at no shop', [Human.Id]));
+    for J := 0 to List.Count - 1 do
+      for K := J + 1 to List.Count - 1 do
+        if List[J] = List[K] then
+          Exit(Format('item %d is twice in the stock', [TItem(List[J]).Id]));
+    for J := 0 to Human.TemporaryShopSlots.Count - 1 do
+    begin
+      Slot := TShopStockSlot(Human.TemporaryShopSlots[J]);
+      if (Slot.Item <> nil) and (List.IndexOf(Slot.Item) < 0) then
+        Exit(
+            Format(
+                'human %d shows item %d, which the stock does not hold',
+                [Human.Id, Slot.Item.Id]
+            )
+        );
+    end;
+  end;
+end;
+
+// Whether the human's grid shows its location's list in order, with nothing left out.
+function ShowsWholeStock(Human: THuman): Boolean;
+var
+  I, Index: Integer;
+  List: TList;
+  Item: TItem;
+begin
+  Result := False;
+  if Human.TemporaryShopSlots = nil then
+    Exit;
+  List := ShopStockOf(ShopViewLocation(Human));
+  Index := 0;
+  for I := 0 to Human.TemporaryShopSlots.Count - 1 do
+  begin
+    Item := TShopStockSlot(Human.TemporaryShopSlots[I]).Item;
+    if Item = nil then
+      Continue;
+    if (Index >= List.Count) or (List[Index] <> Pointer(Item)) then
+      Exit;
+    Inc(Index);
+  end;
+  Result := Index = List.Count;
+end;
+
+function ShopSlotIndexOf(Human: THuman; Item: TItem): Integer;
+var
+  I: Integer;
+begin
+  Result := -1;
+  if Human.TemporaryShopSlots <> nil then
+    for I := 0 to Human.TemporaryShopSlots.Count - 1 do
+      if TShopStockSlot(Human.TemporaryShopSlots[I]).Item = Item then
+        Exit(I);
+end;
+
+// The items of the planet's shop and of the two humans' holds and storage, in Count; '' when
+// none is in two places.
+function CountSharedShopItems(Planet: TPlanet; A, B: THuman; out Count: Integer): AnsiString;
+var
+  Items: TList;
+  I, J: Integer;
+  Human: THuman;
+begin
+  Result := '';
+  Items := TList.Create;
+  try
+    for I := 0 to Planet.EquipmentShop.Count - 1 do
+      Items.Add(Planet.EquipmentShop[I]);
+    for I := 0 to 1 do
+    begin
+      if I = 0 then
+        Human := A
+      else
+        Human := B;
+      for J := 0 to Human.Player.Inventory.Count - 1 do
+        Items.Add(Human.Player.Inventory[J]);
+      for J := 0 to Human.Player.Artefacts.Count - 1 do
+        Items.Add(Human.Player.Artefacts[J]);
+      for J := 0 to Human.Player.StorageEntries.Count - 1 do
+        if PStorageEntry(Human.Player.StorageEntries[J]).Item <> nil then
+          Items.Add(PStorageEntry(Human.Player.StorageEntries[J]).Item);
+    end;
+    Count := Items.Count;
+    for I := 0 to Items.Count - 1 do
+      for J := I + 1 to Items.Count - 1 do
+        if Items[I] = Items[J] then
+          Exit(Format('item %d is in two places', [TItem(Items[I]).Id]));
+  finally
+    Items.Free;
+  end;
+end;
+
+// Human buys Item from the slot Slot; '' when it bought it, else the refusal's reason.
+function BuyShopItem(Human: THuman; Slot: Integer; Item: TItem): AnsiString;
+var
+  Command: TPlayerCommand;
+begin
+  Result := '';
+  Command := NewCommand(ckBuyEquipment);
+  AddInt(Command, Slot);
+  AddInt(Command, Item.Id);
+  try
+    SubmitFor(Human, Command);
+  except
+    on E: ECommandRefused do
+      Result := RefusalReasonName(E.Reason);
+  end;
+end;
+
+// Human sells Item from its hold back to the shop, as the ship screen does.
+procedure SellToShop(Human: THuman; Item: TItem);
+var
+  Command: TPlayerCommand;
+  I, Index: Integer;
+begin
+  Command := NewCommand(ckOpenShipScreen);
+  AddRef(Command, Human.Player);
+  AddInt(Command, 0);
+  SubmitFor(Human, Command);
+  SubmitKindFor(Human, ckRefreshHoldView);
+  Index := -1;
+  for I := 0 to Human.PlayerHoldEntries.Count - 1 do
+    if TPlayerHoldUnit(Human.PlayerHoldEntries[I]).Item = Item then
+      Index := I;
+  if Index < 0 then
+    raise Exception.Create('The item to sell is not in the hold');
+  Command := NewCommand(ckTakeHoldEntry);
+  AddInt(Command, Index);
+  AddInt(Command, 0);
+  SubmitFor(Human, Command);
+  Command := NewCommand(ckSellHeld);
+  AddInt(Command, 1);
+  AddInt(Command, ShopVisibleColumnCount);
+  SubmitFor(Human, Command);
+end;
+
+// An item of the shop the test can buy and sell back: equipment the shop takes back (the
+// ship screen's sale rule), no hull or weapon, and no script.
+function IsTradedBack(Item: TItem): Boolean;
+begin
+  Result := (Item.ItemType in [t_Hull..t_CustomWeapon])
+      and not (Item is THull)
+      and not (Item is TWeapon)
+      and (Item.ScriptItem = nil)
+      and (Item.OwnerId in [Ord(oiMaloc)..Ord(oiGaal), Ord(oiPirate)]);
+end;
+
+// CHANGE: ENHANCEMENT - Two humans in one shop (aShopStock): the stock is the planet's and
+// each human's grid is a view of it. A save loads with its open grids' items back in their
+// shops. Two humans join at one planet and open its shop: both see the whole stock. The first
+// buys an item; the second's purchase of it is refused (item gone), and its purchase of a later
+// item, by the slot its grid showed before, goes through. The first sells its item back and
+// the second buys it. No item is lost or in two places, and a round trip keeps both grids.
+function RunSharedShop(const Options: TSimulationOptions): Integer;
+var
+  I, J, Before, After, SlotX, SlotY, Grids, AId, BId: Integer;
+  Star: TStar;
+  Planet, Candidate: TPlanet;
+  A, B: THuman;
+  X, Y: TItem;
+  Command: TPlayerCommand;
+  Problem, Reason: AnsiString;
+
+  procedure Fail(const Text: AnsiString);
+  begin
+    Emit('shared shop failed: ' + Text);
+    raise EAbort.Create(Text);
+  end;
+
+  procedure Open(Human: THuman);
+  begin
+    Command := NewCommand(ckOpenShopStock);
+    AddInt(Command, ShopVisibleColumnCount);
+    SubmitFor(Human, Command);
+  end;
+
+  // Two tradable items, X before Y in the shop's order, that both humans can carry together.
+  function FindPair: Boolean;
+  var
+    K, L, Space: Integer;
+    List: TList;
+  begin
+    Result := False;
+    List := Planet.EquipmentShop;
+    Space := Min(A.Player.GetCargoFreeSpace, B.Player.GetCargoFreeSpace);
+    for K := 0 to List.Count - 1 do
+      for L := K + 1 to List.Count - 1 do
+        if IsTradedBack(TItem(List[K]))
+            and IsTradedBack(TItem(List[L]))
+            and (TItem(List[K]).Weight + TItem(List[L]).Weight <= Space) then
+        begin
+          X := TItem(List[K]);
+          Y := TItem(List[L]);
+          Exit(True);
+        end;
+  end;
+
+begin
+  Result := 0;
+  try
+    // The save's open grids, the local one in the original layout, went back to their shops.
+    Grids := 0;
+    for I := 0 to Session.Humans.Count - 1 do
+      if Session.Humans[I].TemporaryShopSlots <> nil then
+        Inc(Grids);
+    Problem := CheckShopViews;
+    if Problem <> '' then
+      Fail('after the load: ' + Problem);
+    for I := 0 to Session.Humans.Count - 1 do
+      if (Session.Humans[I].TemporaryShopSlots <> nil)
+          and not ShowsWholeStock(Session.Humans[I]) then
+        Fail('a loaded grid does not show its shop');
+    Emit(Format('shared shop loaded grids=%d ok', [Grids]));
+    Planet := nil;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+    begin
+      Star := TStar(Galaxy.Stars[I]);
+      for J := 0 to Star.Planets.Count - 1 do
+      begin
+        Candidate := TPlanet(Star.Planets[J]);
+        if (Planet = nil)
+            and (Candidate.OwnerId <= Byte(oiGaal))
+            and (Candidate.EquipmentShop.Count >= 6) then
+          Planet := Candidate;
+      end;
+    end;
+    if Planet = nil then
+      Fail('no planet with a shop');
+    A := JoinHumanAt(Planet, 'ShopA', 1);
+    B := JoinHumanAt(Planet, 'ShopB', 2);
+    if (A = nil) or (B = nil) then
+      Fail('the humans did not join');
+    // Money and room for what they trade: a new ranger's hold is small.
+    A.Player.SetMoney(10000000);
+    B.Player.SetMoney(10000000);
+    Inc(A.Player.GetHull.Weight, 1000);
+    Inc(B.Player.GetHull.Weight, 1000);
+    A.Player.RefreshDerivedStats(True);
+    B.Player.RefreshDerivedStats(True);
+    Open(A);
+    Open(B);
+    if not FindPair then
+      Fail('no two items to trade');
+    Problem := CountSharedShopItems(Planet, A, B, Before);
+    if Problem <> '' then
+      Fail(Problem);
+    // (a) Both see the whole stock.
+    if not ShowsWholeStock(A) or not ShowsWholeStock(B) then
+      Fail('a grid does not show the whole stock');
+    Emit(
+        Format(
+            'shared shop planet=%d items=%d both see the stock',
+            [Planet.Id, Planet.EquipmentShop.Count]
+        )
+    );
+    // (b) A buys X; B's purchase of X is refused, and of Y by its old slot goes through.
+    SlotX := ShopSlotIndexOf(B, X);
+    SlotY := ShopSlotIndexOf(B, Y);
+    Reason := BuyShopItem(A, ShopSlotIndexOf(A, X), X);
+    if Reason <> '' then
+      Fail('the first purchase was refused: ' + Reason);
+    if (Planet.EquipmentShop.IndexOf(X) >= 0) or (A.Player.Inventory.IndexOf(X) < 0) then
+      Fail('the bought item did not move to the buyer');
+    if ShopSlotIndexOf(A, X) >= 0 then
+      Fail('the buyer still shows the item');
+    if (ShopSlotIndexOf(B, X) >= 0) or not ShowsWholeStock(B) then
+      Fail('the other human''s grid was not rebuilt');
+    Reason := BuyShopItem(B, SlotX, X);
+    if Reason <> RefusalReasonName(rrItemGone) then
+      Fail('the purchase of the sold item was not refused as gone: ' + Reason);
+    if ShopSlotIndexOf(B, Y) = SlotY then
+      Fail('the later item did not move');
+    Reason := BuyShopItem(B, SlotY, Y);
+    if Reason <> '' then
+      Fail('the purchase by the old slot was refused: ' + Reason);
+    if (Planet.EquipmentShop.IndexOf(Y) >= 0) or (B.Player.Inventory.IndexOf(Y) < 0) then
+      Fail('the item bought by its old slot did not move to the buyer');
+    Emit(
+        Format(
+            'shared shop bought item=%d again=%s slot=%d moved ok',
+            [X.Id, RefusalReasonName(rrItemGone), SlotY]
+        )
+    );
+    // (c) A sells X back; B sees it and buys it.
+    SellToShop(A, X);
+    if (Planet.EquipmentShop.IndexOf(X) < 0) or (A.Player.Inventory.IndexOf(X) >= 0) then
+      Fail('the sold item is not back in the shop');
+    if (ShopSlotIndexOf(B, X) < 0) or not ShowsWholeStock(B) then
+      Fail('the other human does not see the sold item');
+    Reason := BuyShopItem(B, ShopSlotIndexOf(B, X), X);
+    if Reason <> '' then
+      Fail('the purchase of the sold item was refused: ' + Reason);
+    if (Planet.EquipmentShop.IndexOf(X) >= 0) or (B.Player.Inventory.IndexOf(X) < 0) then
+      Fail('the item bought again did not move to the buyer');
+    Emit('shared shop sold back and bought again ok');
+    // (d) Nothing lost or in two places.
+    Problem := CountSharedShopItems(Planet, A, B, After);
+    if Problem <> '' then
+      Fail(Problem);
+    if After <> Before then
+      Fail(Format('the items went from %d to %d', [Before, After]));
+    Problem := CheckShopViews;
+    if Problem <> '' then
+      Fail(Problem);
+    Emit(Format('shared shop items before=%d after=%d ok', [Before, After]));
+    // (e) Both grids survive a round trip; the second names its items by id.
+    AId := A.Id;
+    BId := B.Id;
+    // A load computes the rangers' wealth again; the trades changed it outside a day.
+    Galaxy.RefreshRangerWealthStats;
+    Galaxy.RefreshRangerRatingPlaces;
+    if not CheckRoundTrip(Options.DumpDirectory, Options.Seed) then
+      Fail('round trip');
+    A := FindHuman(AId);
+    B := FindHuman(BId);
+    if (A = nil) or (B = nil) then
+      Fail('a human is missing after the round trip');
+    if not ShowsWholeStock(A) or not ShowsWholeStock(B) then
+      Fail('a grid does not show the whole stock after the round trip');
+    Problem := CheckShopViews;
+    if Problem <> '' then
+      Fail('after the round trip: ' + Problem);
+    Emit('shared shop ok');
+  except
+    on E: EAbort do
+      Result := 1;
+  end;
+end;
+
 procedure EmitHumans(const Options: TSimulationOptions);
 var
   Lines: TStringList;
@@ -1223,6 +1574,11 @@ var
 begin
   Result := 0;
   LoadSave(Options.SavePath, Options.Seed);
+  if Options.SharedShop then
+  begin
+    Result := RunSharedShop(Options);
+    Exit;
+  end;
   if Options.Pvp then
   begin
     Result := RunPvp(Options);

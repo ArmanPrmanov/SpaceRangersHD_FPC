@@ -54,7 +54,8 @@ uses
   aItem,
   aShip,
   aScript,
-  aRuins;
+  aRuins,
+  aShopStock;
 
 const
   // 'SREF', then a format version. Loaders that do not know the table stop
@@ -158,6 +159,17 @@ begin
     AddItem(TObject(List[I]));
 end;
 
+// CHANGE: BUGFIX - A shop's list without the items a human's grid writes, which native's
+// grid held outside the list (aShopStock): they get no identity, as before.
+procedure AddShopItemIdentities(List: TList);
+var
+  I: Integer;
+begin
+  for I := 0 to ListCount(List) - 1 do
+    if not ShopItemSavedByView(TObject(List[I])) then
+      AddItem(TObject(List[I]));
+end;
+
 procedure AddShipIdentity(Ship: TShip);
 begin
   AddIdentity(Ship, 'ship:' + IntToStr(Ship.Id));
@@ -165,7 +177,7 @@ begin
   AddItemIdentities(Ship.Artefacts);
   AddItemIdentities(Ship.GuaranteedDeathDropItems);
   if Ship is TRuins then
-    AddItemIdentities(TRuins(Ship).EquipmentShop);
+    AddShopItemIdentities(TRuins(Ship).EquipmentShop);
 end;
 
 // TScript.LoadState finds named items by name and appends the unnamed ones it
@@ -189,7 +201,7 @@ begin
   end;
 end;
 
-procedure CollectUnsortedIdentities;
+procedure CollectGalaxyIdentities;
 var
   I, J, K: Integer;
   Star: TStar;
@@ -198,8 +210,6 @@ var
   Script: TScript;
   Prefix: WideString;
 begin
-  IdentityCount := 0;
-  UnresolvedObjectCount := 0;
   for I := 0 to Galaxy.StoredItems.Count - 1 do
   begin
     Stored := TStoredItem(Galaxy.StoredItems[I]);
@@ -233,7 +243,7 @@ begin
     begin
       Planet := TPlanet(Star.Planets[J]);
       AddIdentity(Planet, 'planet:' + IntToStr(Planet.Id));
-      AddItemIdentities(Planet.EquipmentShop);
+      AddShopItemIdentities(Planet.EquipmentShop);
       for K := 0 to ListCount(Planet.SurfaceLootEntries) - 1 do
         AddItem(PPlanetSurfaceLootEntry(Planet.SurfaceLootEntries[K]).Item);
       for K := 0 to ListCount(Planet.Warriors) - 1 do
@@ -244,6 +254,18 @@ begin
     AddItemIdentities(Star.Items);
     for J := 0 to ListCount(Star.MovingDropItems) - 1 do
       AddItem(PointerToTMovingDropItemEntry(Star.MovingDropItems[J]).Payload);
+  end;
+end;
+
+procedure CollectUnsortedIdentities;
+begin
+  IdentityCount := 0;
+  UnresolvedObjectCount := 0;
+  BeginShopStockSave;
+  try
+    CollectGalaxyIdentities;
+  finally
+    EndShopStockSave;
   end;
 end;
 
