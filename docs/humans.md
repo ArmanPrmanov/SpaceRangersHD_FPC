@@ -104,12 +104,67 @@ Converting the script functions (`aScriptFun`):
   ranger is needed, `RuinsProxyOwner(Ship)`.
 - UI builtins (dialogues, dialogue text and answers, screens, the star map's
   path overlay, sounds, the arcade ship, Steam achievements) stay on the local
-  human (`LocalPlayer`, `LocalHuman`). A builtin that opens a dialogue or a
-  screen does so only when `ScriptHuman` is the local human; so do the queued
-  battles. A script's dialogue is not sent to a remote human's client
-  ([network.md](network.md), Remote dialogue, says why); an NPC's offer or
-  demand is. Text quests are off in multiplayer (ROADMAP.md, Phase 6), so they
-  follow the local human.
+  human (`LocalPlayer`, `LocalHuman`). A script's dialogue is not sent to a
+  remote human's client ([network.md](network.md), Remote dialogue, says why);
+  an NPC's offer or demand is. Text quests are off in multiplayer (ROADMAP.md,
+  Phase 6), so they follow the local human.
+- **Script code of another human.** On a host, a client's commands run its
+  script code with `ScriptHuman` its human; so does script code bound to
+  another human, in the day or in someone else's command, and in hot-seat
+  script code of a human whose turn it is not. Its game effects happen for
+  that human; nothing touches this machine's screens, boxes, video or music,
+  or the local human's state. The human's own machine shows the UI when it
+  runs the same command on its prediction.
+  - `aScriptFun.ScriptUiAllowed` decides for the UI builtins: only script
+    code of the local human (or of no human) may show UI, and a modal one
+    (a box, a child or custom form) never on the turn thread. Otherwise the
+    builtin gives a declining player's answer and `Rangers.log` gets
+    `Script <builtin> for human N: not shown on this machine, default answer`:
+    `MessageBoxYesNo` no (0), `CountBox` and `NumberBox` `'Cancel'`,
+    `TextBox` its default text, `ListBox` -1, `OpenCustomForm` and
+    `RunChildForm` 0, `CurrentForm` `''`, `FormCurShip` and the star map's
+    position 0, `UICheckElement` and the custom form's queries 0 or `''`;
+    `MessageBox`, `FormChange`, `UpdateFormShip`, `ButtonClick`, `SetFocus`,
+    the custom form's changes, the star map's view, selection and message,
+    the music and `ScriptActionsRun` do nothing.
+  - `DText`, `DAddText`, `DAnswer` and `InjectAnswer` pick the dialogue
+    screen from the script's ranger and write it only for the local human.
+    For another human, `DAnswer 'exit'` still ends its ruins mode
+    (`TPlayer.CloseRuinsMode`), `'main'` still leaves the script dialogue, and
+    `'exit_end'` leaves `Session.GameEndReason` alone (the human's own machine
+    sets its own); `InjectAnswer` still records the injected answer. The
+    dialogue state itself (`Session.ScriptDialogIndex`, `CurrentScript`, the
+    injections and overrides) is still one for all humans.
+  - `FormShipCurItem` reads and changes the script's human's held item
+    (`THuman.SelectedHoldItem`); only the local human's ship screen is
+    redrawn.
+  - `CustomWin` and `CustomLose` end the game for the script's human only in
+    multiplayer, as `EndGame` does (Respawn and game end).
+  - `GetTalkShip`, `GetTalkType` and `TalkByAI` read the talk of the human
+    whose command runs (the one talking), else the script's human's, else the
+    local human's. The script's human is not first: a ship's script can be
+    another human's than the talker's.
+  - `ExtremalTakeOff` and `ForceNextDay` set the script's human's
+    `THuman.ScriptTakeoffRequested` and `ScriptEndTurnRequested`. Only the
+    local human's are dispatched (`aScript.DispatchPendingScriptRequests`);
+    `OrderScriptTakeoff` and `ClearScriptEndTurn` clear their actor's. They are
+    UI requests and are not saved.
+  - Queued arcade and planet battles and videos carry their human
+    (`HumanId`). A request is queued when its human is local or the code runs
+    in that human's own command (`aScript.MayQueueScriptRequest`): then the
+    human's own machine runs the same command, shows the request and reports
+    the outcome (`ArcadeBattleExit`, `FinishQueuedPlanetaryBattle`,
+    `FinishQueuedVideo`), and the report finishes its actor's request. Any
+    other request is not started: `StartAB` answers 0 and the status
+    variables stay as they were. This machine shows only the local human's
+    requests (`LocalScriptRequest`). Robot battles are automatic victories in
+    any case (ROADMAP.md, Phase 6).
+  - Leaving or entering ruins mode opens the ruins or return screen only for
+    the local human's ranger (`TPlayer.EnterRuinsMode`,
+    `CloseRuinsModeScreen`).
+  - A command that script code submits while a command executes, or on the
+    turn thread, is the script's human's, else the executing command's
+    actor's ([commands.md](commands.md), Threads).
 
 ## Respawn and game end
 
@@ -496,6 +551,14 @@ note in the progress entry.
   of another item by the slot its grid showed before (which has moved) goes
   through; an item the first sells back shows in the second's grid and can be
   bought; no item is lost or in two places; and a round trip keeps both grids.
+- Each save also runs `--sim-script-routing` (Scripts): two humans join and
+  one is made local. The other's script code must show nothing and get the
+  declining answers; a command nested in its command, or in another's command
+  for its script, must be its own; its takeoff and end-turn requests must be
+  its own and its commands must clear only its own; its battles and videos
+  must be queued only in its own command and finished only by its own report;
+  the talk builtins must read the talker's talk; and its ruins mode must open
+  no screen while the local human's does.
 - The same counts run `--sim-pvp` on each save: a second human joins in the
   local human's star and the local one attacks it. With friendly fire on its
   hits must do damage; after the `SetSessionFlag` command turns it off, the

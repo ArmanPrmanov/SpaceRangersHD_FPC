@@ -7115,10 +7115,10 @@ begin
             ArcadeBattleScreen.SelectedMapName := '';
           end;
           RunScriptTurns;
-          if QueuedArcadeBattles.Count > 0 then
+          Request := LocalScriptRequest(srqArcadeBattle);
+          if Request <> nil then
           begin
             Stage := 14;
-            Request := PScriptABRequest(QueuedArcadeBattles[0]);
             RequestedScreenId := screenArcadeBattle;
             ArcadeBattleScreen.SelectedMapName := Request.MapName;
             ScriptArcadeReturnScreenId := Ord(CurrentScreenId);

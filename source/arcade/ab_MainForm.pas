@@ -445,10 +445,7 @@ begin
   if not MusicInHyperEnabled then
     MusicManager.RequestFadeOut;
   LoadPanel.OnOpen;
-  if QueuedArcadeBattles.Count > 0 then
-    ActiveArcadeRequest := QueuedArcadeBattles[0]
-  else
-    ActiveArcadeRequest := nil;
+  ActiveArcadeRequest := LocalScriptRequest(srqArcadeBattle);
   if ActiveArcadeRequest <> nil then
     ActiveArcadeRequestShips := ActiveArcadeRequest.Ships
   else

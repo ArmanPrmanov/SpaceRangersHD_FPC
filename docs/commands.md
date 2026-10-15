@@ -79,6 +79,14 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
   turn thread submits its client's commands with `InTurnJob` off, so they are
   recorded in the talk's wait as a local human's answer is
   ([network.md](network.md), Remote dialogue).
+- **The actor.** `NewCommand` makes a command of the local human: the UI
+  submits for the human at this machine. A command submitted while another
+  one executes (`ActingHuman` is set), or on the turn thread, is for the human
+  whose code runs: the human of the running script code (`ScriptHuman`), else
+  the executing command's actor. So a command nested in a client's command on
+  the host is the client's human's, as it is on the client. The command log
+  records only the outermost command; a replay submits the nested ones again
+  by the same rule.
 - `SubmitCommand` tells `BeforeCommandHook` and `AfterCommandHook` (the command
   log) and then `NetworkCommandHook` (a client sends the command to its host,
   [network.md](network.md)). A command that raises tells `CommandFailedHook`

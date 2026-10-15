@@ -1,7 +1,6 @@
 # Simulation units that still use UI units or ui globals (tools/layers_globals.txt).
 # Written by tools/check_layers.py --update.
 # Remove entries by removing the dependency; never add one by hand.
-aPlayer -> RequestedScreenId
 aScript -> ArcadeBattleScreen
 aScript -> BreakMessageGIException
 aScript -> CurrentScreenId

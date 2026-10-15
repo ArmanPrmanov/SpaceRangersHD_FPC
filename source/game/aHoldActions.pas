@@ -246,7 +246,7 @@ begin
   Result :=
       ((Human.Player.IsOnPlanet and (Human.Player.CurrentPlanet.OwnerId <> Byte(oiUninhabited)))
               or (Human.Player.IsDockedToShip and (Human.Player.RuinsMode = 0)))
-          and (QueuedArcadeBattles.Count <= 0);
+          and (FirstScriptRequest(srqArcadeBattle, Human.Id) = nil);
 end;
 
 // Moved from TfShip2.GetLocalStorageOwner.

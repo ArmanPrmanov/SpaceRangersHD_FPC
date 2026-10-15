@@ -72,6 +72,9 @@ type
     // CHANGE: ENHANCEMENT - Two humans land at one planet and share its equipment stock
     // (RunSharedShop; aShopStock).
     SharedShop: Boolean;
+    // CHANGE: ENHANCEMENT - Script builtins act for the script's human, on that human's
+    // machine (RunScriptRouting).
+    ScriptRouting: Boolean;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 // Shared with the networked runner (HeadlessNet).
@@ -108,8 +111,11 @@ uses
   aObjectRefs,
   aRanger,
   aScript,
+  aScriptFun,
   aShip,
   aShopStock,
+  aUiScriptActions,
+  SimEvents,
   aSaveLoad,
   aSession,
   SaveTrace,
@@ -1550,6 +1556,309 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - Script builtins act for the script's human, on that human's machine
+// (--sim-script-routing; docs/humans.md, Scripts). Two joined humans: one is made local, the
+// other stands for a remote one. Headless there are no screens, so a builtin that touched one
+// would fail.
+const
+  ckRoutingProbe = 1000;
+var
+  RoutingProbeRegistered: Boolean;
+  // What the probe command runs, as its actor.
+  RoutingProbeAction: procedure;
+  // The human the probe command's script code runs for (nil: the actor).
+  RoutingScriptHuman: THuman;
+  RoutingNestedActor: Cardinal;
+  RoutingCode: TCodeEC;
+  RoutingText: WideString;
+  RoutingScreenRequests: Integer;
+
+// Runs Text as code of no script for Human (ScriptHuman); the caller reads the variables and
+// frees the code.
+function RunProbeScript(Human: THuman; const Text: WideString): TCodeEC;
+var
+  SavedHuman: THuman;
+  SavedScript: TScript;
+begin
+  Result := CompileScriptText(Text);
+  Result.LinkAll(Session.SharedScriptVariables, False);
+  Result.LinkAll(ScriptFunctionScope, False);
+  Result.ScriptFunLinked := True;
+  SavedHuman := ScriptHuman;
+  SavedScript := CurrentScript;
+  ScriptHuman := Human;
+  CurrentScript := nil;
+  try
+    Result.Run(ScriptProcess);
+  finally
+    ScriptHuman := SavedHuman;
+    CurrentScript := SavedScript;
+  end;
+end;
+
+procedure ExecuteRoutingProbe(const Command: TPlayerCommand);
+begin
+  RoutingProbeAction;
+end;
+
+procedure RecordNestedActor;
+var
+  SavedHuman: THuman;
+begin
+  SavedHuman := ScriptHuman;
+  if RoutingScriptHuman <> nil then
+    ScriptHuman := RoutingScriptHuman;
+  try
+    RoutingNestedActor := NewCommand(ckRoutingProbe).Actor;
+  finally
+    ScriptHuman := SavedHuman;
+  end;
+end;
+
+procedure RunRoutingText;
+var
+  Human: THuman;
+begin
+  Human := RoutingScriptHuman;
+  if Human = nil then
+    Human := ActingHuman;
+  RoutingCode := RunProbeScript(Human, RoutingText);
+end;
+
+// Runs Text in a command of Actor, as script code of ScriptOf (nil: the actor's).
+function RunInCommand(Actor, ScriptOf: THuman; const Text: WideString): TCodeEC;
+begin
+  RoutingProbeAction := @RunRoutingText;
+  RoutingScriptHuman := ScriptOf;
+  RoutingText := Text;
+  RoutingCode := nil;
+  SubmitKindFor(Actor, ckRoutingProbe);
+  Result := RoutingCode;
+end;
+
+procedure CountScreenRequest(Screen: TGameScreenId);
+begin
+  Inc(RoutingScreenRequests);
+end;
+
+function RunScriptRouting(const Options: TSimulationOptions): Integer;
+var
+  L, R: THuman;
+  Code: TCodeEC;
+  Defaults, EndReason: Integer;
+  Command: TPlayerCommand;
+  SavedHandler: TScreenRequestHandler;
+  TalkShip: TShip;
+
+  procedure Fail(const Text: AnsiString);
+  begin
+    Emit('script routing failed: ' + Text);
+    raise EAbort.Create(Text);
+  end;
+
+  procedure Expect(Condition: Boolean; const Text: AnsiString);
+  begin
+    if not Condition then
+      Fail(Text);
+  end;
+
+  function Count(Queue: Integer; Human: THuman): Integer;
+  begin
+    Result := ScriptRequestCount(Queue, Human.Id);
+  end;
+
+begin
+  Result := 0;
+  try
+    if not RoutingProbeRegistered then
+    begin
+      RegisterCommand(ckRoutingProbe, 'RoutingProbe', @ExecuteRoutingProbe);
+      RoutingProbeRegistered := True;
+    end;
+    JoinHumans(3);
+    L := Session.Humans[1];
+    R := Session.Humans[2];
+    SetLocalHuman(L);
+    Expect(LocalHuman = L, 'the joined human is not local');
+    // (a) The UI builtins of a remote human's script code show nothing and answer as a player
+    // who declines.
+    Defaults := ScriptUiDefaultCount;
+    EndReason := Session.GameEndReason;
+    Code := RunProbeScript(
+        R,
+        'int r1; str s1; str s2; str s3; int r2; int r3; int r4; str s4; int r5;'
+            + 'MessageBox("probe");'
+            + 'r1 = MessageBoxYesNo("probe");'
+            + 's1 = CountBox("c", "d", 0, 10);'
+            + 's2 = NumberBox("c", "d", 0, 10);'
+            + 's3 = TextBox("c", "default");'
+            + 'r2 = ListBox("c", "a", "b");'
+            + 'r3 = OpenCustomForm("probe");'
+            + 'r4 = RunChildForm("probe");'
+            + 's4 = CurrentForm();'
+            + 'r5 = StarMapCurPosX();'
+            + 'StartMusic("probe");'
+            + 'ButtonClick("a", "b");'
+            + 'FormChange("probe");'
+            + 'DText("probe");'
+            + 'DAddText("probe");'
+            + 'DAnswer("probe");'
+            + 'DAnswer("exit_end");'
+    );
+    try
+      Expect(Code.LocalVar.GetVar('r1').GetInt = 0, 'MessageBoxYesNo did not answer no');
+      Expect(Code.LocalVar.GetVar('s1').GetString = 'Cancel', 'CountBox did not cancel');
+      Expect(Code.LocalVar.GetVar('s2').GetString = 'Cancel', 'NumberBox did not cancel');
+      Expect(
+          Code.LocalVar.GetVar('s3').GetString = 'default',
+          'TextBox did not give the default'
+      );
+      Expect(Code.LocalVar.GetVar('r2').GetInt = -1, 'ListBox did not cancel');
+      Expect(Code.LocalVar.GetVar('r3').GetInt = 0, 'OpenCustomForm did not answer 0');
+      Expect(Code.LocalVar.GetVar('r4').GetInt = 0, 'RunChildForm did not answer 0');
+      Expect(Code.LocalVar.GetVar('s4').GetString = '', 'CurrentForm named a form');
+      Expect(Code.LocalVar.GetVar('r5').GetInt = 0, 'StarMapCurPosX read the star map');
+    finally
+      Code.Free;
+    end;
+    Expect(
+        ScriptUiDefaultCount - Defaults = 13,
+        Format('%d defaults, not 13', [ScriptUiDefaultCount - Defaults])
+    );
+    Expect(Session.GameEndReason = EndReason, 'a remote exit_end changed the local game end');
+    Emit(Format('script routing ui defaults=%d ok', [ScriptUiDefaultCount - Defaults]));
+    // (b) A command a remote human's command submits is that human's, also from script code
+    // of a third human's script; outside a command it is the local human's.
+    RoutingProbeAction := @RecordNestedActor;
+    RoutingScriptHuman := nil;
+    SubmitKindFor(R, ckRoutingProbe);
+    Expect(RoutingNestedActor = Cardinal(R.Id), 'a nested command is not its actor''s');
+    RoutingScriptHuman := R;
+    SubmitKindFor(L, ckRoutingProbe);
+    Expect(
+        RoutingNestedActor = Cardinal(R.Id),
+        'a nested command is not the script''s human''s'
+    );
+    RoutingScriptHuman := nil;
+    Expect(
+        NewCommand(ckRoutingProbe).Actor = Cardinal(L.Id),
+        'a command is not the local human''s'
+    );
+    Emit('script routing nested actor ok');
+    // (c) Takeoff and end-turn requests are per human, and a command clears its actor's.
+    RunProbeScript(R, 'ExtremalTakeOff(); ForceNextDay();').Free;
+    Expect(R.ScriptTakeoffRequested and R.ScriptEndTurnRequested, 'the remote request is lost');
+    Expect(
+        not L.ScriptTakeoffRequested and not L.ScriptEndTurnRequested,
+        'a remote request is the local human''s'
+    );
+    Expect(not HasPendingScriptRequests, 'a remote request is pending on this machine');
+    RunProbeScript(L, 'ForceNextDay();').Free;
+    SubmitKindFor(R, ckClearScriptEndTurn);
+    Expect(not R.ScriptEndTurnRequested, 'the remote end turn was not cleared');
+    Expect(L.ScriptEndTurnRequested, 'a remote command cleared the local end turn');
+    SubmitKindFor(R, ckOrderScriptTakeoff);
+    Expect(not R.ScriptTakeoffRequested, 'the remote takeoff was not taken');
+    L.ScriptEndTurnRequested := False;
+    Emit('script routing takeoff ok');
+    // (d) Queued battles and videos: a remote human's are queued only in its own command, and
+    // the command that finishes one finishes its actor's.
+    Code := RunProbeScript(
+        R,
+        'int a; a = StartAB("probe"); StartRobots("m", "s", "w", "l", "p"); StartVideo("v", "s");'
+    );
+    try
+      Expect(Code.LocalVar.GetVar('a').GetInt = 0, 'StartAB outside the human''s command started');
+    finally
+      Code.Free;
+    end;
+    Expect(
+        (Count(srqArcadeBattle, R) = 0)
+            and (Count(srqPlanetaryBattle, R) = 0)
+            and (Count(srqVideo, R) = 0),
+        'a remote request was queued outside its command'
+    );
+    RunInCommand(R, nil, 'StartRobots("m", "s", "w", "l", "p"); StartVideo("v", "s");').Free;
+    Expect(
+        (Count(srqPlanetaryBattle, R) = 1) and (Count(srqVideo, R) = 1),
+        'a request in the human''s own command was not queued'
+    );
+    Expect(
+        (LocalScriptRequest(srqPlanetaryBattle) = nil) and (LocalScriptRequest(srqVideo) = nil),
+        'a remote request is the local human''s'
+    );
+    Command := NewCommand(ckFinishQueuedPlanetaryBattle);
+    AddInt(Command, 2);
+    SubmitFor(L, Command);
+    Expect(Count(srqPlanetaryBattle, R) = 1, 'the local human''s report finished a remote battle');
+    Command := NewCommand(ckFinishQueuedPlanetaryBattle);
+    AddInt(Command, 2);
+    SubmitFor(R, Command);
+    Command := NewCommand(ckFinishQueuedVideo);
+    AddInt(Command, 2);
+    SubmitFor(R, Command);
+    Expect(
+        (Count(srqPlanetaryBattle, R) = 0) and (Count(srqVideo, R) = 0),
+        'the remote human''s report did not finish its request'
+    );
+    Emit('script routing queues ok');
+    // (e) The talk builtins read the talking human's talk: the actor's, also in another
+    // human's script, else the script's human's.
+    TalkShip := L.Player;
+    R.TalkShip := TalkShip;
+    R.TalkType := 7;
+    L.TalkShip := nil;
+    L.TalkType := 0;
+    Code := RunProbeScript(R, 'int k; dword t; k = GetTalkType(); t = GetTalkShip();');
+    try
+      Expect(Code.LocalVar.GetVar('k').GetInt = 7, 'GetTalkType read another human''s talk');
+      Expect(
+          Code.LocalVar.GetVar('t').GetDword = PtrUInt(TalkShip),
+          'GetTalkShip read another human''s talk'
+      );
+    finally
+      Code.Free;
+    end;
+    Code := RunInCommand(R, L, 'int k; k = GetTalkType();');
+    try
+      Expect(
+          Code.LocalVar.GetVar('k').GetInt = 7,
+          'GetTalkType in the talker''s command read the script''s human''s'
+      );
+    finally
+      Code.Free;
+    end;
+    R.TalkShip := nil;
+    R.TalkType := 0;
+    Emit('script routing talk ok');
+    // (f) Ruins mode: the state changes for its human, the screen only for the local one.
+    SavedHandler := ScreenRequestHandler;
+    ScreenRequestHandler := @CountScreenRequest;
+    try
+      RoutingScreenRequests := 0;
+      R.Player.EnterRuinsMode(1);
+      Expect(R.Player.RuinsMode = 1, 'the remote human did not enter ruins mode');
+      R.Player.CloseRuinsModeScreen;
+      Expect(R.Player.RuinsMode = 0, 'the remote human did not leave ruins mode');
+      Expect(RoutingScreenRequests = 0, 'a remote human''s ruins mode requested a screen');
+      L.Player.EnterRuinsMode(1);
+      L.Player.CloseRuinsModeScreen;
+      Expect(
+          RoutingScreenRequests = 2,
+          'the local human''s ruins mode did not request its screens'
+      );
+      Expect(L.Player.RuinsMode = 0, 'the local human did not leave ruins mode');
+    finally
+      ScreenRequestHandler := SavedHandler;
+    end;
+    Emit('script routing ruins ok');
+    Emit('script routing ok');
+  except
+    on E: EAbort do
+      Result := 1;
+  end;
+end;
+
 procedure EmitHumans(const Options: TSimulationOptions);
 var
   Lines: TStringList;
@@ -1577,6 +1886,11 @@ begin
   if Options.SharedShop then
   begin
     Result := RunSharedShop(Options);
+    Exit;
+  end;
+  if Options.ScriptRouting then
+  begin
+    Result := RunScriptRouting(Options);
     Exit;
   end;
   if Options.Pvp then

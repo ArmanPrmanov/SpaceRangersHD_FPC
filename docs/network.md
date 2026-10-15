@@ -565,9 +565,29 @@ Every other human waits meanwhile, as for any dialogue: the day is paused.
 local human, as before: its text and answers are written into this machine's
 talk screen by the script's `DText`/`DAnswer` builtins while the day runs, and
 its answers run the script's answer code, so a client could not show it from
-its own state. So do the queued arcade and planet battles, `EnterRuinsMode` and
-`CloseRuinsModeScreen`, and deploying a tranclucator while docked: they open
-screens, not a dialogue a client could answer mid-day.
+its own state. Deploying a tranclucator while docked stays with the local human
+too: it opens a screen, not a dialogue a client could answer mid-day.
+
+**A client's script code on the host.** The host runs a client's commands, and
+so the client's script code, with `ScriptHuman` the client's human. The script's
+game effects happen there as on the client, but the UI builtins touch nothing
+of the host's: a box, a form or a screen change gives a declining player's
+answer and is logged, the dialogue text and answers (`DText`, `DAnswer`) are
+not written into the host's screens, music and video do not play, and the talk
+builtins read the talking human's talk ([humans.md](humans.md), Scripts). The
+client, which runs the same command on its prediction, shows all of it on its
+own screen. Its takeoff and end-turn requests (`ExtremalTakeOff`,
+`ForceNextDay`) are its human's: the client dispatches them as its own
+`OrderScriptTakeoff` and `EndTurn`, and the host does not act on them for its
+own human. Entering or leaving ruins mode (`EnterRuinsMode`, `CloseBridge`)
+changes the client's human's state and opens no screen on the host. A queued
+arcade or planet battle or video that the client's command starts is queued on
+both for the client's human: the client plays it and reports the outcome by a
+command, which finishes the client's request on the host, never the host's
+own. One that the host's day or another human's command starts for the
+client's human is not started, since the client never sees it. A command that
+a client's command submits from inside it is the client's human's (the actor
+of the executing command, or the script's human), not the host's.
 
 ## Disconnects
 
@@ -763,6 +783,15 @@ star's film once; every client in that star gets it.
   line is in the host's language (the host builds the text); a talk a client
   cannot show (it is on another screen than the star map) is declined, not
   queued; one held for a film's end is declined after 60 s.
+- A client sends every command it submits, also one submitted while another
+  of its commands executes; the host runs the outer one, which submits the
+  inner one again, and then the inner one from the queue.
+- A video a client's command starts on the client's ship screen plays there at
+  once, but the host queues it for the client's human (it cannot see the
+  client's screen), and no report finishes it there.
+- The script dialogue state (`Session.ScriptDialogIndex`, `CurrentScript`, the
+  injected answers and overrides) is still one for all humans, and scripts are
+  named by index.
 - A client that loses its host on a screen that does not start a day (a shop,
   the ship, the galaxy map) finds out when it next opens one of those.
 - Chat is in the protocol (the host relays it); nothing shows it.

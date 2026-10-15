@@ -294,6 +294,9 @@ begin
     // CHANGE: ENHANCEMENT - Two humans share one shop's stock (HeadlessSim.RunSharedShop).
     else if Argument = '--sim-shared-shop' then
       Simulation.SharedShop := True
+    // CHANGE: ENHANCEMENT - Script builtins act for the right human (HeadlessSim.RunScriptRouting).
+    else if Argument = '--sim-script-routing' then
+      Simulation.ScriptRouting := True
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then

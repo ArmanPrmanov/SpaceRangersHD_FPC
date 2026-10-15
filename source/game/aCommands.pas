@@ -140,12 +140,26 @@ begin
 end;
 
 function NewCommand(Kind: TCommandKind): TPlayerCommand;
+var
+  Player: TPlayer;
 begin
   Result := Default(TPlayerCommand);
   Result.Kind := Kind;
   // The UI submits commands for the human at this machine.
-  if LocalPlayer <> nil then
-    Result.Actor := Cardinal(LocalPlayer.Id);
+  Player := LocalPlayer;
+  // CHANGE: BUGFIX - A command submitted while another one executes, or by the turn job, is
+  // for the human whose code runs: the human of the script code that runs, else the actor of
+  // the executing command. It was always the local human, so a nested command of a remote
+  // human's command acted for the host's human (docs/commands.md, Threads).
+  if (ActingHuman <> nil) or InTurnJob then
+  begin
+    if (ScriptHuman <> nil) and (ScriptHuman.Player <> nil) then
+      Player := ScriptHuman.Player
+    else if (ActingHuman <> nil) and (ActingHuman.Player <> nil) then
+      Player := ActingHuman.Player;
+  end;
+  if Player <> nil then
+    Result.Actor := Cardinal(Player.Id);
 end;
 
 

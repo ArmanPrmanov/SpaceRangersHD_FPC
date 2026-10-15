@@ -131,6 +131,14 @@ type
     // holds position until it rejoins. Session state, not game state: it is not saved, and it
     // is True everywhere but on a host.
     Connected: Boolean;
+    // CHANGE: BUGFIX - The human's script asked it to take off (ExtremalTakeOff) or to end its
+    // turn (ForceNextDay). They were two globals, so a remote human's script made the host's
+    // own human take off, and a client's command cleared the host's request. The screens of
+    // the machine the human plays on act on them (aScript.DispatchPendingScriptRequests); the
+    // OrderScriptTakeoff and ClearScriptEndTurn commands clear their actor's. Requests for
+    // the UI, not game state: not saved.
+    ScriptTakeoffRequested: Boolean;
+    ScriptEndTurnRequested: Boolean;
     constructor Create;
     destructor Destroy; override;
     // The message bubbles, under PersistentPlayerMessageLock. SkipLock means the caller

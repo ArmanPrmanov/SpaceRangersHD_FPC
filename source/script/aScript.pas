@@ -468,6 +468,8 @@ type
     BackgroundId: Integer;
     BackgroundMapName: WideString;
     Script: TScript;
+    // CHANGE: BUGFIX - The human whose script code queued it; 0: anyone (see ScriptRequestCount).
+    HumanId: Integer;
   end;
   PScriptDialogOverride = PointerToTDialogOverride;
   TScriptPBRequest = packed record
@@ -477,12 +479,14 @@ type
     FailureText: WideString;
     PlaceText: WideString;
     Script: TScript;
+    HumanId: Integer;
   end;
   PScriptDialogInjection = PointerToTDialogInject;
   TScriptVDRequest = packed record
     Video: WideString;
     Soundtrack: WideString;
     Script: TScript;
+    HumanId: Integer;
   end;
   PScriptDialogBlock = PointerToTDialogBlock;
   TScriptContextSnapshot = packed record
@@ -500,9 +504,7 @@ var
   ResumingScript: TScript = nil;
   StagedArcadeShipScript: TScript = nil;
   ScriptArcadeReturnScreenId: Byte = 0;
-  ScriptTakeoffRequested: Boolean = False;
   StagedArcadeShips: TObjectList;
-  ScriptEndTurnRequested: Boolean = False;
   ScriptFunctionScope: TVarArrayEC;
   ScriptProcess: TCodeProcessEC;
   ScriptDialogOverrides: TObjectList;
@@ -526,15 +528,35 @@ function TryShowQueuedVideo: Boolean;
 function TryDispatchScriptTakeoff: Boolean;
 function TryDispatchScriptEndTurn: Boolean;
 function TryDispatchResumingScriptRequest: Boolean;
-// The queue (srq...) holding the resuming script's request, and its index there.
-function FindResumingScriptRequest(out Index: Integer): Integer;
+// The queue (srq...) holding the resuming script's request of the human (HumanId, 0: anyone),
+// and its index there.
+function FindResumingScriptRequest(HumanId: Integer; out Index: Integer): Integer;
 procedure MoveScriptRequestToFront(Queue, Index: Integer);
 function DispatchPendingScriptRequests: Boolean;
 procedure StartScriptRequestThread;
-procedure CompleteQueuedArcadeBattle(Status: Integer);
+// The script that queued the human's first request (HumanId, 0: anyone's) runs with Status.
+procedure CompleteQueuedArcadeBattle(Status, HumanId: Integer);
 procedure CompleteQueuedTextQuest(Status: TScriptQuestStatus);
-procedure CompleteQueuedPlanetaryBattle(Status: Integer);
-procedure CompleteQueuedVideo(Status: Integer);
+procedure CompleteQueuedPlanetaryBattle(Status, HumanId: Integer);
+procedure CompleteQueuedVideo(Status, HumanId: Integer);
+// CHANGE: BUGFIX - A queued arcade battle, planet battle or video (Queue srqArcadeBattle,
+// srqPlanetaryBattle, srqVideo) belongs to the human whose script code queued it: this
+// machine shows only the local human's, and the command that reports how it ended finishes
+// its actor's (docs/humans.md, Scripts). They were shown on whichever machine ran the
+// script, whoever its human was. HumanId 0 matches every request, and a request queued with
+// no human matches every human. Text quests are off in multiplayer and stay one queue.
+function ScriptRequestCount(Queue, HumanId: Integer): Integer;
+// The human's first request in Queue, or nil.
+function FirstScriptRequest(Queue, HumanId: Integer): Pointer;
+// The local human's first request in Queue, or nil.
+function LocalScriptRequest(Queue: Integer): Pointer;
+// The id of the human the running script code queues for (ScriptHuman), 0 when none.
+function ScriptRequestHumanId: Integer;
+// Whether script code may queue a request for its human (ScriptHuman) on this machine: the
+// human is local, or the code runs in that human's own command, which the human's own
+// machine runs too, shows, and reports the outcome of by a command. Otherwise the request is
+// declined (not started), as for a human who cannot be asked.
+function MayQueueScriptRequest: Boolean;
 procedure LogScriptStepCount(ExpressionCount: Integer);
 procedure InitializeScriptEngine;
 procedure FinalizeScriptEngine;
@@ -678,6 +700,8 @@ begin
 end;
 
 procedure ClearPendingScriptRequests;
+var
+  I: Integer;
 begin
   ResumingScript := nil;
   while QueuedTextQuests.Count > 0 do
@@ -701,21 +725,123 @@ begin
     Dispose(PScriptVDRequest(QueuedVideos[0]));
     QueuedVideos.Delete(0);
   end;
-  ScriptTakeoffRequested := False;
-  ScriptEndTurnRequested := False;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Session.Humans[I].ScriptTakeoffRequested := False;
+    Session.Humans[I].ScriptEndTurnRequested := False;
+  end;
+  if LocalHuman <> nil then
+  begin
+    LocalHuman.ScriptTakeoffRequested := False;
+    LocalHuman.ScriptEndTurnRequested := False;
+  end;
   StagedArcadeShips.Clear;
   StagedArcadeShipScript := nil;
+end;
+
+function QueueList(Queue: Integer): TList;
+begin
+  case Queue of
+    srqVideo: Result := QueuedVideos;
+    srqTextQuest: Result := QueuedTextQuests;
+    srqArcadeBattle: Result := QueuedArcadeBattles;
+    srqPlanetaryBattle: Result := QueuedPlanetaryBattles;
+  else
+    Result := nil;
+  end;
+end;
+
+function RequestHumanId(Queue: Integer; Request: Pointer): Integer;
+begin
+  case Queue of
+    srqVideo: Result := PScriptVDRequest(Request).HumanId;
+    srqArcadeBattle: Result := PScriptABRequest(Request).HumanId;
+    srqPlanetaryBattle: Result := PScriptPBRequest(Request).HumanId;
+  else
+    Result := 0;
+  end;
+end;
+
+function IsRequestOf(Queue: Integer; Request: Pointer; HumanId: Integer): Boolean;
+var
+  Owner: Integer;
+begin
+  Owner := RequestHumanId(Queue, Request);
+  Result := (HumanId = 0) or (Owner = 0) or (Owner = HumanId);
+end;
+
+function FirstScriptRequestIndex(Queue, HumanId: Integer): Integer;
+var
+  List: TList;
+  I: Integer;
+begin
+  Result := -1;
+  List := QueueList(Queue);
+  if List <> nil then
+    for I := 0 to List.Count - 1 do
+      if IsRequestOf(Queue, List[I], HumanId) then
+        Exit(I);
+end;
+
+function ScriptRequestCount(Queue, HumanId: Integer): Integer;
+var
+  List: TList;
+  I: Integer;
+begin
+  Result := 0;
+  List := QueueList(Queue);
+  if List <> nil then
+    for I := 0 to List.Count - 1 do
+      if IsRequestOf(Queue, List[I], HumanId) then
+        Inc(Result);
+end;
+
+function FirstScriptRequest(Queue, HumanId: Integer): Pointer;
+var
+  Index: Integer;
+begin
+  Index := FirstScriptRequestIndex(Queue, HumanId);
+  if Index < 0 then
+    Result := nil
+  else
+    Result := QueueList(Queue)[Index];
+end;
+
+function LocalHumanId: Integer;
+begin
+  if LocalHuman <> nil then
+    Result := LocalHuman.Id
+  else
+    Result := 0;
+end;
+
+function LocalScriptRequest(Queue: Integer): Pointer;
+begin
+  Result := FirstScriptRequest(Queue, LocalHumanId);
+end;
+
+function ScriptRequestHumanId: Integer;
+begin
+  if ScriptHuman <> nil then
+    Result := ScriptHuman.Id
+  else
+    Result := 0;
+end;
+
+function MayQueueScriptRequest: Boolean;
+begin
+  Result := (ScriptHuman = nil) or (ScriptHuman = LocalHuman) or (ScriptHuman = ActingHuman);
 end;
 
 function HasPendingScriptRequests: Boolean;
 begin
   Result :=
-      (QueuedArcadeBattles.Count > 0)
+      (LocalScriptRequest(srqArcadeBattle) <> nil)
           or (QueuedTextQuests.Count > 0)
-          or (QueuedPlanetaryBattles.Count > 0)
-          or (QueuedVideos.Count > 0)
-          or ScriptTakeoffRequested
-          or ScriptEndTurnRequested;
+          or (LocalScriptRequest(srqPlanetaryBattle) <> nil)
+          or (LocalScriptRequest(srqVideo) <> nil)
+          or ((LocalHuman <> nil)
+              and (LocalHuman.ScriptTakeoffRequested or LocalHuman.ScriptEndTurnRequested));
 end;
 
 function TryShowQueuedArcadeBattle: Boolean;
@@ -723,9 +849,9 @@ var
   Request: PScriptABRequest;
 begin
   Result := False;
-  if QueuedArcadeBattles.Count > 0 then
+  Request := LocalScriptRequest(srqArcadeBattle);
+  if Request <> nil then
   begin
-    Request := PScriptABRequest(QueuedArcadeBattles[0]);
     ArcadeBattleScreen.SelectedMapName := Request.MapName;
     case CurrentScreenId of
       screenEquipmentShop, screenGovernment, screenInfo, screenGoodsShop:
@@ -770,10 +896,10 @@ var
   Failed: Boolean;
 begin
   Result := False;
-  if QueuedPlanetaryBattles.Count > 0 then
+  Request := LocalScriptRequest(srqPlanetaryBattle);
+  if Request <> nil then
   begin
     Status := 0;
-    Request := PScriptPBRequest(QueuedPlanetaryBattles[0]);
     try
       Failed := False;
       Status :=
@@ -828,9 +954,9 @@ var
   Video: TxvidGI;
 begin
   Result := False;
-  if QueuedVideos.Count > 0 then
+  Request := LocalScriptRequest(srqVideo);
+  if Request <> nil then
   begin
-    Request := PScriptVDRequest(QueuedVideos[0]);
     if not SkipVideo
         and (TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]) = RuinsTalkScreen) then
     begin
@@ -871,7 +997,7 @@ end;
 function TryDispatchScriptTakeoff: Boolean;
 begin
   Result := False;
-  if ScriptTakeoffRequested then
+  if (LocalHuman <> nil) and LocalHuman.ScriptTakeoffRequested then
   begin
     if OrderScriptTakeoff then
     begin
@@ -890,7 +1016,7 @@ end;
 function TryDispatchScriptEndTurn: Boolean;
 begin
   Result := False;
-  if ScriptEndTurnRequested then
+  if (LocalHuman <> nil) and LocalHuman.ScriptEndTurnRequested then
   begin
     ClearScriptEndTurn;
     if CurrentScreenId = screenRuinsTalk then
@@ -913,7 +1039,7 @@ end;
 
 // CHANGE: ENHANCEMENT - Finding the resuming script's request, moving it (a command,
 // aUiScriptActions) and showing it are apart.
-function FindResumingScriptRequest(out Index: Integer): Integer;
+function FindResumingScriptRequest(HumanId: Integer; out Index: Integer): Integer;
 var
   I: Integer;
   Quest, Arcade, Planetary, Video: PQueuedTextQuest;
@@ -928,7 +1054,7 @@ begin
   for I := 0 to QueuedVideos.Count - 1 do
   begin
     Video := PQueuedTextQuest(QueuedVideos[I]);
-    if Video.Script = ResumingScript then
+    if (Video.Script = ResumingScript) and IsRequestOf(srqVideo, QueuedVideos[I], HumanId) then
     begin
       Index := I;
       Exit(srqVideo);
@@ -946,7 +1072,8 @@ begin
   for I := 0 to QueuedArcadeBattles.Count - 1 do
   begin
     Arcade := PQueuedTextQuest(QueuedArcadeBattles[I]);
-    if Arcade.Script = ResumingScript then
+    if (Arcade.Script = ResumingScript)
+        and IsRequestOf(srqArcadeBattle, QueuedArcadeBattles[I], HumanId) then
     begin
       Index := I;
       Exit(srqArcadeBattle);
@@ -955,7 +1082,8 @@ begin
   for I := 0 to QueuedPlanetaryBattles.Count - 1 do
   begin
     Planetary := PQueuedTextQuest(QueuedPlanetaryBattles[I]);
-    if Planetary.Script = ResumingScript then
+    if (Planetary.Script = ResumingScript)
+        and IsRequestOf(srqPlanetaryBattle, QueuedPlanetaryBattles[I], HumanId) then
     begin
       Index := I;
       Exit(srqPlanetaryBattle);
@@ -986,10 +1114,10 @@ var
   Queue, Index: Integer;
 begin
   Result := False;
-  Queue := FindResumingScriptRequest(Index);
+  Queue := FindResumingScriptRequest(LocalHumanId, Index);
   if Queue = srqNone then
     Exit;
-  if Index > 0 then
+  if Index > FirstScriptRequestIndex(Queue, LocalHumanId) then
     MoveResumingScriptRequestToFront;
   case Queue of
     srqVideo: TryShowQueuedVideo;
@@ -1060,12 +1188,33 @@ begin
   end;
 end;
 
-procedure CompleteQueuedArcadeBattle(Status: Integer);
+// The human's first request in Queue, taken out of the queue; nil when it has none. The log
+// says so: a command that finishes a request its actor does not have changes nothing.
+function TakeScriptRequest(Queue, HumanId: Integer): Pointer;
+var
+  Index: Integer;
+begin
+  Index := FirstScriptRequestIndex(Queue, HumanId);
+  if Index < 0 then
+  begin
+    AppendLogLineThreadSafe(
+        AnsiString(
+            Format('Script request queue %d: human %d has no request to finish', [Queue, HumanId])
+        )
+    );
+    Exit(nil);
+  end;
+  Result := QueueList(Queue)[Index];
+  QueueList(Queue).Delete(Index);
+end;
+
+procedure CompleteQueuedArcadeBattle(Status, HumanId: Integer);
 var
   Request: PScriptABRequest;
 begin
-  Request := PScriptABRequest(QueuedArcadeBattles[0]);
-  QueuedArcadeBattles.Delete(0);
+  Request := TakeScriptRequest(srqArcadeBattle, HumanId);
+  if Request = nil then
+    Exit;
   ResumingScript := Request.Script;
   if Request.Script <> nil then
   begin
@@ -1100,12 +1249,13 @@ begin
     ResumingScript := nil;
 end;
 
-procedure CompleteQueuedPlanetaryBattle(Status: Integer);
+procedure CompleteQueuedPlanetaryBattle(Status, HumanId: Integer);
 var
   Request: PScriptPBRequest;
 begin
-  Request := PScriptPBRequest(QueuedPlanetaryBattles[0]);
-  QueuedPlanetaryBattles.Delete(0);
+  Request := TakeScriptRequest(srqPlanetaryBattle, HumanId);
+  if Request = nil then
+    Exit;
   ResumingScript := Request.Script;
   if Request.Script <> nil then
   begin
@@ -1119,14 +1269,15 @@ begin
     ResumingScript := nil;
 end;
 
-procedure CompleteQueuedVideo(Status: Integer);
+procedure CompleteQueuedVideo(Status, HumanId: Integer);
 var
   Request: PScriptVDRequest;
 begin
   if LocalPlayer = nil then
     Exit;
-  Request := PScriptVDRequest(QueuedVideos[0]);
-  QueuedVideos.Delete(0);
+  Request := TakeScriptRequest(srqVideo, HumanId);
+  if Request = nil then
+    Exit;
   ResumingScript := Request.Script;
   if Request.Script <> nil then
   begin

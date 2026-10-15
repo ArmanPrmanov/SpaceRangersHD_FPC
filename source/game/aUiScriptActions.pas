@@ -42,10 +42,10 @@ procedure MoveResumingScriptRequestToFront;
 // The script that queued the planetary battle or video runs with the outcome.
 procedure FinishQueuedPlanetaryBattle(Status: Integer);
 procedure FinishQueuedVideo(Status: Integer);
-// A script asked for takeoff: the request is taken, and the player ordered to take off when
-// landed or docked. Returns whether the order was given.
+// A script asked the local human to take off: the request is taken, and the player ordered
+// to take off when landed or docked. Returns whether the order was given.
 function OrderScriptTakeoff: Boolean;
-// Takes a script's end-turn request.
+// Takes the local human's end-turn request from a script.
 procedure ClearScriptEndTurn;
 // Runs Item's script and config action code, each with Param 0, as the info panels do when
 // they show the item.
@@ -138,7 +138,7 @@ procedure ExecuteMoveResumingScriptRequest(const Command: TPlayerCommand);
 var
   Queue, Index: Integer;
 begin
-  Queue := FindResumingScriptRequest(Index);
+  Queue := FindResumingScriptRequest(Integer(Command.Actor), Index);
   if Index > 0 then
     MoveScriptRequestToFront(Queue, Index);
 end;
@@ -148,10 +148,12 @@ begin
   SubmitOrRun(NewCommand(ckMoveResumingScriptRequest), @ExecuteMoveResumingScriptRequest);
 end;
 
-// Moved from TryRunQueuedPlanetaryBattle.
+// Moved from TryRunQueuedPlanetaryBattle. CHANGE: BUGFIX - Finishes the actor's battle: a
+// client reports its own, which the host must not take for its own human's (aScript,
+// ScriptRequestCount).
 procedure ExecuteFinishQueuedPlanetaryBattle(const Command: TPlayerCommand);
 begin
-  CompleteQueuedPlanetaryBattle(IntArg(Command, 0));
+  CompleteQueuedPlanetaryBattle(IntArg(Command, 0), Integer(Command.Actor));
 end;
 
 procedure FinishQueuedPlanetaryBattle(Status: Integer);
@@ -166,7 +168,7 @@ end;
 // Moved from TryShowQueuedVideo and TfRuinsTalk.StopScriptVideo.
 procedure ExecuteFinishQueuedVideo(const Command: TPlayerCommand);
 begin
-  CompleteQueuedVideo(IntArg(Command, 0));
+  CompleteQueuedVideo(IntArg(Command, 0), Integer(Command.Actor));
 end;
 
 procedure FinishQueuedVideo(Status: Integer);
@@ -178,13 +180,21 @@ begin
   SubmitOrRun(Command, @ExecuteFinishQueuedVideo);
 end;
 
-// Moved from TryDispatchScriptTakeoff.
+// The human whose script request a command takes: its actor, or with no player the local one.
+function RequestHuman(const Command: TPlayerCommand): THuman;
+begin
+  Result := ActorHuman(Command);
+  if Result = nil then
+    Result := LocalHuman;
+end;
+
+// Moved from TryDispatchScriptTakeoff. CHANGE: BUGFIX - The actor's request (THuman).
 procedure ExecuteOrderScriptTakeoff(const Command: TPlayerCommand);
 var
   P: TPlayer;
 begin
   P := Actor(Command);
-  ScriptTakeoffRequested := False;
+  RequestHuman(Command).ScriptTakeoffRequested := False;
   ScriptTakeoffOrdered := (P.CurrentPlanet <> nil) or (P.DockedTo <> nil);
   if ScriptTakeoffOrdered then
     P.OrderTakeoff;
@@ -199,7 +209,7 @@ end;
 // Moved from TryDispatchScriptTakeoff and TryDispatchScriptEndTurn.
 procedure ExecuteClearScriptEndTurn(const Command: TPlayerCommand);
 begin
-  ScriptEndTurnRequested := False;
+  RequestHuman(Command).ScriptEndTurnRequested := False;
 end;
 
 procedure ClearScriptEndTurn;

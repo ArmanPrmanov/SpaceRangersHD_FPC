@@ -1040,7 +1040,7 @@ begin
         (LocalPlayer = LocalHuman.PlayerHoldShip)
             and not LocalPlayer.InHyperspace
             and (LocalPlayer.RuinsMode = 0)
-            and (QueuedArcadeBattles.Count <= 0)
+            and (LocalScriptRequest(srqArcadeBattle) = nil)
     );
   with GetByName('CustomBridgeInto') as TGraphButtonGI do
     SetActive(
@@ -1048,7 +1048,7 @@ begin
             and (LocalPlayer.GetHull.CapitalShip > 1)
             and not LocalPlayer.InHyperspace
             and (LocalPlayer.RuinsMode = 0)
-            and (QueuedArcadeBattles.Count <= 0)
+            and (LocalScriptRequest(srqArcadeBattle) = nil)
     );
   if not FlagD4 then
   begin
@@ -1572,7 +1572,7 @@ procedure TfShip2.RewardsMouseDown(Sender: TObjectGI; KeyState: Cardinal; Point:
 begin
   if UiRuntimeFlag
       and not LocalHuman.PlayerHoldShip.InHyperspace
-      and (QueuedArcadeBattles.Count <= 0)
+      and (LocalScriptRequest(srqArcadeBattle) = nil)
       and RewardsBuffer.Active then
   begin
     if SelectedHoldKind <> phkEmpty then
@@ -1603,7 +1603,8 @@ procedure TfShip2.ShipNameMouseDown(Sender: TObjectGI; KeyState: Cardinal; Point
 var
   Name: WideString;
 begin
-  if not LocalHuman.PlayerHoldShip.InHyperspace and (QueuedArcadeBattles.Count <= 0) then
+  if not LocalHuman.PlayerHoldShip.InHyperspace
+      and (LocalScriptRequest(srqArcadeBattle) = nil) then
   begin
     Name := LocalHuman.PlayerHoldShip.GetName;
     if ShowTextInputDialog(Self, LocalizedColorText('FormShip.EnterShipName'), Name, 30, 0, 0)
@@ -2822,7 +2823,7 @@ begin
   if (SelectedHoldKind = phkEmpty)
       and (LocalHuman.PlayerHoldShip.FindEquippedItemInSlot(ItemType, Slot) = nil) then
     Exit;
-  if (LocalPlayer.InHyperspace or (QueuedArcadeBattles.Count > 0))
+  if (LocalPlayer.InHyperspace or (LocalScriptRequest(srqArcadeBattle) <> nil))
       and not Galaxy.IsArcadeEquipmentChangeEnabled then
   begin
     SoundManager.PlaySound('Sound.NoMoney');
@@ -2949,7 +2950,7 @@ begin
         CloseClicked(nil);
     end;
   end;
-  if LocalHuman.PlayerHoldShip.InHyperspace or (QueuedArcadeBattles.Count > 0) then
+  if LocalHuman.PlayerHoldShip.InHyperspace or (LocalScriptRequest(srqArcadeBattle) <> nil) then
     RefreshShipView
   else if not RemoteHoldVisible then
   begin
@@ -2985,7 +2986,7 @@ begin
     aCalc.WaitForTurnCalculationUI;
     UpdateActionCursor(True);
   end;
-  if LocalHuman.PlayerHoldShip.InHyperspace or (QueuedArcadeBattles.Count > 0) then
+  if LocalHuman.PlayerHoldShip.InHyperspace or (LocalScriptRequest(srqArcadeBattle) <> nil) then
   begin
     RefreshShipView;
     aCalc.WaitForTurnCalculationUI;
@@ -3028,7 +3029,7 @@ begin
   end
   else
     Exit;
-  if LocalHuman.PlayerHoldShip.InHyperspace or (QueuedArcadeBattles.Count > 0) then
+  if LocalHuman.PlayerHoldShip.InHyperspace or (LocalScriptRequest(srqArcadeBattle) <> nil) then
   begin
     RefreshShipView;
     aCalc.WaitForTurnCalculationUI;
@@ -3054,7 +3055,7 @@ var
   begin
     aCalc.WaitForTurnCalculationUI;
     if LocalHuman.PlayerHoldShip.InHyperspace
-        or (QueuedArcadeBattles.Count > 0)
+        or (LocalScriptRequest(srqArcadeBattle) <> nil)
         or (RemoteHoldVisible and NeedsRefresh) then
       RefreshShipView
     else if not RemoteHoldVisible then
@@ -3306,7 +3307,7 @@ begin
           and (TEquipment(Entry.Item).MicroModuleIndex = 0)
           and (SelectedHoldItem as TMicroModule).CanInstallOn(TEquipment(Entry.Item))
           and not LocalHuman.PlayerHoldShip.InHyperspace
-          and (QueuedArcadeBattles.Count <= 0) then
+          and (LocalScriptRequest(srqArcadeBattle) = nil) then
       begin
         Text :=
             FormatText2(
@@ -3330,7 +3331,7 @@ begin
           and (Entry.Item <> nil)
           and (Entry.Kind in [phkEquipment, phkArtefact])
           and not LocalHuman.PlayerHoldShip.InHyperspace
-          and (QueuedArcadeBattles.Count <= 0) then
+          and (LocalScriptRequest(srqArcadeBattle) = nil) then
       begin
         ActionResult := UseHeldItemOn(hsHoldEquipment, Index, Ord(Expanded));
         if ActionResult in [1..3] then
@@ -3357,7 +3358,7 @@ begin
         and (Entry.Item <> nil)
         and (Entry.Kind in [phkEquipment, phkArtefact])
         and not LocalHuman.PlayerHoldShip.InHyperspace
-        and (QueuedArcadeBattles.Count <= 0) then
+        and (LocalScriptRequest(srqArcadeBattle) = nil) then
     begin
       ActionResult := UseHeldItemOn(hsHoldArtefact, Index, Ord(Expanded));
       if ActionResult in [1..3] then
@@ -3475,7 +3476,7 @@ var
 begin
   Result := False;
   if not LocalHuman.PlayerHoldShip.InHyperspace
-      and (QueuedArcadeBattles.Count <= 0)
+      and (LocalScriptRequest(srqArcadeBattle) = nil)
       and not LocalHuman.PlayerHoldShip.ScriptChameleon
       and (LocalHuman.PlayerHoldShip.HasPlayerChameleonCharges or LocalHuman.PlayerHoldShip.ChameleonActive) then
   begin
@@ -3620,7 +3621,7 @@ begin
       end;
     end
     else if not LocalPlayer.InHyperspace
-        and (QueuedArcadeBattles.Count <= 0)
+        and (LocalScriptRequest(srqArcadeBattle) = nil)
         and (LocalPlayer.SelectedEquipmentConfiguration <> Index) then
     begin
       aCalc.WaitForTurnCalculationUI;
@@ -3664,7 +3665,7 @@ begin
   end;
   if (LocalPlayer = LocalHuman.PlayerHoldShip)
       and not LocalPlayer.InHyperspace
-      and (QueuedArcadeBattles.Count <= 0)
+      and (LocalScriptRequest(srqArcadeBattle) = nil)
       and (Key >= Ord('1'))
       and (Key <= Ord('9')) then
   begin
@@ -3692,7 +3693,7 @@ begin
   else
   begin
     if not LocalHuman.PlayerHoldShip.InHyperspace
-        and (QueuedArcadeBattles.Count <= 0)
+        and (LocalScriptRequest(srqArcadeBattle) = nil)
         and IsVirtualKeyDown(VK_CONTROL) then
     begin
       if Key = Ord('I') then
@@ -4027,7 +4028,7 @@ var
     end;
   end;
 begin
-  if LocalHuman.PlayerHoldShip.InHyperspace or (QueuedArcadeBattles.Count > 0) then
+  if LocalHuman.PlayerHoldShip.InHyperspace or (LocalScriptRequest(srqArcadeBattle) <> nil) then
     Exit;
   aCalc.WaitForTurnCalculationUI;
   if SelectedHoldKind <> phkEmpty then
@@ -7974,7 +7975,7 @@ end;
 procedure TfShip2.StorageToShipClicked(Sender: TObjectGI);
 begin
   if not LocalHuman.PlayerHoldShip.InHyperspace
-      and (QueuedArcadeBattles.Count <= 0)
+      and (LocalScriptRequest(srqArcadeBattle) = nil)
       and ((LocalPlayer = LocalHuman.PlayerHoldShip) or (LocalHuman.PlayerHoldShip is TTranclucator))
       and (LocalPlayer.RuinsMode <= 0) then
   begin
@@ -8000,7 +8001,7 @@ var
 begin
   Text := LocalizedColorText('FormShip.SellAllFromStorage');
   Value := 0;
-  if QueuedArcadeBattles.Count <= 0 then
+  if LocalScriptRequest(srqArcadeBattle) = nil then
   begin
     if LocalPlayer.CurrentPlanet <> nil then
       Location := LocalPlayer.CurrentPlanet
@@ -8046,7 +8047,7 @@ begin
   if ((LocalPlayer = LocalHuman.PlayerHoldShip) or (LocalHuman.PlayerHoldShip is TTranclucator))
       and (LocalPlayer.RuinsMode <= 0)
       and not LocalPlayer.InHyperspace
-      and (QueuedArcadeBattles.Count <= 0) then
+      and (LocalScriptRequest(srqArcadeBattle) = nil) then
   begin
     aCalc.WaitForTurnCalculationUI;
     if PutAllIntoStorage then
@@ -8191,7 +8192,7 @@ begin
   if LocalPlayer.InNormalSpace
       or LocalPlayer.InHyperspace
       or (LocalPlayer.RuinsMode > 0)
-      or (QueuedArcadeBattles.Count > 0)
+      or (LocalScriptRequest(srqArcadeBattle) <> nil)
       or ((LocalPlayer.CurrentPlanet <> nil)
           and (LocalPlayer.CurrentPlanet.OwnerId = Byte(oiUninhabited))) then
     Exit;

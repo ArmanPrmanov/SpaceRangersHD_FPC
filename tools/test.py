@@ -207,6 +207,23 @@ def check_shared_shop(args, binary: Path, save: Path) -> tuple[bool, str]:
     return True, f"two humans share a shop's stock ({loaded})"
 
 
+def check_script_routing(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """Script builtins act for the script's human, on that human's machine (--sim-script-routing).
+
+    Of two joined humans one is made local. The other's script code shows no box, screen or
+    music and gets a declining player's answers; a command nested in its command is its own;
+    its takeoff and end-turn requests are its own, and its commands clear only its own; its
+    battles and videos are queued only in its own command, and only its own report finishes
+    them; the talk builtins read the talking human's talk; and its ruins mode opens no screen.
+    """
+    code, output = simulate(binary, args.game_dir, save, ["--sim-script-routing"])
+    lines = output.splitlines()
+    if code != 0 or "script routing ok" not in lines:
+        return False, "script routing failed:" + output_tail(output)
+    defaults = last_line(output, "script routing ui ")
+    return True, f"script builtins act for the script's human ({defaults})"
+
+
 def drop_end_turns(log: Path) -> None:
     """Removes the EndTurn commands from one human's log, so its human never ends a turn."""
     header, records = split_commands.read_records(log)
@@ -833,6 +850,10 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     passed_shop, note = check_shared_shop(args, binary, save)
     notes.append(note)
     passed = passed and passed_shop
+
+    passed_routing, note = check_script_routing(args, binary, save)
+    notes.append(note)
+    passed = passed and passed_routing
 
     for count in HUMAN_COUNTS:
         passed_humans, note = check_humans(args, binary, save, count)

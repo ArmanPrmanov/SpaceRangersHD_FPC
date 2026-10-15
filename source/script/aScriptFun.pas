@@ -659,6 +659,10 @@ procedure SF_ImportAll(av: array of TVarEC; code: TCodeEC);
 procedure SF_GalaxyPtr(av: array of TVarEC; code: TCodeEC);
 procedure InitializeScriptBuiltinsAndConstants(Scope: TVarArrayEC);
 procedure LinkRecoveredTypes;
+var
+  // CHANGE: BUGFIX - How often a script builtin did what a declining player does instead of
+  // showing its UI on this machine (ScriptUiAllowed); the headless checks read it.
+  ScriptUiDefaultCount: Integer = 0;
 implementation
 uses
   aSession,
@@ -745,13 +749,85 @@ uses
   fAbout,
   fPanelMain,
   fGalaxy2,
-  GI_GraphBuf;
+  GI_GraphBuf,
+  aHoldActions;
 
 // CHANGE: CLEANUP - The human whose message bubbles a script's messages go to: the script's
 // human, or the local human when no human is left, where the messages went before.
 function ScriptBubbles: THuman;
 begin
   Result := ScriptHuman;
+  if Result = nil then
+    Result := LocalHuman;
+end;
+
+// CHANGE: BUGFIX - The script's human, or the local human when there is none.
+function ScriptHumanOrLocal: THuman;
+begin
+  Result := ScriptHuman;
+  if Result = nil then
+    Result := LocalHuman;
+end;
+
+// CHANGE: BUGFIX - Whether the running script code is the local human's (no human counts as
+// local): only then does a builtin touch this machine's screens, boxes, video or music.
+function IsScriptUiLocal: Boolean;
+begin
+  Result := (ScriptHuman = nil) or (ScriptHuman = LocalHuman);
+end;
+
+procedure LogScriptUiDefault(const Builtin: AnsiString);
+var
+  Id: Integer;
+begin
+  InterlockedIncrement(ScriptUiDefaultCount);
+  if ScriptHuman <> nil then
+    Id := ScriptHuman.Id
+  else
+    Id := 0;
+  AppendLogLineThreadSafe(
+      AnsiString(
+          Format('Script %s for human %d: not shown on this machine, default answer', [Builtin, Id])
+      )
+  );
+end;
+
+// CHANGE: BUGFIX - Whether a script builtin may show its UI on this machine (docs/humans.md,
+// Scripts). Only the local human's script code may; a Modal builtin, which runs a message loop
+// until the player answers, never on the turn thread either. Otherwise the builtin gives the
+// answer a player who declines gives, and the log says so; the script's game effects still
+// happen for its human. On a host, a client's script code runs in that client's commands, and
+// the client shows the same UI on its own machine when it runs them.
+function ScriptUiAllowed(const Builtin: AnsiString; Modal: Boolean = False): Boolean;
+begin
+  Result :=
+      IsScriptUiLocal
+          and not (Modal
+              and (Session.TurnCalculationThread <> nil)
+              and Session.TurnCalculationThread.IsCurrentThread);
+  if not Result then
+    LogScriptUiDefault(Builtin);
+end;
+
+// CHANGE: BUGFIX - The ranger whose location picks the dialogue screen (DText, DAnswer,
+// InjectAnswer): the script's, else the local one. It was always the local one.
+function DialogPlayer: TPlayer;
+begin
+  Result := ScriptPlayer;
+  if Result = nil then
+    Result := LocalPlayer;
+end;
+
+// CHANGE: BUGFIX - The human whose talk the talk builtins read: the one whose command runs,
+// who is the one talking, else the script's human, else the local one. It was always the
+// local human, so on a host a client's talk read the host's (nil) talk fields. The script's
+// human comes second because a ship's script can belong to another human than the one who
+// talks to the ship.
+function TalkHuman: THuman;
+begin
+  Result := ActingHuman;
+  if Result = nil then
+    Result := ScriptHuman;
   if Result = nil then
     Result := LocalHuman;
 end;
@@ -3291,14 +3367,18 @@ procedure SF_DText(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script DText');
-  if LocalPlayer.IsDockedToShip then
+  // CHANGE: BUGFIX - Only the local human's dialogue screen is this machine's; a remote
+  // human's client writes the text into its own when it runs the same command.
+  if not IsScriptUiLocal then
+    Exit;
+  if DialogPlayer.IsDockedToShip then
     RuinsTalkScreen.DialogText :=
         ReplaceAllWideString(
             ReplaceAllWideString(av[1].GetString, '<clr>', '<color=255,240,100>'),
             '<clrEnd>',
             '</color>'
         )
-  else if not LocalPlayer.IsOnPlanet then
+  else if not DialogPlayer.IsOnPlanet then
     TalkScreen.DialogText :=
         ReplaceAllWideString(
             ReplaceAllWideString(av[1].GetString, '<clr>', '<color=255,240,100>'),
@@ -3317,14 +3397,17 @@ procedure SF_DAddText(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script DAddText');
-  if LocalPlayer.IsDockedToShip then
+  // CHANGE: BUGFIX - As DText.
+  if not IsScriptUiLocal then
+    Exit;
+  if DialogPlayer.IsDockedToShip then
     RuinsTalkScreen.DialogText :=
         RuinsTalkScreen.DialogText
             + ReplaceAllWideString(
                 ReplaceAllWideString(av[1].GetString, '<clr>', '<color=255,240,100>'),
                 '<clrEnd>',
                 '</color>')
-  else if not LocalPlayer.IsOnPlanet then
+  else if not DialogPlayer.IsOnPlanet then
     TalkScreen.DialogText :=
         TalkScreen.DialogText
             + ReplaceAllWideString(
@@ -3348,10 +3431,33 @@ end;
 procedure SF_DAnswer(av: array of TVarEC; code: TCodeEC);
 var
   Count: Integer;
+  P: TPlayer;
+  Mode: AnsiString;
 begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script DAnswer');
-  if LocalPlayer.IsDockedToShip then
+  // CHANGE: BUGFIX - The answers go into this machine's dialogue screen only for the local
+  // human's script; a remote human's client builds its own when it runs the same command.
+  // What an answer changes besides the screen still happens for the script's human: 'exit'
+  // ends its ruins mode, and 'main' leaves the script dialogue as before (Session's dialogue
+  // state is still one for all humans).
+  if not IsScriptUiLocal then
+  begin
+    P := ScriptPlayer;
+    if P = nil then
+      Exit;
+    Mode := ExtractDelimitedPartW(LowerCase(AnsiString(av[1].GetString)), 0, '~');
+    if P.IsDockedToShip then
+    begin
+      if ((Mode = 'exit') or (Mode = 'fastexit')) and (P.RuinsMode > 0) then
+        P.CloseRuinsMode;
+    end
+    else if not P.IsOnPlanet and (LowerCase(AnsiString(av[1].GetString)) = 'main') then
+      Session.ScriptDialogIndex := -1;
+    Exit;
+  end;
+  P := DialogPlayer;
+  if P.IsDockedToShip then
   begin
     if ExtractDelimitedPartW(LowerCase(AnsiString(av[1].GetString)), 0, '~') = 'takeoff' then
     begin
@@ -3365,8 +3471,8 @@ begin
     else if (ExtractDelimitedPartW(LowerCase(AnsiString(av[1].GetString)), 0, '~') = 'exit')
         or (ExtractDelimitedPartW(LowerCase(AnsiString(av[1].GetString)), 0, '~') = 'fastexit') then
     begin
-      if LocalPlayer.RuinsMode > 0 then
-        LocalPlayer.CloseRuinsModeScreen
+      if P.RuinsMode > 0 then
+        P.CloseRuinsModeScreen
       else
         RuinsTalkScreen.ContinueScriptDialog;
     end
@@ -3458,7 +3564,7 @@ begin
           RuinsTalkScreen.RunScriptAnswer
       );
   end
-  else if not LocalPlayer.IsOnPlanet then
+  else if not P.IsOnPlanet then
   begin
     if (ExtractDelimitedPartW(LowerCase(AnsiString(av[1].GetString)), 0, '~') = 'exit')
         or (ExtractDelimitedPartW(LowerCase(AnsiString(av[1].GetString)), 0, '~') = 'takeoff') then
@@ -7767,7 +7873,12 @@ begin
     Mode := ExtractDelimitedPartW(Text, 0, '~');
     Text := ExtractDelimitedRangeW(Text, 1, Count - 1, '~');
   end;
-  if LocalPlayer.IsDockedToShip then
+  // CHANGE: BUGFIX - The answer is injected for every human as before (Session's dialogue
+  // state is one for all), but goes into this machine's dialogue screen only for the local
+  // human's script.
+  if not IsScriptUiLocal then
+    Exit;
+  if DialogPlayer.IsDockedToShip then
   begin
     if Mode = 'block' then
       RuinsTalkScreen.AddChoice(Text, 0, ScriptDialogBlockCallback)
@@ -7776,7 +7887,7 @@ begin
     else
       RuinsTalkScreen.AddChoice(Entry.Answer, PtrInt(Entry), RuinsTalkScreen.RunInjectedDialog);
   end
-  else if LocalPlayer.IsOnPlanet then
+  else if DialogPlayer.IsOnPlanet then
   begin
     if Mode = 'block' then
       GovernmentScreen.AddChoice(Text, 0, ScriptDialogBlockCallback)
@@ -7868,18 +7979,18 @@ begin
 end;
 procedure SF_GetTalkShip(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetDword(PtrUInt(LocalHuman.TalkShip));
+  av[0].SetDword(PtrUInt(TalkHuman.TalkShip));
 end;
 procedure SF_TalkByAI(av: array of TVarEC; code: TCodeEC);
 begin
-  if LocalHuman.TalkScripted then
+  if TalkHuman.TalkScripted then
     av[0].SetInt(1)
   else
     av[0].SetInt(0);
 end;
 procedure SF_GetTalkType(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(LocalHuman.TalkType);
+  av[0].SetInt(TalkHuman.TalkType);
 end;
 procedure SF_ScriptRun(av: array of TVarEC; code: TCodeEC);
 var
@@ -8135,12 +8246,23 @@ var
 begin
   if High(av) = 0 then
   begin
-    av[0].SetInt(QueuedArcadeBattles.Count);
+    av[0].SetInt(ScriptRequestCount(srqArcadeBattle, ScriptRequestHumanId));
     Exit;
   end;
   if CurrentScript <> StagedArcadeShipScript then
     StagedArcadeShips.Clear;
   StagedArcadeShipScript := CurrentScript;
+  // CHANGE: BUGFIX - The battle is the script's human's, a solo instance on that human's own
+  // machine (ROADMAP.md, Phase 6). It is queued for that human where it can be shown and its
+  // outcome reported (aScript.MayQueueScriptRequest); otherwise it is not started, and the
+  // ships staged for it go.
+  if not MayQueueScriptRequest then
+  begin
+    StagedArcadeShips.Clear;
+    LogScriptUiDefault('StartAB');
+    av[0].SetInt(0);
+    Exit;
+  end;
   New(Request);
   Request.MapName := av[1].GetString;
   Request.BackgroundId := 0;
@@ -8159,9 +8281,7 @@ begin
     else if av[2].RealVType = vkString then
       Request.BackgroundMapName := av[2].GetString;
   end;
-  // CHANGE: ENHANCEMENT - The battle shows on this machine, whoever the script's human is: a
-  // queued battle is not a dialogue a client can answer, and arcade battles are not offered to a
-  // client (docs/network.md, Remote dialogue).
+  Request.HumanId := ScriptRequestHumanId;
   QueuedArcadeBattles.Add(Request);
   if CurrentScript <> nil then
     CurrentScript.InitCode.LocalVar.GetVar('GABStatus').SetInt(1);
@@ -8173,11 +8293,18 @@ var
 begin
   if High(av) = 0 then
   begin
-    av[0].SetInt(QueuedPlanetaryBattles.Count);
+    av[0].SetInt(ScriptRequestCount(srqPlanetaryBattle, ScriptRequestHumanId));
     Exit;
   end;
   if High(av) < 5 then
     raise Exception.Create('Error.Script StartRobots');
+  // CHANGE: BUGFIX - As StartAB: the battle is queued for the script's human where it can be
+  // run and reported, and is otherwise not started.
+  if not MayQueueScriptRequest then
+  begin
+    LogScriptUiDefault('StartRobots');
+    Exit;
+  end;
   New(Request);
   Request.MapName := av[1].GetString;
   Request.StartText := av[2].GetString;
@@ -8189,9 +8316,7 @@ begin
   else
     Request.StartText := '621' + Request.StartText;
   Request.Script := CurrentScript;
-  // CHANGE: ENHANCEMENT - The battle shows on this machine, whoever the script's human is: a
-  // queued battle is not a dialogue a client can answer, and planet battles are not offered to
-  // a client (docs/network.md, Remote dialogue).
+  Request.HumanId := ScriptRequestHumanId;
   QueuedPlanetaryBattles.Add(Request);
   if CurrentScript <> nil then
     CurrentScript.InitCode.LocalVar.GetVar('GRobotStatus').SetInt(1);
@@ -11709,7 +11834,11 @@ begin
     ReleaseSpaceObject(Ship.Graphic);
     Ship.RefreshGraphic;
   end;
-  if (High(av) > 2) and (av[3].GetInt <> 0) and (CurrentScreenId = screenStarMap) then
+  // CHANGE: BUGFIX - Only the local human's star map is reopened.
+  if (High(av) > 2)
+      and (av[3].GetInt <> 0)
+      and (CurrentScreenId = screenStarMap)
+      and ScriptUiAllowed('Chameleon') then
   begin
     RequestedScreenId := screenStarMap;
     TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
@@ -11880,16 +12009,21 @@ begin
   if High(av) > 1 then
     Star.BackgroundImage := av[2].GetInt;
 end;
+// CHANGE: BUGFIX - The request is the script's human's (THuman.ScriptTakeoffRequested); the
+// screens of the machine that human plays on act on it.
 procedure SF_ExtremalTakeOff(av: array of TVarEC; code: TCodeEC);
 begin
-  ScriptTakeoffRequested := True;
+  ScriptHumanOrLocal.ScriptTakeoffRequested := True;
 end;
 procedure SF_ForceNextDay(av: array of TVarEC; code: TCodeEC);
 begin
-  ScriptEndTurnRequested := True;
+  ScriptHumanOrLocal.ScriptEndTurnRequested := True;
 end;
 procedure SF_ScriptActionsRun(av: array of TVarEC; code: TCodeEC);
 begin
+  // CHANGE: BUGFIX - It closes this machine's screen for the local human's requests.
+  if not ScriptUiAllowed('ScriptActionsRun') then
+    Exit;
   ScriptRequestThread.Execute;
 end;
 procedure SF_StarListToPlanetList(av: array of TVarEC; code: TCodeEC);
@@ -12021,6 +12155,23 @@ begin
     TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
   end;
 end;
+// CHANGE: BUGFIX - A custom ending ends the game for the script's human only in multiplayer,
+// as EndGame does (ROADMAP.md, Phase 6), and shows only when that human is the local one.
+// Returns whether it shows on this machine; with one human it always does, as native.
+function ShowsCustomEnding: Boolean;
+var
+  Human: THuman;
+begin
+  Result := True;
+  if IsMultiplayer then
+  begin
+    Human := ScriptHuman;
+    if Human = nil then
+      Human := DefaultScriptHuman;
+    FinishHuman(Human, 0);
+    Result := Human = LocalHuman;
+  end;
+end;
 procedure SF_CustomWin(av: array of TVarEC; code: TCodeEC);
 var
   Event: TGalaxyEvent;
@@ -12033,6 +12184,8 @@ begin
     Event.AddTextData(av[2].GetString)
   else
     Event.AddTextData('');
+  if not ShowsCustomEnding then
+    Exit;
   Session.GameEndReason := 0;
   RequestedScreenId := screenGameEnd;
   TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
@@ -12049,6 +12202,8 @@ begin
     Event.AddTextData(av[2].GetString)
   else
     Event.AddTextData('');
+  if not ShowsCustomEnding then
+    Exit;
   Session.GameEndReason := 0;
   RequestedScreenId := screenGameEnd;
   TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
@@ -12067,15 +12222,26 @@ var
   Request: PScriptVDRequest;
   SavedCategory: WideString;
   Video: TxvidGI;
+  Local: Boolean;
 begin
   if High(av) = 0 then
   begin
-    av[0].SetInt(QueuedVideos.Count);
+    av[0].SetInt(ScriptRequestCount(srqVideo, ScriptRequestHumanId));
     Exit;
   end;
   if High(av) < 2 then
     raise Exception.Create('Error.Script StartVideo');
-  if GetInnermostScreenLoop = ShipScreen then
+  // CHANGE: BUGFIX - The video plays on the script's human's machine: at once on the local
+  // human's ship screen, else queued for that human where it can be shown and reported, as
+  // the battles (StartAB). Only the local human's queued video closes this machine's screen.
+  // Otherwise it is not shown.
+  Local := IsScriptUiLocal;
+  if not Local and not MayQueueScriptRequest then
+  begin
+    LogScriptUiDefault('StartVideo');
+    Exit;
+  end;
+  if Local and (GetInnermostScreenLoop = ShipScreen) then
   begin
     ShipScreen.ShipLoopSound.SetVolume(0);
     Video := ShipScreen.GetByName('Film') as TxvidGI;
@@ -12115,11 +12281,15 @@ begin
     Request.Video := av[1].GetString;
     Request.Soundtrack := av[2].GetString;
     Request.Script := CurrentScript;
+    Request.HumanId := ScriptRequestHumanId;
     QueuedVideos.Add(Request);
     if CurrentScript <> nil then
       CurrentScript.InitCode.LocalVar.GetVar('GVideoStatus').SetInt(1);
-    RequestedScreenId := CurrentScreenId;
-    TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
+    if Local then
+    begin
+      RequestedScreenId := CurrentScreenId;
+      TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
+    end;
   end;
 end;
 procedure SF_StartMusic(av: array of TVarEC; code: TCodeEC);
@@ -12128,6 +12298,9 @@ var
 begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script StartMusic');
+  // CHANGE: BUGFIX - This machine's music, for the local human's scripts only.
+  if not ScriptUiAllowed('StartMusic') then
+    Exit;
   if MusicEnabled then
   begin
     if GetInnermostScreenLoop = StarMapScreen then
@@ -12152,6 +12325,12 @@ var
 begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script MusicControls');
+  // CHANGE: BUGFIX - As StartMusic; a query answers ''.
+  if not ScriptUiAllowed('MusicControls') then
+  begin
+    av[0].SetString('');
+    Exit;
+  end;
   Command := av[1].GetString;
   if Command = 'SetPlayListOverride' then
   begin
@@ -14125,9 +14304,8 @@ begin
       ScriptPlayer.RuinsStatusText := av[2].GetString
     else
       ScriptPlayer.RuinsStatusText := '';
-    // CHANGE: ENHANCEMENT - EnterRuinsMode and CloseRuinsModeScreen request the ruins screens
-    // on this machine, whoever the script's human is; they open screens, not a dialogue a
-    // client could answer mid-day (docs/network.md, Remote dialogue).
+    // CHANGE: BUGFIX - EnterRuinsMode and CloseRuinsModeScreen change the script's human's
+    // state and open the screen only when that human is the local one.
     if Mode > 0 then
       ScriptPlayer.EnterRuinsMode(Mode)
     else
@@ -15770,6 +15948,10 @@ var
 begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script MessageBox');
+  // CHANGE: BUGFIX - Shown only for the local human's script code, and never on the turn
+  // thread (ScriptUiAllowed); otherwise nobody sees it.
+  if not ScriptUiAllowed('MessageBox', True) then
+    Exit;
   if High(av) < 2 then
     Options := mbgCancel or mbgUnused04
   else
@@ -15804,6 +15986,9 @@ begin
   else
     OffsetY := av[4].GetInt;
   av[0].SetInt(0);
+  // CHANGE: BUGFIX - Otherwise the answer is no (ScriptUiAllowed).
+  if not ScriptUiAllowed('MessageBoxYesNo', True) then
+    Exit;
   if ShowMessageBoxGI(GetInnermostScreenLoop, av[1].GetString, Options, 0, OffsetX, OffsetY)
       = mbgResultOK then
     av[0].SetInt(1);
@@ -15816,6 +16001,12 @@ var
 begin
   if High(av) < 4 then
     raise Exception.Create('Error.Script CountBox');
+  // CHANGE: BUGFIX - Otherwise the answer is a cancel (ScriptUiAllowed).
+  if not ScriptUiAllowed('CountBox', True) then
+  begin
+    av[0].SetString('Cancel');
+    Exit;
+  end;
   // The native routine reads these strings here, then reads them again for the dialog call.
   Caption := av[1].GetString;
   Description := av[2].GetString;
@@ -15867,6 +16058,12 @@ var
 begin
   if High(av) < 4 then
     raise Exception.Create('Error.Script NumberBox');
+  // CHANGE: BUGFIX - Otherwise the answer is a cancel (ScriptUiAllowed).
+  if not ScriptUiAllowed('NumberBox', True) then
+  begin
+    av[0].SetString('Cancel');
+    Exit;
+  end;
   Caption := 'GI,' + av[1].GetString;
   Description := av[2].GetString;
   Minimum := av[3].GetInt;
@@ -15950,6 +16147,10 @@ begin
   else
     OffsetY := av[5].GetInt;
   av[0].SetString(Value);
+  // CHANGE: BUGFIX - Otherwise the answer is the default text, as for a cancel
+  // (ScriptUiAllowed).
+  if not ScriptUiAllowed('TextBox', True) then
+    Exit;
   if ShowTextInputDialog(GetInnermostScreenLoop, Caption, Value, MaximumLength, OffsetX, OffsetY)
       = 1 then
     av[0].SetString(Value);
@@ -15963,6 +16164,12 @@ var
 begin
   if High(av) < 2 then
     raise Exception.Create('Error.Script ListBox');
+  // CHANGE: BUGFIX - Otherwise the answer is a cancel, -1 (ScriptUiAllowed).
+  if not ScriptUiAllowed('ListBox', True) then
+  begin
+    av[0].SetInt(-1);
+    Exit;
+  end;
   Caption := av[1].GetString;
   Choices := TList.Create;
   Index := -1;
@@ -16003,7 +16210,10 @@ begin
 end;
 procedure SF_FormCurShip(av: array of TVarEC; code: TCodeEC);
 begin
-  if GetInnermostScreenLoop = HangarScreen then
+  // CHANGE: BUGFIX - This machine's screen is the local human's; otherwise no ship.
+  if not ScriptUiAllowed('FormCurShip') then
+    av[0].SetDword(0)
+  else if GetInnermostScreenLoop = HangarScreen then
     av[0].SetDword(PtrUInt(HangarScreen.SelectedShip))
   else if GetInnermostScreenLoop = ScannerScreen then
     av[0].SetDword(PtrUInt(ScannerScreen.ShipToInspect))
@@ -16093,6 +16303,17 @@ var
 begin
   if High(av) < 3 then
     raise Exception.Create('Error.Script UICheckElement');
+  // CHANGE: BUGFIX - This machine's controls are the local human's; otherwise the answer is
+  // empty.
+  if not ScriptUiAllowed('UICheckElement') then
+  begin
+    Query := av[3].GetString;
+    if (Query = 'Text') or (Query = 'Help') or (Query = 'Image') then
+      av[0].SetString('')
+    else
+      av[0].SetInt(0);
+    Exit;
+  end;
   FormName := av[1].GetString;
   Path := av[2].GetString;
   Control := nil;
@@ -16534,6 +16755,9 @@ var
 begin
   if High(av) < 2 then
     raise Exception.Create('Error.Script ButtonClick');
+  // CHANGE: BUGFIX - Only the local human's script code presses this machine's buttons.
+  if not ScriptUiAllowed('ButtonClick') then
+    Exit;
   FormName := av[1].GetString;
   Path := av[2].GetString;
   if FormName = '' then
@@ -16570,6 +16794,9 @@ var
 begin
   if High(av) < 2 then
     raise Exception.Create('Error.Script SetFocus');
+  // CHANGE: BUGFIX - As ButtonClick.
+  if not ScriptUiAllowed('SetFocus') then
+    Exit;
   FormName := av[1].GetString;
   Path := av[2].GetString;
   if FormName = '' then
@@ -16583,19 +16810,29 @@ begin
     raise Exception.Create('Error.Script SetFocus - Object not found');
   Form.SetFocusedControl(Control);
 end;
+// CHANGE: BUGFIX - What the ship screen's cursor holds is the script's human's
+// (THuman.SelectedHoldItem): the queries and changes are that human's, and only the local
+// human's ship screen, which must be open, is redrawn. It was always the local human's, so
+// a client's item code freed or replaced what the host's human held.
 procedure SF_FormShipCurItem(av: array of TVarEC; code: TCodeEC);
 var
   Query: Integer;
   Item: TObject;
+  H: THuman;
+  Local: Boolean;
 begin
-  if GetInnermostScreenLoop <> ShipScreen then
+  Local := IsScriptUiLocal;
+  H := ScriptHumanOrLocal;
+  if Local and (GetInnermostScreenLoop <> ShipScreen) then
+    raise Exception.Create('Error.Script FormShipCurItem');
+  if not Local and (H.PlayerHoldShip = nil) then
     raise Exception.Create('Error.Script FormShipCurItem');
   if High(av) < 1 then
   begin
-    if not (ShipScreen.SelectedHoldKind in [phkEquipment, phkArtefact]) then
+    if not (H.SelectedHoldKind in [phkEquipment, phkArtefact]) then
       av[0].SetDword(0)
     else
-      av[0].SetDword(PtrUInt(ShipScreen.SelectedHoldItem));
+      av[0].SetDword(PtrUInt(H.SelectedHoldItem));
     Exit;
   end;
   if av[1].RealVType = vkString then
@@ -16624,50 +16861,63 @@ begin
   else
     Query := av[3].GetInt;
   case Query of
-    0: av[0].SetInt(Integer(ShipScreen.SelectedHoldKind));
-    1: av[0].SetInt(ShipScreen.SelectedGoodsIndex);
-    2: av[0].SetInt(ShipScreen.SelectedGoodsQuantity);
-    3: av[0].SetInt(ShipScreen.SelectedGoodsCost);
-    4: ShipScreen.ReturnSelectedHoldEntry;
+    0: av[0].SetInt(Integer(H.SelectedHoldKind));
+    1: av[0].SetInt(H.SelectedGoodsIndex);
+    2: av[0].SetInt(H.SelectedGoodsQuantity);
+    3: av[0].SetInt(H.SelectedGoodsCost);
+    4:
+      if Local then
+        ShipScreen.ReturnSelectedHoldEntry
+      else if H.SelectedHoldKind <> phkEmpty then
+        ReturnHeldEntry;
     5:
     begin
-      if ShipScreen.SelectedHoldItem <> nil then
-        ShipScreen.SelectedHoldItem.Free;
-      ShipScreen.SelectedHoldItem := nil;
-      ShipScreen.SelectedHoldKind := phkEmpty;
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
-      if not ShipScreen.IsCursorImageSelected('Main') then
-        ShipScreen.SetCursorByName('Main');
-      ShipScreen.RefreshShipView;
+      if H.SelectedHoldItem <> nil then
+        H.SelectedHoldItem.Free;
+      H.SelectedHoldItem := nil;
+      H.SelectedHoldKind := phkEmpty;
+      H.PlayerHoldShip.RefreshDerivedStats(True);
+      if Local then
+      begin
+        if not ShipScreen.IsCursorImageSelected('Main') then
+          ShipScreen.SetCursorByName('Main');
+        ShipScreen.RefreshShipView;
+      end;
     end;
     6:
     begin
       // Detach and Replace return the old item, just like the no-argument query.
-      av[0].SetDword(PtrUInt(ShipScreen.SelectedHoldItem));
-      ShipScreen.SelectedHoldItem := nil;
-      ShipScreen.SelectedHoldKind := phkEmpty;
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
-      if not ShipScreen.IsCursorImageSelected('Main') then
-        ShipScreen.SetCursorByName('Main');
-      ShipScreen.RefreshShipView;
+      av[0].SetDword(PtrUInt(H.SelectedHoldItem));
+      H.SelectedHoldItem := nil;
+      H.SelectedHoldKind := phkEmpty;
+      H.PlayerHoldShip.RefreshDerivedStats(True);
+      if Local then
+      begin
+        if not ShipScreen.IsCursorImageSelected('Main') then
+          ShipScreen.SetCursorByName('Main');
+        ShipScreen.RefreshShipView;
+      end;
     end;
     7:
     begin
       if (High(av) < 2) or (av[2].GetDword = 0) then
         raise Exception.Create('Error.Script FormShipCurItem no replacing item');
-      if (ShipScreen.SelectedHoldItem = nil)
-          or not (ShipScreen.SelectedHoldKind in [phkEquipment, phkArtefact]) then
+      if (H.SelectedHoldItem = nil)
+          or not (H.SelectedHoldKind in [phkEquipment, phkArtefact]) then
         raise Exception.Create('Error.Script FormShipCurItem no item to replace');
       Item := TObject(av[2].GetDword);
-      av[0].SetDword(PtrUInt(ShipScreen.SelectedHoldItem));
-      ShipScreen.SelectedHoldItem := TItem(Item);
+      av[0].SetDword(PtrUInt(H.SelectedHoldItem));
+      H.SelectedHoldItem := TItem(Item);
       if Item is TArtefact then
-        ShipScreen.SelectedHoldKind := phkArtefact
+        H.SelectedHoldKind := phkArtefact
       else
-        ShipScreen.SelectedHoldKind := phkEquipment;
-      LocalHuman.PlayerHoldShip.RefreshDerivedStats(True);
-      ShipScreen.UpdateActionCursor(True);
-      ShipScreen.RefreshShipView;
+        H.SelectedHoldKind := phkEquipment;
+      H.PlayerHoldShip.RefreshDerivedStats(True);
+      if Local then
+      begin
+        ShipScreen.UpdateActionCursor(True);
+        ShipScreen.RefreshShipView;
+      end;
     end;
   else
     // Native creates this exception without raising or freeing it.
@@ -16677,6 +16927,9 @@ begin
 end;
 procedure SF_UpdateFormShip(av: array of TVarEC; code: TCodeEC);
 begin
+  // CHANGE: BUGFIX - Only the local human's ship screen is this machine's.
+  if not ScriptUiAllowed('UpdateFormShip') then
+    Exit;
   if GetInnermostScreenLoop = ShipScreen then
   begin
     ShipScreen.Flag3BC := True;
@@ -16687,13 +16940,25 @@ begin
 end;
 procedure SF_CurrentForm(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetString(GetInnermostScreenLoop.RegisteredLoopName);
+  // CHANGE: BUGFIX - This machine's screen is the local human's; otherwise none.
+  if not ScriptUiAllowed('CurrentForm') then
+    av[0].SetString('')
+  else
+    av[0].SetString(GetInnermostScreenLoop.RegisteredLoopName);
 end;
 procedure SF_FormChange(av: array of TVarEC; code: TCodeEC);
 var
   Id: TGameScreenId;
   Name: WideString;
 begin
+  // CHANGE: BUGFIX - Only the local human's script code changes this machine's screen; for
+  // another human the query answers no screen.
+  if not ScriptUiAllowed('FormChange') then
+  begin
+    if High(av) < 1 then
+      av[0].SetString('');
+    Exit;
+  end;
   if High(av) < 1 then
   begin
     if TMessageLoopGI(RegisteredScreens[Ord(RequestedScreenId)]) = nil then
@@ -16756,6 +17021,12 @@ var
 begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script RunChildForm');
+  // CHANGE: BUGFIX - Otherwise the form is closed at once, 0 (ScriptUiAllowed).
+  if not ScriptUiAllowed('RunChildForm', True) then
+  begin
+    av[0].SetInt(0);
+    Exit;
+  end;
   Name := av[1].GetString;
   for Id := screenNone to screenAchievements do
     if (TMessageLoopGI(RegisteredScreens[Ord(Id)]) <> nil)
@@ -16821,12 +17092,21 @@ procedure SF_OpenCustomForm(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script OpenCustomForm');
+  // CHANGE: BUGFIX - Otherwise the form is closed at once, 0 (ScriptUiAllowed).
+  if not ScriptUiAllowed('OpenCustomForm', True) then
+  begin
+    av[0].SetInt(0);
+    Exit;
+  end;
   av[0].SetInt(ShowCustomDialog(GetInnermostScreenLoop, av[1].GetString));
 end;
 procedure SF_CloseCustomForm(av: array of TVarEC; code: TCodeEC);
 var
   ResultCode: Integer;
 begin
+  // CHANGE: BUGFIX - The custom form is the local human's (OpenCustomForm).
+  if not ScriptUiAllowed('CloseCustomForm') then
+    Exit;
   if CurrentCustomDialog = nil then
     raise Exception.Create('Error.Script CloseCustomForm - no custom form');
   if High(av) > 0 then
@@ -16842,6 +17122,12 @@ var
 begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script CustomInterfaceState');
+  // CHANGE: BUGFIX - The custom form is the local human's (OpenCustomForm).
+  if not ScriptUiAllowed('CustomInterfaceState') then
+  begin
+    av[0].SetInt(0);
+    Exit;
+  end;
   Form := CurrentCustomDialog;
   if Form = nil then
     raise Exception.Create('Error.Script CustomInterfaceState - no custom form');
@@ -16866,6 +17152,12 @@ var
 begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script CustomInterfaceText');
+  // CHANGE: BUGFIX - As CustomInterfaceState.
+  if not ScriptUiAllowed('CustomInterfaceText') then
+  begin
+    av[0].SetString('');
+    Exit;
+  end;
   Form := CurrentCustomDialog;
   if Form = nil then
     raise Exception.Create('Error.Script CustomInterfaceText - no custom form');
@@ -16895,6 +17187,12 @@ var
 begin
   if High(av) < 1 then
     raise Exception.Create('Error.Script CustomInterfaceImage');
+  // CHANGE: BUGFIX - As CustomInterfaceState.
+  if not ScriptUiAllowed('CustomInterfaceImage') then
+  begin
+    av[0].SetString('');
+    Exit;
+  end;
   Form := CurrentCustomDialog;
   if Form = nil then
     raise Exception.Create('Error.Script CustomInterfaceImage - no custom form');
@@ -16949,6 +17247,9 @@ var
 begin
   if High(av) < 3 then
     raise Exception.Create('Error.Script CustomInterfacePos');
+  // CHANGE: BUGFIX - As CustomInterfaceState.
+  if not ScriptUiAllowed('CustomInterfacePos') then
+    Exit;
   Form := CurrentCustomDialog;
   if Form = nil then
     raise Exception.Create('Error.Script CustomInterfacePos - no custom form');
@@ -16964,6 +17265,9 @@ var
 begin
   if High(av) < 2 then
     raise Exception.Create('Error.Script CustomInterfacePosZ');
+  // CHANGE: BUGFIX - As CustomInterfaceState.
+  if not ScriptUiAllowed('CustomInterfacePosZ') then
+    Exit;
   Form := CurrentCustomDialog;
   if Form = nil then
     raise Exception.Create('Error.Script CustomInterfacePosZ - no custom form');
@@ -16979,6 +17283,9 @@ var
 begin
   if High(av) < 3 then
     raise Exception.Create('Error.Script CustomInterfacePos');
+  // CHANGE: BUGFIX - As CustomInterfaceState.
+  if not ScriptUiAllowed('CustomInterfaceSize') then
+    Exit;
   Form := CurrentCustomDialog;
   if Form = nil then
     raise Exception.Create('Error.Script CustomInterfacePos - no custom form');
@@ -16994,6 +17301,9 @@ var
 begin
   if High(av) < 2 then
     raise Exception.Create('Error.Script StarMapCenterView');
+  // CHANGE: BUGFIX - This machine's star map is the local human's.
+  if not ScriptUiAllowed('StarMapCenterView') then
+    Exit;
   Position.X := av[1].GetInt;
   Position.Y := av[2].GetInt;
   StarMapScreen.SetMapCenterManually(TruncatePointF(Position));
@@ -17006,18 +17316,28 @@ begin
       StarMapScreen.AddMapAnimation(Position, 'Bm.SI.' + GiResourceSuffix + 'Ring', 200 * Index);
   end;
 end;
+// CHANGE: BUGFIX - This machine's star map is the local human's; otherwise 0.
 procedure SF_StarMapCurPosX(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(StarMapScreen.GetMapCenter.X);
+  if ScriptUiAllowed('StarMapCurPosX') then
+    av[0].SetInt(StarMapScreen.GetMapCenter.X)
+  else
+    av[0].SetInt(0);
 end;
 procedure SF_StarMapCurPosY(av: array of TVarEC; code: TCodeEC);
 begin
-  av[0].SetInt(StarMapScreen.GetMapCenter.Y);
+  if ScriptUiAllowed('StarMapCurPosY') then
+    av[0].SetInt(StarMapScreen.GetMapCenter.Y)
+  else
+    av[0].SetInt(0);
 end;
 procedure SF_StarMapCustomSelectionMode(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) < 10 then
     raise Exception.Create('Error.Script StarMapCustomSelectionMode');
+  // CHANGE: BUGFIX - As StarMapCenterView.
+  if not ScriptUiAllowed('StarMapCustomSelectionMode') then
+    Exit;
   if GetInnermostScreenLoop = StarMapScreen then
   begin
     if av[1].RealVType = vkString then
@@ -17045,6 +17365,9 @@ procedure SF_StarMapBlinkingMessage(av: array of TVarEC; code: TCodeEC);
 begin
   if High(av) <> 1 then
     raise Exception.Create('Error.Script StarMapBlinkingMessage');
+  // CHANGE: BUGFIX - As StarMapCenterView.
+  if not ScriptUiAllowed('StarMapBlinkingMessage') then
+    Exit;
   StarMapScreen.ShowLargeHelp(av[1].GetString);
 end;
 procedure SF_BlinkingWarning(av: array of TVarEC; code: TCodeEC);

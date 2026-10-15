@@ -148,7 +148,7 @@ begin
       Event.AddData(IntArg(Command, 3 + I * 2));
       Event.AddData(IntArg(Command, 4 + I * 2));
     end;
-    CompleteQueuedArcadeBattle(2);
+    CompleteQueuedArcadeBattle(2, Integer(Command.Actor));
   end;
   ArcadeKellerDefeats := 0;
   if ArcadeKellerReward <> nil then

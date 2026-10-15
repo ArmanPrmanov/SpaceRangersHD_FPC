@@ -1635,7 +1635,7 @@ begin
   Film.ImageClose;
   Film.SetActive(False);
   InvalidateViewport;
-  if Result and (QueuedVideos.Count > 0) then
+  if Result and (LocalScriptRequest(srqVideo) <> nil) then
     FinishQueuedVideo(2);
 end;
 

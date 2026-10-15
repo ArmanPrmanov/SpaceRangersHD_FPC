@@ -18,7 +18,8 @@ uses
   aRanger,
   aRuins,
   aShip,
-  aGalaxyStruct;
+  aGalaxyStruct,
+  GlobalsV;
 type
   TJournalRecord = class;
   TPlayer = class;
@@ -230,6 +231,11 @@ type
     procedure RefreshNewsAtLocation;
     procedure CreateRuinsProxy;
     procedure EnterRuinsMode(Mode: Integer);
+    // CHANGE: BUGFIX - Leaving ruins mode is the state change for Self's human
+    // (CloseRuinsMode, which returns the screen that human goes back to) and, when Self is the
+    // local human's ranger, that screen (CloseRuinsModeScreen). It closed the screen of
+    // whichever machine ran it, so a client's command closed the host's.
+    function CloseRuinsMode: TGameScreenId;
     procedure CloseRuinsModeScreen;
     procedure ExitRuinsMode;
     function CanSelectShipTarget(Ship: TShip): Boolean;
@@ -279,7 +285,6 @@ uses
   aKling,
   aConst,
   aShopStock,
-  GlobalsV,
   aTranclucator;
 
 constructor TJournalRecord.Create;
@@ -4451,16 +4456,18 @@ begin
     BuildTemporaryShopSlotGrid(HumanOf(Self));
   end;
   RuinsMode := SelectedMode;
-  RequestScreen(screenRuinsTalk);
+  // CHANGE: BUGFIX - The screen opens only for the local human (CloseRuinsMode).
+  if HumanOf(Self) = LocalHuman then
+    RequestScreen(screenRuinsTalk);
 end;
 
 // CHANGE: CLEANUP - The open shop is Self's human's, not the local human's.
-procedure TPlayer.CloseRuinsModeScreen;
+function TPlayer.CloseRuinsMode: TGameScreenId;
 begin
   RuinsStatusText := '';
   if (RuinsSavedPlanet = nil) and (RuinsSavedDockedTo = nil) then
   begin
-    RequestedScreenId := screenStarMap;
+    Result := screenStarMap;
     if HumanOf(Self).TemporaryShopSlots <> nil then
     begin
       aCalc.WaitForTurnCalculationUI;
@@ -4473,15 +4480,23 @@ begin
   else
   begin
     if RuinsSavedDockedTo <> nil then
-      RequestedScreenId := screenRuinsTalk
+      Result := screenRuinsTalk
     else if RuinsSavedPlanet.OwnerId <> Byte(oiUninhabited) then
-      RequestedScreenId := screenPlanet
+      Result := screenPlanet
     else
-      RequestedScreenId := screenPlanetNO;
+      Result := screenPlanetNO;
     ExitRuinsMode;
   end;
-  // CHANGE: CLEANUP - The screen is chosen above, before the waits for the turn job.
-  RequestScreen(RequestedScreenId);
+end;
+
+procedure TPlayer.CloseRuinsModeScreen;
+var
+  Screen: TGameScreenId;
+begin
+  // The screen is chosen before the waits for the turn job in CloseRuinsMode.
+  Screen := CloseRuinsMode;
+  if HumanOf(Self) = LocalHuman then
+    RequestScreen(Screen);
 end;
 
 // CHANGE: CLEANUP - The open shop is Self's human's, not the local human's.
