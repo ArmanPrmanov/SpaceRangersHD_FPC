@@ -770,10 +770,13 @@ begin
 end;
 
 // CHANGE: BUGFIX - Whether the running script code is the local human's (no human counts as
-// local): only then does a builtin touch this machine's screens, boxes, video or music.
+// local): only then does a builtin touch this machine's screens, boxes, video or music. Not
+// while another human's command runs with that human's dialogue state (ForeignDialogHuman):
+// the local human's script code it runs (another script's auxiliary code, say) does not
+// touch the screens either, as on that human's own machine, where the code is not local.
 function IsScriptUiLocal: Boolean;
 begin
-  Result := (ScriptHuman = nil) or (ScriptHuman = LocalHuman);
+  Result := ((ScriptHuman = nil) or (ScriptHuman = LocalHuman)) and (ForeignDialogHuman = nil);
 end;
 
 procedure LogScriptUiDefault(const Builtin: AnsiString);
@@ -3268,8 +3271,9 @@ begin
   // CHANGE: ENHANCEMENT - A script dialogue stays with the local human (docs/network.md,
   // Remote dialogue): its text and answers are written into this machine's talk screen while
   // the day runs (DText, DAnswer), and its answers run the script's answer code, so a client
-  // could not show it from its own state. A remote human's script opens none.
-  if (ScriptHuman <> LocalHuman) or (LocalPlayer = nil) then
+  // could not show it from its own state. A remote human's script opens none, nor does any
+  // script code in a remote human's command.
+  if (ScriptHuman <> LocalHuman) or (LocalPlayer = nil) or (ForeignDialogHuman <> nil) then
     Exit;
   if (High(av) = 1) and (av[1].GetDword = 0) then
     Exit;
@@ -3439,8 +3443,8 @@ begin
   // CHANGE: BUGFIX - The answers go into this machine's dialogue screen only for the local
   // human's script; a remote human's client builds its own when it runs the same command.
   // What an answer changes besides the screen still happens for the script's human: 'exit'
-  // ends its ruins mode, and 'main' leaves the script dialogue as before (Session's dialogue
-  // state is still one for all humans).
+  // ends its ruins mode, and 'main' leaves the script dialogue as before (the dialogue state
+  // in the globals is the one of the human whose command runs, aScript.TScriptDialogState).
   if not IsScriptUiLocal then
   begin
     P := ScriptPlayer;
@@ -7873,9 +7877,9 @@ begin
     Mode := ExtractDelimitedPartW(Text, 0, '~');
     Text := ExtractDelimitedRangeW(Text, 1, Count - 1, '~');
   end;
-  // CHANGE: BUGFIX - The answer is injected for every human as before (Session's dialogue
-  // state is one for all), but goes into this machine's dialogue screen only for the local
-  // human's script.
+  // CHANGE: BUGFIX - The answer is injected into the dialogue state in the globals as before
+  // (the one of the human whose command runs, aScript.TScriptDialogState), but goes into this
+  // machine's dialogue screen only for the local human's script.
   if not IsScriptUiLocal then
     Exit;
   if DialogPlayer.IsDockedToShip then

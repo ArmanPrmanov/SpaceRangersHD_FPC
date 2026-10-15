@@ -182,6 +182,7 @@ uses
   GR_Main,
   Globals,
   aConst,
+  aDialogActions,
   aGalaxyEvent,
   aGalaxyStruct,
   aHuman,
@@ -193,14 +194,6 @@ uses
   aPlayer,
   aSession,
   aTranclucator;
-
-procedure AddScript(var Command: TPlayerCommand; Script: TScript);
-begin
-  if Script = nil then
-    AddInt(Command, -1)
-  else
-    AddInt(Command, Galaxy.Scripts.IndexOf(Script));
-end;
 
 procedure SubmitSimple(Kind: TCommandKind);
 begin
@@ -437,23 +430,14 @@ procedure ExecuteGovernmentDialogOverride(const Command: TPlayerCommand);
 var
   Script: TScript;
   Text: WideString;
-  I, Selected, Priority: Integer;
+  Entry: PScriptDialogOverride;
 begin
-  Selected := 0;
-  Priority := PScriptDialogOverride(ScriptDialogOverrides[0]).Priority;
-  for I := 0 to ScriptDialogOverrides.Count - 1 do
-    if PScriptDialogOverride(ScriptDialogOverrides[I]).Priority > Priority then
-    begin
-      Selected := I;
-      Priority := PScriptDialogOverride(ScriptDialogOverrides[I]).Priority;
-    end;
-  Script := PScriptDialogOverride(ScriptDialogOverrides[Selected]).Script;
-  Script
-      .InitCode
-      .LocalVar
-      .GetVar('GAnswerData')
-      .SetDword(PScriptDialogOverride(ScriptDialogOverrides[Selected]).AnswerData);
-  Text := PScriptDialogOverride(ScriptDialogOverrides[Selected]).DialogName;
+  // CHANGE: BUGFIX - The override the sender's screen selected, by its key; a log from before
+  // selects the one with the highest priority here. None (an empty list) is refused.
+  Entry := OverrideArgument(Command, 0);
+  Script := Entry.Script;
+  Script.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Entry.AnswerData);
+  Text := Entry.DialogName;
   if Text <> '' then
   begin
     Script.CallDialogByVariable(Text);
@@ -471,21 +455,27 @@ begin
 end;
 
 function ApplyGovernmentDialogOverride: TScript;
+var
+  Command: TPlayerCommand;
 begin
-  SubmitSimple(ckGovernmentDialogOverride);
+  Command := NewCommand(ckGovernmentDialogOverride);
+  AddOverrideKey(Command, SelectedDialogOverride);
+  SubmitCommand(Command);
   Result := GovernmentScript;
 end;
 
 // Moved from TfGov.RunInjectedAnswer: the dialog the answer leads to, and its message.
 procedure ExecuteGovernmentInjectedDialog(const Command: TPlayerCommand);
 var
-  Index: Integer;
   Injection: PScriptDialogInjection;
 begin
-  Index := IntArg(Command, 0);
-  if (ScriptDialogInjections = nil) or (Index < 0) or (Index >= ScriptDialogInjections.Count) then
-    raise Exception.Create(CommandKindName(Command.Kind) + ' names a missing dialog injection');
-  Injection := PScriptDialogInjection(ScriptDialogInjections[Index]);
+  // CHANGE: BUGFIX - Ints: the answer's index, then its key.
+  Injection := InjectionArgument(Command, 0, 1);
+  if Injection.Script = nil then
+    raise ECommandRefused.CreateReason(
+        rrTargetGone,
+        CommandKindName(Command.Kind) + ' names an answer whose script has ended'
+    );
   CurrentScript := Injection.Script;
   CurrentScript.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Injection.AnswerData);
   Session.ScriptDialogIndex := -1;
@@ -500,8 +490,13 @@ begin
 end;
 
 function RunGovernmentInjectedDialog(Injection: PScriptDialogInjection): Boolean;
+var
+  Command: TPlayerCommand;
 begin
-  SubmitInt(ckGovernmentInjectedDialog, ScriptDialogInjections.IndexOf(Injection));
+  Command := NewCommand(ckGovernmentInjectedDialog);
+  AddInt(Command, ScriptDialogInjections.IndexOf(Injection));
+  AddInjectionKey(Command, Injection);
+  SubmitCommand(Command);
   Result := PlanetOutcome <> 0;
 end;
 

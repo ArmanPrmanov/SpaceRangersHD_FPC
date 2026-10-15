@@ -118,6 +118,7 @@ uses
   aGalaxyStruct,
   aHold,
   aCommands,
+  aDialogActions,
   aShopActions,
   aStationActions,
   aPlanetActions,
@@ -1673,6 +1674,246 @@ begin
   Inc(RoutingScreenRequests);
 end;
 
+// CHANGE: ENHANCEMENT - Commands name scripts, injected answers and overrides by key, and a
+// remote human's dialogue commands keep to that human's dialogue state (docs/humans.md,
+// Scripts; docs/commands.md). L is local, R stands for a client's human whose commands the
+// host applies. Prints what fails and returns False.
+function CheckDialogKeys(L, R: THuman): Boolean;
+var
+  S1, S2: TScript;
+  SavedHuman1, SavedHuman2, Index1, Index2: Integer;
+  SavedName2: WideString;
+  Command, OldCommand, OverrideCommand: TPlayerCommand;
+  LocalEntry, X, Y: PScriptDialogInjection;
+  Override1, Override2: PScriptDialogOverride;
+  State: TScriptDialogState;
+  Got: AnsiString;
+  Exchanged: Boolean;
+
+  procedure Fail(const Text: AnsiString);
+  begin
+    Emit('script routing failed: ' + Text);
+    raise EAbort.Create(Text);
+  end;
+
+  procedure Expect(Condition: Boolean; const Text: AnsiString);
+  begin
+    if not Condition then
+      Fail(Text);
+  end;
+
+  // '' when Human's command ran, else the reason it was refused for.
+  function TryFor(Human: THuman; Command: TPlayerCommand): AnsiString;
+  begin
+    Result := '';
+    try
+      SubmitFor(Human, Command);
+    except
+      on E: ECommandRefused do
+        Result := RefusalReasonName(E.Reason);
+    end;
+  end;
+
+  function NewInjection(Script: TScript; const Answer, Action: WideString): PScriptDialogInjection;
+  begin
+    New(Result);
+    Result.Script := Script;
+    Result.DialogName := 'probe';
+    Result.Text := '';
+    Result.Answer := Answer;
+    Result.Priority := 0;
+    Result.AnswerData := 0;
+    Result.ReplaceGreeting := False;
+    Result.ActionCode := Action;
+    Result.ActionScript := Script;
+  end;
+
+  function NewOverride(Script: TScript; Priority: Integer): PScriptDialogOverride;
+  begin
+    New(Result);
+    Result.Script := Script;
+    Result.DialogName := '';
+    Result.Priority := Priority;
+    Result.AnswerData := 0;
+  end;
+
+  // R's dialogue state while none of its commands runs.
+  function RemoteState: TScriptDialogState;
+  begin
+    Result := HumanDialogState(R);
+  end;
+
+  // The local human's dialogue is as the probe left it.
+  procedure ExpectLocalDialog(const What: AnsiString);
+  begin
+    Expect(ForeignDialogHuman = nil, What + ': a remote dialogue state is still in place');
+    Expect(Session.ScriptDialogIndex = 3, What + ': the local dialogue message changed');
+    Expect(CurrentScript = S2, What + ': the local dialogue''s script changed');
+    Expect(
+        (ScriptDialogInjections <> nil)
+            and (ScriptDialogInjections.Count = 1)
+            and (ScriptDialogInjections[0] = LocalEntry)
+            and (LocalEntry.Answer = 'local'),
+        What + ': the local injected answers changed'
+    );
+  end;
+
+begin
+  Result := True;
+  if Galaxy.Scripts.Count < 2 then
+  begin
+    Emit(Format('script routing keys skipped scripts=%d', [Galaxy.Scripts.Count]));
+    Exit;
+  end;
+  S1 := TScript(Galaxy.Scripts[0]);
+  S2 := TScript(Galaxy.Scripts[1]);
+  SavedHuman1 := S1.HumanId;
+  SavedHuman2 := S2.HumanId;
+  SavedName2 := S2.ScriptFileName;
+  Exchanged := False;
+  try
+    try
+      // The local human has a dialogue open: its message, script and an injected answer.
+      ClearScriptDialogRules;
+      LocalEntry := NewInjection(S2, 'local', '');
+      ScriptDialogInjections.Add(LocalEntry);
+      Session.ScriptDialogIndex := 3;
+      CurrentScript := S2;
+      // (1) The same script for two humans, started in a different order here: R's answer
+      // names R's script by its key, not by its index.
+      S1.HumanId := R.Id;
+      S2.HumanId := L.Id;
+      S2.ScriptFileName := S1.ScriptFileName;
+      Command := NewCommand(ckScriptAnswerOnly);
+      AddScriptIndex(Command, S1);
+      AddInt(Command, -1);
+      AddScriptKey(Command, S1);
+      OldCommand := NewCommand(ckScriptAnswerOnly);
+      AddScriptIndex(OldCommand, S1);
+      AddInt(OldCommand, -1);
+      Galaxy.Scripts.Exchange(0, 1);
+      Exchanged := True;
+      Got := TryFor(R, Command);
+      Expect(Got = '', 'an answer by key was refused: ' + Got);
+      Expect(RemoteState.Script = S1, 'an answer by key did not reach its human''s script');
+      ExpectLocalDialog('a remote answer');
+      // A log from before names the script by its index, which now holds the other one.
+      Got := TryFor(R, OldCommand);
+      Expect(Got = '', 'an answer by index was refused: ' + Got);
+      Expect(RemoteState.Script = S2, 'an answer by index did not reach the indexed script');
+      ExpectLocalDialog('a remote answer by index');
+      // (2) A key that names no script is refused before anything changes.
+      Command.Ints[4] := 7;
+      Got := TryFor(R, Command);
+      Expect(Got = RefusalReasonName(rrTargetGone), 'a stale script key was not refused: ' + Got);
+      Command.Ints[4] := 0;
+      Command.Ints[3] := Command.Ints[3] xor $5A5A;
+      Got := TryFor(R, Command);
+      Expect(Got = RefusalReasonName(rrTargetGone), 'an unknown script key was not refused: ' + Got);
+      Expect(RemoteState.Script = S2, 'a refused answer changed the dialogue''s script');
+      ExpectLocalDialog('a refused answer');
+      Emit('script routing script keys ok');
+      // (3) R's injected answers: the command names Y, and R's list is then built again in
+      // another order; the answer runs Y's action, not the one now at Y's index.
+      Got := TryFor(R, NewCommand(ckClearTalkDialogRules));
+      Expect(Got = '', 'clearing the remote rules was refused: ' + Got);
+      ExpectLocalDialog('the remote rules cleared');
+      State := RemoteState;
+      X := NewInjection(S1, 'x', 'ForceNextDay();');
+      Y := NewInjection(S1, 'y', 'ExtremalTakeOff();');
+      State.Injections.Add(X);
+      State.Injections.Add(Y);
+      Expect(EnterHumanDialogState(R), 'the remote dialogue state was not put in place');
+      try
+        Command := NewCommand(ckRunInjectedAnswerAction);
+        AddInt(Command, ScriptDialogInjections.IndexOf(Y));
+        AddInjectionKey(Command, Y);
+        Override1 := NewOverride(S1, 1);
+        ScriptDialogOverrides.Add(Override1);
+        OverrideCommand := NewCommand(ckTalkDialogOverride);
+        AddOverrideKey(OverrideCommand, SelectedDialogOverride);
+      finally
+        LeaveHumanDialogState;
+      end;
+      ExpectLocalDialog('the remote answer named');
+      Got := TryFor(R, NewCommand(ckClearTalkDialogRules));
+      Expect(Got = '', 'clearing the remote rules was refused: ' + Got);
+      State.Injections.Add(NewInjection(S1, 'y', 'ExtremalTakeOff();'));
+      State.Injections.Add(NewInjection(S1, 'x', 'ForceNextDay();'));
+      R.ScriptTakeoffRequested := False;
+      R.ScriptEndTurnRequested := False;
+      Got := TryFor(R, Command);
+      Expect(Got = '', 'an injected answer by key was refused: ' + Got);
+      Expect(
+          R.ScriptTakeoffRequested and not R.ScriptEndTurnRequested,
+          'an injected answer by key ran another answer''s action'
+      );
+      ExpectLocalDialog('a remote injected answer');
+      // A log from before names the answer by its index only: the one now there runs.
+      OldCommand := NewCommand(ckRunInjectedAnswerAction);
+      AddInt(OldCommand, Command.Ints[0]);
+      R.ScriptTakeoffRequested := False;
+      Got := TryFor(R, OldCommand);
+      Expect(Got = '', 'an injected answer by index was refused: ' + Got);
+      Expect(
+          R.ScriptEndTurnRequested and not R.ScriptTakeoffRequested,
+          'an injected answer by index did not run the answer at that index'
+      );
+      R.ScriptEndTurnRequested := False;
+      // Built again without it: refused, and nothing runs.
+      Got := TryFor(R, NewCommand(ckClearTalkDialogRules));
+      Expect(Got = '', 'clearing the remote rules was refused: ' + Got);
+      State.Injections.Add(NewInjection(S1, 'x', 'ForceNextDay();'));
+      R.ScriptTakeoffRequested := False;
+      Got := TryFor(R, Command);
+      Expect(
+          Got = RefusalReasonName(rrTargetGone),
+          'a stale injected answer was not refused: ' + Got
+      );
+      Expect(
+          not R.ScriptTakeoffRequested and not R.ScriptEndTurnRequested,
+          'a refused injected answer ran an action'
+      );
+      ExpectLocalDialog('a refused injected answer');
+      Emit('script routing injection keys ok');
+      // (4) Overrides: none is refused (the list was read at [0] unchecked), and a stale key
+      // is refused.
+      Got := TryFor(R, NewCommand(ckTalkDialogOverride));
+      Expect(Got = RefusalReasonName(rrTargetGone), 'an override with none was not refused: ' + Got);
+      Override2 := NewOverride(S1, 2);
+      State.Overrides.Add(Override2);
+      Got := TryFor(R, OverrideCommand);
+      Expect(
+          Got = RefusalReasonName(rrTargetGone),
+          'a stale override key was not refused: ' + Got
+      );
+      Got := TryFor(R, NewCommand(ckTalkDialogOverride));
+      Expect(Got = '', 'the remote override was refused: ' + Got);
+      Expect(TalkScript = S1, 'the remote override did not select its script');
+      ExpectLocalDialog('a remote override');
+      // A remote reset of the dialogue leaves the local one.
+      Got := TryFor(R, NewCommand(ckResetScriptDialog));
+      Expect(Got = '', 'the remote reset was refused: ' + Got);
+      ExpectLocalDialog('a remote reset');
+      Emit('script routing dialog state ok');
+    except
+      on E: EAbort do
+        Result := False;
+    end;
+  finally
+    if Exchanged then
+      Galaxy.Scripts.Exchange(0, 1);
+    S1.HumanId := SavedHuman1;
+    S2.HumanId := SavedHuman2;
+    S2.ScriptFileName := SavedName2;
+    R.ScriptTakeoffRequested := False;
+    R.ScriptEndTurnRequested := False;
+    ClearScriptDialogRules;
+    Session.ScriptDialogIndex := -1;
+    CurrentScript := nil;
+  end;
+end;
+
 function RunScriptRouting(const Options: TSimulationOptions): Integer;
 var
   L, R: THuman;
@@ -1903,6 +2144,8 @@ begin
       ScreenRequestHandler := SavedHandler;
     end;
     Emit('script routing ruins ok');
+    // (g) Scripts, injected answers and overrides by key; a remote human's dialogue state.
+    Expect(CheckDialogKeys(L, R), 'dialog keys');
     Emit('script routing ok');
   except
     on E: EAbort do

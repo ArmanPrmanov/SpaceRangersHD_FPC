@@ -200,7 +200,7 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   | `rrNoMoney` | 2 | `no-money` | a purchase of goods or equipment, a refuel, reload or rockets the human cannot pay; a sale in space the partner cannot pay in full; a ship built at a Dominion, a map, a satellite, an investment or a Dominion order the human cannot pay; a repair of the held item or of everything, a bribe, a gift to a partner, a deposit, a modernization, a side change, a pirate raid or nodes the money does not cover |
   | `rrItemGone` | 3 | `item-gone` | a shop command whose item (by id) the shop's stock no longer holds (`aShopActions.ShopItemArg`); a ship built at a Dominion with a part no longer in the shop, the hold or the storage, or named twice; surface loot (by id) no longer on the planet; a hold cell whose item is no longer in the edited ship, or (`TakeHoldEntry`) is not the item the sender's cell showed |
   | `rrOfferGone` | 4 | `offer-gone` | a station's one-off special ship already sold; a satellite offer that is not the one the human accepted, or no more satellites allowed; an investment the business center would not offer now (too soon, or the star or its constellation has the station or no room for it); a map of a constellation that is charted or no longer an uncharted neighbour; a station's modernization someone has paid for; a side change or pirate raid whose price went above the quote |
-  | `rrTargetGone` | 5 | `target-gone` | a request for protection when the partner is after no ship; a dominator a program already hacked; a Dominion relocation, ambush or assault when the Dominion has other plans (it flies or teleports, a script controls it, or it lacks the energy), the star has a Dominion, or an ambush at the star is under way; a truce with a ship that keeps one with another human (the offer itself is declined); a recall of interceptors that are not the human's |
+  | `rrTargetGone` | 5 | `target-gone` | a script dialog command whose script, injected answer or override (by key, [commands.md](commands.md)) is not there, or an override command with no override; a request for protection when the partner is after no ship; a dominator a program already hacked; a Dominion relocation, ambush or assault when the Dominion has other plans (it flies or teleports, a script controls it, or it lacks the energy), the star has a Dominion, or an ambush at the star is under way; a truce with a ship that keeps one with another human (the offer itself is declined); a recall of interceptors that are not the human's |
   | `rrNoRoom` | 6 | `no-room` | a sale in space that does not fit in the partner's hold |
   | `rrInUse` | 7 | `in-use` | opening the screen of a ship (not the human's own ranger) another human has open (`THuman.EditedShip`, [humans.md](humans.md)) |
 
@@ -275,7 +275,11 @@ humans at the same planet or station see it before the next state.
   and including the trade, in order, through `SubmitCommand`
   (`TNetHost.ApplyTrade`): the commands before it go first, since the trade may
   depend on them (taking an item out of the hold, then selling it), and the
-  command log records them in that order. A command before the trade that
+  command log records them in that order. A script dialogue among them (a
+  government screen visited first, say) keeps to the peer's human's dialogue
+  state, which the host swaps in for each of its commands, and shows nothing on
+  the host ([humans.md](humans.md), Scripts), so it may apply while the host's own
+  dialogue is open. A command before the trade that
   raises is refused as at the barrier (`CommandFailed`); the trade gets
   `CommandResult`, applied or refused. The commands after the trade stay queued
   for the barrier. The order in which trades of different humans arrive decides
@@ -711,7 +715,13 @@ answer and is logged, the dialogue text and answers (`DText`, `DAnswer`) are
 not written into the host's screens, music and video do not play, and the talk
 builtins read the talking human's talk ([humans.md](humans.md), Scripts). The
 client, which runs the same command on its prediction, shows all of it on its
-own screen. Its takeoff and end-turn requests (`ExtremalTakeOff`,
+own screen. The client's dialogue commands keep to the client's human's script
+dialogue state (the dialog message, its script, the injected answers and
+overrides), which the host swaps in for each of them; the host's own open
+dialogue stays as it was, and the injected answers its screen shows stay valid
+([humans.md](humans.md), Scripts). They name scripts and injected answers by
+key, so a script the host started in another order is still the one meant, and
+one that is gone is refused. Its takeoff and end-turn requests (`ExtremalTakeOff`,
 `ForceNextDay`) are its human's: the client dispatches them as its own
 `OrderScriptTakeoff` and `EndTurn`, and the host does not act on them for its
 own human. Entering or leaving ruins mode (`EnterRuinsMode`, `CloseBridge`)
@@ -869,6 +879,12 @@ again (`net client shop relay`); then its purchase of X is refused (`item-gone`)
 while it waits. It then ends its turn and at once sends a purchase without
 waiting for it (`net client shop sent after end turn seq=`): the host applies it
 after that day, and Net2 hears it was applied. Every state has the host's hash.
+Before it buys X, Net1 goes through a government dialogue (`EnterGovernment`,
+`BeginGovernmentDialog`, `RunScriptsAuxiliaryCode`, `LeaveGovernment`), which the
+host applies with the purchase while the host's human has a script dialogue open
+(a message, a script and an injected answer): the host's dialogue state must be
+as it was after every trade and after the barrier (`net host dialogue kept=1
+checks= remote=`).
 
 The headless runner (`HeadlessNet`):
 
@@ -948,9 +964,6 @@ star's film once; every client in that star gets it.
   line is in the host's language (the host builds the text); a talk a client
   cannot show (it is on another screen than the star map) is declined, not
   queued; one held for a film's end is declined after 60 s.
-- The script dialogue state (`Session.ScriptDialogIndex`, `CurrentScript`, the
-  injected answers and overrides) is still one for all humans, and scripts are
-  named by index.
 - A client that loses its host on a screen that does not start a day (a shop,
   the ship, the galaxy map) finds out when it next opens one of those.
 - Chat is in the protocol (the host relays it); nothing shows it.

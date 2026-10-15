@@ -149,6 +149,13 @@ type
     // the UI, not game state: not saved.
     ScriptTakeoffRequested: Boolean;
     ScriptEndTurnRequested: Boolean;
+    // CHANGE: BUGFIX - The human's script dialogue state (aScript.TScriptDialogState: the dialog
+    // message, the dialog's script, the injected answers, overrides and blocks) while it is not
+    // in the globals that hold it. It was one for all humans, so a client's dialogue applied on
+    // the host overwrote the host's own and freed answers its screen still showed. The globals
+    // hold the local human's; a command of another human swaps that human's in while it runs
+    // (aScript.EnterHumanDialogState). Created when first needed; UI state, not saved.
+    ScriptDialogState: TObject;
     constructor Create;
     destructor Destroy; override;
     // The message bubbles, under PersistentPlayerMessageLock. SkipLock means the caller
@@ -1067,6 +1074,7 @@ begin
   PlayerOldQuests.Free;
   FinalizePlayerHoldView(Self);
   GovernmentDialogNames.Free;
+  ScriptDialogState.Free;
   inherited Destroy;
 end;
 

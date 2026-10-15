@@ -228,6 +228,10 @@ def check_script_routing(args, binary: Path, save: Path) -> tuple[bool, str]:
     battles and videos are queued only in its own command, and only its own report finishes
     them; a video while its ship screen shows is not queued (its machine plays it at once and
     reports nothing); the talk builtins read the talking human's talk; and its ruins mode opens no screen.
+    Its dialogue commands name scripts, injected answers and overrides by key: an answer reaches its
+    script though the scripts are in another order, an injected answer runs its own action though
+    the list was built again in another order, a stale key is refused (target-gone), and a log's
+    index form still runs by index; they leave the local human's open dialogue as it was.
     """
     code, output = simulate(binary, args.game_dir, save, ["--sim-script-routing"])
     lines = output.splitlines()
@@ -821,7 +825,9 @@ def check_network_shop(args, binary: Path) -> tuple[bool, list[str]]:
     the ship screen: the three hold commands before the sale apply with it, in order. Net2's
     purchase of X is refused (item-gone) while it waits for it. Only trades are relayed. A
     purchase Net2 sends right after its end turn applies after that day. Every client state has
-    the host's hash."""
+    the host's hash. Net1 goes through a government dialogue before buying X: the host applies
+    it with the purchase while its own script dialogue is open, and its own dialogue state (the
+    message, the script and an injected answer) stays as it was."""
     label = "new game, 3 humans trading at one planet"
     problem, host_output, outputs = run_network(args, binary, None, 2, shop=True)
     if not problem:
@@ -856,6 +862,13 @@ def check_network_shop(args, binary: Path) -> tuple[bool, list[str]]:
     answered = [line for line in net_lines(net2, "net trade answered ") if line["kind"] == "BuyEquipment"]
     if not answered or answered[0]["ok"] != "0" or answered[0]["reason"] != "item-gone":
         return False, [f"{label}: Net2 did not get the refusal while it waited: {answered}"]
+    purchase = [line for line in applied if line["human"] == id1 and line["kind"] == "BuyEquipment"]
+    dialogue = net_lines(host_output, "net host dialogue ")
+    if "net client shop dialogue sent" not in net1.splitlines() or not purchase or int(purchase[0]["before"]) < 4:
+        return False, [f"{label}: Net1's government dialogue did not apply with its purchase: {purchase}"]
+    if (not dialogue or dialogue[0]["kept"] != "1" or int(dialogue[0]["checks"]) < 2
+            or int(dialogue[0]["remote"]) < 3):
+        return False, [f"{label}: Net1's dialogue changed the host's own open dialogue: {dialogue}"]
     sale = [line for line in applied if line["human"] == id1 and line["kind"] == "SellHeld"]
     if not sale or sale[0]["before"] != "3":
         return False, [f"{label}: the hold commands before Net1's sale did not apply with it: {sale}"]
@@ -890,6 +903,8 @@ def check_network_shop(args, binary: Path) -> tuple[bool, list[str]]:
         f"{label}: a sale of goods is seen by the other client; a sale from the ship screen applies with the 3 hold "
         f"commands before it; only trades are relayed ({', '.join(sorted(kinds))})",
         f"{label}: a purchase sent while the day runs applies after it",
+        f"{label}: a client's government dialogue applies with its purchase and leaves the host's own open "
+        f"dialogue as it was ({dialogue[0]['checks']} checks, {dialogue[0]['remote']} dialogue commands)",
     ]
 
 

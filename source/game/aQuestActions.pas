@@ -73,6 +73,7 @@ uses
   EC_Str,
   aMyFunction,
   aConst,
+  aDialogActions,
   aGalaxy,
   aGalaxyStruct,
   aItem,
@@ -90,14 +91,6 @@ begin
     Result := -1
   else
     Result := Galaxy.Scripts.IndexOf(Script);
-end;
-
-function ScriptAtIndex(Index: Integer): TScript;
-begin
-  if Index < 0 then
-    Result := nil
-  else
-    Result := TScript(Galaxy.Scripts[Index]);
 end;
 
 // Runs the command, or with no player to act, the executor directly.
@@ -151,7 +144,8 @@ begin
     Result := Session.SharedScriptVariables.GetVarNE(Name);
 end;
 
-// Ints: the script's index, then one value per name. Text: the names, one per line.
+// Ints: the script's index, then one value per name, then the script's key. Text: the names,
+// one per line.
 procedure ApplyQuestVariables(Script: TScript; const Command: TPlayerCommand);
 var
   Names: WideString;
@@ -184,9 +178,28 @@ begin
   end;
 end;
 
+// The number of names in the command's text.
+function QuestVariableCount(const Command: TPlayerCommand): Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  if Command.Text = '' then
+    Exit;
+  Result := 1;
+  for I := 1 to Length(Command.Text) do
+    if Command.Text[I] = #10 then
+      Inc(Result);
+end;
+
 procedure ExecuteSetQuestVariables(const Command: TPlayerCommand);
 begin
-  ApplyQuestVariables(ScriptAtIndex(IntArg(Command, 0)), Command);
+  // CHANGE: BUGFIX - The script by its key after the values; a log from before names it by
+  // its index only (aDialogActions.ScriptArgument).
+  ApplyQuestVariables(
+      ScriptArgument(Command, 0, 1 + QuestVariableCount(Command), True),
+      Command
+  );
 end;
 
 procedure SetQuestVariables(
@@ -212,6 +225,8 @@ begin
     Command.Text := Command.Text + Names[I];
     AddInt(Command, Values[I]);
   end;
+  if LocalPlayer <> nil then
+    AddScriptKey(Command, Script);
   // With no player, or a script the command cannot name, this runs unrecorded.
   if (LocalPlayer = nil) or ((Script <> nil) and (Command.Ints[0] < 0)) then
     ApplyQuestVariables(Script, Command)

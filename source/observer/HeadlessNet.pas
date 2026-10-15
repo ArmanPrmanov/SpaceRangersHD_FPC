@@ -19,6 +19,9 @@ unit HeadlessNet;
 // host applies them while it waits for its peers, a human's only once every human before it
 // is ready, so that its days are the same however the commands arrived. --sim-net-shop: the
 // clients join at the host's human's planet and trade there on their first day.
+// CHANGE: ENHANCEMENT - --sim-net-shop: Net1 goes through a government dialogue before its
+// first purchase, which the host applies with the purchase while its own dialogue is open; the
+// host's dialogue state must stay as it was (docs/network.md, Tests).
 interface
 uses
   HeadlessSim;
@@ -40,6 +43,9 @@ uses
   EC_Buf,
   Globals,
   aCommands,
+  aDialogActions,
+  aPlanetActions,
+  aScript,
   aShopActions,
   aShopStock,
   aItem,
@@ -201,6 +207,16 @@ var
   HostTriedFirst: Boolean;
   ShopNotifications: Integer;
   PreviousShopHandler: TSimEventHandler;
+  // --sim-net-shop: the host's own open dialogue (its message, script and injected answer),
+  // how often it was checked, whether it was ever changed, and the dialogue commands of remote
+  // humans the host ran meanwhile.
+  HostDialogueOpen: Boolean;
+  HostDialogueScript: TScript;
+  HostDialogueEntry: PScriptDialogInjection;
+  HostDialogueSavedScript: TScript;
+  HostDialogueChecks: Integer;
+  HostDialogueChanged: Boolean;
+  HostDialogueRemote: Integer;
 
 procedure CountRemoteTrade(const Command: TPlayerCommand);
 begin
@@ -208,6 +224,74 @@ begin
     PreviousAfterCommand(Command);
   if (Command.Kind = ckTradeGoods) and (LocalHuman <> nil) and (Integer(Command.Actor) <> LocalHuman.Id) then
     Inc(RemoteTrades);
+  if HostDialogueOpen
+      and (LocalHuman <> nil)
+      and (Integer(Command.Actor) <> LocalHuman.Id)
+      and ((Command.Kind = ckBeginGovernmentDialog)
+          or (Command.Kind = ckScriptAuxiliaryCode)
+          or (Command.Kind = ckLeaveGovernment)) then
+    Inc(HostDialogueRemote);
+end;
+
+// --sim-net-shop: the host's human has a script dialogue open while its clients' commands
+// apply (the screens would show it): a message, a script and an injected answer.
+procedure OpenHostDialogue;
+begin
+  HostDialogueSavedScript := CurrentScript;
+  HostDialogueScript := nil;
+  if Galaxy.Scripts.Count > 0 then
+    HostDialogueScript := TScript(Galaxy.Scripts[0]);
+  ClearScriptDialogRules;
+  New(HostDialogueEntry);
+  HostDialogueEntry.Script := HostDialogueScript;
+  HostDialogueEntry.DialogName := 'host';
+  HostDialogueEntry.Text := '';
+  HostDialogueEntry.Answer := 'host';
+  HostDialogueEntry.Priority := 0;
+  HostDialogueEntry.AnswerData := 0;
+  HostDialogueEntry.ReplaceGreeting := False;
+  HostDialogueEntry.ActionCode := '';
+  HostDialogueEntry.ActionScript := nil;
+  ScriptDialogInjections.Add(HostDialogueEntry);
+  Session.ScriptDialogIndex := 3;
+  CurrentScript := HostDialogueScript;
+  HostDialogueChecks := 0;
+  HostDialogueChanged := False;
+  HostDialogueRemote := 0;
+  HostDialogueOpen := True;
+end;
+
+procedure CheckHostDialogue;
+begin
+  if not HostDialogueOpen then
+    Exit;
+  Inc(HostDialogueChecks);
+  if (ForeignDialogHuman <> nil)
+      or (Session.ScriptDialogIndex <> 3)
+      or (CurrentScript <> HostDialogueScript)
+      or (ScriptDialogInjections = nil)
+      or (ScriptDialogInjections.Count <> 1)
+      or (ScriptDialogInjections[0] <> HostDialogueEntry)
+      or (HostDialogueEntry.Answer <> 'host') then
+    HostDialogueChanged := True;
+end;
+
+procedure CloseHostDialogue;
+begin
+  if not HostDialogueOpen then
+    Exit;
+  CheckHostDialogue;
+  HostDialogueOpen := False;
+  Emit(
+      Format(
+          'net host dialogue kept=%d checks=%d remote=%d',
+          [Ord(not HostDialogueChanged), HostDialogueChecks, HostDialogueRemote]
+      )
+  );
+  ClearScriptDialogRules;
+  HostDialogueEntry := nil;
+  Session.ScriptDialogIndex := -1;
+  CurrentScript := HostDialogueSavedScript;
 end;
 
 // CHANGE: ENHANCEMENT - Right before the host applies a remote human's purchase of goods as it
@@ -289,6 +373,8 @@ begin
     BuyFirst(HumanId, Queued);
   if Done and Applied and ShopRun and not HostTriedFirst and (Queued.Command.Kind = ckBuyEquipment) then
     HostBuysSame(Queued);
+  if Done then
+    CheckHostDialogue;
 end;
 
 function HeadlessMayApplyTrades: Boolean;
@@ -466,6 +552,13 @@ begin
   XId := X.Id;
   if Name = 'Net1' then
   begin
+    // A government dialogue first, as the government screen runs it; the host applies it
+    // with the purchase after it, while its own dialogue is open.
+    EnterGovernment;
+    BeginGovernmentDialog;
+    RunScriptsAuxiliaryCode;
+    LeaveGovernment;
+    Emit('net client shop dialogue sent');
     Reason := BuyShopItem(H, ShopSlotIndexOf(H, X), X);
     Emit(Format('net client shop bought item=%d reason=%s', [XId, Reason]));
     TradeGoodsFor(H, Good, 1, False);
@@ -577,7 +670,7 @@ begin
     RemoteTrades := 0;
     if Options.NetNested then
       RegisterNestedProbe;
-    if Options.NetBuyRace then
+    if Options.NetBuyRace or Options.NetShop then
     begin
       PreviousAfterCommand := AfterCommandHook;
       AfterCommandHook := @CountRemoteTrade;
@@ -630,6 +723,7 @@ begin
       begin
         OpenShopFor(LocalHuman);
         EndTurnFor(LocalHuman);
+        OpenHostDialogue;
         Plan := 'o';
       end
       else
@@ -653,6 +747,7 @@ begin
         TradeWindow := False;
       end;
       Host.ApplyQueues;
+      CloseHostDialogue;
       if not AllHumansEndedTurn then
       begin
         Emit(Format('net host failed: day %d cannot start after every peer was ready', [Day]));
@@ -765,6 +860,7 @@ begin
     TradeWindow := False;
     RaceArmed := False;
     ShopRun := False;
+    HostDialogueOpen := False;
     RemoveNetTalkProbe;
     ProbeSendsFilms := False;
     StopNetwork;

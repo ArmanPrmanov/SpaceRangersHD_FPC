@@ -234,6 +234,7 @@ uses
   EC_Str,
   aMyFunction,
   aConst,
+  aDialogActions,
   aGalaxyEvent,
   aGalaxyStruct,
   aHuman,
@@ -291,36 +292,6 @@ begin
   Command := NewCommand(Kind);
   AddRef(Command, Instance);
   SubmitCommand(Command);
-end;
-
-procedure AddScript(var Command: TPlayerCommand; Script: TScript);
-begin
-  if Script = nil then
-    AddInt(Command, -1)
-  else
-    AddInt(Command, Galaxy.Scripts.IndexOf(Script));
-end;
-
-function ScriptArg(const Command: TPlayerCommand; Index: Integer): TScript;
-var
-  ScriptIndex: Integer;
-begin
-  ScriptIndex := IntArg(Command, Index);
-  if (ScriptIndex < 0) or (ScriptIndex >= Galaxy.Scripts.Count) then
-    raise Exception.Create(CommandKindName(Command.Kind) + ' names no script');
-  Result := TScript(Galaxy.Scripts[ScriptIndex]);
-end;
-
-function InjectionArg(const Command: TPlayerCommand; Index: Integer): PScriptDialogInjection;
-var
-  InjectionIndex: Integer;
-begin
-  InjectionIndex := IntArg(Command, Index);
-  if (ScriptDialogInjections = nil)
-      or (InjectionIndex < 0)
-      or (InjectionIndex >= ScriptDialogInjections.Count) then
-    raise Exception.Create(CommandKindName(Command.Kind) + ' names a missing dialog injection');
-  Result := PScriptDialogInjection(ScriptDialogInjections[InjectionIndex]);
 end;
 
 function EquipmentArg(const Command: TPlayerCommand; Index: Integer): TEquipment;
@@ -737,24 +708,15 @@ var
   P: TPlayer;
   Script: TScript;
   Text: WideString;
-  I, SelectedIndex, BestPriority: Integer;
+  Entry: PScriptDialogOverride;
 begin
   P := Actor(Command);
-  SelectedIndex := 0;
-  BestPriority := PScriptDialogOverride(ScriptDialogOverrides[0]).Priority;
-  for I := 0 to ScriptDialogOverrides.Count - 1 do
-    if PScriptDialogOverride(ScriptDialogOverrides[I]).Priority > BestPriority then
-    begin
-      SelectedIndex := I;
-      BestPriority := PScriptDialogOverride(ScriptDialogOverrides[I]).Priority;
-    end;
-  Script := PScriptDialogOverride(ScriptDialogOverrides[SelectedIndex]).Script;
-  Script
-      .InitCode
-      .LocalVar
-      .GetVar('GAnswerData')
-      .SetDword(PScriptDialogOverride(ScriptDialogOverrides[SelectedIndex]).AnswerData);
-  Text := PScriptDialogOverride(ScriptDialogOverrides[SelectedIndex]).DialogName;
+  // CHANGE: BUGFIX - The override the sender's screen selected, by its key; a log from before
+  // selects the one with the highest priority here. None (an empty list) is refused.
+  Entry := OverrideArgument(Command, 0);
+  Script := Entry.Script;
+  Script.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Entry.AnswerData);
+  Text := Entry.DialogName;
   if Text <> '' then
   begin
     Script.PublishCurrentShip(P.DockedTo);
@@ -771,8 +733,12 @@ begin
 end;
 
 function ApplyStationDialogOverride: TScript;
+var
+  Command: TPlayerCommand;
 begin
-  SubmitSimple(ckStationDialogOverride);
+  Command := NewCommand(ckStationDialogOverride);
+  AddOverrideKey(Command, SelectedDialogOverride);
+  SubmitCommand(Command);
   Result := StationScript;
 end;
 
@@ -781,10 +747,19 @@ end;
 procedure ExecuteStationInjectedDialog(const Command: TPlayerCommand);
 var
   Injection: PScriptDialogInjection;
+  Script: TScript;
 begin
-  Injection := InjectionArg(Command, 0);
-  if IntArg(Command, 1) >= 0 then
-    CurrentScript := ScriptArg(Command, 1);
+  // CHANGE: BUGFIX - Ints: the answer's index, the script's index, the answer's key (five),
+  // then the script's key (three). Both are found before anything changes.
+  Injection := InjectionArgument(Command, 0, 2);
+  Script := ScriptArgument(Command, 1, 7, True);
+  if Injection.Script = nil then
+    raise ECommandRefused.CreateReason(
+        rrTargetGone,
+        CommandKindName(Command.Kind) + ' names an answer whose script has ended'
+    );
+  if Script <> nil then
+    CurrentScript := Script;
   Injection.Script.PublishCurrentShip(Actor(Command).DockedTo);
   CurrentScript.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Injection.AnswerData);
   Session.ScriptDialogIndex := -1;
@@ -804,7 +779,9 @@ var
 begin
   Command := NewCommand(ckStationInjectedDialog);
   AddInt(Command, ScriptDialogInjections.IndexOf(Injection));
-  AddScript(Command, CurrentScript);
+  AddScriptIndex(Command, CurrentScript);
+  AddInjectionKey(Command, Injection);
+  AddScriptKey(Command, CurrentScript);
   SubmitCommand(Command);
   Result := StationOutcome <> 0;
 end;
@@ -812,7 +789,8 @@ end;
 // Moved from TfRuinsTalk.RunScriptGameEnd.
 procedure ExecuteStationScriptGameEnd(const Command: TPlayerCommand);
 begin
-  CurrentScript := ScriptArg(Command, 0);
+  // CHANGE: BUGFIX - Ints: the script's index, the answer, then the script's key.
+  CurrentScript := ScriptArgument(Command, 0, 2, False);
   CurrentScript.ExecuteDialogAnswer(IntArg(Command, 1));
   Session.GameEndReason := 0;
 end;
@@ -822,8 +800,9 @@ var
   Command: TPlayerCommand;
 begin
   Command := NewCommand(ckStationScriptGameEnd);
-  AddScript(Command, CurrentScript);
+  AddScriptIndex(Command, CurrentScript);
   AddInt(Command, Answer);
+  AddScriptKey(Command, CurrentScript);
   SubmitCommand(Command);
 end;
 

@@ -495,6 +495,43 @@ type
     EndState: Boolean;
     Gap9: array[0..2] of Byte;
   end;
+  // CHANGE: BUGFIX - A script named the same way on every machine (docs/commands.md, Changing
+  // a command's arguments). Commands named a script by its index in Galaxy.Scripts, but each
+  // machine appends the scripts its own commands start, so on a host a client's answer ran
+  // another script. The key is the human the script is bound to, a hash of its file name,
+  // and how many scripts of that human and file come before it in Galaxy.Scripts: a State
+  // gives every machine the same list, and both machines start a human's scripts in that
+  // human's command order. It is computed, never saved. A nil script, or one not in the
+  // galaxy, has Ordinal -1.
+  TScriptKey = record
+    HumanId: Integer;
+    NameHash: Integer;
+    Ordinal: Integer;
+  end;
+  // An injected answer or a dialog override, named by its script, a hash of what it says and
+  // does, and how many equal entries come before it in its list (docs/commands.md).
+  TDialogEntryKey = record
+    Script: TScriptKey;
+    Hash: Integer;
+    Ordinal: Integer;
+  end;
+  // CHANGE: BUGFIX - The script dialogue state of one human (THuman.ScriptDialogState): the
+  // globals Session.ScriptDialogIndex, CurrentScript, ScriptDialogInjections,
+  // ScriptDialogOverrides and ScriptDialogBlocks hold the local human's, and this object holds
+  // the human's own while another human's is in the globals (docs/humans.md, Scripts).
+  TScriptDialogState = class
+    DialogIndex: Integer;
+    Script: TScript;
+    Injections: TObjectList;
+    Overrides: TObjectList;
+    Blocks: TObjectList;
+    constructor Create;
+    destructor Destroy; override;
+    // Exchanges this state with the globals.
+    procedure Exchange;
+    // Forgets a script that is freed.
+    procedure Forget(Freed: TScript);
+  end;
 var
   CurrentScript: TScript;
   QueuedArcadeBattles: TList;
@@ -599,6 +636,28 @@ function CollectScriptCandidateShips(Star: TStar): TList;
 function FindScriptGroupCandidate(Candidates: TList; Group: TScriptGroup): TShip;
 function GetScriptShipBindingForContext(Ship: TShip; Script: TScript): TScriptShip;
 procedure ClearScriptDialogRules;
+// CHANGE: BUGFIX - Script and dialog entry keys (TScriptKey, TDialogEntryKey).
+function ScriptKeyOf(Script: TScript): TScriptKey;
+// The script with that key, or nil; Found says whether the key named one (a nil key finds nil).
+function FindScriptByKey(const Key: TScriptKey; out Found: Boolean): TScript;
+// Of an entry of ScriptDialogInjections or ScriptDialogOverrides, as they stand.
+function InjectionKeyOf(Injection: PScriptDialogInjection): TDialogEntryKey;
+function FindInjectionByKey(const Key: TDialogEntryKey): PScriptDialogInjection;
+function OverrideKeyOf(Entry: PScriptDialogOverride): TDialogEntryKey;
+function FindOverrideByKey(const Key: TDialogEntryKey): PScriptDialogOverride;
+// The override the screens apply: the first with the highest priority; nil when there is none.
+function SelectedDialogOverride: PScriptDialogOverride;
+// CHANGE: BUGFIX - While a command of a human who is not the local one runs, its dialogue
+// state is in the globals (Human: a THuman; aCommands calls these through its hooks). The
+// dialog builtins then write no screen of this machine (aScriptFun.IsScriptUiLocal). Enter
+// returns whether it swapped (not for the local human, nor inside another swap); only then
+// call Leave.
+function EnterHumanDialogState(Human: TObject): Boolean;
+procedure LeaveHumanDialogState;
+// The human whose dialogue state the globals hold instead of the local one's, or nil.
+function ForeignDialogHuman: TObject;
+// The human's dialogue state; created when first asked for.
+function HumanDialogState(Human: TObject): TScriptDialogState;
 procedure ExecuteScriptText(SourceText: WideString; Scope: TVarArrayEC);
 function CompileScriptText(SourceText: WideString): TCodeEC;
 procedure RunScriptCode(ContextName: WideString; Code: TCodeEC; ParentCode: TCodeEC);
@@ -662,6 +721,8 @@ uses
   aTranclucator,
   aUiScriptActions,
   aWarrior;
+
+procedure ForgetScriptInDialogStates(Freed: TScript); forward;
 
 procedure LogScriptCallHistory;
 var
@@ -2376,6 +2437,8 @@ destructor TScript.Destroy;
 begin
   if CurrentScript = Self then
     CurrentScript := nil;
+  // CHANGE: BUGFIX - Nor may another human's dialogue state keep it.
+  ForgetScriptInDialogStates(Self);
   Clear;
   if Constellations <> nil then
   begin
@@ -4900,6 +4963,365 @@ begin
   end
   else
     ScriptDialogBlocks := TObjectList.Create;
+end;
+
+const
+  TextHashBasis = 2166136261;
+
+var
+  // Every TScriptDialogState, so that a freed script is forgotten in each.
+  DialogStates: TList = nil;
+  // The human whose dialogue state the globals hold instead of the local one's, and the
+  // object that holds the local one's meanwhile.
+  ForeignStateHuman: THuman = nil;
+  ForeignState: TScriptDialogState = nil;
+
+// FNV-1a over the UTF-16 code units: the same on every machine.
+function TextHash(const Text: WideString; Hash: Cardinal): Cardinal;
+var
+  I: Integer;
+  Value: QWord;
+begin
+  Value := Hash;
+  for I := 1 to Length(Text) do
+    Value := ((Value xor Ord(Text[I])) * 16777619) and $FFFFFFFF;
+  Result := Cardinal(Value);
+end;
+
+function IntHash(Number: Integer; Hash: Cardinal): Cardinal;
+var
+  I: Integer;
+  Value: QWord;
+  Bits: Cardinal;
+begin
+  Value := Hash;
+  Bits := Cardinal(Number);
+  for I := 0 to 3 do
+    Value := ((Value xor ((Bits shr (I * 8)) and $FF)) * 16777619) and $FFFFFFFF;
+  Result := Cardinal(Value);
+end;
+
+function ScriptNameHash(Script: TScript): Integer;
+begin
+  Result := Integer(TextHash(Script.ScriptFileName, TextHashBasis));
+end;
+
+function ScriptKeyOf(Script: TScript): TScriptKey;
+var
+  I, Index: Integer;
+  Other: TScript;
+begin
+  Result.HumanId := 0;
+  Result.NameHash := 0;
+  Result.Ordinal := -1;
+  // A script that is not in the galaxy names none, as its index (-1) did.
+  if (Script = nil) or (Galaxy = nil) then
+    Exit;
+  Index := Galaxy.Scripts.IndexOf(Script);
+  if Index < 0 then
+    Exit;
+  Result.HumanId := Script.HumanId;
+  Result.NameHash := ScriptNameHash(Script);
+  Result.Ordinal := 0;
+  for I := 0 to Index - 1 do
+  begin
+    Other := TScript(Galaxy.Scripts[I]);
+    if (Other.HumanId = Script.HumanId) and (Other.ScriptFileName = Script.ScriptFileName) then
+      Inc(Result.Ordinal);
+  end;
+end;
+
+function FindScriptByKey(const Key: TScriptKey; out Found: Boolean): TScript;
+var
+  I, Count: Integer;
+  Script: TScript;
+begin
+  Result := nil;
+  Found := Key.Ordinal = -1;
+  if (Key.Ordinal < 0) or (Galaxy = nil) then
+    Exit;
+  Count := 0;
+  for I := 0 to Galaxy.Scripts.Count - 1 do
+  begin
+    Script := TScript(Galaxy.Scripts[I]);
+    if (Script.HumanId = Key.HumanId) and (ScriptNameHash(Script) = Key.NameHash) then
+    begin
+      if Count = Key.Ordinal then
+      begin
+        Found := True;
+        Exit(Script);
+      end;
+      Inc(Count);
+    end;
+  end;
+end;
+
+function SameScriptKey(const A, B: TScriptKey): Boolean;
+begin
+  Result := (A.HumanId = B.HumanId) and (A.NameHash = B.NameHash) and (A.Ordinal = B.Ordinal);
+end;
+
+function DialogEntryScript(Entry: Pointer; Injection: Boolean): TScript;
+begin
+  if Injection then
+    Result := PScriptDialogInjection(Entry).Script
+  else
+    Result := PScriptDialogOverride(Entry).Script;
+end;
+
+// What the entry says and does; AnswerData is left out, since mods keep object addresses in it.
+function DialogEntryHash(Entry: Pointer; Injection: Boolean): Integer;
+var
+  Hash: Cardinal;
+  Inject: PScriptDialogInjection;
+  Key: TScriptKey;
+begin
+  if Injection then
+  begin
+    Inject := PScriptDialogInjection(Entry);
+    Hash := TextHash(Inject.DialogName, TextHashBasis);
+    Hash := TextHash(#1 + Inject.Text, Hash);
+    Hash := TextHash(#1 + Inject.Answer, Hash);
+    Hash := TextHash(#1 + Inject.ActionCode, Hash);
+    Hash := IntHash(Inject.Priority, Hash);
+    Hash := IntHash(Ord(Inject.ReplaceGreeting), Hash);
+    Key := ScriptKeyOf(Inject.ActionScript);
+    Hash := IntHash(Key.HumanId, Hash);
+    Hash := IntHash(Key.NameHash, Hash);
+    Hash := IntHash(Key.Ordinal, Hash);
+  end
+  else
+  begin
+    Hash := TextHash(PScriptDialogOverride(Entry).DialogName, TextHashBasis);
+    Hash := IntHash(PScriptDialogOverride(Entry).Priority, Hash);
+  end;
+  Result := Integer(Hash);
+end;
+
+function DialogEntryKey(List: TObjectList; Entry: Pointer; Injection: Boolean): TDialogEntryKey;
+var
+  I, Index: Integer;
+begin
+  Result.Script := ScriptKeyOf(nil);
+  Result.Hash := 0;
+  Result.Ordinal := -1;
+  if (List = nil) or (Entry = nil) then
+    Exit;
+  Index := List.IndexOf(Entry);
+  if Index < 0 then
+    Exit;
+  Result.Script := ScriptKeyOf(DialogEntryScript(Entry, Injection));
+  Result.Hash := DialogEntryHash(Entry, Injection);
+  Result.Ordinal := 0;
+  for I := 0 to Index - 1 do
+    if (DialogEntryHash(List[I], Injection) = Result.Hash)
+        and SameScriptKey(ScriptKeyOf(DialogEntryScript(List[I], Injection)), Result.Script) then
+      Inc(Result.Ordinal);
+end;
+
+function FindDialogEntry(
+    List: TObjectList;
+    const Key: TDialogEntryKey;
+    Injection: Boolean
+): Pointer;
+var
+  I, Count: Integer;
+begin
+  Result := nil;
+  if (List = nil) or (Key.Ordinal < 0) then
+    Exit;
+  Count := 0;
+  for I := 0 to List.Count - 1 do
+    if (DialogEntryHash(List[I], Injection) = Key.Hash)
+        and SameScriptKey(ScriptKeyOf(DialogEntryScript(List[I], Injection)), Key.Script) then
+    begin
+      if Count = Key.Ordinal then
+        Exit(List[I]);
+      Inc(Count);
+    end;
+end;
+
+function InjectionKeyOf(Injection: PScriptDialogInjection): TDialogEntryKey;
+begin
+  Result := DialogEntryKey(ScriptDialogInjections, Injection, True);
+end;
+
+function FindInjectionByKey(const Key: TDialogEntryKey): PScriptDialogInjection;
+begin
+  Result := PScriptDialogInjection(FindDialogEntry(ScriptDialogInjections, Key, True));
+end;
+
+function OverrideKeyOf(Entry: PScriptDialogOverride): TDialogEntryKey;
+begin
+  Result := DialogEntryKey(ScriptDialogOverrides, Entry, False);
+end;
+
+function FindOverrideByKey(const Key: TDialogEntryKey): PScriptDialogOverride;
+begin
+  Result := PScriptDialogOverride(FindDialogEntry(ScriptDialogOverrides, Key, False));
+end;
+
+function SelectedDialogOverride: PScriptDialogOverride;
+var
+  I, Priority: Integer;
+begin
+  Result := nil;
+  if (ScriptDialogOverrides = nil) or (ScriptDialogOverrides.Count = 0) then
+    Exit;
+  Result := PScriptDialogOverride(ScriptDialogOverrides[0]);
+  Priority := Result.Priority;
+  for I := 0 to ScriptDialogOverrides.Count - 1 do
+    if PScriptDialogOverride(ScriptDialogOverrides[I]).Priority > Priority then
+    begin
+      Result := PScriptDialogOverride(ScriptDialogOverrides[I]);
+      Priority := Result.Priority;
+    end;
+end;
+
+procedure DisposeDialogEntries(List: TObjectList);
+var
+  I: Integer;
+begin
+  if List = nil then
+    Exit;
+  // Native untyped Dispose, as ClearScriptDialogRules; the list must not free them again.
+  for I := 0 to List.Count - 1 do
+    Dispose(Pointer(List[I]));
+  List.Clear;
+  List.Free;
+end;
+
+procedure ForgetDialogEntries(Freed: TScript; Injections, Overrides, Blocks: TObjectList);
+var
+  I: Integer;
+begin
+  if Injections <> nil then
+    for I := 0 to Injections.Count - 1 do
+    begin
+      if PScriptDialogInjection(Injections[I]).Script = Freed then
+        PScriptDialogInjection(Injections[I]).Script := nil;
+      if PScriptDialogInjection(Injections[I]).ActionScript = Freed then
+        PScriptDialogInjection(Injections[I]).ActionScript := nil;
+    end;
+  if Overrides <> nil then
+    for I := 0 to Overrides.Count - 1 do
+      if PScriptDialogOverride(Overrides[I]).Script = Freed then
+        PScriptDialogOverride(Overrides[I]).Script := nil;
+  if Blocks <> nil then
+    for I := 0 to Blocks.Count - 1 do
+      if PScriptDialogBlock(Blocks[I]).Script = Freed then
+        PScriptDialogBlock(Blocks[I]).Script := nil;
+end;
+
+constructor TScriptDialogState.Create;
+begin
+  inherited Create;
+  DialogIndex := -1;
+  Injections := TObjectList.Create;
+  Overrides := TObjectList.Create;
+  Blocks := TObjectList.Create;
+  if DialogStates = nil then
+    DialogStates := TList.Create;
+  DialogStates.Add(Self);
+end;
+
+destructor TScriptDialogState.Destroy;
+begin
+  if ForeignState = Self then
+  begin
+    Exchange;
+    ForeignState := nil;
+    ForeignStateHuman := nil;
+  end;
+  if DialogStates <> nil then
+    DialogStates.Remove(Self);
+  DisposeDialogEntries(Injections);
+  DisposeDialogEntries(Overrides);
+  DisposeDialogEntries(Blocks);
+  inherited Destroy;
+end;
+
+procedure TScriptDialogState.Exchange;
+var
+  Index: Integer;
+  Swapped: TScript;
+  List: TObjectList;
+begin
+  Index := Session.ScriptDialogIndex;
+  Session.ScriptDialogIndex := DialogIndex;
+  DialogIndex := Index;
+  Swapped := CurrentScript;
+  CurrentScript := Script;
+  Script := Swapped;
+  List := ScriptDialogInjections;
+  ScriptDialogInjections := Injections;
+  Injections := List;
+  List := ScriptDialogOverrides;
+  ScriptDialogOverrides := Overrides;
+  Overrides := List;
+  List := ScriptDialogBlocks;
+  ScriptDialogBlocks := Blocks;
+  Blocks := List;
+end;
+
+procedure TScriptDialogState.Forget(Freed: TScript);
+begin
+  if Script = Freed then
+    Script := nil;
+  ForgetDialogEntries(Freed, Injections, Overrides, Blocks);
+end;
+
+// A freed script is forgotten in every human's parked dialogue state, and in the globals while
+// they hold another human's. The local human's globals otherwise stay as they always were.
+procedure ForgetScriptInDialogStates(Freed: TScript);
+var
+  I: Integer;
+begin
+  if DialogStates <> nil then
+    for I := 0 to DialogStates.Count - 1 do
+      TScriptDialogState(DialogStates[I]).Forget(Freed);
+  if ForeignState <> nil then
+    ForgetDialogEntries(
+        Freed,
+        ScriptDialogInjections,
+        ScriptDialogOverrides,
+        ScriptDialogBlocks
+    );
+end;
+
+function HumanDialogState(Human: TObject): TScriptDialogState;
+begin
+  Result := nil;
+  if Human = nil then
+    Exit;
+  if THuman(Human).ScriptDialogState = nil then
+    THuman(Human).ScriptDialogState := TScriptDialogState.Create;
+  Result := TScriptDialogState(THuman(Human).ScriptDialogState);
+end;
+
+function EnterHumanDialogState(Human: TObject): Boolean;
+begin
+  Result := False;
+  if (ForeignState <> nil) or (Human = nil) or (LocalHuman = nil) or (Human = LocalHuman) then
+    Exit;
+  ForeignState := HumanDialogState(Human);
+  ForeignStateHuman := THuman(Human);
+  ForeignState.Exchange;
+  Result := True;
+end;
+
+procedure LeaveHumanDialogState;
+begin
+  if ForeignState = nil then
+    Exit;
+  ForeignState.Exchange;
+  ForeignState := nil;
+  ForeignStateHuman := nil;
+end;
+
+function ForeignDialogHuman: TObject;
+begin
+  Result := ForeignStateHuman;
 end;
 
 constructor TLibraryHandler.Create(

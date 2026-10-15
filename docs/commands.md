@@ -35,6 +35,10 @@ records the command, and the headless runner replays it.
      executor finds the item by its id in the shop's stock
      (`aShopActions.ShopItemArg`) and refuses with `rrItemGone` when it is
      gone; the slot only places it in the actor's grid.
+   - A script, an injected answer or a dialog override goes in by its key
+     (`aDialogActions.AddScriptKey`, `AddInjectionKey`, `AddOverrideKey`),
+     never by its index in a list each machine builds itself
+     ([humans.md](humans.md), Scripts).
    - Integers go in with `AddInt`, floats with `AddFloat`/`AddPoint` (sent
      bit for bit), and text with `Command.Text`.
    - A value the screen computed from UI state, such as a layout width or a
@@ -83,6 +87,28 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
   - `ChangeSide` (531) and `OrderPirateRaid` (586) carry the price the dialog
     quoted; a higher price is refused, as is a price the money does not cover.
     Without it they pay the price as it stands, as before.
+  - The script dialog commands name their script by its key
+    (`aScript.TScriptKey`, three integers, [humans.md](humans.md), Scripts)
+    after the old arguments, which still hold its index in `Galaxy.Scripts`:
+    `ScriptAnswer`, `ScriptAnswerOnly`, `ScriptCallDialog`,
+    `ScriptCallDialogByName`, `ScriptCallDialogMessage` (300–304; Ints:
+    index, value, key), `TalkScriptMessage` (327; index, publish, key),
+    `StationScriptGameEnd` (index, answer, key) and `SetQuestVariables`
+    (index, the values, key). Injected answers are named by their entry key
+    (`TDialogEntryKey`, five integers) after their index in
+    `ScriptDialogInjections`: `RunInjectedAnswerAction` (335),
+    `CallInjectedDialog` (336) and `GovernmentInjectedDialog` (408) (index,
+    key), `StationInjectedDialog` (508; the answer's index, the script's
+    index, the answer's key, the script's key). The override commands
+    `TalkDialogOverride` (329), `GovernmentDialogOverride` (407) and
+    `StationDialogOverride` (507) carry the key of the override the sender's
+    screen selected; without it they select the one with the highest
+    priority, as before. `aDialogActions` has the helpers (`AddScriptKey`,
+    `ScriptArgument`, `AddInjectionKey`, `InjectionArgument`,
+    `AddOverrideKey`, `OverrideArgument`). A key or an index that names
+    nothing, an empty override list (it was read at `[0]` unchecked) and an
+    answer whose script has ended are refused (`rrTargetGone`) before
+    anything changes.
 
 ## Trades
 

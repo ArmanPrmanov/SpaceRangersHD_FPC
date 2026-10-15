@@ -94,6 +94,14 @@ var
   // Set in a session; without them SubmitTrade raises the refusal as SubmitCommand does.
   TradeRefusedHook: procedure(Reason: TRefusalReason);
   TradeAbortHook: procedure;
+  // CHANGE: BUGFIX - Around a command that runs while none does (the outermost), of a human who
+  // is not the local one: Enter puts that human's script dialogue state (a THuman's) in place
+  // of the local human's and returns whether it did, and Leave puts the local one's back
+  // (aScript.EnterHumanDialogState, set by aDialogActions; docs/humans.md, Scripts). So a
+  // client's dialogue on a host, at the barrier, in a remote dialogue or before a trade,
+  // leaves the host's own open dialogue as it was.
+  EnterActorStateHook: function(Human: TObject): Boolean;
+  LeaveActorStateHook: procedure;
 
 function NewCommand(Kind: TCommandKind): TPlayerCommand;
 // Names Instance by kind and id; nil names nothing.
@@ -422,6 +430,7 @@ end;
 procedure ExecuteCommand(const Command: TPlayerCommand);
 var
   Previous: THuman;
+  Swapped: Boolean;
 begin
   if (Command.Kind > MaximumCommandKind) or not Assigned(Executors[Command.Kind]) then
     raise Exception.Create('No executor for ' + CommandKindName(Command.Kind));
@@ -433,9 +442,16 @@ begin
     Exit;
   Previous := ActingHuman;
   ActingHuman := ActorHuman(Command);
+  Swapped :=
+      (Previous = nil)
+          and Assigned(EnterActorStateHook)
+          and Assigned(LeaveActorStateHook)
+          and EnterActorStateHook(ActingHuman);
   try
     Executors[Command.Kind](Command);
   finally
+    if Swapped then
+      LeaveActorStateHook;
     ActingHuman := Previous;
   end;
 end;

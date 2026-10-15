@@ -18,8 +18,9 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
   on which human is local: on a host, the local human is just one of several.
 - Per-human state lives on `THuman`, for example the star whose day is
   filmed, the message bubbles, the open shop, the conversation, the hold
-  order, the item held on the ship screen's cursor and the government
-  negotiation. `HumanOf(Ship)` finds the human for a ranger.
+  order, the item held on the ship screen's cursor, the government
+  negotiation and, while another human's is in the globals, the script
+  dialogue state (see Scripts). `HumanOf(Ship)` finds the human for a ranger.
 - **The ship screen.** `THuman.EditedShip` is the ship whose screen the human
   has open, from `OpenShipScreen` to the `CloseShipScreen` that leaves it (also
   while the screen is closed to show another one and comes back). One human at
@@ -141,9 +142,39 @@ Converting the script functions (`aScriptFun`):
     For another human, `DAnswer 'exit'` still ends its ruins mode
     (`TPlayer.CloseRuinsMode`), `'main'` still leaves the script dialogue, and
     `'exit_end'` leaves `Session.GameEndReason` alone (the human's own machine
-    sets its own); `InjectAnswer` still records the injected answer. The
-    dialogue state itself (`Session.ScriptDialogIndex`, `CurrentScript`, the
-    injections and overrides) is still one for all humans.
+    sets its own); `InjectAnswer` still records the injected answer.
+  - **The dialogue state is per human.** `Session.ScriptDialogIndex`,
+    `CurrentScript`, `ScriptDialogInjections`, `ScriptDialogOverrides` and
+    `ScriptDialogBlocks` hold the dialogue of the human whose command runs:
+    the local human's, which the screens read, unless a command of another
+    human runs. For the outermost command of a human who is not the local one
+    (`ExecuteCommand`: at the barrier, in a remote dialogue, before a trade,
+    a relayed trade on a client), `aScript.EnterHumanDialogState` exchanges
+    the globals with that human's `THuman.ScriptDialogState`
+    (`TScriptDialogState`) and `LeaveHumanDialogState` exchanges them back
+    after it, also when it raises. So a client's dialogue on a host keeps to
+    its own state from one of its commands to the next, and the host's open
+    dialogue, its script and the injected answers its screen shows stay as
+    they were. Meanwhile (`ForeignDialogHuman` is set) no script code shows
+    UI (`IsScriptUiLocal` is false, and `Dialog` opens nothing), not even
+    the local human's script code that the command runs (another script's
+    auxiliary code): on the other human's machine that code is not local
+    either. Moving the globals into `THuman` was not done: `CurrentScript`
+    is also the script engine's running script, used by about 150 builtins.
+    A freed script is forgotten in every human's parked state. The state is
+    UI state and is not saved; with one human nothing is exchanged, so single
+    player is as before.
+  - **Scripts by key.** Commands name a script by its key
+    (`aScript.TScriptKey`): the human it is bound to, a hash of its file
+    name, and how many scripts of that human and file come before it in
+    `Galaxy.Scripts`. Its index differs between machines (each appends the
+    scripts its own commands start); the key does not: a `State` gives every
+    machine the same list, and a human's scripts are started in that human's
+    command order on both. It is computed, never saved. An injected answer
+    or an override is named by its entry key (`TDialogEntryKey`): its
+    script's key, a hash of what it says and does (not `AnswerData`, which
+    can be an address), and how many equal entries come before it in its
+    list. See [commands.md](commands.md), Changing a command's arguments.
   - `FormShipCurItem` reads and changes the script's human's held item
     (`THuman.SelectedHoldItem`); only the local human's ship screen is
     redrawn.
@@ -576,7 +607,14 @@ note in the progress entry.
   its own and its commands must clear only its own; its battles and videos
   must be queued only in its own command and finished only by its own report;
   the talk builtins must read the talker's talk; and its ruins mode must open
-  no screen while the local human's does.
+  no screen while the local human's does. With a dialogue of the local human
+  open, the other's dialogue commands name scripts and injected answers by
+  key: an answer must reach its script after the two humans' scripts were put
+  in another order, an injected answer must run its own action after the list
+  was built again in another order, a stale or unknown key and an empty
+  override list must be refused (`target-gone`), and the index form a log
+  from before carries must still run by index; the local human's dialogue
+  message, script and injected answers must stay as they were.
 - The same counts run `--sim-pvp` on each save: a second human joins in the
   local human's star and the local one attacks it. With friendly fire on its
   hits must do damage; after the `SetSessionFlag` command turns it off, the
