@@ -1173,6 +1173,9 @@ begin
   H.PlayerAutomaticControl := False;
   H.PendingPlayerFollowTarget := nil;
   Actor(Command).OrderNone(False);
+  // CHANGE: BUGFIX - A ship whose screen the human had open is free for the others: its
+  // machine will not close it (aHuman.THuman.EditedShip).
+  H.ReleaseShipScreen;
 end;
 
 var

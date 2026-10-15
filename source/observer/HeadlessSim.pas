@@ -123,6 +123,7 @@ uses
   aScriptFun,
   aShip,
   aShopStock,
+  aTalkActions,
   aUiScriptActions,
   SimEvents,
   aSaveLoad,
@@ -1810,6 +1811,25 @@ begin
         (Count(srqPlanetaryBattle, R) = 0) and (Count(srqVideo, R) = 0),
         'the remote human''s report did not finish its request'
     );
+    // A video in the remote human's command while its ship screen shows plays there at once,
+    // and is not reported: it is not queued here. Once the screen closes it is queued again.
+    Command := NewCommand(ckOpenShipScreen);
+    AddRef(Command, R.Player);
+    AddInt(Command, 0);
+    SubmitFor(R, Command);
+    Expect(R.ShipScreenShown, 'the remote human''s ship screen does not show');
+    RunInCommand(R, nil, 'StartVideo("v", "s");').Free;
+    Expect(Count(srqVideo, R) = 0, 'a video on the remote human''s ship screen was queued');
+    Command := NewCommand(ckCloseShipScreen);
+    AddInt(Command, 0);
+    SubmitFor(R, Command);
+    Expect(not R.ShipScreenShown and (R.EditedShip = nil), 'the closed ship screen still shows');
+    RunInCommand(R, nil, 'StartVideo("v", "s");').Free;
+    Expect(Count(srqVideo, R) = 1, 'a video off the ship screen was not queued');
+    Command := NewCommand(ckFinishQueuedVideo);
+    AddInt(Command, 2);
+    SubmitFor(R, Command);
+    Expect(Count(srqVideo, R) = 0, 'the video was not finished');
     Emit('script routing queues ok');
     // (e) The talk builtins read the talking human's talk: the actor's, also in another
     // human's script, else the script's human's.
@@ -2481,6 +2501,355 @@ var
     Emit(Format('stale surface loot planet=%d ok', [Planet.Id]));
   end;
 
+  // A station whose ship humans can see, in a star with a planet humans can join at.
+  function FindAnyStation(out Planet: TPlanet): TRuins;
+  const
+    Types: array[0..5] of TStationType = (
+        rstScienceBase,
+        rstMilitaryBase,
+        rstPirateBase,
+        rstBusinessCenter,
+        rstRangerCenter,
+        rstMedicalBase
+    );
+  var
+    I: Integer;
+  begin
+    Result := nil;
+    Planet := nil;
+    for I := 0 to High(Types) do
+      if Result = nil then
+        Result := FindStation(Types[I], Planet);
+  end;
+
+  function OpenShipCommand(Ship: TShip): TPlayerCommand;
+  begin
+    Result := NewCommand(ckOpenShipScreen);
+    AddRef(Result, Ship);
+    AddInt(Result, 0);
+  end;
+
+  function CloseShipCommand: TPlayerCommand;
+  begin
+    Result := NewCommand(ckCloseShipScreen);
+    AddInt(Result, 0);
+  end;
+
+  // The hold cell (not expanded) of the human's view that shows Item, or -1.
+  function HoldCellOf(Human: THuman; Item: TItem): Integer;
+  var
+    I: Integer;
+  begin
+    Result := -1;
+    if Human.PlayerHoldEntries <> nil then
+      for I := 0 to Human.PlayerHoldEntries.Count - 1 do
+        if TPlayerHoldUnit(Human.PlayerHoldEntries[I]).Item = Item then
+          Exit(I);
+  end;
+
+  function TakeCellCommand(Cell: Integer; Item: TItem): TPlayerCommand;
+  begin
+    Result := NewCommand(ckTakeHoldEntry);
+    AddInt(Result, Cell);
+    AddInt(Result, 0);
+    AddInt(Result, Integer(Item.Id));
+  end;
+
+  // A sponsored station's ship: one human edits it at a time, and a take from a hold cell that
+  // another human emptied is refused without holding the item.
+  procedure CheckSharedShip;
+  var
+    Station: TRuins;
+    Planet: TPlanet;
+    A, B: THuman;
+    Item: TItem;
+    Command: TPlayerCommand;
+    Cell, Before, After: Integer;
+    Problem: AnsiString;
+  begin
+    Station := FindAnyStation(Planet);
+    if Station = nil then
+    begin
+      Emit('stale shared ship skipped: no station');
+      Exit;
+    end;
+    JoinPair(Planet, A, B);
+    DockAt(A, Station);
+    DockAt(B, Station);
+    Station.ModernizationSponsor := True;
+    Item := THull.Create;
+    THull(Item).Init(10, 1, 0, 1, -1, False);
+    Station.Inventory.Add(Item);
+    A.Player.FreeExperience := 100;
+    B.Player.FreeExperience := 200;
+    Station.FreeExperience := 7;
+    // B saw the item in the station's hold before A came.
+    Expect(TryFor(B, OpenShipCommand(Station)) = '', 'the first open was refused');
+    Expect(TryFor(B, NewCommand(ckRefreshHoldView)) = '', 'the hold view was refused');
+    Cell := HoldCellOf(B, Item);
+    Expect(Cell >= 0, 'the station''s hold does not show the item');
+    Expect(TryFor(B, CloseShipCommand) = '', 'the close was refused');
+    // A opens the ship, and B cannot while A has it open.
+    Expect(TryFor(A, OpenShipCommand(Station)) = '', 'the open of a free ship was refused');
+    Expect(Station.FreeExperience = 100, 'the ship does not show the editor''s experience');
+    ExpectRefused(B, OpenShipCommand(Station), rrInUse, 'a second human opening the ship');
+    Expect(
+        (B.EditedShip = nil) and (B.Player.FreeExperience = 200) and (Station.FreeExperience = 100),
+        'the refused open changed the experience'
+    );
+    // A takes the item and stores it.
+    Expect(TryFor(A, NewCommand(ckRefreshHoldView)) = '', 'the hold view was refused');
+    Expect(TryFor(A, TakeCellCommand(HoldCellOf(A, Item), Item)) = '', 'the first take was refused');
+    Command := NewCommand(ckStoreHeld);
+    AddInt(Command, -1);
+    AddInt(Command, 1);
+    Expect(TryFor(A, Command) = '', 'the item could not be stored');
+    Expect(TryFor(A, CloseShipCommand) = '', 'the close was refused');
+    Expect(
+        (A.EditedShip = nil) and (A.Player.FreeExperience = 100) and (Station.FreeExperience = 7),
+        'the close did not give the experience back'
+    );
+    // B opens again, with its view where the cell still shows the item.
+    Problem := CountItems([Station.Inventory], [A, B], Before);
+    Expect(Problem = '', Problem);
+    Expect(TryFor(B, OpenShipCommand(Station)) = '', 'the open after the editor left was refused');
+    ExpectRefused(B, TakeCellCommand(Cell, Item), rrItemGone, 'a take from a stale cell');
+    Command := NewCommand(ckTakeHoldEntry);
+    AddInt(Command, Cell);
+    AddInt(Command, 0);
+    ExpectRefused(B, Command, rrItemGone, 'a take from a stale cell, as an old log has it');
+    Expect(
+        (B.SelectedHoldKind = phkEmpty) and (B.SelectedHoldItem = nil),
+        'the refused take holds the item'
+    );
+    Problem := CountItems([Station.Inventory], [A, B], After);
+    Expect(Problem = '', Problem);
+    Expect(After = Before, Format('the items went from %d to %d', [Before, After]));
+    // B goes without closing the screen (a disconnect holds its position): the ship is free.
+    SubmitKindFor(B, ckHoldPosition);
+    Expect(
+        (B.EditedShip = nil) and (B.Player.FreeExperience = 200) and (Station.FreeExperience = 7),
+        'holding position did not free the ship'
+    );
+    Expect(TryFor(A, OpenShipCommand(Station)) = '', 'the ship stayed taken after its editor went');
+    Expect(TryFor(A, CloseShipCommand) = '', 'the close was refused');
+    Emit(Format('stale shared ship station=%d item=%d ok', [Station.Id, Item.Id]));
+  end;
+
+  // A second payment for a station's modernization, which the first one bought.
+  procedure CheckModernization;
+  var
+    Station: TRuins;
+    Planet: TPlanet;
+    A, B: THuman;
+    Command: TPlayerCommand;
+  begin
+    Station := FindAnyStation(Planet);
+    if Station = nil then
+    begin
+      Emit('stale modernization skipped: no station');
+      Exit;
+    end;
+    JoinPair(Planet, A, B);
+    DockAt(A, Station);
+    DockAt(B, Station);
+    Station.ModernizationSponsor := False;
+    Command := NewCommand(ckPayForModernization);
+    AddInt(Command, Max(1, Station.CalculateEquippedItemCostWithoutHull));
+    Expect(TryFor(A, Command) = '', 'the first payment was refused');
+    Expect(Station.ModernizationSponsor, 'the first payment bought nothing');
+    ExpectRefused(B, Command, rrOfferGone, 'the second payment');
+    Emit(Format('stale modernization station=%d ok', [Station.Id]));
+  end;
+
+  // A ranger in space in a star with a planet humans can join at; nil when there is none.
+  function FindRangerInSpace(out Planet: TPlanet): TShip;
+  var
+    I, J: Integer;
+    Star: TStar;
+    Ship: TShip;
+  begin
+    Result := nil;
+    Planet := nil;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+    begin
+      Star := TStar(Galaxy.Stars[I]);
+      if (Result <> nil) or (JoinPlanetIn(Star) = nil) then
+        Continue;
+      for J := 0 to Star.Ships.Count - 1 do
+      begin
+        Ship := TShip(Star.Ships[J]);
+        if (Result = nil) and (Ship is TRanger) and not IsHuman(Ship) and Ship.InNormalSpace then
+        begin
+          Result := Ship;
+          Planet := JoinPlanetIn(Star);
+        end;
+      end;
+    end;
+  end;
+
+  // Gifts beyond the money, a truce that would replace another human's, and a deposit beyond
+  // the money.
+  procedure CheckGiftsTruceDeposit;
+  var
+    Partner: TShip;
+    Planet: TPlanet;
+    Station: TRuins;
+    A, B: THuman;
+    Command: TPlayerCommand;
+    Money: Integer;
+  begin
+    Partner := FindRangerInSpace(Planet);
+    if Partner = nil then
+      Emit('stale gift skipped: no ranger in space')
+    else
+    begin
+      JoinPair(Planet, A, B);
+      A.TalkShip := Partner;
+      A.Player.SetMoney(50);
+      Money := Partner.Money;
+      Command := NewCommand(ckGivePartnerGift);
+      AddInt(Command, 100);
+      ExpectRefused(A, Command, rrNoMoney, 'a partner gift beyond the money');
+      Command := NewCommand(ckGivePiratePartnerGift);
+      AddInt(Command, 100);
+      ExpectRefused(A, Command, rrNoMoney, 'a pirate partner gift beyond the money');
+      Expect(Partner.Money = Money, 'a refused gift paid the partner');
+      Command := NewCommand(ckGivePartnerGift);
+      AddInt(Command, 50);
+      Expect(TryFor(A, Command) = '', 'a gift of the money there is was refused');
+      Expect(
+          (A.Player.Money = 0) and (Partner.Money = Money + 50),
+          'the gift did not move its money'
+      );
+      A.TalkShip := nil;
+      // A has a truce with the ranger; B's offer would replace it.
+      Partner.TruceWithShip(A.Player);
+      B.TalkShip := Partner;
+      Command := NewCommand(ckShowTruceOffer);
+      Expect(TryFor(B, Command) = '', 'the truce offer was refused');
+      Expect(TalkOutcome = toRefused, 'the ranger offered a second human a truce');
+      Command := NewCommand(ckAcceptTruceOffer);
+      AddInt(Command, 10);
+      ExpectRefused(B, Command, rrTargetGone, 'a truce that replaces another human''s');
+      Expect(
+          (Partner.TruceShip = A.Player) and (A.Player.TruceShip = Partner),
+          'the refused truce replaced the first'
+      );
+      B.TalkShip := nil;
+      Emit(Format('stale gift truce partner=%d ok', [Partner.Id]));
+    end;
+    Station := FindStation(rstBusinessCenter, Planet);
+    if Station = nil then
+    begin
+      Emit('stale deposit skipped: no business center');
+      Exit;
+    end;
+    JoinPair(Planet, A, B);
+    DockAt(A, Station);
+    A.Player.SetMoney(1000);
+    Command := NewCommand(ckOpenDeposit);
+    AddInt(Command, 5000);
+    AddFloat(Command, 3.0);
+    ExpectRefused(A, Command, rrNoMoney, 'a deposit beyond the money');
+    Expect(A.Player.DepositAmount = 0, 'the refused deposit was opened');
+    Command := NewCommand(ckOpenDeposit);
+    AddInt(Command, 1000);
+    AddFloat(Command, 3.0);
+    Expect(TryFor(A, Command) = '', 'a deposit of the money there is was refused');
+    Expect(
+        (A.Player.DepositAmount = 1000) and (A.Player.Money = 0),
+        'the deposit did not take its money'
+    );
+    Emit(Format('stale deposit station=%d ok', [Station.Id]));
+  end;
+
+  // Another human's medals and interceptors, and a configuration that is not there.
+  procedure CheckOwnership;
+  var
+    Planet: TPlanet;
+    A, B: THuman;
+    Command: TPlayerCommand;
+    I, First, Visible: Integer;
+  begin
+    Planet := nil;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+      if Planet = nil then
+        Planet := JoinPlanetIn(TStar(Galaxy.Stars[I]));
+    Expect(Planet <> nil, 'no planet to join at');
+    JoinPair(Planet, A, B);
+    if A.Player.AwardIds = nil then
+      A.Player.AwardIds := TList.Create;
+    while A.Player.AwardIds.Count < 2 do
+      A.Player.AwardIds.Add(Pointer(PtrInt(A.Player.AwardIds.Count + 1)));
+    First := PtrInt(A.Player.AwardIds[0]);
+    Visible := A.Player.AwardVisibleCount;
+    Command := NewCommand(ckExchangeAwards);
+    AddRef(Command, A.Player);
+    AddInt(Command, 0);
+    AddInt(Command, 1);
+    ExpectRefused(B, Command, rrOther, 'reordering another human''s medals');
+    Expect(PtrInt(A.Player.AwardIds[0]) = First, 'the refused exchange moved the medals');
+    Expect(TryFor(A, Command) = '', 'reordering the human''s own medals was refused');
+    Command := NewCommand(ckChangeAwardVisibleCount);
+    AddRef(Command, A.Player);
+    AddInt(Command, -1);
+    ExpectRefused(B, Command, rrOther, 'changing another human''s shown medals');
+    Expect(A.Player.AwardVisibleCount = Visible, 'the refused change showed other medals');
+    Command := NewCommand(ckRecallInterceptors);
+    AddRef(Command, A.Player);
+    ExpectRefused(B, Command, rrTargetGone, 'recalling interceptors that are not the human''s');
+    Command := NewCommand(ckChooseEquipmentConfiguration);
+    AddInt(Command, 10);
+    AddInt(Command, 1);
+    ExpectRefused(A, Command, rrOther, 'an equipment configuration that is not there');
+    Emit('stale ownership ok');
+  end;
+
+  // A side change priced up by another human's, and the nodes of an empty base.
+  procedure CheckPirateBase;
+  var
+    Station: TRuins;
+    Planet: TPlanet;
+    A, B: THuman;
+    Command: TPlayerCommand;
+    I, Quote, Owner: Integer;
+  begin
+    Station := FindStation(rstPirateBase, Planet);
+    if Station = nil then
+    begin
+      Emit('stale pirate base skipped: no pirate base');
+      Exit;
+    end;
+    JoinPair(Planet, A, B);
+    DockAt(A, Station);
+    DockAt(B, Station);
+    // The quote, as TfRuinsTalk.ShowPirateBaseSideChangeDialog computes it.
+    Quote := Galaxy.ComputeScaledHugeMoney(2);
+    for I := Galaxy.GalaxyEvents.Count - 1 downto 0 do
+    begin
+      if TGalaxyEvent(Galaxy.GalaxyEvents[I]).Turn + 365 < Galaxy.CurrentTurn then
+        Break;
+      if TGalaxyEvent(Galaxy.GalaxyEvents[I]).EventType = 'PlayerChangesSide' then
+        Quote := Min(Int64(100000000), Round(Quote * 1.5));
+    end;
+    if Quote >= 100000000 then
+      Emit('stale side change skipped: the price is at its limit')
+    else
+    begin
+      Command := NewCommand(ckChangeSide);
+      AddInt(Command, Quote);
+      Expect(TryFor(A, Command) = '', 'the first side change was refused');
+      Owner := B.Player.OwnerId;
+      ExpectRefused(B, Command, rrOfferGone, 'a side change at a price that went up');
+      Expect(B.Player.OwnerId = Owner, 'the refused side change changed the side');
+      Emit(Format('stale side change quote=%d ok', [Quote]));
+    end;
+    Station.NodeReserve := 0;
+    ExpectRefused(A, NewCommand(ckBuyPirateNodes), rrOutOfStock, 'nodes of a base that has none');
+    Emit(Format('stale pirate nodes station=%d ok', [Station.Id]));
+  end;
+
 begin
   Result := 0;
   Joined := 0;
@@ -2492,6 +2861,11 @@ begin
     CheckSaleInSpace;
     CheckMap;
     CheckSurfaceLoot;
+    CheckSharedShip;
+    CheckModernization;
+    CheckGiftsTruceDeposit;
+    CheckOwnership;
+    CheckPirateBase;
     Emit('stale commands ok');
   except
     on E: EAbort do

@@ -577,6 +577,11 @@ begin
               * (Galaxy.AverageRangerCapital div 100)
               * OwnerInfo[P.CurrentPlanet.OwnerId].FuelPriceFactor
       );
+  // CHANGE: BUGFIX - The government offers the bribe only for money the human has
+  // (TfGov.ShowBribeOffer); a command the money does not cover stopped it at 0 and bought the
+  // relation all the same (docs/network.md, Commands).
+  if P.Money < Cost then
+    raise ECommandRefused.CreateReason(rrNoMoney, 'PayBribe: not enough money');
   P.SetMoney(P.Money - Cost);
   if P.CurrentPlanet.OwnerId = Byte(oiPirate) then
   begin

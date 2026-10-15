@@ -214,7 +214,8 @@ def check_script_routing(args, binary: Path, save: Path) -> tuple[bool, str]:
     music and gets a declining player's answers; a command nested in its command is its own;
     its takeoff and end-turn requests are its own, and its commands clear only its own; its
     battles and videos are queued only in its own command, and only its own report finishes
-    them; the talk builtins read the talking human's talk; and its ruins mode opens no screen.
+    them; a video while its ship screen shows is not queued (its machine plays it at once and
+    reports nothing); the talk builtins read the talking human's talk; and its ruins mode opens no screen.
     """
     code, output = simulate(binary, args.game_dir, save, ["--sim-script-routing"])
     lines = output.splitlines()
@@ -232,6 +233,12 @@ def check_stale_commands(args, binary: Path, save: Path) -> tuple[bool, str]:
     new station, building a ship at a Dominion with a shop part and relocating the Dominion (and
     the orders after it), selling to a ranger in space that can pay one sale, buying a map, and
     picking up surface loot (the second pickup of a moved entry goes through, found by its id).
+    Also: a sponsored station's ship is open to one human at a time (the experience it lends
+    comes back, also when the human goes without closing it), and a take from a hold cell another
+    human emptied is refused without holding the item; a second payment for a modernization;
+    gifts and a deposit beyond the money; a truce that would replace another human's; another
+    human's medals and interceptors; an equipment configuration that is not there; a side
+    change whose price went up; and nodes from an empty pirate base.
     """
     code, output = simulate(binary, args.game_dir, save, ["--sim-stale-commands"])
     lines = output.splitlines()
@@ -733,7 +740,8 @@ def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
     load gave, so this checks that a load gives back what a new game saves (the outline of the
     hidden constellation, for one). The run also has the host refuse a client's purchase
     (--sim-net-buy-race, check_refusal), and the client submit a command that submits another
-    from inside it, which the host must run once (--sim-net-nested)."""
+    from inside it, which the host must run once (--sim-net-nested), and a session flag, which
+    only the host sets: the host refuses it, and its flag stays."""
     label = "new game, 2 humans networked"
     # A new game loads no save, so its commands are not recorded (the log starts at a load).
     problem, host_output, outputs = run_network(args, binary, None, 1, race=True, nested=True)
@@ -753,10 +761,27 @@ def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
         return False, [f"{label}: the client did not run its nested command: {sent}"]
     if not nested or nested[0]["outer"] != "1" or nested[0]["inner"] != "1":
         return False, [f"{label}: the host did not run the client's nested command once: {nested}"]
+    flag_sent = [line for output in outputs for line in net_lines(output, "net client session flag ")]
+    flag_host = net_lines(host_output, "net host session flag ")
+    flag_failed = [
+        line for line in net_lines(host_output, "net command failed ")
+        if line.get("kind") == "SetSessionFlag" and line.get("reason", "").startswith("other")
+    ]
+    flag_refused = [
+        line for output in outputs for line in net_lines(output, "net client refused ")
+        if line.get("kind") == "SetSessionFlag"
+    ]
+    if not flag_sent or not flag_host:
+        return False, [f"{label}: no session flag probe: {flag_sent} {flag_host}"]
+    if flag_host[0]["text-quests"] == flag_sent[0]["text-quests"]:
+        return False, [f"{label}: a client's session flag changed the host's"]
+    if not flag_failed or not flag_refused:
+        return False, [f"{label}: the host did not refuse a client's session flag: {flag_failed} {flag_refused}"]
     return True, [
         f"{label}: {NET_DAYS} days, client hashes match the host's",
         f"{label}: {note}",
         f"{label}: a command a client submits from inside another reaches the host once",
+        f"{label}: a client's session flag is refused, and the host's stays",
     ]
 
 

@@ -106,6 +106,9 @@ type
     // CHANGE: ENHANCEMENT - Tells the peer that its command Sequence raised E here, and why
     // (CommandResult); logs it. Thread-safe: the turn thread calls it in a remote dialogue.
     procedure CommandFailed(Peer: THostPeer; Sequence: Cardinal; const Command: TPlayerCommand; E: Exception);
+    // CHANGE: BUGFIX - Refuses a command only the host's human may give (IsHostOnlyCommand),
+    // which a peer sent: it is not queued or run, and the peer is told (CommandFailed).
+    procedure RefuseHostOnlyCommand(Peer: THostPeer; Sequence: Cardinal; const Command: TPlayerCommand);
   public
     // Joins wait while this is set; the headless host sets it until every client is there,
     // so that the humans join in the same order every run (by name).
@@ -329,6 +332,13 @@ begin
   Result := nil;
 end;
 
+// CHANGE: BUGFIX - Whether only the host's human may give the command: the session flags are
+// the host's (docs/humans.md, Session flags; docs/network.md, Commands). A peer's is refused.
+function IsHostOnlyCommand(const Command: TPlayerCommand): Boolean;
+begin
+  Result := Command.Kind = ckSetSessionFlag;
+end;
+
 procedure TNetHost.Refuse(Peer: THostPeer; const Reason: WideString);
 var
   Payload: TBufEC;
@@ -388,6 +398,8 @@ begin
                   [CommandKindName(Command.Kind), Peer.HumanId, Command.Actor]
               )
           )
+        else if IsHostOnlyCommand(Command) then
+          RefuseHostOnlyCommand(Peer, Sequence, Command)
         else
         begin
           I := Length(Peer.Queue);
@@ -631,7 +643,11 @@ begin
     Command := NewCommand(ckHoldPosition);
     Command.Actor := Cardinal(Human.Id);
     SubmitCommand(Command);
-  end;
+  end
+  else
+    // CHANGE: BUGFIX - HoldPosition frees a ship whose screen the human had open; without it,
+    // nothing else would (aHuman.THuman.EditedShip).
+    Human.ReleaseShipScreen;
 end;
 
 procedure TNetHost.ProcessLeaving;
@@ -934,6 +950,25 @@ begin
   end;
 end;
 
+procedure TNetHost.RefuseHostOnlyCommand(
+    Peer: THostPeer;
+    Sequence: Cardinal;
+    const Command: TPlayerCommand
+);
+var
+  Refusal: ECommandRefused;
+begin
+  Refusal := ECommandRefused.CreateReason(
+      rrOther,
+      CommandKindName(Command.Kind) + ': only the host gives this command'
+  );
+  try
+    CommandFailed(Peer, Sequence, Command, Refusal);
+  finally
+    Refusal.Free;
+  end;
+end;
+
 procedure TNetHost.BeginDay;
 begin
   FDayUnderWay := True;
@@ -1076,6 +1111,8 @@ begin
                         [CommandKindName(Command.Kind), Peer.HumanId, Command.Actor]
                     )
                 )
+              else if IsHostOnlyCommand(Command) then
+                RefuseHostOnlyCommand(Peer, Sequence, Command)
               else if Command.Kind = ckEndTurn then
                 // Not an answer: it waits for the next day with the rest of the queue.
                 Peer.Deferred.Add(TNetMessage.Create(Kind, Payload.Data, Payload.DataSize))

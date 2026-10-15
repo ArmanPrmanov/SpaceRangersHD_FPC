@@ -321,10 +321,11 @@ begin
     Check(DecodeCommandResult(Buffer).Reason = rrOther, 'an unknown refusal reason is Other');
     // The reasons of the stale-copy checks travel in the same byte.
     Buffer.Clear;
-    Outcome.Reason := rrNoRoom;
+    Outcome.Reason := rrInUse;
     EncodeCommandResult(Outcome, Buffer);
     Buffer.SetPosition(0);
-    Check(DecodeCommandResult(Buffer).Reason = rrNoRoom, 'the last refusal reason round trips');
+    Check(DecodeCommandResult(Buffer).Reason = rrInUse, 'the last refusal reason round trips');
+    CheckText('in-use', WideString(RefusalReasonName(rrInUse)), 'reason names');
     CheckText('offer-gone', WideString(RefusalReasonName(rrOfferGone)), 'reason names');
     CheckText('target-gone', WideString(RefusalReasonName(rrTargetGone)), 'reason names');
     CheckText('no-room', WideString(RefusalReasonName(rrNoRoom)), 'reason names');

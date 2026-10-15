@@ -4116,7 +4116,8 @@ end;
 
 procedure TfRuinsTalk.AcceptPirateBaseSideChange(Action: PtrInt);
 begin
-  ChangeSide;
+  // The command carries the price the dialog quoted.
+  ChangeSide(StationServiceQuoteCost);
   StationServiceQuoteCost := StationAmount;
   SoundManager.PlaySound('Sound.Sell');
   TrySetAchievementProgress('SIDECHANGER', LocalPlayer.SideChangeCount);
@@ -9597,7 +9598,8 @@ procedure TfRuinsTalk.AcceptDominionWarOperation(Action: PtrInt);
 begin
   DialogText := LocalizedColorText('FormRuins.CB.WarPlans.WarOperation.CBAfterOk');
   SoundManager.PlaySound('Sound.Sell');
-  if not OrderPirateRaid then
+  // The command carries the price the dialog quoted.
+  if not OrderPirateRaid(StationServiceQuoteCost) then
   begin
     StationServiceQuoteCost := StationAmount;
     DialogText :=

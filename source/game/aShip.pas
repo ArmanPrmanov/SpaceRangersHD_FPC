@@ -3985,6 +3985,8 @@ begin
     Exit;
   // The shop it had open where it died takes its stock back.
   RestoreTemporaryShopStock(Human);
+  // CHANGE: BUGFIX - And a ship whose screen it had open is free for the others.
+  Human.ReleaseShipScreen;
   Human.PlayerStar := Planet.CurrentStar;
   Text := LocalizedColorText('Multiplayer.Respawned');
   if Text = '' then

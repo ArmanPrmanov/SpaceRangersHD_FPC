@@ -205,7 +205,8 @@ const
       'Multiplayer.RefusedItemGone',
       'Multiplayer.RefusedOfferGone',
       'Multiplayer.RefusedTargetGone',
-      'Multiplayer.RefusedNoRoom'
+      'Multiplayer.RefusedNoRoom',
+      'Multiplayer.RefusedInUse'
   );
   English: array[TRefusalReason] of WideString = (
       'The host refused your last action.',
@@ -214,7 +215,8 @@ const
       'The host refused your action: the item is gone.',
       'The host refused your action: the offer is no longer there.',
       'The host refused your action: things changed before it arrived.',
-      'The host refused your sale: the buyer has no room for it.'
+      'The host refused your sale: the buyer has no room for it.',
+      'The host refused your action: another player is using it.'
   );
 begin
   Result := LocalizedColorText(Keys[Reason]);

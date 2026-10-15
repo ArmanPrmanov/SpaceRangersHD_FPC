@@ -162,7 +162,10 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   rest ([commands.md](commands.md), Threads). The host's remote dialogue gets
   only such commands too.
 - The host refuses a command whose actor is not the peer's human, and queues
-  the rest per peer. It does not execute them as they arrive: arrival order
+  the rest per peer. A command only the host's human gives (`SetSessionFlag`:
+  the session flags are the host's, [humans.md](humans.md)) is refused as it
+  arrives, also in a remote dialogue, and the peer gets a `CommandResult`
+  (`rrOther`); it is never queued (`TNetHost.RefuseHostOnlyCommand`). It does not execute them as they arrive: arrival order
   depends on the network, and the day's outcome must not.
 - A peer is **ready** when its queue holds an `EndTurn` (kind 43), or when its
   human does not hold the day anyway (`HumanHoldsDay` is false: continuing
@@ -187,13 +190,14 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
 
   | Reason | Byte | Log | Raised by |
   | --- | --- | --- | --- |
-  | `rrOther` | 0 | `other` | any other exception; also a sale in space of goods the seller does not carry, and a dominator program the human has none of |
-  | `rrOutOfStock` | 1 | `out-of-stock` | a purchase of goods beyond the stock (`TShip.CheckGoodsPurchase`) |
-  | `rrNoMoney` | 2 | `no-money` | a purchase of goods or equipment, a refuel, reload or rockets the human cannot pay; a sale in space the partner cannot pay in full; a ship built at a Dominion, a map, a satellite, an investment or a Dominion order the human cannot pay |
-  | `rrItemGone` | 3 | `item-gone` | a shop command whose item (by id) the shop's stock no longer holds (`aShopActions.ShopItemArg`); a ship built at a Dominion with a part no longer in the shop, the hold or the storage, or named twice; surface loot (by id) no longer on the planet |
-  | `rrOfferGone` | 4 | `offer-gone` | a station's one-off special ship already sold; a satellite offer that is not the one the human accepted, or no more satellites allowed; an investment the business center would not offer now (too soon, or the star or its constellation has the station or no room for it); a map of a constellation that is charted or no longer an uncharted neighbour |
-  | `rrTargetGone` | 5 | `target-gone` | a request for protection when the partner is after no ship; a dominator a program already hacked; a Dominion relocation, ambush or assault when the Dominion has other plans (it flies or teleports, a script controls it, or it lacks the energy), the star has a Dominion, or an ambush at the star is under way |
+  | `rrOther` | 0 | `other` | any other exception; also a sale in space of goods the seller does not carry, a dominator program the human has none of, another human's medals, an equipment configuration that is not there, and a client's `SetSessionFlag` |
+  | `rrOutOfStock` | 1 | `out-of-stock` | a purchase of goods beyond the stock (`TShip.CheckGoodsPurchase`); nodes from a pirate base that has none |
+  | `rrNoMoney` | 2 | `no-money` | a purchase of goods or equipment, a refuel, reload or rockets the human cannot pay; a sale in space the partner cannot pay in full; a ship built at a Dominion, a map, a satellite, an investment or a Dominion order the human cannot pay; a repair of the held item or of everything, a bribe, a gift to a partner, a deposit, a modernization, a side change, a pirate raid or nodes the money does not cover |
+  | `rrItemGone` | 3 | `item-gone` | a shop command whose item (by id) the shop's stock no longer holds (`aShopActions.ShopItemArg`); a ship built at a Dominion with a part no longer in the shop, the hold or the storage, or named twice; surface loot (by id) no longer on the planet; a hold cell whose item is no longer in the edited ship, or (`TakeHoldEntry`) is not the item the sender's cell showed |
+  | `rrOfferGone` | 4 | `offer-gone` | a station's one-off special ship already sold; a satellite offer that is not the one the human accepted, or no more satellites allowed; an investment the business center would not offer now (too soon, or the star or its constellation has the station or no room for it); a map of a constellation that is charted or no longer an uncharted neighbour; a station's modernization someone has paid for; a side change or pirate raid whose price went above the quote |
+  | `rrTargetGone` | 5 | `target-gone` | a request for protection when the partner is after no ship; a dominator a program already hacked; a Dominion relocation, ambush or assault when the Dominion has other plans (it flies or teleports, a script controls it, or it lacks the energy), the star has a Dominion, or an ambush at the star is under way; a truce with a ship that keeps one with another human (the offer itself is declined); a recall of interceptors that are not the human's |
   | `rrNoRoom` | 6 | `no-room` | a sale in space that does not fit in the partner's hold |
+  | `rrInUse` | 7 | `in-use` | opening the screen of a ship (not the human's own ranger) another human has open (`THuman.EditedShip`, [humans.md](humans.md)) |
 
   The checks are those the screens make before they offer the action, so they
   never fire in a single-player game; they refuse a command a client predicted
@@ -206,7 +210,7 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   refusal to its player as a message bubble of its human (`TNetClient.ShowRefusal`),
   with a `Multiplayer.Refused*` text: `RefusedOutOfStock` ("The host refused
   your purchase: not enough in stock."), `RefusedNoMoney`, `RefusedItemGone`,
-  `RefusedOfferGone`, `RefusedTargetGone`, `RefusedNoRoom`, `RefusedOther`
+  `RefusedOfferGone`, `RefusedTargetGone`, `RefusedNoRoom`, `RefusedInUse`, `RefusedOther`
   (English fallbacks, as Waiting's texts). The next state
   replaces the human's bubbles, so the client shows the refusals of the day
   again after applying it. Today the host sends `CommandResult` for refusals
@@ -599,7 +603,10 @@ arcade or planet battle or video that the client's command starts is queued on
 both for the client's human: the client plays it and reports the outcome by a
 command, which finishes the client's request on the host, never the host's
 own. One that the host's day or another human's command starts for the
-client's human is not started, since the client never sees it. A command that
+client's human is not started, since the client never sees it. A video that
+starts while the client's ship screen shows (its own `OpenShipScreen` came, its
+`CloseShipScreen` has not: `THuman.ShipScreenShown`) plays at once on the
+client, which reports nothing, so the host does not queue it. A command that
 a client's command submits from inside it is the client's human's (the actor
 of the executing command, or the script's human), not the host's.
 
@@ -720,7 +727,10 @@ game is not recorded (the command log starts at a load), so there only the
 refusal is checked. In that run the client also submits, on its first day, a
 command whose executor submits another one (`--sim-net-nested`, two probe kinds
 registered only then): the client must send the outer one only, and the host
-must run each once (`net host nested outer=1 inner=1`).
+must run each once (`net host nested outer=1 inner=1`). It then sets a session
+flag, which the host must refuse (`net command failed ... kind=SetSessionFlag`,
+and the client's `net client refused`) without changing its own
+(`net host session flag text-quests=` differs from what the client predicted).
 
 The headless runner (`HeadlessNet`):
 
@@ -800,9 +810,6 @@ star's film once; every client in that star gets it.
   line is in the host's language (the host builds the text); a talk a client
   cannot show (it is on another screen than the star map) is declined, not
   queued; one held for a film's end is declined after 60 s.
-- A video a client's command starts on the client's ship screen plays there at
-  once, but the host queues it for the client's human (it cannot see the
-  client's screen), and no report finishes it there.
 - The script dialogue state (`Session.ScriptDialogIndex`, `CurrentScript`, the
   injected answers and overrides) is still one for all humans, and scripts are
   named by index.

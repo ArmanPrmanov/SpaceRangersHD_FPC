@@ -88,6 +88,16 @@ type
     // The edited ship's own free experience while the screen shows the player's instead;
     // -1 when it does not.
     SavedShipExperience: Integer;
+    // CHANGE: BUGFIX - The ship whose screen the human has open, from the OpenShipScreen
+    // command to the CloseShipScreen that leaves it (also while the screen is closed to show
+    // another one and comes back), and whether the ship screen shows now (until any
+    // CloseShipScreen). Another human may not open a ship one human has open, but its own
+    // ranger (aHoldActions, OpenShipScreen): two humans editing a sponsored station's ship
+    // swapped their experience and took items by stale hold cells. Session state, not game
+    // state: not saved; ReleaseShipScreen clears it when the human leaves, disconnects or
+    // respawns, and a load (RebuildHumans) forgets it.
+    EditedShip: TShip;
+    ShipScreenShown: Boolean;
     // Prices while trading with a ship in space.
     TradeRows: array[0..7] of TGoodsShopTradeRow;
     // Whether the star map shows its weapon panel.
@@ -174,6 +184,10 @@ type
     function HasUsedCheat(const Name: WideString): Boolean;
     function HasCheated: Boolean;
     procedure ClearCheats;
+    // Closes the ship screen the human has open (EditedShip) as far as the game is concerned:
+    // the ship's experience comes back from the player's, as CloseShipScreen does, and no
+    // human has the ship open any more. For a human whose machine will not close it.
+    procedure ReleaseShipScreen;
   end;
   // The humans in join order. Every TPlayer in the galaxy is in it, and nothing else is.
   THumanList = class(TList)
@@ -598,6 +612,8 @@ begin
   Human := HumanOf(Player);
   if Human = nil then
     Exit;
+  // CHANGE: BUGFIX - A ship the human left with open is free for the others.
+  Human.ReleaseShipScreen;
   Session.Humans.Remove(Human);
   Human.Player := nil;
   if Human <> LocalHuman then
@@ -614,6 +630,9 @@ begin
       Session.Humans[I].Free;
   Session.Humans.Clear;
   LocalHuman.Player := nil;
+  // CHANGE: BUGFIX - The ship it had open is not in the galaxy that replaces this one.
+  LocalHuman.EditedShip := nil;
+  LocalHuman.ShipScreenShown := False;
   if Local = nil then
     Exit;
   AddHuman(Local);
@@ -1049,6 +1068,24 @@ begin
   FinalizePlayerHoldView(Self);
   GovernmentDialogNames.Free;
   inherited Destroy;
+end;
+
+procedure THuman.ReleaseShipScreen;
+begin
+  if EditedShip = nil then
+    Exit;
+  // OpenShipScreen lent the player's experience to the ship only when SavedShipExperience
+  // was set (aHoldActions.CanUsePlayerExperience).
+  if (SavedShipExperience >= 0) and (Player <> nil) and (EditedShip <> Player) then
+  begin
+    Player.FreeExperience := EditedShip.FreeExperience;
+    EditedShip.FreeExperience := SavedShipExperience;
+  end;
+  SavedShipExperience := -1;
+  if PlayerHoldShip = EditedShip then
+    PlayerHoldShip := nil;
+  EditedShip := nil;
+  ShipScreenShown := False;
 end;
 
 function ActorHuman(const Command: TPlayerCommand): THuman;

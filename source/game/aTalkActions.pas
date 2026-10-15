@@ -789,6 +789,18 @@ begin
   Result := SubmitAmountText(ckDemandCargo, 0, Text);
 end;
 
+// CHANGE: BUGFIX - Whether Ship keeps a truce with a human other than Player, one that still
+// holds on both sides (TShip.TruceWithShip sets both).
+function HasTruceWithOtherHuman(Ship: TShip; Player: TPlayer): Boolean;
+begin
+  Result :=
+      (Ship <> nil)
+          and (Ship.TruceShip <> nil)
+          and (Ship.TruceShip <> Player)
+          and IsHuman(Ship.TruceShip)
+          and (Ship.TruceShip.TruceShip = Ship);
+end;
+
 // Moved from TfTalk.ShowTruceOffer. The refusal's text is the screen's, after its choices.
 procedure ExecuteShowTruceOffer(const Command: TPlayerCommand);
 var
@@ -805,6 +817,10 @@ begin
     TalkOutcome := toHavePact;
   end
   else if H.TalkShip.UnknownVirtualC0(Player) then
+    TalkOutcome := toRefused
+  // CHANGE: BUGFIX - The ship keeps its truce with another human: it refuses this one, which
+  // would replace that one (TShip.TruceShip is one ship). Single player has one human.
+  else if HasTruceWithOtherHuman(H.TalkShip, Player) then
     TalkOutcome := toRefused
   else if H.TalkShip.BuildTrucePaymentResponse(Player, Response, 0) then
   begin
@@ -829,6 +845,11 @@ var
   H: THuman;
 begin
   H := ActorHuman(Command);
+  // CHANGE: BUGFIX - A ship keeps one truce (TShip.TruceShip). Between days a second human's
+  // paid truce silently replaced the first human's, which that human had paid for too
+  // (docs/network.md, Commands). Refused before the payment.
+  if HasTruceWithOtherHuman(H.TalkShip, Actor(Command)) then
+    raise ECommandRefused.CreateReason(rrTargetGone, 'AcceptTruceOffer: the ship has a truce with another human');
   TalkText := Command.Text;
   TalkOutcome :=
       Ord(H.TalkShip.BuildTrucePaymentResponse(Actor(Command), TalkText, IntArg(Command, 0)));
@@ -1264,6 +1285,19 @@ begin
   Result := TalkOutcome <> 0;
 end;
 
+// CHANGE: BUGFIX - The talk screen offers a gift of no more than the money
+// (TfTalk.ShowPartnerGift, DoublePartnerGift). The payment stopped at the money there was while
+// the partner got the whole gift, which made money when another command between days had
+// spent some, or a client named more (docs/network.md, Commands).
+procedure RequireGiftMoney(const Command: TPlayerCommand; Player: TPlayer; Amount: Integer);
+begin
+  if (Amount < 0) or (Player.Money < Amount) then
+    raise ECommandRefused.CreateReason(
+        rrNoMoney,
+        Format('%s: %d is more than the money', [CommandKindName(Command.Kind), Amount])
+    );
+end;
+
 // Moved from TfTalk.GivePartnerGift and PayPartnerGiftMoney.
 procedure ExecuteGivePartnerGift(const Command: TPlayerCommand);
 var
@@ -1274,6 +1308,7 @@ begin
   H := ActorHuman(Command);
   Player := Actor(Command);
   Amount := IntArg(Command, 0);
+  RequireGiftMoney(Command, Player, Amount);
   Change :=
       Round(
           (150 * Amount)
@@ -1306,6 +1341,7 @@ begin
   H := ActorHuman(Command);
   Player := Actor(Command);
   Amount := IntArg(Command, 0);
+  RequireGiftMoney(Command, Player, Amount);
   if H.TalkShip is TNormalShip then
     Change :=
         Round(

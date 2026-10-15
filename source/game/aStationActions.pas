@@ -163,7 +163,8 @@ procedure GiveMicroModuleForNodes(ModuleId, LowCost, MediumCost: Integer);
 
 // The pirate base.
 procedure ChangeNationality(Race: Byte; Portrait: Integer; const Name: WideString; Cost: Integer);
-procedure ChangeSide;
+// QuotedCost is the price the screen showed.
+procedure ChangeSide(QuotedCost: Integer);
 procedure PurchasePirateNodes;
 function PurchasePirateProgram(ProgramIndex: Byte; Cost: Integer): Boolean;
 function PirateBaseRepair: Boolean;
@@ -217,8 +218,8 @@ procedure QueueDominionTravel(Star: TStar; Cost: Integer);
 procedure DropDominionTravel;
 procedure RelocateDominion(Star: TStar);
 // Returns whether pirates were sent (StationTargetStar); StationText names them and
-// StationAmount is the price.
-function OrderPirateRaid: Boolean;
+// StationAmount is the price. QuotedCost is the price the screen showed.
+function OrderPirateRaid(QuotedCost: Integer): Boolean;
 procedure OrderPirateAmbush(Star: TStar);
 procedure OrderPirateAssault(Star: TStar);
 
@@ -846,8 +847,19 @@ end;
 
 // Moved from TfRuinsTalk.RecallInterceptorsFromTarget.
 procedure ExecuteRecallInterceptors(const Command: TPlayerCommand);
+var
+  Ship: TShip;
 begin
-  (RefObject(Command, 0) as TShip).ClearIncomingInterceptors;
+  Ship := RefObject(Command, 0) as TShip;
+  // CHANGE: BUGFIX - As the bridge lists them: the actor's own interceptors only. A client's
+  // command recalled anyone's from any ship, and between days they may have returned or
+  // another human's may have been sent (docs/network.md, Commands).
+  if (Ship = nil) or (Ship.InterceptorSourceShip <> Actor(Command)) then
+    raise ECommandRefused.CreateReason(
+        rrTargetGone,
+        'RecallInterceptors: the human has no interceptors at the ship'
+    );
+  Ship.ClearIncomingInterceptors;
 end;
 
 procedure RecallInterceptorsFrom(Ship: TShip);
@@ -915,6 +927,14 @@ var
   P: TPlayer;
 begin
   P := Actor(Command);
+  // CHANGE: BUGFIX - The station asks for the money only while nobody has paid it
+  // (TfRuinsTalk.OpenStationModernization), and the screen checks the money. Between days a
+  // second human paid for what another human's payment had already bought, and the money
+  // stopped at 0 (docs/network.md, Commands).
+  if (P.DockedTo as TRuins).ModernizationSponsor then
+    raise ECommandRefused.CreateReason(rrOfferGone, 'PayForModernization: the station is paid for');
+  if P.Money < IntArg(Command, 0) then
+    raise ECommandRefused.CreateReason(rrNoMoney, 'PayForModernization: not enough money');
   PayStationModernization(P, Cardinal(IntArg(Command, 0)));
   (P.DockedTo as TRuins).ModernizationSponsor := True;
 end;
@@ -1189,10 +1209,6 @@ var
   P: TPlayer;
 begin
   P := Actor(Command);
-  if P.OwnerId = Byte(oiPirate) then
-    P.OwnerId := RaceToOwner(P.PilotRace)
-  else
-    P.OwnerId := Byte(oiPirate);
   Cost := Galaxy.ComputeScaledHugeMoney(2);
   for I := Galaxy.GalaxyEvents.Count - 1 downto 0 do
   begin
@@ -1201,6 +1217,19 @@ begin
     if TGalaxyEvent(Galaxy.GalaxyEvents[I]).EventType = 'PlayerChangesSide' then
       Cost := Min(Int64(100000000), Round(Cost * 1.5));
   end;
+  // CHANGE: BUGFIX - The command carries the price the screen quoted (a log from before has
+  // none, and pays the price as it stands). Every side change in the last year raises the
+  // price, also another human's between days, and the money stopped at 0
+  // (docs/network.md, Commands). The price was computed after the side changed; it does not
+  // depend on it.
+  if (Length(Command.Ints) > 0) and (Cost > IntArg(Command, 0)) then
+    raise ECommandRefused.CreateReason(rrOfferGone, 'ChangeSide: the price went up');
+  if (Length(Command.Ints) > 0) and (P.Money < Cost) then
+    raise ECommandRefused.CreateReason(rrNoMoney, 'ChangeSide: not enough money');
+  if P.OwnerId = Byte(oiPirate) then
+    P.OwnerId := RaceToOwner(P.PilotRace)
+  else
+    P.OwnerId := Byte(oiPirate);
   StationAmount := Cost;
   P.SetMoney(P.Money - Cost);
   Inc(P.SideChangeCount);
@@ -1253,9 +1282,9 @@ begin
   Event.AddData(Ord(P.OwnerId = Byte(oiPirate)));
 end;
 
-procedure ChangeSide;
+procedure ChangeSide(QuotedCost: Integer);
 begin
-  SubmitSimple(ckChangeSide);
+  SubmitInt(ckChangeSide, QuotedCost);
 end;
 
 // Moved from TfRuinsTalk.BuyPirateBaseNodes.
@@ -1270,10 +1299,17 @@ var
   P: TPlayer;
 begin
   P := Actor(Command);
+  // CHANGE: BUGFIX - As the screen offers them (TfRuinsTalk.ShowPirateBaseNodeDialog): while
+  // the base has nodes, for money the human has. Between days another human may have bought
+  // the reserve, and this purchase paid for none (docs/network.md, Commands).
+  if P.DockedTo.NodeReserve <= 0 then
+    raise ECommandRefused.CreateReason(rrOutOfStock, 'BuyPirateNodes: the base has no nodes');
   Count := (P.DockedTo as TRuins).GetNodeSaleBatchSize;
   Cost := Galaxy.ScaleGoodsPriceByGalaxyAge(Count * 10 * 3);
   Discount := P.GetPirateServiceDiscount;
   DiscountedCost := Max(Int64(1), Cost - Round(Cost / 100 * Discount));
+  if P.Money < DiscountedCost then
+    raise ECommandRefused.CreateReason(rrNoMoney, 'BuyPirateNodes: not enough money');
   P.SetMoney(P.Money - DiscountedCost);
   Dec(P.DockedTo.NodeReserve, Count);
   P.AddPirateCareerActivity(4);
@@ -1842,6 +1878,11 @@ var
   P: TPlayer;
 begin
   P := Actor(Command);
+  // CHANGE: BUGFIX - The screen offers only a deposit the human can pay
+  // (TfRuinsTalk.ShowBusinessCenterDepositDialog). The deposit kept the amount while the
+  // payment stopped at the money there was, which made money (docs/network.md, Commands).
+  if (IntArg(Command, 0) < 0) or (P.Money < IntArg(Command, 0)) then
+    raise ECommandRefused.CreateReason(rrNoMoney, 'OpenDeposit: not enough money');
   P.DepositAmount := Round(IntArg(Command, 0));
   P.DepositInterestRate := FloatArg(Command, 1);
   P.DepositDayCount := 0;
@@ -3125,6 +3166,14 @@ var
 begin
   P := Actor(Command);
   Cost := ApplyRecentDominionOrderSurcharge(Galaxy.ComputeScaledHugeMoney(2));
+  // CHANGE: BUGFIX - The command carries the price the screen quoted (a log from before has
+  // none, and pays the price as it stands). Every Dominion order in the last 60 days raises
+  // it, also another human's between days, and the money stopped at 0 (docs/network.md,
+  // Commands).
+  if (Length(Command.Ints) > 0) and (Cost > IntArg(Command, 0)) then
+    raise ECommandRefused.CreateReason(rrOfferGone, 'OrderPirateRaid: the price went up');
+  if (Length(Command.Ints) > 0) and (P.Money < Cost) then
+    raise ECommandRefused.CreateReason(rrNoMoney, 'OrderPirateRaid: not enough money');
   P.SetMoney(P.Money - Cost);
   if MainPiratePlanet <> nil then
     MainPiratePlanet.ChangeRelationToRanger(P, 10);
@@ -3229,9 +3278,9 @@ begin
   end;
 end;
 
-function OrderPirateRaid: Boolean;
+function OrderPirateRaid(QuotedCost: Integer): Boolean;
 begin
-  SubmitSimple(ckOrderPirateRaid);
+  SubmitInt(ckOrderPirateRaid, QuotedCost);
   Result := StationOutcome <> 0;
 end;
 

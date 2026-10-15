@@ -416,12 +416,50 @@ begin
   end;
 end;
 
+// CHANGE: BUGFIX - A hold cell that shows an item must still have it in the edited ship. The
+// cells are the human's view of the ship (aHold); between days another human may have taken
+// the item from a shared ship (a sponsored station's), and a command from the stale cell held
+// the item before it raised on a ship without it, or ran its scripts (docs/network.md,
+// Commands). A cell without an item, or with goods, is not checked.
+procedure RequireHoldCellItem(const Command: TPlayerCommand; Human: THuman; Entry: TPlayerHoldUnit);
+var
+  Present: Boolean;
+begin
+  if (Entry = nil) or not (Entry.Kind in [phkEquipment, phkArtefact]) then
+    Exit;
+  if Human.PlayerHoldShip = nil then
+    raise Exception.Create(CommandKindName(Command.Kind) + ' needs an open ship screen');
+  if Entry.Item = nil then
+    Present := False
+  else if Entry.Kind = phkEquipment then
+    Present := Human.PlayerHoldShip.Inventory.IndexOf(Entry.Item) >= 0
+  else
+    Present := Human.PlayerHoldShip.Artefacts.IndexOf(Entry.Item) >= 0;
+  if not Present then
+    raise ECommandRefused.CreateReason(
+        rrItemGone,
+        CommandKindName(Command.Kind) + ' names a hold cell whose item is gone'
+    );
+end;
+
 function HoldEntryArg(const Command: TPlayerCommand; Index: Integer): TPlayerHoldUnit;
 var
   H: THuman;
 begin
   H := ActorHuman(Command);
   Result := FindHoldEntry(H, IntArg(Command, Index), IntArg(Command, Index + 1) <> 0);
+  RequireHoldCellItem(Command, H, Result);
+end;
+
+// CHANGE: BUGFIX - The other human who has Ship's screen open (THuman.EditedShip), or nil.
+function OtherShipEditor(Human: THuman; Ship: TShip): THuman;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to Session.Humans.Count - 1 do
+    if (Session.Humans[I] <> Human) and (Session.Humans[I].EditedShip = Ship) then
+      Exit(Session.Humans[I]);
 end;
 
 procedure AddHoldCell(var Command: TPlayerCommand; Index: Integer; Expanded: Boolean);
@@ -693,8 +731,9 @@ end;
 // on the ship and the storage.
 procedure ExecuteOpenShipScreen(const Command: TPlayerCommand);
 var
-  H: THuman;
+  H, Editor: THuman;
   P: TPlayer;
+  Ship: TShip;
   Reentering: Boolean;
   I: Integer;
   Item: TItem;
@@ -702,7 +741,23 @@ begin
   H := ActorHuman(Command);
   P := Actor(Command);
   Reentering := IntArg(Command, 0) <> 0;
-  H.PlayerHoldShip := RefObject(Command, 0) as TShip;
+  Ship := RefObject(Command, 0) as TShip;
+  // CHANGE: BUGFIX - One human at a time edits a ship that is not its own ranger (a sponsored
+  // station's): the screen lends the ship the human's experience until it closes, and takes
+  // hold cells by the human's view of the hold. Two humans interleaving between days swapped
+  // their experience (docs/network.md, Commands). A human always opens its own ranger.
+  if (Ship <> P) and (H.EditedShip <> Ship) then
+  begin
+    Editor := OtherShipEditor(H, Ship);
+    if Editor <> nil then
+      raise ECommandRefused.CreateReason(
+          rrInUse,
+          Format('OpenShipScreen: human %d has ship %d open', [Editor.Id, Ship.Id])
+      );
+  end;
+  H.PlayerHoldShip := Ship;
+  H.EditedShip := Ship;
+  H.ShipScreenShown := True;
   if Reentering then
   begin
     H.PlayerHoldShip.ScriptItemsAct(satOnReEnteringForm, nil, nil, 0);
@@ -847,8 +902,14 @@ begin
     end;
   end;
   P.RefreshStorageBubbles;
+  // CHANGE: BUGFIX - The ship screen no longer shows; leaving it (not to come back) frees the
+  // ship for the other humans (ExecuteOpenShipScreen).
+  H.ShipScreenShown := False;
   if IntArg(Command, 0) = 0 then
+  begin
     H.PlayerHoldShip := nil;
+    H.EditedShip := nil;
+  end;
 end;
 
 procedure CloseShipScreen(Reentering: Boolean);
@@ -937,6 +998,19 @@ var
 begin
   H := ActorHuman(Command);
   Entry := HoldEntryArg(Command, 0);
+  // CHANGE: BUGFIX - The command names the item the sender's cell showed (a log from before
+  // names none, and 0 is a cell of goods): the cell must still show it. Between days another
+  // human may have taken it from a shared ship, and this human's view then shows another item
+  // in the cell, or none (docs/network.md, Commands).
+  if (Length(Command.Ints) >= 3) and (IntArg(Command, 2) <> 0) then
+    if (Entry = nil)
+        or not (Entry.Kind in [phkEquipment, phkArtefact])
+        or (Entry.Item = nil)
+        or (Integer(Entry.Item.Id) <> IntArg(Command, 2)) then
+      raise ECommandRefused.CreateReason(
+          rrItemGone,
+          Format('TakeHoldEntry: item %d is no longer in the hold cell', [IntArg(Command, 2)])
+      );
   if Entry = nil then
     raise Exception.Create('TakeHoldEntry names an empty hold cell');
   TakeHoldEntry(Entry, IntArg(Command, 0), IntArg(Command, 1) <> 0);
@@ -946,9 +1020,16 @@ end;
 procedure TakeHoldEntryAt(Index: Integer; Expanded: Boolean);
 var
   Command: TPlayerCommand;
+  Entry: TPlayerHoldUnit;
 begin
   Command := NewCommand(ckTakeHoldEntry);
   AddHoldCell(Command, Index, Expanded);
+  // The item the cell shows, which the executor checks (0: goods or none).
+  Entry := FindHoldEntry(ActorHuman(Command), Index, Expanded);
+  if (Entry <> nil) and (Entry.Kind in [phkEquipment, phkArtefact]) and (Entry.Item <> nil) then
+    AddInt(Command, Integer(Entry.Item.Id))
+  else
+    AddInt(Command, 0);
   SubmitCommand(Command);
 end;
 
@@ -1185,6 +1266,7 @@ begin
   Expanded := IntArg(Command, 1) <> 0;
   Count := IntArg(Command, 2);
   Entry := FindHoldEntry(H, Index, Expanded);
+  RequireHoldCellItem(Command, H, Entry);
   PutOutcome := poPlaced;
   if (Entry <> nil) and (Entry.Kind in [phkEquipment, phkArtefact]) then
   begin
@@ -1351,6 +1433,7 @@ begin
   Count := IntArg(Command, 2);
   RunScripts := IntArg(Command, 3) <> 0;
   Entry := FindHoldEntry(H, Index, Expanded);
+  RequireHoldCellItem(Command, H, Entry);
   PutOutcome := poAborted;
   if RunScripts
       and (H.SelectedHoldOrigin = 0)
@@ -1535,6 +1618,7 @@ begin
   Index := IntArg(Command, 0);
   Expanded := IntArg(Command, 1) <> 0;
   Entry := FindHoldEntry(H, Index, Expanded);
+  RequireHoldCellItem(Command, H, Entry);
   if H.SelectedHoldItem is TWeapon then
     (H.SelectedHoldItem as TWeapon).Target := nil;
   H.PlayerHoldShip.Inventory.Add(H.SelectedHoldItem);
@@ -1626,6 +1710,7 @@ begin
   Index := IntArg(Command, 0);
   Expanded := IntArg(Command, 1) <> 0;
   Entry := FindHoldEntry(H, Index, Expanded);
+  RequireHoldCellItem(Command, H, Entry);
   H.PlayerHoldShip.Artefacts.Add(H.SelectedHoldItem);
   (H.SelectedHoldItem as TEquipment).EquippedFlag := 0;
   if H.SelectedHoldItem is TArtefactTranclucator then
@@ -2743,6 +2828,11 @@ begin
   RequireHeldItem(Command);
   P := Actor(Command);
   Nodes := IntArg(Command, 0);
+  // CHANGE: BUGFIX - As the screen checks before it repairs (TfShip2.SpecialSlot1Clicked): a
+  // command from a client the money does not cover stopped the money at 0 and repaired the
+  // item all the same (docs/network.md, Commands).
+  if (H.SelectedHoldItem as TEquipment).CalculateRepairCost > P.Money then
+    raise ECommandRefused.CreateReason(rrNoMoney, 'RepairHeld: not enough money');
   if Nodes > 0 then
     P.ConsumeAvailableNodes(Nodes, H.PlayerHoldShip);
   P.SetMoney(P.Money - (H.SelectedHoldItem as TEquipment).CalculateRepairCost);
@@ -2888,6 +2978,10 @@ begin
   end;
   if not P.CanRepairArtefactsAtLocation then
     NodeCost := 0;
+  // CHANGE: BUGFIX - As the screen checks before it asks for the nodes (TfShip2.RepairAllClicked):
+  // the money stopped at 0 and everything was repaired all the same (docs/network.md, Commands).
+  if (Cost + NodeCost > 0) and (P.Money < Cost + NodeCost) then
+    raise ECommandRefused.CreateReason(rrNoMoney, 'RepairAll: not enough money');
   if (NodeCost > 0) and (Nodes <> 0) then
     P.ConsumeAvailableNodes(Nodes, H.PlayerHoldShip);
   if Nodes <> 0 then
@@ -3433,8 +3527,21 @@ begin
 end;
 
 // Moved from TfShip2.MainKeyDown.
+// CHANGE: BUGFIX - The screen offers the ten configurations (TPlayer.EquipmentConfigurations);
+// an index from a client was used unchecked, and range checks are off.
+procedure RequireEquipmentConfigurationIndex(const Command: TPlayerCommand; Index: Integer);
+begin
+  // array[0..9]
+  if (Index < 0) or (Index > 9) then
+    raise ECommandRefused.CreateReason(
+        rrOther,
+        Format('%s: no equipment configuration %d', [CommandKindName(Command.Kind), Index])
+    );
+end;
+
 procedure ExecuteSaveEquipmentConfiguration(const Command: TPlayerCommand);
 begin
+  RequireEquipmentConfigurationIndex(Command, IntArg(Command, 0));
   Actor(Command).SaveEquipmentConfiguration(IntArg(Command, 0));
 end;
 
@@ -3458,6 +3565,7 @@ var
 begin
   P := Actor(Command);
   Index := IntArg(Command, 0);
+  RequireEquipmentConfigurationIndex(Command, Index);
   P.SaveEquipmentConfiguration(P.SelectedEquipmentConfiguration);
   P.SelectedEquipmentConfiguration := Index;
   ConfigurationApplied := P.HasEquipmentConfiguration(Index) and (IntArg(Command, 1) <> 0);
@@ -3731,9 +3839,29 @@ begin
 end;
 
 // Moved from TfRewards.AwardMouseDown.
-procedure ExecuteExchangeAwards(const Command: TPlayerCommand);
+// CHANGE: BUGFIX - The awards screen lets a human change only its own ranger's medals
+// (TfRewards: LocalPlayer = Ship); a client's command named any ship, and indices unchecked.
+procedure RequireOwnAwards(const Command: TPlayerCommand; Ship: TShip);
 begin
-  (RefObject(Command, 0) as TShip).AwardIds.Exchange(IntArg(Command, 0), IntArg(Command, 1));
+  if Ship <> Actor(Command) then
+    raise ECommandRefused.CreateReason(
+        rrOther,
+        CommandKindName(Command.Kind) + ': the medals are not the human''s'
+    );
+end;
+
+procedure ExecuteExchangeAwards(const Command: TPlayerCommand);
+var
+  Ship: TShip;
+begin
+  Ship := RefObject(Command, 0) as TShip;
+  RequireOwnAwards(Command, Ship);
+  if (IntArg(Command, 0) < 0)
+      or (IntArg(Command, 0) >= Ship.AwardIds.Count)
+      or (IntArg(Command, 1) < 0)
+      or (IntArg(Command, 1) >= Ship.AwardIds.Count) then
+    raise ECommandRefused.CreateReason(rrOther, 'ExchangeAwards: no such medal');
+  Ship.AwardIds.Exchange(IntArg(Command, 0), IntArg(Command, 1));
 end;
 
 procedure ExchangeAwards(Ship: TShip; First: Integer; Second: Integer);
@@ -3753,6 +3881,7 @@ var
   Ship: TShip;
 begin
   Ship := RefObject(Command, 0) as TShip;
+  RequireOwnAwards(Command, Ship);
   if IntArg(Command, 0) > 0 then
   begin
     if Ship.AwardVisibleCount < Ship.AwardIds.Count then

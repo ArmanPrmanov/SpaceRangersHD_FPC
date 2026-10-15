@@ -43,6 +43,7 @@ uses
   aHuman,
   aObjectRefs,
   aPlayer,
+  aPlayerActions,
   aSession,
   aShip,
   aGalaxyStruct,
@@ -436,7 +437,10 @@ begin
     if Options.NetBuyRace then
       Emit(Format('net host trades remote=%d host=%d', [RemoteTrades, LocalHuman.Id]));
     if Options.NetNested then
+    begin
       Emit(Format('net host nested outer=%d inner=%d', [NestedOuterRuns, NestedInnerRuns]));
+      Emit(Format('net host session flag text-quests=%d', [Ord(Session.TextQuestsDisabled)]));
+    end;
     Emit(
         Format(
             'done net host days=%d humans=%d day=%d hash=%s',
@@ -705,6 +709,10 @@ begin
         begin
           SubmitCommand(NewCommand(ckNetNestedOuter));
           Emit(Format('net client nested outer=%d inner=%d', [NestedOuterRuns, NestedInnerRuns]));
+          // CHANGE: ENHANCEMENT - The session flags are the host's: it refuses a client's
+          // (NetHost.IsHostOnlyCommand), and the next state undoes this prediction.
+          SetSessionFlagValue(SessionFlagTextQuestsDisabled, not Session.TextQuestsDisabled);
+          Emit(Format('net client session flag text-quests=%d', [Ord(Session.TextQuestsDisabled)]));
         end;
         PlayHumanTurn(LocalHuman, Galaxy.CurrentTurn, Index, Plan);
         LastPlayedDay := Galaxy.CurrentTurn;

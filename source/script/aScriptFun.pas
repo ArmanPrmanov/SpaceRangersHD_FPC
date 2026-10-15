@@ -12241,6 +12241,12 @@ begin
     LogScriptUiDefault('StartVideo');
     Exit;
   end;
+  // CHANGE: BUGFIX - The human's own machine plays it at once on its ship screen (below), and
+  // reports nothing, as single player sets no status for it: the ship screen its commands
+  // opened (THuman.ShipScreenShown) shows there now. Queued here, it waited for a report that
+  // never came (docs/network.md, Commands).
+  if not Local and ScriptHuman.ShipScreenShown then
+    Exit;
   if Local and (GetInnermostScreenLoop = ShipScreen) then
   begin
     ShipScreen.ShipLoopSound.SetVolume(0);

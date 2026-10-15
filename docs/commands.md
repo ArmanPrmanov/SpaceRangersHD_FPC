@@ -77,6 +77,11 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
     reference); without it the map is the first uncharted neighbour, as before.
   - `BuySatellite` (552) carries the offer's item id and the price shown;
     without them it buys the offer as it stands, as before.
+  - `TakeHoldEntry` (207) carries the id of the item the cell showed (0 for
+    goods); without it only the cell's item must still be in the ship.
+  - `ChangeSide` (531) and `OrderPirateRaid` (586) carry the price the dialog
+    quoted; a higher price is refused, as is a price the money does not cover.
+    Without it they pay the price as it stands, as before.
 
 ## Threads
 
@@ -106,7 +111,8 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
   writes a checkpoint for whatever it changed before it raised.
 - An executor that refuses a command for a reason the player should hear
   raises `ECommandRefused` with a `TRefusalReason` (out of stock, not enough
-  money, the item is gone, the offer is gone, the target has changed, no room);
+  money, the item is gone, the offer is gone, the target has changed, no room,
+  another human is using it);
   a host tells the client why ([network.md](network.md), Commands). Where
   another human's command between days can change what a screen offered (a
   shared shop, a one-off offer, a station's order, a constellation's map), the

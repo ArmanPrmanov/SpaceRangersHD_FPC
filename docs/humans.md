@@ -20,6 +20,15 @@ how code refers to humans instead, and how to convert a `GetPlayer` site.
   filmed, the message bubbles, the open shop, the conversation, the hold
   order, the item held on the ship screen's cursor and the government
   negotiation. `HumanOf(Ship)` finds the human for a ranger.
+- **The ship screen.** `THuman.EditedShip` is the ship whose screen the human
+  has open, from `OpenShipScreen` to the `CloseShipScreen` that leaves it (also
+  while the screen is closed to show another one and comes back). One human at
+  a time edits a ship that is not its own ranger (a sponsored station's): another
+  human's `OpenShipScreen` is refused (`rrInUse`), since the screen lends the
+  ship the editor's experience until it closes. `THuman.ReleaseShipScreen`
+  gives the experience back and frees the ship for a human whose machine will
+  not close it: `HoldPosition` (a disconnect), a respawn and leaving the game;
+  a load forgets it. It is not saved.
 - `Actor(Command)` and `ActorHuman(Command)` are the human who issued a
   command. Executors use them, never `LocalHuman`.
 
@@ -158,7 +167,11 @@ Converting the script functions (`aScriptFun`):
     other request is not started: `StartAB` answers 0 and the status
     variables stay as they were. This machine shows only the local human's
     requests (`LocalScriptRequest`). Robot battles are automatic victories in
-    any case (ROADMAP.md, Phase 6).
+    any case (ROADMAP.md, Phase 6). A video for a human who is not local while
+    that human's ship screen shows (`THuman.ShipScreenShown`, set by its own
+    `OpenShipScreen` and cleared by `CloseShipScreen`) is not queued: the
+    human's machine plays it at once on the ship screen and reports nothing,
+    as single player sets no status for it.
   - Leaving or entering ruins mode opens the ruins or return screen only for
     the local human's ranger (`TPlayer.EnterRuinsMode`,
     `CloseRuinsModeScreen`).
@@ -393,7 +406,9 @@ The block starts with `SRHU`, a version and its size. A later version only
 appends fields; a reader reads the fields it knows and skips the rest.
 
 **Session flags** (`Session` in `aSession`) are part of the saved session and
-change only through the `SetSessionFlag` command (`SetSessionFlagValue`):
+change only through the `SetSessionFlag` command (`SetSessionFlagValue`). They
+are the host's: a host refuses a client's `SetSessionFlag` before it is queued
+([network.md](network.md), Commands).
 
 | Flag | Default | Effect |
 | --- | --- | --- |
