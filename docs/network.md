@@ -89,14 +89,15 @@ protocol; never renumber one, add new ones at the end and bump
 | `Refuse` | host → client | reason text; the host then closes |
 | `State` | host → client | state number, base state number (0 = whole), day number, state hash, zstd bytes (`NetDelta`) |
 | `Film` | host → client | day number, star id, zstd bytes of the film (`TEFilm.SaveToBuffer`, `CompressState` with no reference) |
-| `Command` | both | an encoded `TPlayerCommand` (`aCommands.EncodeCommand`) |
+| `Command` | client → host | the client's number for the command (32 bits, from 1 per connection), then an encoded `TPlayerCommand` (`aCommands.EncodeCommand`) |
 | `Ack` | client → host | the number of the last state the client applied |
 
 The host numbers its states from 1. A day number cannot name a base: a join
 between two days sends a state of the same day as the one before it.
-`ProtocolVersion` is 5 (2: `TalkRequest` has its payload; 3: `Status` names
+`ProtocolVersion` is 6 (2: `TalkRequest` has its payload; 3: `Status` names
 the human whose answer to a dialogue the day waits for; 4: `NewHuman` and
-`Character`; 5: `Film` is compressed).
+`Character`; 5: `Film` is compressed; 6: `Command` carries the client's number
+for it, and `CommandResult`).
 | `Status` | host → client | per human: id, name, connected, holds the day; whether a day is running; the human whose answer to a dialogue the day waits for (0: none) |
 | `TalkRequest` | host → client | human id, ship id, planet id (0: none), scripted, talk kind, amount, text: the human's talk fields (Remote dialogue) |
 | `TalkDone` | client → host | nothing: the client's answer is complete, or it cannot show the talk |
@@ -104,6 +105,7 @@ the human whose answer to a dialogue the day waits for; 4: `NewHuman` and
 | `Bye` | both | the sender leaves |
 | `NewHuman` | host → client | nothing: the name is new, so the client chooses its character |
 | `Character` | client → host | name, race, character preset, portrait, two starting skills, two starting items |
+| `CommandResult` | host → client | the command's number (as in `Command`), its kind, applied (1) or refused (0), the reason (a byte, `aCommands.TRefusalReason`), the exception's text; sent for a refused command (Commands) |
 
 ## Joining
 
@@ -170,6 +172,41 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   The command log does not record it, and records the commands after it
   (`CommandFailedHook`, [commands.md](commands.md)). The same holds for a
   command of a remote dialogue.
+- **Refusals.** The client numbers the commands it sends, from 1 per
+  connection (`TNetClient.LastCommandSequence`). For a command that raises on
+  the host, the host sends `CommandResult` to that client (`TNetHost.CommandFailed`,
+  also from the turn thread in a remote dialogue) with the number, the kind, the
+  exception's text, and a reason: an executor that can say why raises
+  `aCommands.ECommandRefused` with one of `TRefusalReason`; any other exception
+  is `rrOther`. The reasons (their byte, and the log's name):
+
+  | Reason | Byte | Log | Raised by |
+  | --- | --- | --- | --- |
+  | `rrOther` | 0 | `other` | any other exception |
+  | `rrOutOfStock` | 1 | `out-of-stock` | a purchase of goods beyond the stock (`TShip.CheckGoodsPurchase`) |
+  | `rrNoMoney` | 2 | `no-money` | a purchase of goods or equipment, a refuel, reload or rockets the human cannot pay |
+  | `rrItemGone` | 3 | `item-gone` | a shop command whose slot no longer holds the item it names (`ShopSlotArg`) |
+
+  A reason the client does not know reads as `rrOther`. The host logs
+  `command failed human= seq= kind= reason=`; the client logs `command refused
+  seq= kind= reason=`, keeps the result for `TakeCommandResult`, and shows the
+  refusal to its player as a message bubble of its human (`TNetClient.ShowRefusal`),
+  with a `Multiplayer.Refused*` text: `RefusedOutOfStock` ("The host refused
+  your purchase: not enough in stock."), `RefusedNoMoney`, `RefusedItemGone`,
+  `RefusedOther` (English fallbacks, as Waiting's texts). The next state
+  replaces the human's bubbles, so the client shows the refusals of the day
+  again after applying it. Today the host sends `CommandResult` for refusals
+  only; the message can also say that a command was applied (`Ok`), for a
+  host that answers commands as they arrive.
+- A purchase of goods that the stock or the money no longer allows raises
+  (`TShip.BuyGoodsFromLocation`, which showed a Windows message box that
+  blocked the host's day); the goods screen checks the same before it trades,
+  and a purchase refused on this machine is only logged (`aShopActions.TradeGoods`).
+- **The shop's columns.** The commands that build a shop grid carry the
+  columns the sender's screen shows (`aShopStock.ShopVisibleColumnCount`), and
+  the executor keeps them in the actor's `THuman.ShopColumnCount`, which pads
+  that human's grid (`ShopColumnCount`): a client's command does not change the
+  host's own grid. It is layout and is not saved; the grid itself is.
 - When the host's human has ended its turn and every peer is ready, the host
   applies the queued commands, human by human in `Session.Humans` order, each
   queue up to and including its `EndTurn`, through `SubmitCommand`, so the
@@ -623,6 +660,20 @@ that starts a new game (`--sim-new-game`) and one client check the hashes too: a
 new game's galaxy has not been through a load, so this checks that a load gives
 back what it saved (a hidden constellation has no outline, and the load once
 gave it the constructor's empty one, so every state of a new game differed).
+
+With one client, and in the new game, the host refuses a purchase
+(`--sim-net-buy-race`, `check_refusal`): the client buys one unit of the good
+whose whole stock it could pay for, and before the host applies the queues it
+buys as much of that good in the client's human's name as leaves too little
+(`net host buys first`; joins never put two humans in one star, so the host's
+own human cannot be at the client's planet). The client's purchase must fail on
+the host without holding its day, with the reason `out-of-stock`; the host's
+command log must hold as many purchases of remote humans as the host applied
+(`net host trades remote=`), so not the refused one; and the client must get
+the refusal (`net client refused seq= reason= bubble=1`) and show it as a bubble,
+again after the next state (`net client refusal after state bubble=1`). A new
+game is not recorded (the command log starts at a load), so there only the
+refusal is checked.
 
 The headless runner (`HeadlessNet`):
 

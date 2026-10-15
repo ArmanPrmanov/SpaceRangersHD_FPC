@@ -36,7 +36,9 @@ records the command, and the headless runner replays it.
      bit for bit), and text with `Command.Text`.
    - A value the screen computed from UI state, such as a layout width or a
      quote shown in a dialog, travels in the command. A value computed from
-     game state is computed again in the executor.
+     game state is computed again in the executor. An executor keeps such a
+     value in the actor's `THuman`, never in a global this machine's screen
+     reads (the shop's columns, `THuman.ShopColumnCount`).
 4. **Keep decisions where they were.** The screen may still decide which
    command to send from what the player selected. The executor redoes
    checks that depend on game state, exactly as the screen did.
@@ -80,6 +82,13 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
   instead of the last two and the exception goes on to the caller; the log
   does not record it (the replay would raise too), and the next boundary
   writes a checkpoint for whatever it changed before it raised.
+- An executor that refuses a command for a reason the player should hear
+  raises `ECommandRefused` with a `TRefusalReason` (out of stock, not enough
+  money, the item is gone); a host tells the client why
+  ([network.md](network.md), Commands). Raise it only before the executor's
+  first change: the log writes no checkpoint after such a command (the next
+  boundary still does if the hash changed). Never show a message box from an
+  executor: on a host it would block the day.
 - Keep the `aCalc.WaitForTurnCalculationUI` calls the screen already makes
   before changing the game.
 

@@ -64,6 +64,11 @@ type
     TemporaryShopSlots: TList;
     TemporaryShopPlanet: TPlanet;
     TemporaryShopStation: TRuins;
+    // CHANGE: BUGFIX - The columns the human's shop screen shows, which pad its shop grid
+    // (aShopStock.ShopColumnCount); the commands that build the grid carry them. It was one
+    // global, so a client's command set the host's. 0 until a command sets it: this machine's
+    // screen's. Layout, not game state: not saved (the grid itself is).
+    ShopColumnCount: Integer;
     // Ships shown in the hangar's nine slots, by id.
     HangarShipIds: array[0..8] of Integer;
     // The ship screen's hold order (aHold) and the ship it lists.

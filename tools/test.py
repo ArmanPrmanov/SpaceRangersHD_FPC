@@ -12,6 +12,7 @@ import hashlib
 import os
 import platform
 import statistics
+import struct
 import subprocess
 import sys
 import tempfile
@@ -45,7 +46,9 @@ END_TURN_KIND = 43
 # films before it asks (--sim-net-talk-after-film) and each client plays its film for NET_FILM_MS
 # (--sim-net-film-ms), so the talk comes during the film and waits for its end. With one client,
 # the rejoin is first cancelled once (--sim-net-cancel-join), and a fifth run has the host stop
-# hosting after NET_STOP_DAY days (--sim-net-stop-at).
+# hosting after NET_STOP_DAY days (--sim-net-stop-at). With one client, and in the new game, the
+# host buys the goods of a client's queued purchase first, which it must refuse and tell the
+# client (--sim-net-buy-race).
 NET_CLIENT_COUNTS = (1, 7)
 NET_DAYS = 10
 NET_LEAVE_DAY = 3
@@ -54,6 +57,10 @@ NET_FILM_MS = 500
 NET_STOP_DAY = 3
 # A client notices that the host stopped hosting within this many ms.
 NET_NOTICE_MS = 5000
+# The command kind of TradeGoods (source/game/aShopActions.pas), and the reason a purchase of
+# goods sold first is refused with (aCommands.RefusalReasonName).
+TRADE_GOODS_KIND = 110
+OUT_OF_STOCK = "out-of-stock"
 # A networked process that runs longer than this has hung.
 NET_TIMEOUT = 600
 # Any other game run that takes longer than this has hung (the longest, 100 turns of a save,
@@ -342,7 +349,8 @@ def net_lines(output: str, prefix: str) -> list[dict[str, str]]:
 
 
 def run_network(
-    args, binary: Path, save: Path | None, count: int, log: Path | None = None, leave: str = ""
+    args, binary: Path, save: Path | None, count: int, log: Path | None = None, leave: str = "",
+    race: bool = False,
 ):
     """One networked session: a host with `count` clients (Net1..NetN) for NET_DAYS days. Without
     a save the host plays a new game (--sim-new-game).
@@ -353,7 +361,9 @@ def run_network(
     after "day", a join as Net1 that cancels itself once let in comes first (the last client
     output is the real rejoin's, the one before it the cancelled one's). With leave "stop" the
     host stops hosting after NET_STOP_DAY days. Without leave the talk comes while the clients
-    play their films. Returns (problem, host output, client outputs); problem is '' when every
+    play their films. With race, the clients buy goods whose whole stock they could pay for, and
+    the host buys that stock first, once, so that a client's purchase is refused
+    (--sim-net-buy-race). Returns (problem, host output, client outputs); problem is '' when every
     process ended cleanly.
     """
     host_options = [
@@ -366,6 +376,8 @@ def run_network(
         host_options.append(f"--sim-net-stop-at={NET_STOP_DAY}")
     if log is not None:
         host_options.append(f"--record-commands={log}")
+    if race:
+        host_options.append("--sim-net-buy-race")
     host = GameProcess(binary, args.game_dir, host_options)
     port_line = host.wait_line("net host port=", NET_TIMEOUT)
     if not port_line:
@@ -381,6 +393,8 @@ def run_network(
             options.append("--sim-net-talk-leave")
         elif not leave:
             options.append(f"--sim-net-film-ms={NET_FILM_MS}")
+        if race:
+            options.append("--sim-net-buy-race")
         clients.append(GameProcess(binary, args.game_dir, options))
     codes = []
     if leave in ("day", "talk"):
@@ -471,12 +485,14 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
     leaves in the middle of a talk, which ends the talk without hanging the host.
     """
     label = f"{count + 1} humans networked"
+    # With one client, the host also refuses a purchase of it (check_refusal).
+    race = count == 1
     runs = []
     with tempfile.TemporaryDirectory(prefix="rangers-net-log-") as directory:
         log = Path(directory) / "host.srcl"
         for run in range(2):
             problem, host_output, outputs = run_network(
-                args, binary, save, count, log if run == 0 else None
+                args, binary, save, count, log if run == 0 else None, race=race
             )
             if not problem:
                 problem = compare_client_hashes(host_output, outputs)
@@ -505,6 +521,11 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
             return False, [
                 f"{label}: the replay's talks differ from the host's: {replay_talks} != {host_talks}"
             ]
+        refusal_note = ""
+        if race:
+            problem, refusal_note = check_refusal(runs[0][1], runs[0][2], log)
+            if problem:
+                return False, [f"{label}: {problem}"]
     _, host_output, outputs = runs[0]
     host_days = net_lines(host_output, "net host day=")
     client_days = [line for output in outputs for line in net_lines(output, "net client day=")]
@@ -525,6 +546,8 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
             median([int(line["take"]) for line in host_days]),
         ),
     ]  # fmt: skip
+    if refusal_note:
+        notes.append(f"{label}: {refusal_note}")
     if count == 1:
         problem, host_output, outputs = run_network(args, binary, save, count, leave="day")
         if not problem:
@@ -595,13 +618,66 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
     return True, notes
 
 
+def check_refusal(host_output: str, outputs: list[str], log: Path | None) -> tuple[str, str]:
+    """A run with --sim-net-buy-race: the host bought the goods of a client's queued purchase
+    first, so the purchase failed on the host without blocking its day; the host's command log,
+    when there is one, does not record it (it records as many purchases of remote humans as the
+    host applied); and the client got the refusal with the reason out-of-stock and showed it as a
+    bubble, again after the next state. Returns what is wrong, and a note."""
+    bought = net_lines(host_output, "net host buys first ")
+    if not bought:
+        return "the host never bought a client's goods first", ""
+    first = bought[0]
+    failed = [
+        line for line in net_lines(host_output, "net command failed ")
+        if line["human"] == first["human"] and line["seq"] == first["seq"]
+    ]
+    if not failed or failed[0]["kind"] != "TradeGoods" or not failed[0]["reason"].startswith(OUT_OF_STOCK):
+        return f"the host did not refuse human {first['human']}'s purchase {first['seq']}: {failed}", ""
+    refused = [
+        line for output in outputs for line in net_lines(output, "net client refused ")
+        if line["human"] == first["human"] and line["seq"] == first["seq"]
+    ]
+    if not refused or refused[0]["reason"] != OUT_OF_STOCK or refused[0]["kind"] != "TradeGoods":
+        return f"the client did not get the refusal of purchase {first['seq']}: {refused}", ""
+    if refused[0]["bubble"] != "1":
+        return "the client did not show the refusal as a bubble", ""
+    again = [line for output in outputs for line in net_lines(output, "net client refusal after state ")]
+    if not again or again[0]["bubble"] != "1":
+        return "the client did not show the refusal again after the next state", ""
+    note = (
+        f"a client's purchase of goods the host bought first (good {first['good']}) is refused "
+        f"({OUT_OF_STOCK}) and shown as a bubble"
+    )
+    if log is None:
+        return "", note
+    trades = net_lines(host_output, "net host trades ")
+    if not trades:
+        return "the host did not count the purchases it applied", ""
+    _, records = split_commands.read_records(log)
+    logged = 0
+    for record_type, payload in records:
+        if record_type == split_commands.COMMAND:
+            kind, actor = struct.unpack_from("<HI", payload, 0)
+            if kind == TRADE_GOODS_KIND and str(actor) != trades[0]["host"]:
+                logged += 1
+    if logged != int(trades[0]["remote"]):
+        return (
+            f"the command log records {logged} purchases of remote humans, the host applied "
+            f"{trades[0]['remote']}"
+        ), ""
+    return "", f"{note}; the log has the {logged} purchases of remote humans the host applied, not it"
+
+
 def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
     """A host that starts a new game instead of loading a save (--sim-new-game) and one client:
     every state the client applies has the host's hash. A new game's galaxy is not one that a
     load gave, so this checks that a load gives back what a new game saves (the outline of the
-    hidden constellation, for one)."""
+    hidden constellation, for one). The run also has the host refuse a client's purchase
+    (--sim-net-buy-race, check_refusal)."""
     label = "new game, 2 humans networked"
-    problem, host_output, outputs = run_network(args, binary, None, 1)
+    # A new game loads no save, so its commands are not recorded (the log starts at a load).
+    problem, host_output, outputs = run_network(args, binary, None, 1, race=True)
     if not problem:
         problem = compare_client_hashes(host_output, outputs)
     if problem:
@@ -609,7 +685,10 @@ def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
     days = net_lines(host_output, "net host day=")
     if len(days) != NET_DAYS:
         return False, [f"{label}: the host ran {len(days)} days"]
-    return True, [f"{label}: {NET_DAYS} days, client hashes match the host's"]
+    problem, note = check_refusal(host_output, outputs, None)
+    if problem:
+        return False, [f"{label}: {problem}"]
+    return True, [f"{label}: {NET_DAYS} days, client hashes match the host's", f"{label}: {note}"]
 
 
 def check_humans(args, binary: Path, save: Path, count: int) -> tuple[bool, str]:

@@ -477,6 +477,9 @@ type
     function IsCargoGoodIllegalOnCurrentPlanet(Good: Byte): Boolean;
     procedure SellGoodsToLocation(Good: Byte; Count: Integer);
     procedure BuyGoodsFromLocation(Good: Byte; Count: Integer);
+    // CHANGE: BUGFIX - Raises aCommands.ECommandRefused when the location has fewer than Count
+    // of Good or the ship cannot pay for them, as BuyGoodsFromLocation does.
+    procedure CheckGoodsPurchase(Good: Byte; Count: Integer);
     procedure ProcessLiberationGroupRoute;
     procedure LeaveLiberationGroup;
     function GetHull: THull;
@@ -888,6 +891,7 @@ procedure LinkRecoveredTypes;
 implementation
 uses
   SaveTrace,
+  aCommands,
   aSession,
   aHold,
   aHuman,
@@ -7561,18 +7565,31 @@ begin
   RefreshDerivedStats(True);
 end;
 
+procedure TShip.CheckGoodsPurchase(Good: Byte; Count: Integer);
+begin
+  if GetLocationGoodsEntry(Good).Count < Count then
+    raise ECommandRefused.CreateReason(
+        rrOutOfStock,
+        Format('BuyGoods: %d of good %d wanted, %d in stock', [Count, Good, GetLocationGoodsEntry(Good).Count])
+    );
+  if ShopGoodsPurchasePrice(Good, nil) * Count > Money then
+    raise ECommandRefused.CreateReason(
+        rrNoMoney,
+        Format('BuyGoods: %d of good %d cost more than %d', [Count, Good, Money])
+    );
+end;
+
 procedure TShip.BuyGoodsFromLocation(Good: Byte; Count: Integer);
 var
   Value: Integer;
   Event: TGalaxyEvent;
   Illegal: Boolean;
 begin
-  if (GetLocationGoodsEntry(Good).Count < Count)
-      or (ShopGoodsPurchasePrice(Good, nil) * Count > Money) then
-    ShowMessage(
-        #$CD#$E5' '#$E2#$E5#$F0#$ED#$FB#$E5' '#$EF#$E0#$F0#$E0#$EC#$E5#$F2#$F0#$FB' '#$EF#$EE#$EA#$F3#$EF#$EA#$E8
-    )
-  else
+  // CHANGE: BUGFIX - Raised instead of a Windows message box ("wrong purchase parameters"),
+  // which blocked the thread that runs the command: a host applying a client's purchase of
+  // goods another human bought first. The command fails, and the host tells the client why
+  // (docs/network.md, Commands). The screens and the NPCs check before they buy.
+  CheckGoodsPurchase(Good, Count);
   begin
     if TradeGoodsSold = nil then
       TradeGoodsSold := TGoods.Create;

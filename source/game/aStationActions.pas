@@ -2746,7 +2746,8 @@ var
       RestoreTemporaryShopStock(ActorHuman(Command));
       Station := TRuins(P.DockedTo);
       Station.EquipmentShop.Delete(Station.EquipmentShop.IndexOf(Item));
-      ShopVisibleColumnCount := IntArg(Command, 2 * ConstructionPartCount);
+      // CHANGE: BUGFIX - The actor's columns, not this machine's (THuman.ShopColumnCount).
+      ActorHuman(Command).ShopColumnCount := IntArg(Command, 2 * ConstructionPartCount);
       BuildTemporaryShopSlotGrid(ActorHuman(Command));
       Inc(ShopItems);
     end;

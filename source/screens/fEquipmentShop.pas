@@ -507,7 +507,8 @@ begin
       ContentColumnCount := Slot.GridPoint.X + 1;
   end;
   Panel := GetByName('PanelGoods') as TPanelGI;
-  CellWidth := Panel.ClientSize.X / ShopVisibleColumnCount;
+  // CHANGE: BUGFIX - The columns the local human's grid was built for (THuman.ShopColumnCount).
+  CellWidth := Panel.ClientSize.X / ShopColumnCount(LocalHuman);
   CellHeight := Panel.ClientSize.Y / ShopGridRowCount;
   for I := 1 to ContentColumnCount - 1 do
     with TImageGI.Create(Panel) do
@@ -885,8 +886,8 @@ begin
     SetDisabled(
         Panel.ScrollOffset.X
             >= Round(
-                    Panel.ClientSize.X / ShopVisibleColumnCount * ContentColumnCount
-                        - Panel.ClientSize.X / ShopVisibleColumnCount * ShopVisibleColumnCount)
+                    Panel.ClientSize.X / ShopColumnCount(LocalHuman) * ContentColumnCount
+                        - Panel.ClientSize.X / ShopColumnCount(LocalHuman) * ShopColumnCount(LocalHuman))
                 - 1
     );
 end;
@@ -960,12 +961,12 @@ begin
   Panel := GetByName('PanelGoods') as TPanelGI;
   Column :=
       Round(
-          (Panel.ScrollOffset.X - Panel.ClientSize.X / ShopVisibleColumnCount)
-              / (Panel.ClientSize.X / ShopVisibleColumnCount)
+          (Panel.ScrollOffset.X - Panel.ClientSize.X / ShopColumnCount(LocalHuman))
+              / (Panel.ClientSize.X / ShopColumnCount(LocalHuman))
       );
   if Column < 0 then
     Column := 0;
-  TargetScrollX := Round(Panel.ClientSize.X / ShopVisibleColumnCount * Column);
+  TargetScrollX := Round(Panel.ClientSize.X / ShopColumnCount(LocalHuman) * Column);
   if (ScrollTimer = nil) and (TargetScrollX <> Panel.ScrollOffset.X) then
     ScrollTimer := ScheduleCallbackTimer(0, 20, ScrollTick);
   UpdateScrollButtons;
@@ -979,12 +980,12 @@ begin
   Panel := GetByName('PanelGoods') as TPanelGI;
   Column :=
       Round(
-          (Panel.ScrollOffset.X + Panel.ClientSize.X / ShopVisibleColumnCount)
-              / (Panel.ClientSize.X / ShopVisibleColumnCount)
+          (Panel.ScrollOffset.X + Panel.ClientSize.X / ShopColumnCount(LocalHuman))
+              / (Panel.ClientSize.X / ShopColumnCount(LocalHuman))
       );
-  if Column > ContentColumnCount - ShopVisibleColumnCount then
-    Column := Max(ContentColumnCount - ShopVisibleColumnCount, 0);
-  TargetScrollX := Round(Panel.ClientSize.X / ShopVisibleColumnCount * Column);
+  if Column > ContentColumnCount - ShopColumnCount(LocalHuman) then
+    Column := Max(ContentColumnCount - ShopColumnCount(LocalHuman), 0);
+  TargetScrollX := Round(Panel.ClientSize.X / ShopColumnCount(LocalHuman) * Column);
   if (ScrollTimer = nil) and (TargetScrollX <> Panel.ScrollOffset.X) then
     ScrollTimer := ScheduleCallbackTimer(0, 20, ScrollTick);
   UpdateScrollButtons;

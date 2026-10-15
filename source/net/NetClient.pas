@@ -87,7 +87,16 @@ type
     FHasTalk: Boolean;
     // When the dialogue came (GetTickCount64).
     FTalkArrived: QWord;
+    // CHANGE: ENHANCEMENT - The number of the last command sent (Command); the host's
+    // CommandResult names commands by it.
+    FCommandSequence: Cardinal;
+    // The results the host sent, oldest first, until TakeCommandResult takes them (at most
+    // KeptCommandResults); and the refusals shown since the last state applied, shown again
+    // after the next one, which replaces the human's bubbles.
+    FResults: array of TCommandResultMessage;
+    FShownRefusals: array of TCommandResultMessage;
     procedure HandleMessage(Kind: TNetMessageKind; Payload: TBufEC);
+    procedure ShowRefusal(const Refusal: TCommandResultMessage);
     procedure GiveUp(const Text: AnsiString);
     procedure SayHello;
     procedure TakeConnection;
@@ -144,6 +153,11 @@ type
     function MayHoldTalk(FilmPlaying: Boolean): Boolean;
     // The answer is complete (or the talk cannot be shown here): the host's day goes on.
     procedure SendTalkDone;
+    // CHANGE: ENHANCEMENT - The oldest result of a command (CommandResult) not taken yet. A
+    // refusal is also shown to this client's human as a message bubble when it comes.
+    function TakeCommandResult(out Message: TCommandResultMessage): Boolean;
+    // The number SendCommand gave the last command it sent (0: none yet).
+    property LastCommandSequence: Cardinal read FCommandSequence;
     // The host asked for a character (NewHuman) and none has been sent yet.
     property CharacterWanted: Boolean read FCharacterWanted;
     property HumanId: Integer read FHumanId;
@@ -166,9 +180,13 @@ var
   ClientTalkHoldMs: Integer = 60000;
 // NetworkCommandHook of a client: sends the command to the host.
 procedure ClientCommandSubmitted(const Command: TPlayerCommand);
+// CHANGE: ENHANCEMENT - What the bubble of a refused command says (Multiplayer.Refused*, with
+// an English fallback, as the waits' texts).
+function RefusalText(Reason: TRefusalReason): WideString;
 implementation
 uses
   SysUtils,
+  aConst,
   aGalaxy,
   aObjectRefs,
   aSaveLoad,
@@ -176,6 +194,27 @@ uses
 
 const
   ConnectTimeoutMs = 10000;
+  KeptCommandResults = 64;
+
+function RefusalText(Reason: TRefusalReason): WideString;
+const
+  Keys: array[TRefusalReason] of WideString = (
+      'Multiplayer.RefusedOther',
+      'Multiplayer.RefusedOutOfStock',
+      'Multiplayer.RefusedNoMoney',
+      'Multiplayer.RefusedItemGone'
+  );
+  English: array[TRefusalReason] of WideString = (
+      'The host refused your last action.',
+      'The host refused your purchase: not enough in stock.',
+      'The host refused your purchase: not enough money.',
+      'The host refused your action: the item is gone.'
+  );
+begin
+  Result := LocalizedColorText(Keys[Reason]);
+  if Result = '' then
+    Result := English[Reason];
+end;
 
 destructor TNetClientFilm.Destroy;
 begin
@@ -316,6 +355,7 @@ var
   Header: TStateHeader;
   Film: TNetClientFilm;
   Reference: TBufEC;
+  CommandResult: TCommandResultMessage;
 begin
   case Kind of
     nkWelcome:
@@ -404,7 +444,45 @@ begin
         FHasTalk := True;
         FTalkArrived := GetTickCount64;
       end;
+    nkCommandResult:
+      begin
+        CommandResult := DecodeCommandResult(Payload);
+        if Length(FResults) >= KeptCommandResults then
+          Delete(FResults, 0, 1);
+        Insert(CommandResult, FResults, Length(FResults));
+        if not CommandResult.Ok then
+        begin
+          NetLog(
+              Format(
+                  'command refused seq=%d kind=%s reason=%s: %s',
+                  [CommandResult.Sequence, CommandKindName(CommandResult.Kind),
+                      RefusalReasonName(CommandResult.Reason), UTF8Encode(CommandResult.Text)]
+              )
+          );
+          ShowRefusal(CommandResult);
+          Insert(CommandResult, FShownRefusals, Length(FShownRefusals));
+        end;
+      end;
   end;
+end;
+
+// The refusal as a bubble of this client's human. The next state replaces the human's bubbles,
+// so ApplyState shows it again.
+procedure TNetClient.ShowRefusal(const Refusal: TCommandResultMessage);
+begin
+  if (Galaxy = nil) or (LocalHuman = nil) or (LocalHuman.Id <> FHumanId) then
+    Exit;
+  LocalHuman.AddOrUpdateBubble(0, Galaxy.CurrentTurn, RefusalText(Refusal.Reason), '');
+end;
+
+function TNetClient.TakeCommandResult(out Message: TCommandResultMessage): Boolean;
+begin
+  Message := Default(TCommandResultMessage);
+  Result := Length(FResults) > 0;
+  if not Result then
+    Exit;
+  Message := FResults[0];
+  Delete(FResults, 0, 1);
 end;
 
 procedure TNetClient.Pump;
@@ -442,6 +520,7 @@ var
   Human: THuman;
   Payload: TBufEC;
   Swap: TBufEC;
+  I: Integer;
 begin
   if not FHasPending then
     raise Exception.Create('No state to apply');
@@ -468,6 +547,10 @@ begin
   if (Human = nil) or (Human.Player = nil) then
     raise Exception.CreateFmt('The host''s state has no human %d', [FHumanId]);
   SetLocalHuman(Human);
+  // CHANGE: ENHANCEMENT - The state came after the refusals of the day's commands.
+  for I := 0 to High(FShownRefusals) do
+    ShowRefusal(FShownRefusals[I]);
+  FShownRefusals := nil;
   if Result.Hash <> Result.HostHash then
     NetLog(
         Format(
@@ -500,7 +583,8 @@ begin
     Exit;
   Payload := TBufEC.Create;
   try
-    EncodeCommandMessage(Command, Payload);
+    Inc(FCommandSequence);
+    EncodeCommandMessage(FCommandSequence, Command, Payload);
     FThread.Send(FPeerId, nkCommand, Payload);
   finally
     Payload.Free;

@@ -287,6 +287,10 @@ begin
       Simulation.NetCancelJoin := True
     else if Pos('--sim-net-stop-at=', Argument) = 1 then
       Simulation.NetStopAt := StrToInt(Copy(Argument, 19, MaxInt))
+    // CHANGE: ENHANCEMENT - A client's purchase of goods that the host's day sold first: the
+    // host refuses it and tells the client (docs/network.md, Tests).
+    else if Argument = '--sim-net-buy-race' then
+      Simulation.NetBuyRace := True
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then

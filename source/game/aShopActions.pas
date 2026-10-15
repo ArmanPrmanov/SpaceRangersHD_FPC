@@ -58,6 +58,7 @@ uses
   Math,
   SE_Space,
   aConst,
+  GR_Main,
   aGalaxy,
   aGalaxyEvent,
   aGalaxyStruct,
@@ -95,10 +96,16 @@ begin
   if (H.TemporaryShopSlots = nil)
       or (SlotIndex < 0)
       or (SlotIndex >= H.TemporaryShopSlots.Count) then
-    raise Exception.Create(CommandKindName(Command.Kind) + ' names a missing shop slot');
+    raise ECommandRefused.CreateReason(
+        rrItemGone,
+        CommandKindName(Command.Kind) + ' names a missing shop slot'
+    );
   Result := TShopStockSlot(H.TemporaryShopSlots[SlotIndex]);
   if (Result.Item = nil) or (Result.Item.Id <> IntArg(Command, Index + 1)) then
-    raise Exception.Create(CommandKindName(Command.Kind) + ' names another shop item');
+    raise ECommandRefused.CreateReason(
+        rrItemGone,
+        CommandKindName(Command.Kind) + ' names another shop item'
+    );
 end;
 
 // Moved from TfEquipmentShop.OnOpen.
@@ -193,7 +200,7 @@ begin
                     P.GetEffectiveSkillLevel(psTrading))
         );
   if P.Money < Price then
-    raise Exception.Create('BuyEquipment: not enough money');
+    raise ECommandRefused.CreateReason(rrNoMoney, 'BuyEquipment: not enough money');
   if not (Slot.Item is THull) and (P.CargoFreeSpace < Slot.Item.Weight) then
     raise Exception.Create('BuyEquipment: not enough cargo space');
   EquipmentPurchase := epDone;
@@ -424,6 +431,8 @@ begin
     RefreshTradeRows(ActorHuman(Command), Partner);
     if not Sell then
     begin
+      // CHANGE: BUGFIX - A purchase that cannot be made fails before the partner is paid.
+      P.CheckGoodsPurchase(Good, Count);
       Partner.SetMoney(
           Partner.Money
               + Count
@@ -468,7 +477,15 @@ begin
   AddInt(Command, Good);
   AddInt(Command, Count);
   AddInt(Command, Ord(Sell));
-  SubmitCommand(Command);
+  // CHANGE: BUGFIX - The goods screen checks the stock and the money before it trades; a
+  // purchase it lets through anyway is refused and changes nothing, as the message box the
+  // purchase showed before (TShip.BuyGoodsFromLocation) left it.
+  try
+    SubmitCommand(Command);
+  except
+    on E: ECommandRefused do
+      AppendLogLineThreadSafe(AnsiString('TradeGoods refused: ' + E.Message));
+  end;
 end;
 
 // Moved verbatim from TfHangar.RepairHullClicked.

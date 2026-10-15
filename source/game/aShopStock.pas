@@ -34,8 +34,14 @@ var
   ShopSlotClass: TShopStockSlotClass = TShopStockSlot;
   // The screen widens the grid with the window, which adds empty slots.
   ShopGridRowCount: Integer = 4;
+  // CHANGE: BUGFIX - The columns this machine's shop screen shows; the commands that build a
+  // grid carry it, and the grid is padded to its human's (ShopColumnCount).
   ShopVisibleColumnCount: Integer = 6;
 procedure TemporaryShopStockHook(Argument: Pointer);
+// CHANGE: BUGFIX - The columns of Human's shop grid (THuman.ShopColumnCount), or this
+// machine's screen's while the human's commands have set none. Human is a THuman; nil means
+// the local human.
+function ShopColumnCount(Human: TObject = nil): Integer;
 // CHANGE: CLEANUP - Human, a THuman, is the human whose shop it is; nil means the local
 // human. It is a TObject because this interface cannot use aHuman without a unit cycle.
 procedure BuildTemporaryShopSlotGrid(Human: TObject = nil);
@@ -49,6 +55,19 @@ uses
 
 procedure TemporaryShopStockHook(Argument: Pointer);
 begin
+end;
+
+function ShopColumnCount(Human: TObject): Integer;
+var
+  H: THuman;
+begin
+  H := THuman(Human);
+  if H = nil then
+    H := LocalHuman;
+  if (H <> nil) and (H.ShopColumnCount > 0) then
+    Result := H.ShopColumnCount
+  else
+    Result := ShopVisibleColumnCount;
 end;
 
 procedure BuildTemporaryShopSlotGrid(Human: TObject);
@@ -125,8 +144,8 @@ begin
     end;
   end;
   EmptyCount := 0;
-  if H.TemporaryShopSlots.Count < ShopVisibleColumnCount * ShopGridRowCount then
-    EmptyCount := ShopVisibleColumnCount * ShopGridRowCount - H.TemporaryShopSlots.Count
+  if H.TemporaryShopSlots.Count < ShopColumnCount(H) * ShopGridRowCount then
+    EmptyCount := ShopColumnCount(H) * ShopGridRowCount - H.TemporaryShopSlots.Count
   else if H.TemporaryShopSlots.Count mod ShopGridRowCount <> 0 then
     EmptyCount := ShopGridRowCount - H.TemporaryShopSlots.Count mod ShopGridRowCount;
   for I := 1 to EmptyCount do

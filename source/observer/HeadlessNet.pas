@@ -13,6 +13,8 @@ unit HeadlessNet;
 // the connect on its own thread and prints each phase of its join, can cancel it, plays each
 // film of its star for a while and keeps a dialogue that comes meanwhile for the film's end;
 // the host can send the films before its probe asks, and can stop hosting.
+// CHANGE: ENHANCEMENT - A refused command (--sim-net-buy-race): the host buys the goods a
+// client's queued purchase wants first, the purchase is refused, and the client shows why.
 interface
 uses
   HeadlessSim;
@@ -33,6 +35,8 @@ uses
   SysUtils,
   EC_Buf,
   Globals,
+  aCommands,
+  aShopActions,
   GlobalsV,
   aEFilm,
   aGalaxy,
@@ -172,6 +176,71 @@ begin
   ProbePrevious := nil;
 end;
 
+var
+  // --sim-net-buy-race: the host has bought first; the purchases of remote humans the host
+  // applied (the command log records exactly these); the hook the count chains.
+  RaceDone: Boolean;
+  RemoteTrades: Integer;
+  PreviousAfterCommand: TCommandHook;
+
+procedure CountRemoteTrade(const Command: TPlayerCommand);
+begin
+  if Assigned(PreviousAfterCommand) then
+    PreviousAfterCommand(Command);
+  if (Command.Kind = ckTradeGoods) and (LocalHuman <> nil) and (Integer(Command.Actor) <> LocalHuman.Id) then
+    Inc(RemoteTrades);
+end;
+
+// Before the queues are applied, the first queued purchase of goods of a remote human who is
+// landed: the host buys as much of that good in the human's name as leaves too little for it,
+// when the human can pay for that, once in the run. The queued purchase is then refused.
+procedure BuyBeforeQueues(Host: TNetHost);
+var
+  I, J, Wanted, Stock, Count: Integer;
+  Human: THuman;
+  Queue: TQueuedCommands;
+  Good: Byte;
+  Command: TPlayerCommand;
+begin
+  if RaceDone then
+    Exit;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if (Human = LocalHuman) or (Human.Player = nil) or (Human.Player.CurrentPlanet = nil) then
+      Continue;
+    Queue := Host.QueuedCommands(Human.Id);
+    for J := 0 to High(Queue) do
+    begin
+      Command := Queue[J].Command;
+      if (Command.Kind <> ckTradeGoods) or (Length(Command.Ints) < 3) or (Command.Ints[2] <> 0) then
+        Continue;
+      Good := Command.Ints[0];
+      Wanted := Command.Ints[1];
+      Stock := Human.Player.GetLocationGoodsEntry(Good).Count;
+      Count := Stock - Wanted + 1;
+      if (Count < 1)
+          or (Int64(Count) * Human.Player.ShopGoodsPurchasePrice(Good, nil) > Human.Player.Money) then
+        Break;
+      Command := NewCommand(ckTradeGoods);
+      Command.Actor := Cardinal(Human.Id);
+      AddRef(Command, nil);
+      AddInt(Command, Good);
+      AddInt(Command, Count);
+      AddInt(Command, 0);
+      SubmitCommand(Command);
+      Emit(
+          Format(
+              'net host buys first human=%d good=%d count=%d stock=%d seq=%d',
+              [Human.Id, Good, Count, Stock, Queue[J].Sequence]
+          )
+      );
+      RaceDone := True;
+      Exit;
+    end;
+  end;
+end;
+
 function RunNetHost(const Options: TSimulationOptions): Integer;
 var
   Host: TNetHost;
@@ -193,6 +262,13 @@ begin
     if Options.NetTalkDay > 0 then
       InstallNetTalkProbe(Options.NetTalkDay);
     ProbeSendsFilms := Options.NetTalkAfterFilm;
+    RaceDone := False;
+    RemoteTrades := 0;
+    if Options.NetBuyRace then
+    begin
+      PreviousAfterCommand := AfterCommandHook;
+      AfterCommandHook := @CountRemoteTrade;
+    end;
     Emit(Format('net host port=%d clients=%d', [Host.Thread.ListenPort, Options.NetClients]));
     // Every client first, then the joins by name, so that the humans are the same each run.
     Host.HoldJoins := True;
@@ -231,6 +307,8 @@ begin
         end;
         NetInboxEvent.WaitFor(5);
       until False;
+      if Options.NetBuyRace then
+        BuyBeforeQueues(Host);
       Host.ApplyQueues;
       if not AllHumansEndedTurn then
       begin
@@ -320,6 +398,8 @@ begin
       end;
       NetInboxEvent.WaitFor(5);
     until False;
+    if Options.NetBuyRace then
+      Emit(Format('net host trades remote=%d host=%d', [RemoteTrades, LocalHuman.Id]));
     Emit(
         Format(
             'done net host days=%d humans=%d day=%d hash=%s',
@@ -327,6 +407,9 @@ begin
         )
     );
   finally
+    if @AfterCommandHook = @CountRemoteTrade then
+      AfterCommandHook := PreviousAfterCommand;
+    PreviousAfterCommand := nil;
     RemoveNetTalkProbe;
     ProbeSendsFilms := False;
     StopNetwork;
@@ -441,6 +524,8 @@ var
   Phase, ShownPhase: TNetJoinPhase;
   OwnFilm, FilmPlaying, TalkHeld: Boolean;
   Character: TJoinCharacter;
+  Outcome: TCommandResultMessage;
+  RefusalShown: WideString;
 begin
   Result := 0;
   Colon := LastDelimiter(':', Options.NetJoin);
@@ -455,6 +540,8 @@ begin
   FilmCount := 0;
   FilmUntil := 0;
   TalkHeld := False;
+  RefusalShown := '';
+  BuyWholeStockGood := Options.NetBuyRace;
   try
     // The connect runs on its own thread, as the game's join does; each phase is printed.
     Client := JoinGame(Address, Port, WideString(Options.NetName), False);
@@ -500,6 +587,20 @@ begin
         Emit('done net client cancelled');
         Exit(0);
       end;
+      // A refusal shows as a bubble of this client's human (NetClient.ShowRefusal).
+      while Client.TakeCommandResult(Outcome) do
+        if not Outcome.Ok then
+        begin
+          RefusalShown := RefusalText(Outcome.Reason);
+          Emit(
+              Format(
+                  'net client refused seq=%d kind=%s reason=%s bubble=%d human=%d',
+                  [Outcome.Sequence, CommandKindName(Outcome.Kind), RefusalReasonName(Outcome.Reason),
+                      Ord((LocalHuman <> nil) and (LocalHuman.FindBubbleByText(RefusalShown, False) <> nil)),
+                      Client.HumanId]
+              )
+          );
+        end;
       FilmBytes := FilmBytes + TakeFilms(Client, FilmCount, OwnFilm);
       if OwnFilm and (Options.NetFilmMs > 0) then
         FilmUntil := GetTickCount64 + QWord(Options.NetFilmMs);
@@ -538,6 +639,17 @@ begin
       );
       FilmBytes := 0;
       FilmCount := 0;
+      // The state replaced the human's bubbles; the refusal shows again.
+      if RefusalShown <> '' then
+      begin
+        Emit(
+            Format(
+                'net client refusal after state bubble=%d',
+                [Ord(LocalHuman.FindBubbleByText(RefusalShown, False) <> nil)]
+            )
+        );
+        RefusalShown := '';
+      end;
       if (Options.NetLeaveAt > 0) and (Days >= Options.NetLeaveAt) then
       begin
         Client.Leave(5000);
@@ -577,6 +689,7 @@ begin
         )
     );
   finally
+    BuyWholeStockGood := False;
     StopNetwork;
     NetLogHook := nil;
   end;

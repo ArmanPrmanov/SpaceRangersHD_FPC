@@ -339,7 +339,12 @@ begin
     CommandAnswerCount := 0;
     if Stream = nil then
       Exit;
-    ResyncNeeded := True;
+    // CHANGE: ENHANCEMENT - A refused command changed nothing (aCommands.ECommandRefused), so
+    // no checkpoint follows it; the next boundary still writes one if the hash changed. A host
+    // refuses clients' commands as a matter of course (docs/network.md, Commands), and the
+    // replay of a networked host's log drifted after loading such a checkpoint.
+    if not (ExceptObject is ECommandRefused) then
+      ResyncNeeded := True;
     AppendLogLineThreadSafe(
         'Command log: ' + CommandKindName(Command.Kind) + ' failed and is not recorded'
     );

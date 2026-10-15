@@ -15,7 +15,8 @@ const
   // CHANGE: ENHANCEMENT - 2: TalkRequest has a payload (remote dialogue). 3: Status names the
   // human whose answer to a dialogue the day waits for. 4: NewHuman and Character (a first
   // join chooses its character on the new-game screen). 5: Film carries zstd bytes.
-  ProtocolVersion = 5;
+  // 6: Command carries the client's number for it, and CommandResult.
+  ProtocolVersion = 6;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 
@@ -35,7 +36,21 @@ const
   // character (no payload); client -> host: the choice (TCharacterMessage).
   nkNewHuman = 13;
   nkCharacter = 14;
+  // CHANGE: ENHANCEMENT - host -> client: what became of a command the client sent
+  // (TCommandResultMessage).
+  nkCommandResult = 15;
 type
+  // CHANGE: ENHANCEMENT - host -> client: a command the client sent, named by the number the
+  // client gave it (Command), was applied (Ok) or refused, and why (docs/network.md,
+  // Commands). The host sends it for a refused command.
+  TCommandResultMessage = record
+    Sequence: Cardinal;
+    Kind: TCommandKind;
+    Ok: Boolean;
+    Reason: TRefusalReason;
+    // The exception's text, for the log.
+    Text: WideString;
+  end;
   // client -> host: the new-game screen's choices for a human who joins for the first time,
   // and the name, which the screen may have changed.
   TCharacterMessage = record
@@ -129,8 +144,12 @@ function DecodeStateHeader(Buffer: TBufEC): TStateHeader;
 procedure EncodeFilmHeader(const Header: TFilmHeader; Buffer: TBufEC);
 // Reads the header and leaves Buffer at the film.
 function DecodeFilmHeader(Buffer: TBufEC): TFilmHeader;
-procedure EncodeCommandMessage(const Command: TPlayerCommand; Buffer: TBufEC);
-function DecodeCommandMessage(Buffer: TBufEC): TPlayerCommand;
+// CHANGE: ENHANCEMENT - client -> host: the client numbers its commands from 1 (Sequence), so
+// that CommandResult can name one.
+procedure EncodeCommandMessage(Sequence: Cardinal; const Command: TPlayerCommand; Buffer: TBufEC);
+function DecodeCommandMessage(Buffer: TBufEC; out Sequence: Cardinal): TPlayerCommand;
+procedure EncodeCommandResult(const Message: TCommandResultMessage; Buffer: TBufEC);
+function DecodeCommandResult(Buffer: TBufEC): TCommandResultMessage;
 procedure EncodeAck(Day: Integer; Buffer: TBufEC);
 function DecodeAck(Buffer: TBufEC): Integer;
 procedure EncodeCharacter(const Message: TCharacterMessage; Buffer: TBufEC);
@@ -182,6 +201,7 @@ begin
     nkBye: Result := 'Bye';
     nkNewHuman: Result := 'NewHuman';
     nkCharacter: Result := 'Character';
+    nkCommandResult: Result := 'CommandResult';
   else
     Result := 'Kind' + IntToStr(Kind);
   end;
@@ -306,14 +326,42 @@ begin
   Result.StarId := Buffer.GetInt32;
 end;
 
-procedure EncodeCommandMessage(const Command: TPlayerCommand; Buffer: TBufEC);
+procedure EncodeCommandMessage(Sequence: Cardinal; const Command: TPlayerCommand; Buffer: TBufEC);
 begin
+  Buffer.AddDWord(Sequence);
   EncodeCommand(Command, Buffer);
 end;
 
-function DecodeCommandMessage(Buffer: TBufEC): TPlayerCommand;
+function DecodeCommandMessage(Buffer: TBufEC; out Sequence: Cardinal): TPlayerCommand;
 begin
+  Sequence := Buffer.GetUInt32;
   Result := DecodeCommand(Buffer);
+end;
+
+procedure EncodeCommandResult(const Message: TCommandResultMessage; Buffer: TBufEC);
+begin
+  Buffer.AddDWord(Message.Sequence);
+  Buffer.AddWord(Ord(Message.Kind));
+  Buffer.AddBoolean(Message.Ok);
+  Buffer.AddByte(Ord(Message.Reason));
+  Buffer.AddWideStringZ(Message.Text);
+end;
+
+function DecodeCommandResult(Buffer: TBufEC): TCommandResultMessage;
+var
+  Reason: Byte;
+begin
+  Result := Default(TCommandResultMessage);
+  Result.Sequence := Buffer.GetUInt32;
+  Result.Kind := TCommandKind(Buffer.GetWord);
+  Result.Ok := Buffer.GetBoolean;
+  Reason := Buffer.GetByte;
+  // A reason this build does not know is still a refusal.
+  if Reason <= Ord(High(TRefusalReason)) then
+    Result.Reason := TRefusalReason(Reason)
+  else
+    Result.Reason := rrOther;
+  Result.Text := Buffer.ReadWideString;
 end;
 
 procedure EncodeAck(Day: Integer; Buffer: TBufEC);

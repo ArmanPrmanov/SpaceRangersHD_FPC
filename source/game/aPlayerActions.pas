@@ -977,7 +977,8 @@ end;
 // The grid is padded to the columns the shop screen shows, so the command carries them.
 procedure ExecuteOpenShopStock(const Command: TPlayerCommand);
 begin
-  ShopVisibleColumnCount := IntArg(Command, 0);
+  // CHANGE: BUGFIX - The actor's columns, not this machine's (THuman.ShopColumnCount).
+  ActorHuman(Command).ShopColumnCount := IntArg(Command, 0);
   BuildTemporaryShopSlotGrid(ActorHuman(Command));
 end;
 

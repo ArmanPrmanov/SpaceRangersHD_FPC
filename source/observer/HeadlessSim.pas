@@ -64,12 +64,21 @@ type
     NetFilmMs: Integer;
     NetCancelJoin: Boolean;
     NetStopAt: Integer;
+    // CHANGE: ENHANCEMENT - A refused command (docs/network.md, Tests): a client buys the good
+    // whose whole stock it could pay for (BuyWholeStockGood), and the host, before it applies
+    // the queues, buys that stock first in the client's human's name, once: the client's
+    // purchase is refused.
+    NetBuyRace: Boolean;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 // Shared with the networked runner (HeadlessNet).
 procedure Emit(const Line: AnsiString);
 procedure LoadSave(const FileName: AnsiString; Seed: Cardinal);
 procedure PlayHumanTurn(Human: THuman; Day, Index: Integer; var Plan: AnsiString);
+var
+  // CHANGE: ENHANCEMENT - PlayHumanTurn buys one unit of the good with the smallest stock the
+  // human could buy whole, when there is one (NetBuyRace).
+  BuyWholeStockGood: Boolean;
 implementation
 uses
   SysUtils,
@@ -954,8 +963,9 @@ end;
 function BuyOneGood(Human: THuman): Boolean;
 var
   P: TPlayer;
-  Good: Byte;
+  Good, Best: Byte;
   Command: TPlayerCommand;
+  Cost, BestCost: Int64;
 begin
   Result := False;
   P := Human.Player;
@@ -963,6 +973,31 @@ begin
     Exit;
   if P.GetCargoFreeSpace < 1 then
     Exit;
+  if BuyWholeStockGood then
+  begin
+    Best := 255;
+    BestCost := 0;
+    for Good := 0 to 7 do
+      if P.GetLocationGoodsEntry(Good).Count >= 1 then
+      begin
+        Cost := Int64(P.GetLocationGoodsEntry(Good).Count) * P.ShopGoodsPurchasePrice(Good, nil);
+        if (Cost <= P.Money) and ((Best = 255) or (Cost < BestCost)) then
+        begin
+          Best := Good;
+          BestCost := Cost;
+        end;
+      end;
+    if Best <> 255 then
+    begin
+      Command := NewCommand(ckTradeGoods);
+      AddRef(Command, nil);
+      AddInt(Command, Best);
+      AddInt(Command, 1);
+      AddInt(Command, 0);
+      SubmitFor(Human, Command);
+      Exit(True);
+    end;
+  end;
   for Good := 0 to 7 do
     if (P.GetLocationGoodsEntry(Good).Count >= 1)
         and (P.ShopGoodsPurchasePrice(Good, nil) <= P.Money) then

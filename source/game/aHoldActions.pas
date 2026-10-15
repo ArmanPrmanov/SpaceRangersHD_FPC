@@ -2567,7 +2567,8 @@ begin
         P.CurrentPlanet.EquipmentShop.Add(Item)
       else
         (P.DockedTo as TRuins).EquipmentShop.Add(Item);
-      ShopVisibleColumnCount := Columns;
+      // CHANGE: BUGFIX - The actor's columns, not this machine's (THuman.ShopColumnCount).
+      H.ShopColumnCount := Columns;
       BuildTemporaryShopSlotGrid(H);
     end
     else
@@ -2661,7 +2662,8 @@ begin
         P.CurrentPlanet.EquipmentShop.Add(H.SelectedHoldItem)
       else
         (P.DockedTo as TRuins).EquipmentShop.Add(H.SelectedHoldItem);
-      ShopVisibleColumnCount := Columns;
+      // CHANGE: BUGFIX - The actor's columns, not this machine's (THuman.ShopColumnCount).
+      H.ShopColumnCount := Columns;
       BuildTemporaryShopSlotGrid(H);
     end
     else if not (H.SelectedHoldItem is TCountableItem)
@@ -2802,7 +2804,7 @@ begin
   else
     Cost := CalculateRoundedFuelCost(Amount, 6);
   if P.Money < Cost then
-    raise Exception.Create('RefuelHeld: not enough money');
+    raise ECommandRefused.CreateReason(rrNoMoney, 'RefuelHeld: not enough money');
   P.SetMoney(P.Money - Cost);
   if H.SelectedHoldItem is TCistern then
     Inc((H.SelectedHoldItem as TCistern).Fuel, Amount)
@@ -2837,7 +2839,7 @@ begin
   UnitPrice := Galaxy.ScaleIntByTechLevel(10, 100);
   Cost := Round(Amount * UnitPrice);
   if P.Money < Cost then
-    raise Exception.Create('ReloadHeld: not enough money');
+    raise ECommandRefused.CreateReason(rrNoMoney, 'ReloadHeld: not enough money');
   P.SetMoney(P.Money - Cost);
   Inc(Weapon.Ammo, Amount);
   EquipHeldInFreeSlot;
@@ -2961,7 +2963,7 @@ begin
       Inc(Cost, (Item as TWeapon).CalculateAmmoRefillCost);
   end;
   if P.Money < Cost then
-    raise Exception.Create('BuyRockets: not enough money');
+    raise ECommandRefused.CreateReason(rrNoMoney, 'BuyRockets: not enough money');
   P.SetMoney(P.Money - Cost);
   Quantity := 0;
   for I := 0 to H.PlayerHoldShip.Inventory.Count - 1 do

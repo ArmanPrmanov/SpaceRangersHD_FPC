@@ -167,6 +167,9 @@ var
   Chat: TChatMessage;
   Talk, TalkBack: TTalkRequestMessage;
   Command, CommandBack: TPlayerCommand;
+  Sequence: Cardinal;
+  Outcome, OutcomeBack: TCommandResultMessage;
+  Refusal: Exception;
 begin
   Buffer := TBufEC.Create;
   try
@@ -284,14 +287,42 @@ begin
     SetLength(Command.Ints, 1);
     Command.Ints[0] := 1;
     Command.Text := 'x';
-    EncodeCommandMessage(Command, Buffer);
+    EncodeCommandMessage(4000000000, Command, Buffer);
     Buffer.SetPosition(0);
-    CommandBack := DecodeCommandMessage(Buffer);
+    CommandBack := DecodeCommandMessage(Buffer, Sequence);
     Check(
-        (CommandBack.Kind = 43) and (CommandBack.Actor = 1234) and (Length(CommandBack.Ints) = 1)
-            and (CommandBack.Ints[0] = 1) and (CommandBack.Text = 'x') and Buffer.IsAtEnd,
-        'Command round trips'
+        (Sequence = 4000000000) and (CommandBack.Kind = 43) and (CommandBack.Actor = 1234)
+            and (Length(CommandBack.Ints) = 1) and (CommandBack.Ints[0] = 1)
+            and (CommandBack.Text = 'x') and Buffer.IsAtEnd,
+        'Command round trips with its number'
     );
+
+    Buffer.Clear;
+    Outcome := Default(TCommandResultMessage);
+    Outcome.Sequence := 17;
+    Outcome.Kind := 110;
+    Outcome.Ok := False;
+    Outcome.Reason := rrOutOfStock;
+    Outcome.Text := 'нет товара';
+    EncodeCommandResult(Outcome, Buffer);
+    Buffer.SetPosition(0);
+    OutcomeBack := DecodeCommandResult(Buffer);
+    Check(
+        (OutcomeBack.Sequence = 17) and (OutcomeBack.Kind = 110) and not OutcomeBack.Ok
+            and (OutcomeBack.Reason = rrOutOfStock) and (OutcomeBack.Text = 'нет товара')
+            and Buffer.IsAtEnd,
+        'CommandResult round trips'
+    );
+    // A reason a newer host knows is a refusal all the same.
+    Buffer.Clear;
+    EncodeCommandResult(Outcome, Buffer);
+    PByte(Buffer.Data)[4 + 2 + 1] := 200;
+    Buffer.SetPosition(0);
+    Check(DecodeCommandResult(Buffer).Reason = rrOther, 'an unknown refusal reason is Other');
+    Refusal := ECommandRefused.CreateReason(rrNoMoney, 'x');
+    Check(RefusalReasonOf(Refusal) = rrNoMoney, 'ECommandRefused carries its reason');
+    Refusal.Free;
+    CheckText('CommandResult', WideString(MessageKindName(nkCommandResult)), 'kind names');
     CheckText('TalkDone', WideString(MessageKindName(nkTalkDone)), 'kind names');
     // XXH64 of nothing with seed 0, the published value.
     Check(sr_hash64(nil, 0, 0) = QWord($EF46DB3751D8E999), 'the data hash is XXH64');

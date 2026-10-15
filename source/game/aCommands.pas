@@ -9,6 +9,7 @@ unit aCommands;
 interface
 uses
   EC_Buf,
+  SysUtils,
   Types;
 type
   // A command's kind. Each actions unit declares its kinds as constants in a range of its
@@ -45,6 +46,17 @@ type
   end;
   TCommandExecutor = procedure(const Command: TPlayerCommand);
   TCommandHook = procedure(const Command: TPlayerCommand);
+  // CHANGE: ENHANCEMENT - Why a command could not run, as a host tells the client that sent it
+  // (docs/network.md, Commands: CommandResult). The values travel in that message, so never
+  // renumber one. An executor raises ECommandRefused where the reason is one of these; any
+  // other exception is rrOther. ECommandRefused means that the command changed nothing
+  // before it raised, so the command log needs no checkpoint after it: raise it only before
+  // the executor's first change.
+  TRefusalReason = (rrOther = 0, rrOutOfStock = 1, rrNoMoney = 2, rrItemGone = 3);
+  ECommandRefused = class(Exception)
+    Reason: TRefusalReason;
+    constructor CreateReason(AReason: TRefusalReason; const Text: string);
+  end;
 var
   // Called around every submitted command, on the thread that submits it.
   BeforeCommandHook: TCommandHook;
@@ -75,6 +87,9 @@ function CanNameObject(Instance: TObject): Boolean;
 procedure EncodeCommand(const Command: TPlayerCommand; Buffer: TBufEC);
 function DecodeCommand(Buffer: TBufEC): TPlayerCommand;
 function CommandKindName(Kind: TCommandKind): AnsiString;
+// The reason E gives (ECommandRefused), else rrOther.
+function RefusalReasonOf(E: Exception): TRefusalReason;
+function RefusalReasonName(Reason: TRefusalReason): AnsiString;
 
 procedure RegisterCommand(Kind: TCommandKind; const Name: AnsiString; Executor: TCommandExecutor);
 // Runs the command and tells the hooks.
@@ -83,7 +98,6 @@ procedure SubmitCommand(const Command: TPlayerCommand);
 procedure ExecuteCommand(const Command: TPlayerCommand);
 implementation
 uses
-  SysUtils,
   aGalaxy,
   aPlanet,
   aShip,
@@ -99,6 +113,31 @@ const
 var
   Executors: array[0..MaximumCommandKind] of TCommandExecutor;
   KindNames: array[0..MaximumCommandKind] of AnsiString;
+
+constructor ECommandRefused.CreateReason(AReason: TRefusalReason; const Text: string);
+begin
+  inherited Create(Text);
+  Reason := AReason;
+end;
+
+function RefusalReasonOf(E: Exception): TRefusalReason;
+begin
+  if E is ECommandRefused then
+    Result := ECommandRefused(E).Reason
+  else
+    Result := rrOther;
+end;
+
+function RefusalReasonName(Reason: TRefusalReason): AnsiString;
+begin
+  case Reason of
+    rrOutOfStock: Result := 'out-of-stock';
+    rrNoMoney: Result := 'no-money';
+    rrItemGone: Result := 'item-gone';
+  else
+    Result := 'other';
+  end;
+end;
 
 function NewCommand(Kind: TCommandKind): TPlayerCommand;
 begin

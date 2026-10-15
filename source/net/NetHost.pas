@@ -10,6 +10,7 @@ unit NetHost;
 interface
 uses
   Classes,
+  SysUtils,
   SyncObjs,
   EC_Buf,
   aCommands,
@@ -19,6 +20,14 @@ uses
   NetProtocol;
 type
   THostPeerState = (hpHello, hpPendingJoin, hpJoined);
+
+  // CHANGE: ENHANCEMENT - A command a peer sent, with the number the client gave it
+  // (CommandResult names it).
+  TQueuedCommand = record
+    Sequence: Cardinal;
+    Command: TPlayerCommand;
+  end;
+  TQueuedCommands = array of TQueuedCommand;
 
   THostPeer = class
     PeerId: Integer;
@@ -32,7 +41,7 @@ type
     HasCharacter: Boolean;
     Character: TJoinCharacter;
     // Its commands, in arrival order, not yet applied.
-    Queue: array of TPlayerCommand;
+    Queue: TQueuedCommands;
     // The last state it acknowledged (0: none), and that state while the host has it.
     AckedSerial: Integer;
     Base: TNetState;
@@ -94,6 +103,9 @@ type
     procedure SendStatus(Force: Boolean);
     function TakeState: TNetState;
     function LagsBehind(Peer: THostPeer; Human: THuman): Boolean;
+    // CHANGE: ENHANCEMENT - Tells the peer that its command Sequence raised E here, and why
+    // (CommandResult); logs it. Thread-safe: the turn thread calls it in a remote dialogue.
+    procedure CommandFailed(Peer: THostPeer; Sequence: Cardinal; const Command: TPlayerCommand; E: Exception);
   public
     // Joins wait while this is set; the headless host sets it until every client is there,
     // so that the humans join in the same order every run (by name).
@@ -127,6 +139,8 @@ type
     // human who continues its travel: it is applied, with what comes before it, so that the
     // player's break holds the next day (docs/network.md, Continuing travel).
     procedure ApplyQueues;
+    // The commands of the human's peer waiting in its queue, in arrival order (a copy).
+    function QueuedCommands(HumanId: Integer): TQueuedCommands;
     // The day starts: no join or disconnect until the state after it is sent.
     procedure BeginDay;
     // Sends the films the player-star job encoded to the clients in their stars; returns the
@@ -174,7 +188,6 @@ procedure HostDayCompleted;
 function HostRemoteTalk(Human: THuman): Boolean;
 implementation
 uses
-  SysUtils,
   aEFilm,
   aGalaxy,
   aObjectRefs,
@@ -227,7 +240,7 @@ var
   I: Integer;
 begin
   for I := 0 to High(Queue) do
-    if Queue[I].Kind = ckStopContinuing then
+    if Queue[I].Command.Kind = ckStopContinuing then
       Exit(I);
   Result := -1;
 end;
@@ -237,7 +250,7 @@ var
   I: Integer;
 begin
   for I := 0 to High(Queue) do
-    if Queue[I].Kind = ckEndTurn then
+    if Queue[I].Command.Kind = ckEndTurn then
       Exit(I);
   Result := -1;
 end;
@@ -337,6 +350,7 @@ end;
 procedure TNetHost.HandleMessage(Peer: THostPeer; Kind: TNetMessageKind; Payload: TBufEC);
 var
   Command: TPlayerCommand;
+  Sequence: Cardinal;
   Chat: TChatMessage;
   Serial, I: Integer;
   Other: THostPeer;
@@ -366,7 +380,7 @@ begin
     nkCommand:
       if Peer.State = hpJoined then
       begin
-        Command := DecodeCommandMessage(Payload);
+        Command := DecodeCommandMessage(Payload, Sequence);
         if Integer(Command.Actor) <> Peer.HumanId then
           NetLog(
               Format(
@@ -378,7 +392,8 @@ begin
         begin
           I := Length(Peer.Queue);
           SetLength(Peer.Queue, I + 1);
-          Peer.Queue[I] := Command;
+          Peer.Queue[I].Sequence := Sequence;
+          Peer.Queue[I].Command := Command;
         end;
       end;
     nkAck:
@@ -867,18 +882,55 @@ begin
       Last := Peer.StopIndex;
     for J := 0 to Last do
       try
-        SubmitCommand(Peer.Queue[J]);
+        SubmitCommand(Peer.Queue[J].Command);
       except
         on E: Exception do
-          NetLog(
-              Format(
-                  '%s of human %d failed: %s',
-                  [CommandKindName(Peer.Queue[J].Kind), Peer.HumanId, E.Message]
-              )
-          );
+          CommandFailed(Peer, Peer.Queue[J].Sequence, Peer.Queue[J].Command, E);
       end;
     if Last >= 0 then
       Delete(Peer.Queue, 0, Last + 1);
+  end;
+end;
+
+function TNetHost.QueuedCommands(HumanId: Integer): TQueuedCommands;
+var
+  Peer: THostPeer;
+begin
+  Result := nil;
+  Peer := PeerOfHuman(FPeers, HumanId);
+  if Peer <> nil then
+    Result := Copy(Peer.Queue);
+end;
+
+procedure TNetHost.CommandFailed(
+    Peer: THostPeer;
+    Sequence: Cardinal;
+    const Command: TPlayerCommand;
+    E: Exception
+);
+var
+  Message: TCommandResultMessage;
+  Payload: TBufEC;
+begin
+  Message := Default(TCommandResultMessage);
+  Message.Sequence := Sequence;
+  Message.Kind := Command.Kind;
+  Message.Ok := False;
+  Message.Reason := RefusalReasonOf(E);
+  Message.Text := WideString(E.Message);
+  NetLog(
+      Format(
+          'command failed human=%d seq=%d kind=%s reason=%s: %s',
+          [Peer.HumanId, Sequence, CommandKindName(Command.Kind), RefusalReasonName(Message.Reason),
+              E.Message]
+      )
+  );
+  Payload := TBufEC.Create;
+  try
+    EncodeCommandResult(Message, Payload);
+    FThread.Send(Peer.PeerId, nkCommandResult, Payload);
+  finally
+    Payload.Free;
   end;
 end;
 
@@ -967,6 +1019,7 @@ var
   Payload: TBufEC;
   Kind: TNetMessageKind;
   Command: TPlayerCommand;
+  Sequence: Cardinal;
   Deadline: QWord;
   Commands: Integer;
   Outcome: AnsiString;
@@ -1015,7 +1068,7 @@ begin
         case Kind of
           nkCommand:
             begin
-              Command := DecodeCommandMessage(Payload);
+              Command := DecodeCommandMessage(Payload, Sequence);
               if Integer(Command.Actor) <> Peer.HumanId then
                 NetLog(
                     Format(
@@ -1033,12 +1086,7 @@ begin
                   SubmitTalkCommand(Command);
                 except
                   on E: Exception do
-                    NetLog(
-                        Format(
-                            '%s of human %d in a talk failed: %s',
-                            [CommandKindName(Command.Kind), Peer.HumanId, E.Message]
-                        )
-                    );
+                    CommandFailed(Peer, Sequence, Command, E);
                 end;
               end;
             end;
