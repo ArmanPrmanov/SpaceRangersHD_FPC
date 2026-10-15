@@ -14,8 +14,8 @@ uses
 const
   // CHANGE: ENHANCEMENT - 2: TalkRequest has a payload (remote dialogue). 3: Status names the
   // human whose answer to a dialogue the day waits for. 4: NewHuman and Character (a first
-  // join chooses its character on the new-game screen).
-  ProtocolVersion = 4;
+  // join chooses its character on the new-game screen). 5: Film carries zstd bytes.
+  ProtocolVersion = 5;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 
@@ -69,7 +69,8 @@ type
     // host does not hash its states (StateHashes).
     Hash: QWord;
   end;
-  // host -> client: the film of a star's day (TEFilm.SaveToBuffer) follows the header.
+  // host -> client: the film of a star's day (TEFilm.SaveToBuffer), compressed whole
+  // (NetDelta.CompressState without a reference), follows the header.
   TFilmHeader = record
     Day: Integer;
     StarId: Integer;

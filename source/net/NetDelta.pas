@@ -10,7 +10,8 @@ interface
 uses
   EC_Buf;
 
-// Appends the compressed Source to Target. Reference may be nil for a whole state.
+// Appends the compressed Source to Target. Reference may be nil for a whole state; films go
+// without one too (NetHost.HostStarDay).
 procedure CompressState(Source, Reference, Target: TBufEC; Level: Integer = 3);
 // Replaces Target with the state that Compressed holds; Reference must be the one it was
 // compressed against (nil for a whole state). Raises on corrupt input.

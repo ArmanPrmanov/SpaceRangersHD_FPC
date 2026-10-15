@@ -15,7 +15,7 @@ Read [humans.md](humans.md) (the barrier, hot-seat, `ActingHuman`) and
 | --- | --- |
 | `platform/net_native.c`, `platform/NetNative.pas` | sockets (Winsock / BSD) and zstd |
 | `source/net/NetTransport.pas` | `TNetConnection`: length-prefixed messages over TCP; `TNetListener` |
-| `source/net/NetDelta.pas` | `CompressState` / `ExpandState`: whole states and deltas (zstd with the old state as reference, like `--patch-from`) |
+| `source/net/NetDelta.pas` | `CompressState` / `ExpandState`: whole states, deltas (zstd with the old state as reference, like `--patch-from`) and films |
 | `source/net/NetProtocol.pas` | message kinds, their encoding, protocol version, the data hash |
 | `source/net/NetThread.pas` | the network thread: owns every socket, moves bytes, queues whole messages per peer |
 | `source/net/NetHost.pas` | the host session: peers, joins, commands in, states and films out |
@@ -88,15 +88,15 @@ protocol; never renumber one, add new ones at the end and bump
 | `Welcome` | host → client | the client's human id, the host's name |
 | `Refuse` | host → client | reason text; the host then closes |
 | `State` | host → client | state number, base state number (0 = whole), day number, state hash, zstd bytes (`NetDelta`) |
-| `Film` | host → client | day number, star id, the film (`TEFilm.SaveToBuffer`) |
+| `Film` | host → client | day number, star id, zstd bytes of the film (`TEFilm.SaveToBuffer`, `CompressState` with no reference) |
 | `Command` | both | an encoded `TPlayerCommand` (`aCommands.EncodeCommand`) |
 | `Ack` | client → host | the number of the last state the client applied |
 
 The host numbers its states from 1. A day number cannot name a base: a join
 between two days sends a state of the same day as the one before it.
-`ProtocolVersion` is 4 (2: `TalkRequest` has its payload; 3: `Status` names
+`ProtocolVersion` is 5 (2: `TalkRequest` has its payload; 3: `Status` names
 the human whose answer to a dialogue the day waits for; 4: `NewHuman` and
-`Character`).
+`Character`; 5: `Film` is compressed).
 | `Status` | host → client | per human: id, name, connected, holds the day; whether a day is running; the human whose answer to a dialogue the day waits for (0: none) |
 | `TalkRequest` | host → client | human id, ship id, planet id (0: none), scripted, talk kind, amount, text: the human's talk fields (Remote dialogue) |
 | `TalkDone` | client → host | nothing: the client's answer is complete, or it cannot show the talk |
@@ -263,11 +263,19 @@ does not wait for it:
 The player-star job records one film per star that holds a human (`aStarFilms`).
 Right after each star's day, on the turn thread, the host encodes the film of a
 star whose `PlayerStar` humans include a connected remote human
-(`StarDayHook`), once. After the job it sends the same bytes to every client
-whose human was in that star (`Film`), from the pump as soon as the day has run
+(`StarDayHook`), once, and compresses it there (`CompressState` with no
+reference, level 3, about 1 ms for a star's film of 70 KB), so the pump only
+sends. After the job it sends the same bytes to every client whose human was in
+that star (`Film`), from the pump as soon as the day has run
 (`DayCompletedHook` marks it; the galaxy job may be running), or, headless, at
 once. The film goes before the state: it is small and needed first. A day that
-was not filmed sends nothing.
+was not filmed sends nothing. The client expands it as it arrives
+(`ExpandState`), so `TakeFilmOfDay` holds the film's own bytes.
+
+A film compresses to about 0.63 of its size. The previous film of the same star
+as a reference (as the state deltas do) saves only 14% more, measured over the
+films of 10 days with 8 humans, so films go without one: a client that skips or
+drops a film would need the same reference.
 
 The client plays it on the star map as the history viewer plays a stored film:
 the film's objects bind to the client's scene objects by kind, graphics key
@@ -650,27 +658,31 @@ The headless runner (`HeadlessNet`):
   state shows it. It prints `net talk day= human= ship= response=`. The replay
   installs it with the same flag, so the log's talk is asked again.
 - One line per day: host `net host day= serial= hash= state= whole= delta= film=
-  take= compress= humans= away= plan=` (state: the uncompressed checkpoint;
-  whole: it compressed; delta: the largest delta sent; film: the bytes of the
-  distinct films of that day; take: checkpoint and hash, ms), client `net client
-  day= serial= hash= match= human= state= received= delta= film= films= load=`.
+  filmraw= take= compress= humans= away= plan=` (state: the uncompressed
+  checkpoint; whole: it compressed; delta: the largest delta sent; film: the
+  compressed bytes of the distinct films of that day, each counted once however
+  many clients get it; filmraw: the same films uncompressed; take: checkpoint
+  and hash, ms), client `net client day= serial= hash= match= human= state=
+  received= delta= film= films= load=` (film: the compressed bytes of the films
+  it received).
 
 Measured on Windows x64, debug build, 10 days (`tools/test.py` prints these per
 save):
 
-| Save | Humans | Whole state (raw / zstd) | Median delta | Median films of a day | Client load | Host take |
+| Save | Humans | Whole state (raw / zstd) | Median delta | Median films of a day (raw / zstd) | Client load | Host take |
 | --- | --- | --- | --- | --- | --- | --- |
-| AutoSave | 2 | 2.91 MB / 558 KB | 93 KB | 102 KB | 453 ms | 187 ms |
-| AutoSave | 8 | 2.98 MB / 561 KB | 95 KB | 650 KB | 938 ms | 289 ms |
-| Система Солнце (1) | 2 | 2.79 MB / 534 KB | 99 KB | 86 KB | 359 ms | 109 ms |
-| Система Солнце (1) | 8 | 2.84 MB / 539 KB | 98 KB | 613 KB | 765 ms | 273 ms |
-| Система Солнце | 2 | 2.77 MB / 531 KB | 90 KB | 99 KB | 344 ms | 164 ms |
-| Система Солнце | 8 | 2.84 MB / 535 KB | 91 KB | 509 KB | 734 ms | 258 ms |
+| AutoSave | 2 | 2.91 MB / 558 KB | 93 KB | 71 KB / 45 KB | 453 ms | 187 ms |
+| AutoSave | 8 | 2.98 MB / 561 KB | 95 KB | 516 KB / 319 KB | 938 ms | 289 ms |
+| Система Солнце (1) | 2 | 2.79 MB / 534 KB | 99 KB | 76 KB / 50 KB | 359 ms | 109 ms |
+| Система Солнце (1) | 8 | 2.84 MB / 539 KB | 98 KB | 477 KB / 298 KB | 765 ms | 273 ms |
+| Система Солнце | 2 | 2.77 MB / 531 KB | 90 KB | 87 KB / 60 KB | 344 ms | 164 ms |
+| Система Солнце | 8 | 2.84 MB / 535 KB | 91 KB | 517 KB / 330 KB | 734 ms | 258 ms |
 
 With 8 humans nine processes share the machine, which is most of the slower
 load. Every client with the same base gets the same delta, compressed once.
-A delta is about a sixth of the compressed whole state, and a film of one
-star's day is about as large as a delta.
+A delta is about a sixth of the compressed whole state, and the compressed
+film of one star's day is about half a delta. The films of a day count each
+star's film once; every client in that star gets it.
 
 ## Not done yet
 

@@ -180,6 +180,7 @@ var
   Plan: AnsiString;
   Job: TNetStateJob;
   FilmBytes, StateBytes, Away: Integer;
+  FilmRawStart: Int64;
 begin
   Result := 0;
   LoadSave(Options.SavePath, Options.Seed);
@@ -238,6 +239,7 @@ begin
       end;
       Host.BeginDay;
       ProbeFilmBytes := 0;
+      FilmRawStart := Host.SentFilmRawBytes;
       StartPlayerStarTurnCalculation;
       WaitForTurnCalculation;
       RaisePendingWorkerError;
@@ -264,9 +266,10 @@ begin
         end;
         Emit(
             Format(
-                'net host day=%d serial=%d hash=%s state=%d whole=%d delta=%d film=%d take=%d compress=%d humans=%d away=%d plan=%s',
+                'net host day=%d serial=%d hash=%s state=%d whole=%d delta=%d film=%d filmraw=%d take=%d compress=%d humans=%d away=%d plan=%s',
                 [Galaxy.CurrentTurn, Job.State.Serial, HashText(Job.State.Hash), StateBytes,
-                    Job.WholeSize, Job.DeltaSize, FilmBytes, Host.LastTakeMs, Job.CompressMs,
+                    Job.WholeSize, Job.DeltaSize, FilmBytes,
+                    Integer(Host.SentFilmRawBytes - FilmRawStart), Host.LastTakeMs, Job.CompressMs,
                     Session.Humans.Count, AwayCount, Plan]
             )
         );
@@ -332,7 +335,7 @@ begin
 end;
 
 // Decodes each film the host sent, as the star map would before playing it; returns the
-// bytes and adds them to Count. OwnStar says whether one was of this client's star.
+// bytes they had on the wire and adds them to Count. OwnStar says whether one was of this client's star.
 function TakeFilms(Client: TNetClient; var Count: Integer; out OwnStar: Boolean): Integer;
 var
   Film: TNetClientFilm;
@@ -348,7 +351,7 @@ begin
         Break;
       try
         Decoded.LoadFromBuffer(Film.Bytes);
-        Inc(Result, Film.Bytes.DataSize);
+        Inc(Result, Film.CompressedSize);
         Inc(Count);
         if (LocalHuman <> nil) and (LocalHuman.PlayerStar <> nil)
             and (Film.Header.StarId = Integer(LocalHuman.PlayerStar.Id)) then

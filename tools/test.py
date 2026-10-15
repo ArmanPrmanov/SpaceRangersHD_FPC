@@ -515,11 +515,12 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
         f"{label}: {len(talks)} remote talks on day {talks[0]['day']}, each during its client's "
         "film and answered at the film's end, named in every client's status, seen by the host "
         "and by the replay",
-        "  sizes: whole state {} bytes, {} compressed; median delta {}; median films of a day {}; "
-        "median load {} ms (client), take {} ms (host)".format(
+        "  sizes: whole state {} bytes, {} compressed; median delta {}; median films of a day {} "
+        "({} raw); median load {} ms (client), take {} ms (host)".format(
             host_days[-1]["state"], host_days[-1]["whole"],
             median([int(line["delta"]) for line in host_days if int(line["delta"]) > 0]),
             median([int(line["film"]) for line in host_days if int(line["film"]) > 0]),
+            median([int(line["filmraw"]) for line in host_days if int(line["filmraw"]) > 0]),
             median([int(line["load"]) for line in client_days]),
             median([int(line["take"]) for line in host_days]),
         ),

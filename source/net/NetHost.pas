@@ -61,6 +61,7 @@ type
     // Films the turn thread encoded (TNetHostFilm), under FFilmLock.
     FFilms: TList;
     FFilmLock: TCriticalSection;
+    FSentFilmRawBytes: Int64;
     FDayUnderWay: Boolean;
     FLastStatus: TBufEC;
     FLastTakeMs: Integer;
@@ -129,8 +130,10 @@ type
     // The day starts: no join or disconnect until the state after it is sent.
     procedure BeginDay;
     // Sends the films the player-star job encoded to the clients in their stars; returns the
-    // bytes of the distinct films.
+    // compressed bytes of the distinct films.
     function SendFilms: Integer;
+    // The uncompressed bytes of the distinct films sent so far.
+    property SentFilmRawBytes: Int64 read FSentFilmRawBytes;
     // Takes the state (a quiet point after the day) and queues it for every joined peer;
     // the day is over. The caller frees the job once it is Done.
     function SendState(MeasureWhole: Boolean): TNetStateJob;
@@ -180,6 +183,7 @@ uses
   aSession,
   aSaveLoad,
   GR_Main,
+  NetDelta,
   SimEvents,
   SimulationThread,
   ThreadCalc;
@@ -192,7 +196,9 @@ type
   TNetHostFilm = class
     Day: Integer;
     StarId: Integer;
+    // The film compressed (CompressState), and its size before.
     Bytes: TBufEC;
+    RawSize: Integer;
     HumanIds: array of Integer;
     destructor Destroy; override;
   end;
@@ -888,6 +894,7 @@ var
   Entry: TNetHostFilm;
   I, Count: Integer;
   Human: THuman;
+  Raw: TBufEC;
 begin
   Host := ActiveHost;
   if (Host = nil) or not Recorded then
@@ -913,7 +920,15 @@ begin
   Entry.Day := Galaxy.CurrentTurn;
   Entry.StarId := TStar(Star).Id;
   Entry.Bytes := TBufEC.Create;
-  TEFilm(Film).SaveToBuffer(Entry.Bytes);
+  // Compressed here, once, so that the pump only sends.
+  Raw := TBufEC.Create;
+  try
+    TEFilm(Film).SaveToBuffer(Raw);
+    Entry.RawSize := Raw.DataSize;
+    CompressState(Raw, nil, Entry.Bytes);
+  finally
+    Raw.Free;
+  end;
   Host.FFilmLock.Enter;
   try
     Host.FFilms.Add(Entry);
@@ -1104,6 +1119,7 @@ begin
       EncodeFilmHeader(Header, Payload);
       Payload.AddBytes(Entry.Bytes.Data, Entry.Bytes.DataSize);
       Inc(Result, Entry.Bytes.DataSize);
+      Inc(FSentFilmRawBytes, Entry.RawSize);
       // Encoded once; every client in the star gets the same bytes.
       for J := 0 to High(Entry.HumanIds) do
       begin

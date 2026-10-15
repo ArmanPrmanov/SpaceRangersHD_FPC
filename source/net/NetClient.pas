@@ -16,10 +16,12 @@ uses
   NetThread,
   NetProtocol;
 type
-  // A film the host sent: its header and the bytes TEFilm.LoadFromBuffer reads.
+  // A film the host sent: its header and the bytes TEFilm.LoadFromBuffer reads (expanded), and
+  // how many bytes they were on the wire.
   TNetClientFilm = class
     Header: TFilmHeader;
     Bytes: TBufEC;
+    CompressedSize: Integer;
     destructor Destroy; override;
   end;
 
@@ -360,11 +362,18 @@ begin
         Film := TNetClientFilm.Create;
         Film.Header := DecodeFilmHeader(Payload);
         Film.Bytes := TBufEC.Create;
-        if Payload.DataSize > Payload.Position then
-          Film.Bytes.AddBytes(
-              @PByte(Payload.Data)[Payload.Position], Payload.DataSize - Payload.Position
+        try
+          ExpandState(
+              @PByte(Payload.Data)[Payload.Position],
+              Payload.DataSize - Payload.Position,
+              nil,
+              Film.Bytes
           );
-        Film.Bytes.SetPosition(0);
+        except
+          Film.Free;
+          raise;
+        end;
+        Film.CompressedSize := Payload.DataSize - Payload.Position;
         FFilms.Add(Film);
       end;
     nkStatus:
