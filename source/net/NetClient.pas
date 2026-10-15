@@ -47,6 +47,20 @@ type
   // character (NewHuman); it waits for SendCharacter.
   TNetJoinPhase = (jpConnecting, jpJoining, jpCharacter, jpReceiving, jpJoined);
 
+  // CHANGE: ENHANCEMENT - A trade that waits to run here (docs/network.md, Trades): another
+  // human's that the host relayed, or this client's own that the host applied after the client
+  // stopped waiting for it (Own).
+  TNetRelayedCommand = record
+    HumanId: Integer;
+    Own: Boolean;
+    Command: TPlayerCommand;
+  end;
+  // A trade sent and not answered yet.
+  TNetSentTrade = record
+    Sequence: Cardinal;
+    Command: TPlayerCommand;
+  end;
+
   TNetClient = class
   private
     FThread: TNetThread;
@@ -95,8 +109,18 @@ type
     // after the next one, which replaces the human's bubbles.
     FResults: array of TCommandResultMessage;
     FShownRefusals: array of TCommandResultMessage;
+    // CHANGE: ENHANCEMENT - The trade SendTrade waits for (0: none), and its answer once it has
+    // come; the trades it stopped waiting for, whose answer has not come; the trades to run here
+    // at a safe point (ApplyRelayed).
+    FAwaitedSequence: Cardinal;
+    FAwaitedDone: Boolean;
+    FAwaitedResult: TCommandResultMessage;
+    FLateTrades: array of TNetSentTrade;
+    FRelayed: array of TNetRelayedCommand;
+    FNoAnswerShown: Boolean;
     procedure HandleMessage(Kind: TNetMessageKind; Payload: TBufEC);
     procedure ShowRefusal(const Refusal: TCommandResultMessage);
+    procedure TakeLateTrade(const CommandResult: TCommandResultMessage);
     procedure GiveUp(const Text: AnsiString);
     procedure SayHello;
     procedure TakeConnection;
@@ -126,6 +150,24 @@ type
     function ApplyState: TNetApplyReport;
     // Sends a command this client's human submitted (NetworkCommandHook).
     procedure SendCommand(const Command: TPlayerCommand);
+    // CHANGE: ENHANCEMENT - A trade this client's human submitted (aCommands.TradeSubmitHook,
+    // docs/network.md, Trades): sends it and waits, pumping, for the host's answer. Returns when
+    // the host applied it, so that it runs here; raises ECommandRefused when the host refused
+    // it, did not answer within ClientTradeTimeoutMs (the trade is dropped here; a later answer
+    // that it was applied runs it at a safe point, ApplyRelayed), or is gone. A trade the host
+    // has not answered yet is waited for first.
+    procedure SendTrade(const Command: TPlayerCommand);
+    // CHANGE: ENHANCEMENT - At a safe point (no command runs, no screen is being built, no box
+    // above the screen): runs the trades the host relayed, as their humans, and this client's
+    // own that it applied late, in the order they came. One that fails is logged and dropped;
+    // the next state fixes the copy. Nothing runs while a state waits to be applied: a relay
+    // that came before a state is in it. Runs Limit at most; returns how many ran.
+    function ApplyRelayed(Limit: Integer = MaxInt): Integer;
+    // Whether relayed trades wait to run.
+    function HasRelayed: Boolean;
+    // Whether the last trade SendTrade refused was not answered, and its bubble says so;
+    // clears it.
+    function TakeNoAnswerShown: Boolean;
     // CHANGE: ENHANCEMENT - The character chosen for a first join (CharacterWanted), and the
     // name, which may differ from Hello's; the join goes on.
     procedure SendCharacter(const Name: WideString; const Character: TJoinCharacter);
@@ -178,8 +220,16 @@ var
   ActiveClient: TNetClient;
   // CHANGE: ENHANCEMENT - How long a dialogue may wait for the end of the client's film.
   ClientTalkHoldMs: Integer = 60000;
+  // CHANGE: ENHANCEMENT - How long a trade waits for the host's answer (SendTrade), and what
+  // the wait calls besides pumping once it has lasted ClientTradeIdleMs: the screens keep the
+  // window alive without handling its input (docs/network.md, Trades).
+  ClientTradeTimeoutMs: Integer = 10000;
+  ClientTradeIdleMs: Integer = 100;
+  TradeWaitIdleHook: procedure;
 // NetworkCommandHook of a client: sends the command to the host.
 procedure ClientCommandSubmitted(const Command: TPlayerCommand);
+// CHANGE: ENHANCEMENT - aCommands.TradeSubmitHook of a client (TNetClient.SendTrade).
+procedure ClientTradeSubmitted(const Command: TPlayerCommand);
 // CHANGE: ENHANCEMENT - What the bubble of a refused command says (Multiplayer.Refused*, with
 // an English fallback, as the waits' texts).
 function RefusalText(Reason: TRefusalReason): WideString;
@@ -195,6 +245,13 @@ uses
 const
   ConnectTimeoutMs = 10000;
   KeptCommandResults = 64;
+
+function TradeNoAnswerText: WideString;
+begin
+  Result := LocalizedColorText('Multiplayer.TradeNoAnswer');
+  if Result = '' then
+    Result := 'The host did not answer your action in time.';
+end;
 
 function RefusalText(Reason: TRefusalReason): WideString;
 const
@@ -364,6 +421,7 @@ var
   Film: TNetClientFilm;
   Reference: TBufEC;
   CommandResult: TCommandResultMessage;
+  Relayed: TNetRelayedCommand;
 begin
   case Kind of
     nkWelcome:
@@ -382,6 +440,9 @@ begin
       end;
     nkState:
       begin
+        // CHANGE: ENHANCEMENT - The state holds every trade the host applied before it.
+        FRelayed := nil;
+        FLateTrades := nil;
         Header := DecodeStateHeader(Payload);
         if Header.BaseSerial = 0 then
           Reference := nil
@@ -434,6 +495,12 @@ begin
     nkChat:
       with DecodeChat(Payload) do
         NetLog(Format('chat from human %d: %s', [SenderId, UTF8Encode(Text)]));
+    nkRelayCommand:
+      begin
+        Relayed.Own := False;
+        Relayed.Command := DecodeRelayCommand(Payload, Relayed.HumanId);
+        Insert(Relayed, FRelayed, Length(FRelayed));
+      end;
     nkBye:
       begin
         FHostLeft := True;
@@ -458,6 +525,15 @@ begin
         if Length(FResults) >= KeptCommandResults then
           Delete(FResults, 0, 1);
         Insert(CommandResult, FResults, Length(FResults));
+        // CHANGE: ENHANCEMENT - The answer to the trade SendTrade waits for, or to one it
+        // stopped waiting for: applied there, it runs here at the next safe point.
+        if (FAwaitedSequence <> 0) and (CommandResult.Sequence = FAwaitedSequence) then
+        begin
+          FAwaitedResult := CommandResult;
+          FAwaitedDone := True;
+        end
+        else
+          TakeLateTrade(CommandResult);
         if not CommandResult.Ok then
         begin
           NetLog(
@@ -471,6 +547,149 @@ begin
           Insert(CommandResult, FShownRefusals, Length(FShownRefusals));
         end;
       end;
+  end;
+end;
+
+procedure TNetClient.TakeLateTrade(const CommandResult: TCommandResultMessage);
+var
+  I: Integer;
+  Relayed: TNetRelayedCommand;
+begin
+  for I := 0 to High(FLateTrades) do
+    if FLateTrades[I].Sequence = CommandResult.Sequence then
+    begin
+      if CommandResult.Ok then
+      begin
+        Relayed.HumanId := FHumanId;
+        Relayed.Own := True;
+        Relayed.Command := FLateTrades[I].Command;
+        Insert(Relayed, FRelayed, Length(FRelayed));
+      end;
+      Delete(FLateTrades, I, 1);
+      Exit;
+    end;
+end;
+
+procedure TNetClient.SendTrade(const Command: TPlayerCommand);
+var
+  Start, Deadline: QWord;
+  Sent: TNetSentTrade;
+  Answer: TCommandResultMessage;
+
+  procedure WaitTick;
+  begin
+    if Assigned(TradeWaitIdleHook) and (GetTickCount64 >= Start + QWord(ClientTradeIdleMs)) then
+      TradeWaitIdleHook;
+    NetInboxEvent.WaitFor(2);
+    Pump;
+  end;
+
+begin
+  FNoAnswerShown := False;
+  if not Connected or (FHumanId < 0) then
+    raise ECommandRefused.CreateReason(rrOther, CommandKindName(Command.Kind) + ': no host');
+  Start := GetTickCount64;
+  Deadline := Start + QWord(ClientTradeTimeoutMs);
+  // One trade at a time: one the host has not answered yet could still be applied there.
+  while (Length(FLateTrades) > 0) and Connected and (GetTickCount64 < Deadline) do
+    WaitTick;
+  if Length(FLateTrades) > 0 then
+    raise ECommandRefused.CreateReason(
+        rrOther,
+        CommandKindName(Command.Kind) + ': the host has not answered the last trade'
+    );
+  SendCommand(Command);
+  Sent.Sequence := FCommandSequence;
+  Sent.Command := Command;
+  FAwaitedSequence := Sent.Sequence;
+  FAwaitedDone := False;
+  try
+    Pump;
+    while not FAwaitedDone do
+    begin
+      if not Connected then
+        raise ECommandRefused.CreateReason(rrOther, CommandKindName(Command.Kind) + ': the host is gone');
+      if GetTickCount64 >= Deadline then
+      begin
+        Insert(Sent, FLateTrades, Length(FLateTrades));
+        NetLog(
+            Format(
+                'trade unanswered seq=%d kind=%s ms=%d',
+                [Sent.Sequence, CommandKindName(Command.Kind), GetTickCount64 - Start]
+            )
+        );
+        if (Galaxy <> nil) and (LocalHuman <> nil) and (LocalHuman.Id = FHumanId) then
+        begin
+          LocalHuman.AddOrUpdateBubble(0, Galaxy.CurrentTurn, TradeNoAnswerText, '');
+          FNoAnswerShown := True;
+        end;
+        raise ECommandRefused.CreateReason(
+            rrOther,
+            CommandKindName(Command.Kind) + ': the host did not answer'
+        );
+      end;
+      WaitTick;
+    end;
+  finally
+    FAwaitedSequence := 0;
+  end;
+  Answer := FAwaitedResult;
+  NetLog(
+      Format(
+          'trade answered seq=%d kind=%s ok=%d reason=%s ms=%d',
+          [Answer.Sequence, CommandKindName(Answer.Kind), Ord(Answer.Ok), RefusalReasonName(Answer.Reason),
+              GetTickCount64 - Start]
+      )
+  );
+  if not Answer.Ok then
+    raise ECommandRefused.CreateReason(Answer.Reason, UTF8Encode(Answer.Text));
+end;
+
+function TNetClient.TakeNoAnswerShown: Boolean;
+begin
+  Result := FNoAnswerShown;
+  FNoAnswerShown := False;
+end;
+
+function TNetClient.HasRelayed: Boolean;
+begin
+  Result := Length(FRelayed) > 0;
+end;
+
+function TNetClient.ApplyRelayed(Limit: Integer): Integer;
+var
+  Relayed: TNetRelayedCommand;
+  Ok: Boolean;
+begin
+  Result := 0;
+  if (FAwaitedSequence <> 0) or FHasPending or CommandRunning or (Galaxy = nil) then
+    Exit;
+  while (Length(FRelayed) > 0) and (Result < Limit) do
+  begin
+    Relayed := FRelayed[0];
+    Delete(FRelayed, 0, 1);
+    Ok := True;
+    try
+      ExecuteRelayedCommand(Relayed.Command);
+    except
+      on E: Exception do
+      begin
+        Ok := False;
+        NetLog(
+            Format(
+                'relayed command failed human=%d kind=%s dropped: %s',
+                [Relayed.HumanId, CommandKindName(Relayed.Command.Kind), E.Message]
+            )
+        );
+      end;
+    end;
+    Inc(Result);
+    NetLog(
+        Format(
+            'relayed command ran human=%d kind=%s own=%d ok=%d',
+            [Relayed.HumanId, CommandKindName(Relayed.Command.Kind), Ord(Relayed.Own), Ord(Ok)]
+        )
+    );
   end;
 end;
 
@@ -731,6 +950,13 @@ procedure ClientCommandSubmitted(const Command: TPlayerCommand);
 begin
   if ActiveClient <> nil then
     ActiveClient.SendCommand(Command);
+end;
+
+procedure ClientTradeSubmitted(const Command: TPlayerCommand);
+begin
+  if ActiveClient = nil then
+    raise ECommandRefused.CreateReason(rrOther, CommandKindName(Command.Kind) + ': no host');
+  ActiveClient.SendTrade(Command);
 end;
 
 end.

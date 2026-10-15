@@ -15,8 +15,9 @@ const
   // CHANGE: ENHANCEMENT - 2: TalkRequest has a payload (remote dialogue). 3: Status names the
   // human whose answer to a dialogue the day waits for. 4: NewHuman and Character (a first
   // join chooses its character on the new-game screen). 5: Film carries zstd bytes.
-  // 6: Command carries the client's number for it, and CommandResult.
-  ProtocolVersion = 6;
+  // 6: Command carries the client's number for it, and CommandResult. 7: a host applies a
+  // trade as it arrives and answers it (CommandResult, also when applied), and RelayCommand.
+  ProtocolVersion = 7;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 
@@ -39,10 +40,14 @@ const
   // CHANGE: ENHANCEMENT - host -> client: what became of a command the client sent
   // (TCommandResultMessage).
   nkCommandResult = 15;
+  // CHANGE: ENHANCEMENT - host -> client: a trade the host applied, of another human at the
+  // client's human's planet or station (docs/network.md, Trades): that human's id, then the
+  // encoded command.
+  nkRelayCommand = 16;
 type
   // CHANGE: ENHANCEMENT - host -> client: a command the client sent, named by the number the
   // client gave it (Command), was applied (Ok) or refused, and why (docs/network.md,
-  // Commands). The host sends it for a refused command.
+  // Commands). The host sends it for a refused command, and for a trade it applied (Trades).
   TCommandResultMessage = record
     Sequence: Cardinal;
     Kind: TCommandKind;
@@ -150,6 +155,8 @@ procedure EncodeCommandMessage(Sequence: Cardinal; const Command: TPlayerCommand
 function DecodeCommandMessage(Buffer: TBufEC; out Sequence: Cardinal): TPlayerCommand;
 procedure EncodeCommandResult(const Message: TCommandResultMessage; Buffer: TBufEC);
 function DecodeCommandResult(Buffer: TBufEC): TCommandResultMessage;
+procedure EncodeRelayCommand(HumanId: Integer; const Command: TPlayerCommand; Buffer: TBufEC);
+function DecodeRelayCommand(Buffer: TBufEC; out HumanId: Integer): TPlayerCommand;
 procedure EncodeAck(Day: Integer; Buffer: TBufEC);
 function DecodeAck(Buffer: TBufEC): Integer;
 procedure EncodeCharacter(const Message: TCharacterMessage; Buffer: TBufEC);
@@ -202,6 +209,7 @@ begin
     nkNewHuman: Result := 'NewHuman';
     nkCharacter: Result := 'Character';
     nkCommandResult: Result := 'CommandResult';
+    nkRelayCommand: Result := 'RelayCommand';
   else
     Result := 'Kind' + IntToStr(Kind);
   end;
@@ -362,6 +370,18 @@ begin
   else
     Result.Reason := rrOther;
   Result.Text := Buffer.ReadWideString;
+end;
+
+procedure EncodeRelayCommand(HumanId: Integer; const Command: TPlayerCommand; Buffer: TBufEC);
+begin
+  Buffer.AddInt32(HumanId);
+  EncodeCommand(Command, Buffer);
+end;
+
+function DecodeRelayCommand(Buffer: TBufEC; out HumanId: Integer): TPlayerCommand;
+begin
+  HumanId := Buffer.GetInt32;
+  Result := DecodeCommand(Buffer);
 end;
 
 procedure EncodeAck(Day: Integer; Buffer: TBufEC);

@@ -303,6 +303,9 @@ begin
     // CHANGE: ENHANCEMENT - A nested command reaches the host once (HeadlessNet).
     else if Argument = '--sim-net-nested' then
       Simulation.NetNested := True
+    // CHANGE: ENHANCEMENT - Trades between humans at one planet (HeadlessNet).
+    else if Argument = '--sim-net-shop' then
+      Simulation.NetShop := True
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then

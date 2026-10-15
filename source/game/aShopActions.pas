@@ -330,7 +330,7 @@ var
 begin
   Command := NewCommand(ckBuyEquipment);
   AddShopItem(Command, SlotIndex, Item);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
   Result := EquipmentPurchase;
 end;
 
@@ -390,7 +390,7 @@ begin
   Command := NewCommand(ckFinishStoredHullPurchase);
   AddInt(Command, Index);
   AddInt(Command, PurchasedItem.Id);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 // Moved verbatim from TfGoodsShop2.RefreshGoodsDisplay.
@@ -524,7 +524,13 @@ begin
     SubmitCommand(Command);
   except
     on E: ECommandRefused do
+    begin
       AppendLogLineThreadSafe(AnsiString('TradeGoods refused: ' + E.Message));
+      // CHANGE: ENHANCEMENT - Another human was first (docs/network.md, Trades); the screen
+      // shows the goods as they stand now.
+      if Assigned(TradeRefusedHook) then
+        TradeRefusedHook(E.Reason);
+    end;
   end;
 end;
 
@@ -560,7 +566,7 @@ end;
 
 procedure RepairHull;
 begin
-  SubmitCommand(NewCommand(ckRepairHull));
+  SubmitTrade(NewCommand(ckRepairHull));
 end;
 
 // Moved verbatim from TfHangar.RefuelClicked.
@@ -578,7 +584,7 @@ end;
 
 procedure Refuel;
 begin
-  SubmitCommand(NewCommand(ckRefuel));
+  SubmitTrade(NewCommand(ckRefuel));
 end;
 
 // Moved from TfHangar.MainRightButtonDown.
@@ -613,13 +619,15 @@ begin
 end;
 
 initialization
+  // CHANGE: ENHANCEMENT - The trades (True) apply on a host as they arrive (docs/commands.md,
+  // Trades).
   RegisterCommand(ckEnterEquipmentShop, 'EnterEquipmentShop', @ExecuteEnterEquipmentShop);
   RegisterCommand(ckShowShopItemInfo, 'ShowShopItemInfo', @ExecuteShowShopItemInfo);
-  RegisterCommand(ckBuyEquipment, 'BuyEquipment', @ExecuteBuyEquipment);
-  RegisterCommand(ckFinishStoredHullPurchase, 'FinishStoredHullPurchase', @ExecuteFinishStoredHullPurchase);
-  RegisterCommand(ckTradeGoods, 'TradeGoods', @ExecuteTradeGoods);
-  RegisterCommand(ckRepairHull, 'RepairHull', @ExecuteRepairHull);
-  RegisterCommand(ckRefuel, 'Refuel', @ExecuteRefuel);
+  RegisterCommand(ckBuyEquipment, 'BuyEquipment', @ExecuteBuyEquipment, True);
+  RegisterCommand(ckFinishStoredHullPurchase, 'FinishStoredHullPurchase', @ExecuteFinishStoredHullPurchase, True);
+  RegisterCommand(ckTradeGoods, 'TradeGoods', @ExecuteTradeGoods, True);
+  RegisterCommand(ckRepairHull, 'RepairHull', @ExecuteRepairHull, True);
+  RegisterCommand(ckRefuel, 'Refuel', @ExecuteRefuel, True);
   RegisterCommand(ckStoreTranclucator, 'StoreTranclucator', @ExecuteStoreTranclucator);
   RegisterCommand(ckEndAutomaticControl, 'EndAutomaticControl', @ExecuteEndAutomaticControl);
 end.

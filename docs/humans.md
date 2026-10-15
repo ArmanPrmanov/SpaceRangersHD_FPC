@@ -365,7 +365,9 @@ with several logs (a comma-separated list or a directory) merges them
 (`CommandLog.RunMergedReplay`): between two shared records it applies each human's commands
 in `Session.Humans` order, then the shared record. The order of the files does not matter.
 The merged replay reaches the recording's hashes when the recording was made in that order,
-which the headless hot-seat and the hot-seat UI both follow. Before each player-star job it
+which the headless hot-seat and the hot-seat UI both follow. A networked host's log is not:
+it applies each client's trades, and what the client sent before them, as they arrive, before
+the barrier ([network.md](network.md), Trades). Its single log replays as it was recorded. Before each player-star job it
 checks that no human holds the day (`barrier-waits`).
 
 **Not covered.** Days that other screens start without an end turn: the old hyperspace
@@ -445,7 +447,8 @@ named.
   location that no longer shows the list, in the list's order and without
   sorting it (`RefreshShopView`), and tells the local screen
   (`SimEvents.NotifyShopStockChanged`, which rebuilds the equipment shop's
-  controls). The purchase and sale commands, a grid that is built (it sorts the
+  controls), also when a host applies a client's trade or a client runs a trade
+  its host relayed ([network.md](network.md), Trades). The purchase and sale commands, a grid that is built (it sorts the
   list), the scripts' `AddItemToShop`/`GetItemFromShop`, the daily restocking of
   planets and stations, a bank's deposit prize and a pirate ship built from
   shop parts call it. An NPC that buys at a shop closes and builds the grids

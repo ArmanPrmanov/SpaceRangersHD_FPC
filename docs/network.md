@@ -94,10 +94,11 @@ protocol; never renumber one, add new ones at the end and bump
 
 The host numbers its states from 1. A day number cannot name a base: a join
 between two days sends a state of the same day as the one before it.
-`ProtocolVersion` is 6 (2: `TalkRequest` has its payload; 3: `Status` names
+`ProtocolVersion` is 7 (2: `TalkRequest` has its payload; 3: `Status` names
 the human whose answer to a dialogue the day waits for; 4: `NewHuman` and
 `Character`; 5: `Film` is compressed; 6: `Command` carries the client's number
-for it, and `CommandResult`).
+for it, and `CommandResult`; 7: the host applies a trade as it arrives and
+answers it, also when it applied it, and `RelayCommand`, Trades).
 | `Status` | host → client | per human: id, name, connected, holds the day; whether a day is running; the human whose answer to a dialogue the day waits for (0: none) |
 | `TalkRequest` | host → client | human id, ship id, planet id (0: none), scripted, talk kind, amount, text: the human's talk fields (Remote dialogue) |
 | `TalkDone` | client → host | nothing: the client's answer is complete, or it cannot show the talk |
@@ -105,7 +106,8 @@ for it, and `CommandResult`).
 | `Bye` | both | the sender leaves |
 | `NewHuman` | host → client | nothing: the name is new, so the client chooses its character |
 | `Character` | client → host | name, race, character preset, portrait, two starting skills, two starting items |
-| `CommandResult` | host → client | the command's number (as in `Command`), its kind, applied (1) or refused (0), the reason (a byte, `aCommands.TRefusalReason`), the exception's text; sent for a refused command (Commands) |
+| `CommandResult` | host → client | the command's number (as in `Command`), its kind, applied (1) or refused (0), the reason (a byte, `aCommands.TRefusalReason`), the exception's text; sent for a refused command (Commands) and for every trade the host applied (Trades) |
+| `RelayCommand` | host → client | a human id, then an encoded `TPlayerCommand`: a trade the host applied, of another human at the client's human's planet or station (Trades) |
 
 ## Joining
 
@@ -155,7 +157,8 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
 
 - The client's UI submits commands as always. `SubmitCommand` executes the
   command at once on the client, which is the prediction, and the client's
-  `NetworkCommandHook` sends it to the host. Only a command submitted while
+  `NetworkCommandHook` sends it to the host; a trade is not predicted, it waits
+  for the host's answer (Trades). Only a command submitted while
   none executes goes: one that a command submits from inside it (script code
   it runs, a nested action) is submitted again when the host executes the outer
   one, as the command log records only the outermost and its replay rebuilds the
@@ -165,8 +168,10 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   the rest per peer. A command only the host's human gives (`SetSessionFlag`:
   the session flags are the host's, [humans.md](humans.md)) is refused as it
   arrives, also in a remote dialogue, and the peer gets a `CommandResult`
-  (`rrOther`); it is never queued (`TNetHost.RefuseHostOnlyCommand`). It does not execute them as they arrive: arrival order
-  depends on the network, and the day's outcome must not.
+  (`rrOther`); it is never queued (`TNetHost.RefuseHostOnlyCommand`). It does
+  not execute them as they arrive, except a trade (Trades): arrival order
+  depends on the network, and the day's outcome must not, except between the
+  trades of humans who compete for the same thing.
 - A peer is **ready** when its queue holds an `EndTurn` (kind 43), or when its
   human does not hold the day anyway (`HumanHoldsDay` is false: continuing
   travel, in hyperspace, finished) or is disconnected. A queue without an
@@ -213,9 +218,9 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   `RefusedOfferGone`, `RefusedTargetGone`, `RefusedNoRoom`, `RefusedInUse`, `RefusedOther`
   (English fallbacks, as Waiting's texts). The next state
   replaces the human's bubbles, so the client shows the refusals of the day
-  again after applying it. Today the host sends `CommandResult` for refusals
-  only; the message can also say that a command was applied (`Ok`), for a
-  host that answers commands as they arrive.
+  again after applying it. The host also sends `CommandResult` (`Ok`) for every
+  trade it applied, which its client waits for (Trades); for other commands it
+  sends refusals only.
 - A purchase of goods that the stock or the money no longer allows raises
   (`TShip.BuyGoodsFromLocation`, which showed a Windows message box that
   blocked the host's day); the goods screen checks the same before it trades,
@@ -239,17 +244,129 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   applies the queued commands, human by human in `Session.Humans` order, each
   queue up to and including its `EndTurn`, through `SubmitCommand`, so the
   host's command log records them. Then the barrier
-  (`AllHumansEndedTurn`) holds and the day starts. This is the order the merged
-  hot-seat replay uses, so the same commands give the same day however they
-  arrived. Commands after a peer's `EndTurn` stay queued for the next day.
+  (`AllHumansEndedTurn`) holds and the day starts. Without trades this is the
+  order the merged hot-seat replay uses, so the same commands give the same day
+  however they arrived. The trades, and what each human sent before them, were
+  applied earlier, as they arrived (Trades), so the host's log is in the order
+  the host applied them; it replays to the same hash as it is, but split into
+  one log per human and merged it would apply a human's whole queue at once.
+  Commands after a peer's `EndTurn` stay queued for the next day.
 - The host's own human is first in `Session.Humans`
   (`HostHuman`), and its commands execute at once, so they come first anyway.
 - The exception is a remote dialogue: its commands execute as they arrive,
   on the turn thread (Remote dialogue).
 - `EndTurn` is an ordinary command. There is no separate end-turn message.
 - The client's copy is a prediction. Nothing on the client is reconciled: the
-  next `State` replaces it. Where two humans compete (the last item in a shop),
-  the host's order decides and the next state shows the outcome.
+  next `State` replaces it. Where two humans compete for a trade (the last item
+  in a shop), the order in which the trades reach the host decides, and the
+  client hears it at once (Trades); for other commands the host's order at the
+  barrier decides and the next state shows the outcome.
+
+## Trades
+
+A trade (the kinds registered as trades, [commands.md](commands.md), Trades:
+buying and selling, the hangar and the services that cost money, and the
+station's and government's one-off offers) is decided on the host as soon as it
+arrives, and its client waits for the answer instead of predicting it. Other
+humans at the same planet or station see it before the next state.
+
+- **The host applies it between days.** When a peer's `Command` is a trade with
+  no `EndTurn` before it in the peer's queue, the host applies that queue up to
+  and including the trade, in order, through `SubmitCommand`
+  (`TNetHost.ApplyTrade`): the commands before it go first, since the trade may
+  depend on them (taking an item out of the hold, then selling it), and the
+  command log records them in that order. A command before the trade that
+  raises is refused as at the barrier (`CommandFailed`); the trade gets
+  `CommandResult`, applied or refused. The commands after the trade stay queued
+  for the barrier. The order in which trades of different humans arrive decides
+  between them (the owner's decision): the pump applies a trade while it reads
+  the peer's inbox.
+- **Only at a quiet point the screen allows.** The pump applies trades when no
+  turn job runs and no day is under way (`TNetHost.Quiet`) and
+  `TNetHost.MayApplyTrades` says so; a trade that comes otherwise waits in the
+  queue for the next such pump (`ApplyWaitingTrades`, in `Session.Humans` order),
+  or for the barrier, which answers it too. On the game's host this is
+  `NetPlay.MayChangeUnderScreen`: no command runs, a game screen is open and
+  not closing, and either the pump runs from the message loop of the innermost
+  screen between two of its messages (`FramePumpHook`; no box or dialogue is
+  above the screen, no screen is being built, and no handler is between a
+  `SubmitCommand` and its read of the result globals), or the host's end turn
+  waits for its peers (its wait box), where the queues are applied next anyway.
+  Not from the waits inside a handler (`TurnWaitPumpHook`, the star map's
+  `NetWaitForEvents`). A host whose player keeps a box open holds the trades.
+- **A remote dialogue's** commands run as they arrive, as before; a trade among
+  them gets `CommandResult` too.
+- **Relay.** After a trade is applied, by a peer or by the host's own human, the
+  host sends that one command (`RelayCommand`) to every other joined client
+  whose human is at the actor's planet or station (`aShopStock.HumanShopLocation`;
+  `TNetHost.RelayTrade`, the host's `NetworkCommandHook`). A trade in space (with
+  an NPC partner) goes to nobody: no other human trades with that partner, and
+  the state shows it. Nothing else is relayed: not the commands before the
+  trade, not a dialogue's or a script's, not session commands, and not what the
+  barrier applies (the state after the day carries it). A first attempt relayed
+  every command and spread script side effects to other machines.
+- **A client runs a relayed trade** as its human, through the executor
+  (`aCommands.ExecuteRelayedCommand`: no hook, and what it submits from inside
+  goes nowhere), only at a safe point: the frame pump with
+  `MayChangeUnderScreen`, no state waiting to be applied, no film playing, and
+  not while it waits for its own trade (`TNetClient.ApplyRelayed`). The shop
+  grids there follow: the executor's `ShopStockChanged` rebuilds the local
+  human's grid and tells the equipment shop screen
+  (`SimEvents.NotifyShopStockChanged`); the host's own open shop is told the same
+  way when a client's trade changes its stock. A relayed trade that fails on
+  the client's copy (it differs: the commands before the trade were not relayed,
+  as for a sale from the ship screen, whose held item the client does not have)
+  is logged and dropped; the next state fixes the copy. A relay that came before
+  a state is dropped with it: the state holds it.
+- **The client waits** (`TNetClient.SendTrade`, `aCommands.TradeSubmitHook`).
+  `SubmitCommand` of an outermost trade on a client sends it and does not
+  execute it; it waits, pumping the network, for the `CommandResult` with the
+  trade's number. Applied: the trade runs here, on the client's copy and the
+  relayed trades that have already run, as a command of its human (the command
+  log listens as usual), and `SubmitCommand` returns, so the result globals the
+  screen reads right after it (`EquipmentPurchase`, `PurchasedItem`,
+  `SalePrice`, `SaleChanged`, `RepairAllPaid`, `StationText`, ...) are this
+  run's. Refused: `SubmitCommand` raises `ECommandRefused` with the host's
+  reason before anything runs, and the client shows the refusal as before. The
+  wait blocks the screen's handler, so the screen takes no second trade on what
+  it showed: the window is kept alive meanwhile (`TradeWaitIdleHook`: the
+  message loop's work without dispatching input, after `ClientTradeIdleMs`), and
+  the input that comes is dropped. A LAN round trip takes milliseconds. One
+  generic wait instead of work per screen, because every trade site already
+  reads its results right after `SubmitCommand`; the wait is safe in the screen
+  loop since no handler runs and no screen is built meanwhile.
+- **No answer.** After `ClientTradeTimeoutMs` (10 s) the client stops waiting:
+  the trade is refused here (`rrOther`, a bubble `Multiplayer.TradeNoAnswer`,
+  "The host did not answer your action in time."), and the next trade first
+  waits for that answer, so the host never holds two trades the player could
+  not see. An answer that comes later and says applied runs the trade at the
+  next safe point, as a relay. A lost host ends the wait at once and the
+  lost-host flow goes on (Waiting); the trade is dropped.
+- **Refused trades on the screens.** The trade commands' wrappers submit with
+  `aCommands.SubmitTrade`: a refusal (another human was first, or the host's
+  answer on a client) is shown as a bubble of the local human
+  (`TradeRefusedHook`; on the host `Multiplayer.Late*`, "Another player was
+  first: the item is gone.", on a client the host's `Multiplayer.Refused*`), and
+  then ends the UI action that submitted it (`TradeAbortHook`, the screens'
+  `BreakUiMessage`), as a dialogue choice ends its own, so nothing after the
+  submit acts as if it had been done (the success sound, text, or result). The
+  goods screen keeps its own handling (`aShopActions.TradeGoods` logs the
+  refusal) and shows the goods as they stand. Without a session the hooks are
+  nil and `SubmitTrade` raises the refusal as `SubmitCommand` does.
+- **The ship screen** of a sponsored station's ship that another human has open
+  is refused (`rrInUse`); the host's own human can now lose that race against a
+  client. The screens check it first (`aHoldActions.ShipScreenInUse`): the
+  station's modernization dialogue tells the player and stays, and the ship
+  screen opens the player's own ship instead (`TfShip2.OnOpen`).
+- **Single player and hot-seat** are unchanged: no hook is set, a trade
+  executes at once, and a refusal raises as before. The host's own trades
+  execute at once as before.
+- **Determinism.** Arrival order depends on the network, so the headless host
+  (Tests) applies trades only while it waits for its peers and a human's only
+  once every human before it in `Session.Humans` is ready
+  (`TNetHost.OrderedTrades`): a client blocked on its trade is the first not
+  ready, so it never waits on a later one, and the host applies the same
+  commands in the same order every run.
 
 ## The day
 
@@ -722,15 +839,36 @@ the host without holding its day, with the reason `out-of-stock`; the host's
 command log must hold as many purchases of remote humans as the host applied
 (`net host trades remote=`), so not the refused one; and the client must get
 the refusal (`net client refused seq= reason= bubble=1`) and show it as a bubble,
-again after the next state (`net client refusal after state bubble=1`). A new
-game is not recorded (the command log starts at a load), so there only the
-refusal is checked. In that run the client also submits, on its first day, a
+again after the next state (`net client refusal after state bubble=1`). The
+host buys first right before it applies the purchase as it arrives
+(`TNetHost.TradeHook`), so the purchase is refused while the client waits for
+it (`net trade answered seq= ok=0 reason=out-of-stock`), not at the barrier.
+A new game is not recorded (the command log starts at a load), so there only
+the refusal is checked. In that run the client also submits, on its first day, a
 command whose executor submits another one (`--sim-net-nested`, two probe kinds
 registered only then): the client must send the outer one only, and the host
 must run each once (`net host nested outer=1 inner=1`). It then sets a session
 flag, which the host must refuse (`net command failed ... kind=SetSessionFlag`,
 and the client's `net client refused`) without changing its own
 (`net host session flag text-quests=` differs from what the client predicted).
+
+A host that starts a new game and two clients trade at one planet
+(`--sim-net-shop`, `check_network_shop`): the host's human is landed at a
+planet of its star with a shop (a new game's is docked, so the test moves it)
+and opens the shop; the clients join there (`TNetHost.JoinPlanetHook`), with
+money and room. On its first day Net1 buys an item X, buys a good and sells it
+back, buys an item Y and sells it from the ship screen, and ends its turn. The
+host applies each trade as it comes (`net trade applied human= seq= kind=
+before=`; the sale with the 3 hold commands before it) and relays it to Net2
+(`net relayed human= kind= to=`, trades only). Right after X is applied, the
+host's own human buys X from its grid as it was: refused (`item-gone`), and the
+host's grid was rebuilt and its screen told (`net host shop grid shows=0
+notified=`). Net2 runs the relays one by one (`net relayed command ran`): its
+grid no longer shows X and the planet's stock of the good goes down and up
+again (`net client shop relay`); then its purchase of X is refused (`item-gone`)
+while it waits. It then ends its turn and at once sends a purchase without
+waiting for it (`net client shop sent after end turn seq=`): the host applies it
+after that day, and Net2 hears it was applied. Every state has the host's hash.
 
 The headless runner (`HeadlessNet`):
 
@@ -816,5 +954,13 @@ star's film once; every client in that star gets it.
 - A client that loses its host on a screen that does not start a day (a shop,
   the ship, the galaxy map) finds out when it next opens one of those.
 - Chat is in the protocol (the host relays it); nothing shows it.
+- A relayed trade that depends on commands before it that are not relayed
+  fails on the other clients' copies and is dropped there until the next state:
+  a sale from the ship screen (the held item comes from `TakeHoldEntry`).
+- The hangar's hulls for sale (`HangarShipIds`, a display cache) are not
+  rebuilt when another human's relayed purchase takes one; the equipment shop's
+  grid is.
+- A host whose player keeps a box open holds its clients' trades; they give up
+  after 10 s and get the answer later (Trades).
 - `ContinueUntilArrival` and `EndedTurn` are not in a state; this is harmless
   (The day).

@@ -137,6 +137,9 @@ function CompareStoredItems(Left: PStorageEntry; Right: PStorageEntry; Sort: TPl
 function FindHoldEntry(Human: THuman; Index: Integer; Expanded: Boolean): TPlayerHoldUnit;
 
 procedure OpenShipScreen(Ship: TShip; Reentering: Boolean);
+// CHANGE: BUGFIX - Whether OpenShipScreen would refuse the local human Ship: another human
+// has its screen open (rrInUse). The screens check it before they open the ship screen.
+function ShipScreenInUse(Ship: TShip): Boolean;
 // Recomputes the edited ship's slots and stats and the hold list, as the screen does before
 // it draws.
 procedure RefreshHoldView;
@@ -800,6 +803,15 @@ begin
     H.SavedShipExperience := H.PlayerHoldShip.FreeExperience;
     H.PlayerHoldShip.FreeExperience := P.FreeExperience;
   end;
+end;
+
+function ShipScreenInUse(Ship: TShip): Boolean;
+begin
+  Result :=
+      (Ship <> nil)
+          and (Ship <> LocalPlayer)
+          and (LocalHuman.EditedShip <> Ship)
+          and (OtherShipEditor(LocalHuman, Ship) <> nil);
 end;
 
 procedure OpenShipScreen(Ship: TShip; Reentering: Boolean);
@@ -2782,7 +2794,7 @@ begin
   Command := NewCommand(ckSellHeld);
   AddInt(Command, Count);
   AddInt(Command, ShopVisibleColumnCount);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
   Result := SalePrice;
 end;
 
@@ -2874,7 +2886,7 @@ var
 begin
   Command := NewCommand(ckRepairHeld);
   AddInt(Command, Nodes);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 // Moved from TfShip2.SpecialSlot3Clicked, after the screen checked the money and asked how
@@ -2908,7 +2920,7 @@ var
 begin
   Command := NewCommand(ckRefuelHeld);
   AddInt(Command, Amount);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 // Moved from TfShip2.SpecialSlot3Clicked, after the screen checked the money and asked how
@@ -2941,7 +2953,7 @@ var
 begin
   Command := NewCommand(ckReloadHeld);
   AddInt(Command, Amount);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 var
@@ -3028,7 +3040,7 @@ var
 begin
   Command := NewCommand(ckRepairAll);
   AddInt(Command, Nodes);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
   Result := RepairAllPaid;
 end;
 
@@ -3096,7 +3108,7 @@ var
 begin
   Command := NewCommand(ckBuyRockets);
   AddInt(Command, Ord(Equipped));
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 var
@@ -3181,7 +3193,7 @@ var
 begin
   Command := NewCommand(ckSellHoldInventory);
   AddInt(Command, ShopVisibleColumnCount);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 // Moved from TfShip2.SellAllItems: one loose artefact, after the screen asked about a
@@ -3211,7 +3223,7 @@ begin
   AddInt(Command, Index);
   AddInt(Command, TItem(LocalHuman.PlayerHoldShip.Artefacts[Index]).Id);
   AddInt(Command, ShopVisibleColumnCount);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 // Moved from TfShip2.SellAllItems: the goods of one kind in the hold, after the screen asked
@@ -3250,7 +3262,7 @@ var
 begin
   Command := NewCommand(ckSellHoldGoods);
   AddInt(Command, Good);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 // Moved from TfShip2.SellAllItems: one stored item, after the screen asked.
@@ -3283,7 +3295,7 @@ begin
   AddInt(Command, StorageIndex);
   AddInt(Command, PStorageEntry(LocalPlayer.StorageEntries[StorageIndex]).Item.Id);
   AddInt(Command, ShopVisibleColumnCount);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 var
@@ -3905,6 +3917,8 @@ begin
 end;
 
 initialization
+  // CHANGE: ENHANCEMENT - The trades (True) apply on a host as they arrive (docs/commands.md,
+  // Trades).
   RegisterCommand(ckOpenShipScreen, 'OpenShipScreen', @ExecuteOpenShipScreen);
   RegisterCommand(ckRefreshHoldView, 'RefreshHoldView', @ExecuteRefreshHoldView);
   RegisterCommand(ckLeaveShipScreen, 'LeaveShipScreen', @ExecuteLeaveShipScreen);
@@ -3930,18 +3944,18 @@ initialization
   RegisterCommand(ckTransferHeldFuel, 'TransferHeldFuel', @ExecuteTransferHeldFuel);
   RegisterCommand(ckChangeHull, 'ChangeHull', @ExecuteChangeHull);
   RegisterCommand(ckDropHeld, 'DropHeld', @ExecuteDropHeld);
-  RegisterCommand(ckSellHeld, 'SellHeld', @ExecuteSellHeld);
-  RegisterCommand(ckRepairHeld, 'RepairHeld', @ExecuteRepairHeld);
-  RegisterCommand(ckRefuelHeld, 'RefuelHeld', @ExecuteRefuelHeld);
-  RegisterCommand(ckReloadHeld, 'ReloadHeld', @ExecuteReloadHeld);
-  RegisterCommand(ckRepairAll, 'RepairAll', @ExecuteRepairAll);
-  RegisterCommand(ckBuyRockets, 'BuyRockets', @ExecuteBuyRockets);
+  RegisterCommand(ckSellHeld, 'SellHeld', @ExecuteSellHeld, True);
+  RegisterCommand(ckRepairHeld, 'RepairHeld', @ExecuteRepairHeld, True);
+  RegisterCommand(ckRefuelHeld, 'RefuelHeld', @ExecuteRefuelHeld, True);
+  RegisterCommand(ckReloadHeld, 'ReloadHeld', @ExecuteReloadHeld, True);
+  RegisterCommand(ckRepairAll, 'RepairAll', @ExecuteRepairAll, True);
+  RegisterCommand(ckBuyRockets, 'BuyRockets', @ExecuteBuyRockets, True);
   RegisterCommand(ckUseItem, 'UseItem', @ExecuteUseItem);
   RegisterCommand(ckShowTreasureMap, 'ShowTreasureMap', @ExecuteShowTreasureMap);
-  RegisterCommand(ckSellHoldInventory, 'SellHoldInventory', @ExecuteSellHoldInventory);
-  RegisterCommand(ckSellHoldArtefact, 'SellHoldArtefact', @ExecuteSellHoldArtefact);
-  RegisterCommand(ckSellHoldGoods, 'SellHoldGoods', @ExecuteSellHoldGoods);
-  RegisterCommand(ckSellStoredItem, 'SellStoredItem', @ExecuteSellStoredItem);
+  RegisterCommand(ckSellHoldInventory, 'SellHoldInventory', @ExecuteSellHoldInventory, True);
+  RegisterCommand(ckSellHoldArtefact, 'SellHoldArtefact', @ExecuteSellHoldArtefact, True);
+  RegisterCommand(ckSellHoldGoods, 'SellHoldGoods', @ExecuteSellHoldGoods, True);
+  RegisterCommand(ckSellStoredItem, 'SellStoredItem', @ExecuteSellStoredItem, True);
   RegisterCommand(ckTakeAllFromStorage, 'TakeAllFromStorage', @ExecuteTakeAllFromStorage);
   RegisterCommand(ckPutAllIntoStorage, 'PutAllIntoStorage', @ExecutePutAllIntoStorage);
   RegisterCommand(ckSortStorage, 'SortStorage', @ExecuteSortStorage);

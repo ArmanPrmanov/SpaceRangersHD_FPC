@@ -170,6 +170,7 @@ var
   Sequence: Cardinal;
   Outcome, OutcomeBack: TCommandResultMessage;
   Refusal: Exception;
+  Human: Integer;
 begin
   Buffer := TBufEC.Create;
   try
@@ -333,6 +334,18 @@ begin
     Check(RefusalReasonOf(Refusal) = rrNoMoney, 'ECommandRefused carries its reason');
     Refusal.Free;
     CheckText('CommandResult', WideString(MessageKindName(nkCommandResult)), 'kind names');
+    // CHANGE: ENHANCEMENT - A relayed trade names its human, then the command.
+    Buffer.Clear;
+    EncodeRelayCommand(1234, Command, Buffer);
+    Buffer.SetPosition(0);
+    CommandBack := DecodeRelayCommand(Buffer, Human);
+    Check(
+        (Human = 1234) and (CommandBack.Kind = 43) and (CommandBack.Actor = 1234)
+            and (CommandBack.Text = 'x') and Buffer.IsAtEnd,
+        'RelayCommand round trips'
+    );
+    CheckText('RelayCommand', WideString(MessageKindName(nkRelayCommand)), 'kind names');
+    Check(not IsTradeCommand(65535) and not IsTradeCommand(0), 'an unknown kind is no trade');
     CheckText('TalkDone', WideString(MessageKindName(nkTalkDone)), 'kind names');
     // XXH64 of nothing with seed 0, the published value.
     Check(sr_hash64(nil, 0, 0) = QWord($EF46DB3751D8E999), 'the data hash is XXH64');

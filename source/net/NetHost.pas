@@ -57,7 +57,20 @@ type
     function EndTurnIndex: Integer;
     // CHANGE: ENHANCEMENT - The index of the first StopContinuing in the queue; -1 when none.
     function StopIndex: Integer;
+    // CHANGE: ENHANCEMENT - The index of the first trade in the queue with no EndTurn before
+    // it, which the host applies as it arrives (docs/network.md, Trades); -1 when none.
+    function TradeIndex: Integer;
   end;
+
+  TNetHost = class;
+  // CHANGE: ENHANCEMENT - For the tests: told before (Done False) and after (Done True) the host
+  // applies a peer's trade as it arrives; Queued is the trade, Applied whether it was.
+  TNetTradeHook = procedure(
+      Host: TNetHost;
+      HumanId: Integer;
+      const Queued: TQueuedCommand;
+      Done, Applied: Boolean
+  );
 
   TNetHost = class
   private
@@ -86,6 +99,10 @@ type
     // CHANGE: ENHANCEMENT - The human whose remote dialogue the turn thread waits for (0: none);
     // Status carries it.
     FTalkHumanId: Integer;
+    // CHANGE: ENHANCEMENT - The pump may apply trades now (MayApplyTrades, at a quiet point);
+    // the queues are being applied at the barrier (ApplyQueues), which relays nothing.
+    FTradesAllowed: Boolean;
+    FApplyingQueues: Boolean;
     function FindPeer(PeerId: Integer): THostPeer;
     function ReceiveUnlessInTalk(
         Peer: THostPeer;
@@ -109,10 +126,32 @@ type
     // CHANGE: BUGFIX - Refuses a command only the host's human may give (IsHostOnlyCommand),
     // which a peer sent: it is not queued or run, and the peer is told (CommandFailed).
     procedure RefuseHostOnlyCommand(Peer: THostPeer; Sequence: Cardinal; const Command: TPlayerCommand);
+    // CHANGE: ENHANCEMENT - Tells the peer that its trade Sequence was applied (CommandResult).
+    // Thread-safe, as CommandFailed.
+    procedure CommandApplied(Peer: THostPeer; Sequence: Cardinal; const Command: TPlayerCommand);
+    // CHANGE: ENHANCEMENT - Applies the peer's queue up to and including its trade at Index,
+    // through SubmitCommand, and answers the trade (docs/network.md, Trades).
+    procedure ApplyTrade(Peer: THostPeer; Index: Integer);
+    // The trades that wait in the queues, in Session.Humans order; with OrderedTrades, a
+    // human's only once every human before it is ready.
+    procedure ApplyWaitingTrades;
   public
     // Joins wait while this is set; the headless host sets it until every client is there,
     // so that the humans join in the same order every run (by name).
     HoldJoins: Boolean;
+    // CHANGE: ENHANCEMENT - Whether the host may change the game under its screen now, so that
+    // the pump applies a peer's trade as it arrives (docs/network.md, Trades); nil: never, and
+    // the trades wait for the barrier. Asked at a quiet point only.
+    MayApplyTrades: function: Boolean;
+    // A human's trades wait until every human before it in Session.Humans is ready, and arrival
+    // order does not count: the headless host's days are then the same however the commands
+    // arrived (docs/network.md, Tests).
+    OrderedTrades: Boolean;
+    // For the tests (docs/network.md, Tests): around each trade applied as it arrives; where a
+    // new human joins (a TPlanet; nil: FindJoinPlanet's); a new human that joined.
+    TradeHook: TNetTradeHook;
+    JoinPlanetHook: function(Race: Integer): TObject;
+    JoinedHook: procedure(Human: THuman);
     // Listens on Port (0 picks one). The humans other than the local one start disconnected
     // until their players rejoin.
     constructor Create(Port: Integer; const HostName: WideString);
@@ -144,6 +183,11 @@ type
     procedure ApplyQueues;
     // The commands of the human's peer waiting in its queue, in arrival order (a copy).
     function QueuedCommands(HumanId: Integer): TQueuedCommands;
+    // CHANGE: ENHANCEMENT - Sends a trade the host applied (any human's, the host's own too) to
+    // the clients whose humans are at the same planet or station as its actor, except the
+    // actor's; a trade in space and the trades the barrier applies go to nobody
+    // (docs/network.md, Trades).
+    procedure RelayTrade(const Command: TPlayerCommand);
     // The day starts: no join or disconnect until the state after it is sent.
     procedure BeginDay;
     // Sends the films the player-star job encoded to the clients in their stars; returns the
@@ -189,6 +233,8 @@ procedure HostStarDay(Star, Film: TObject; Recorded: Boolean);
 procedure HostDayCompleted;
 // aHuman.RemoteTalkHook of a host (TNetHost.RemoteTalk).
 function HostRemoteTalk(Human: THuman): Boolean;
+// CHANGE: ENHANCEMENT - aCommands.NetworkCommandHook of a host: relays a trade (RelayTrade).
+procedure HostCommandSubmitted(const Command: TPlayerCommand);
 implementation
 uses
   aEFilm,
@@ -198,6 +244,7 @@ uses
   aPlayerActions,
   aSession,
   aSaveLoad,
+  aShopStock,
   GR_Main,
   NetDelta,
   SimEvents,
@@ -244,6 +291,18 @@ var
 begin
   for I := 0 to High(Queue) do
     if Queue[I].Command.Kind = ckStopContinuing then
+      Exit(I);
+  Result := -1;
+end;
+
+function THostPeer.TradeIndex: Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to High(Queue) do
+    if Queue[I].Command.Kind = ckEndTurn then
+      Exit(-1)
+    else if IsTradeCommand(Queue[I].Command.Kind) then
       Exit(I);
   Result := -1;
 end;
@@ -406,6 +465,10 @@ begin
           SetLength(Peer.Queue, I + 1);
           Peer.Queue[I].Sequence := Sequence;
           Peer.Queue[I].Command := Command;
+          // CHANGE: ENHANCEMENT - A trade applies as it arrives, with what the peer sent before
+          // it, so arrival order decides between humans (docs/network.md, Trades).
+          if FTradesAllowed and not OrderedTrades and (Peer.TradeIndex = I) then
+            ApplyTrade(Peer, I);
         end;
       end;
     nkAck:
@@ -459,6 +522,9 @@ var
   Kind: TNetMessageKind;
   Payload: TBufEC;
 begin
+  // CHANGE: ENHANCEMENT - At a quiet point where the host's screen allows it, a peer's trade
+  // applies as it arrives (docs/network.md, Trades).
+  FTradesAllowed := Quiet and Assigned(MayApplyTrades) and MayApplyTrades();
   // The turn thread reads the peer list (HostStarDay) while a job runs; new peers wait for it.
   while not IsTurnCalculationRunning and FThread.TakeNewPeer(Id) do
   begin
@@ -490,6 +556,9 @@ begin
   finally
     Payload.Free;
   end;
+  if FTradesAllowed then
+    ApplyWaitingTrades;
+  FTradesAllowed := False;
   // The film goes first: it is small and needed first (docs/network.md, Films). Every film of
   // the day is in once the day has run, so it goes while the galaxy job runs.
   if FDayRan then
@@ -733,7 +802,10 @@ begin
         Character := Peer.Character;
         if (Character.Preset < 1) or (Character.Preset > 5) then
           Character.Preset := 1 + Session.Humans.Count mod 5;
-        Planet := FindJoinPlanet(Character.Race);
+        if Assigned(JoinPlanetHook) then
+          Planet := TPlanet(JoinPlanetHook(Character.Race))
+        else
+          Planet := FindJoinPlanet(Character.Race);
         if Planet = nil then
         begin
           Refuse(Peer, 'no planet to join at');
@@ -750,6 +822,8 @@ begin
             )
         );
       end;
+      if (Found = nil) and Assigned(JoinedHook) then
+        JoinedHook(Human);
       Human.Connected := True;
       Peer.State := hpJoined;
       Peer.HumanId := Human.Id;
@@ -888,24 +962,141 @@ var
   I, J, Last: Integer;
   Peer: THostPeer;
 begin
-  for I := 0 to Session.Humans.Count - 1 do
+  // The state after the day carries what the barrier applies: nothing is relayed.
+  FApplyingQueues := True;
+  try
+    for I := 0 to Session.Humans.Count - 1 do
+    begin
+      Peer := PeerOfHuman(FPeers, Session.Humans[I].Id);
+      if (Peer = nil) or Peer.Leaving then
+        Continue;
+      Last := Peer.EndTurnIndex;
+      if (Last < 0) and Session.Humans[I].ContinueUntilArrival then
+        Last := Peer.StopIndex;
+      for J := 0 to Last do
+        try
+          SubmitCommand(Peer.Queue[J].Command);
+          // CHANGE: ENHANCEMENT - A trade is answered: its client may still wait for it.
+          if IsTradeCommand(Peer.Queue[J].Command.Kind) then
+            CommandApplied(Peer, Peer.Queue[J].Sequence, Peer.Queue[J].Command);
+        except
+          on E: Exception do
+            CommandFailed(Peer, Peer.Queue[J].Sequence, Peer.Queue[J].Command, E);
+        end;
+      if Last >= 0 then
+        Delete(Peer.Queue, 0, Last + 1);
+    end;
+  finally
+    FApplyingQueues := False;
+  end;
+end;
+
+procedure TNetHost.ApplyTrade(Peer: THostPeer; Index: Integer);
+var
+  J: Integer;
+  Trade: TQueuedCommand;
+  Applied: Boolean;
+begin
+  Trade := Peer.Queue[Index];
+  if Assigned(TradeHook) then
+    TradeHook(Self, Peer.HumanId, Trade, False, False);
+  Applied := False;
+  for J := 0 to Index do
+    try
+      SubmitCommand(Peer.Queue[J].Command);
+      if J = Index then
+      begin
+        Applied := True;
+        NetLog(
+            Format(
+                'trade applied human=%d seq=%d kind=%s before=%d',
+                [Peer.HumanId, Trade.Sequence, CommandKindName(Trade.Command.Kind), Index]
+            )
+        );
+        CommandApplied(Peer, Trade.Sequence, Trade.Command);
+      end;
+    except
+      on E: Exception do
+        CommandFailed(Peer, Peer.Queue[J].Sequence, Peer.Queue[J].Command, E);
+    end;
+  Delete(Peer.Queue, 0, Index + 1);
+  if Assigned(TradeHook) then
+    TradeHook(Self, Peer.HumanId, Trade, True, Applied);
+end;
+
+procedure TNetHost.ApplyWaitingTrades;
+var
+  I, Index: Integer;
+  Human: THuman;
+  Peer: THostPeer;
+begin
+  I := 0;
+  while I < Session.Humans.Count do
   begin
-    Peer := PeerOfHuman(FPeers, Session.Humans[I].Id);
+    Human := Session.Humans[I];
+    Inc(I);
+    Peer := PeerOfHuman(FPeers, Human.Id);
     if (Peer = nil) or Peer.Leaving then
       Continue;
-    Last := Peer.EndTurnIndex;
-    if (Last < 0) and Session.Humans[I].ContinueUntilArrival then
-      Last := Peer.StopIndex;
-    for J := 0 to Last do
-      try
-        SubmitCommand(Peer.Queue[J].Command);
-      except
-        on E: Exception do
-          CommandFailed(Peer, Peer.Queue[J].Sequence, Peer.Queue[J].Command, E);
-      end;
-    if Last >= 0 then
-      Delete(Peer.Queue, 0, Last + 1);
+    repeat
+      Index := Peer.TradeIndex;
+      if Index >= 0 then
+        ApplyTrade(Peer, Index);
+    until Index < 0;
+    if OrderedTrades and HumanHoldsDay(Human) and (Peer.EndTurnIndex < 0) then
+      Exit;
   end;
+end;
+
+procedure TNetHost.RelayTrade(const Command: TPlayerCommand);
+var
+  Actor, Human: THuman;
+  Location: TObject;
+  Payload: TBufEC;
+  I: Integer;
+  Peer: THostPeer;
+begin
+  if FApplyingQueues or not IsTradeCommand(Command.Kind) then
+    Exit;
+  Actor := FindHuman(Integer(Command.Actor));
+  if (Actor = nil) or (Actor.Player = nil) then
+    Exit;
+  Location := HumanShopLocation(Actor);
+  if Location = nil then
+    Exit;
+  Payload := nil;
+  try
+    for I := 0 to FPeers.Count - 1 do
+    begin
+      Peer := THostPeer(FPeers[I]);
+      if (Peer.State <> hpJoined) or Peer.Leaving or (Peer.HumanId = Actor.Id) then
+        Continue;
+      Human := FindHuman(Peer.HumanId);
+      if (Human = nil) or (Human.Player = nil) or (HumanShopLocation(Human) <> Location) then
+        Continue;
+      if Payload = nil then
+      begin
+        Payload := TBufEC.Create;
+        EncodeRelayCommand(Actor.Id, Command, Payload);
+      end;
+      FThread.Send(Peer.PeerId, nkRelayCommand, Payload);
+      NetLog(
+          Format(
+              'relayed human=%d kind=%s to=%d',
+              [Actor.Id, CommandKindName(Command.Kind), Peer.HumanId]
+          )
+      );
+    end;
+  finally
+    Payload.Free;
+  end;
+end;
+
+procedure HostCommandSubmitted(const Command: TPlayerCommand);
+begin
+  // A remote dialogue's commands run on the turn thread, in space: nothing to relay.
+  if (ActiveHost <> nil) and (GetCurrentThreadId = MainThreadID) then
+    ActiveHost.RelayTrade(Command);
 end;
 
 function TNetHost.QueuedCommands(HumanId: Integer): TQueuedCommands;
@@ -941,6 +1132,24 @@ begin
               E.Message]
       )
   );
+  Payload := TBufEC.Create;
+  try
+    EncodeCommandResult(Message, Payload);
+    FThread.Send(Peer.PeerId, nkCommandResult, Payload);
+  finally
+    Payload.Free;
+  end;
+end;
+
+procedure TNetHost.CommandApplied(Peer: THostPeer; Sequence: Cardinal; const Command: TPlayerCommand);
+var
+  Message: TCommandResultMessage;
+  Payload: TBufEC;
+begin
+  Message := Default(TCommandResultMessage);
+  Message.Sequence := Sequence;
+  Message.Kind := Command.Kind;
+  Message.Ok := True;
   Payload := TBufEC.Create;
   try
     EncodeCommandResult(Message, Payload);
@@ -1121,6 +1330,9 @@ begin
                 Inc(Commands);
                 try
                   SubmitTalkCommand(Command);
+                  // CHANGE: ENHANCEMENT - The client waits for a trade's answer.
+                  if IsTradeCommand(Command.Kind) then
+                    CommandApplied(Peer, Sequence, Command);
                 except
                   on E: Exception do
                     CommandFailed(Peer, Sequence, Command, E);

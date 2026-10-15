@@ -657,7 +657,7 @@ var
 begin
   Command := NewCommand(ckBuyMap);
   AddRef(Command, Constellation);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 // Preserve the native receiver evaluation before the bounded payment,
@@ -1352,6 +1352,8 @@ begin
 end;
 
 initialization
+  // CHANGE: ENHANCEMENT - The trades (True) apply on a host as they arrive (docs/commands.md,
+  // Trades).
   RegisterCommand(ckRunGlobalScripts, 'RunGlobalScripts', @ExecuteRunGlobalScripts);
   RegisterCommand(ckPlanetCaptured, 'PlanetCaptured', @ExecutePlanetCaptured);
   RegisterCommand(ckEnterGovernment, 'EnterGovernment', @ExecuteEnterGovernment);
@@ -1376,7 +1378,7 @@ initialization
   RegisterCommand(ckEnterPrison, 'EnterPrison', @ExecuteEnterPrison);
   RegisterCommand(ckChoosePrison, 'ChoosePrison', @ExecuteChoosePrison);
   RegisterCommand(ckPayBribe, 'PayBribe', @ExecutePayBribe);
-  RegisterCommand(ckBuyMap, 'BuyMap', @ExecuteBuyMap);
+  RegisterCommand(ckBuyMap, 'BuyMap', @ExecuteBuyMap, True);
   RegisterCommand(ckPayPrisonBail, 'PayPrisonBail', @ExecutePayPrisonBail);
   RegisterCommand(ckRequestQuest, 'RequestQuest', @ExecuteRequestQuest);
   RegisterCommand(ckNegotiateQuest, 'NegotiateQuest', @ExecuteNegotiateQuest);

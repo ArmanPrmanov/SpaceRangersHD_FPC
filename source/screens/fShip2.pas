@@ -338,6 +338,7 @@ function CompareStoredItems(
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aCommands,
   aPlayerActions,
   aHoldActions,
   aSession,
@@ -753,6 +754,14 @@ begin
   FlagD4 := False;
   // The command also clears stale weapon targets, empty hold cells and duplicate storage
   // slots, forgets a stale held entry and lends the player's experience, as this did below.
+  // CHANGE: BUGFIX - Another human has the ship's screen open (a sponsored station's ship), so
+  // the command would be refused (rrInUse): the screen shows the player's own ship instead.
+  if (ShipToInspect <> nil) and ShipScreenInUse(ShipToInspect) then
+  begin
+    if Assigned(TradeRefusedHook) then
+      TradeRefusedHook(rrInUse);
+    ShipToInspect := nil;
+  end;
   if ShipToInspect <> nil then
     OpenShipScreen(ShipToInspect, SavedFlag)
   else

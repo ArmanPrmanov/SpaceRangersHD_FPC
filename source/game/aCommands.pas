@@ -83,6 +83,17 @@ var
   // exception goes on to the caller, so that the command log closes what BeforeCommandHook
   // opened (a remote command the host drops, docs/network.md, Commands).
   CommandFailedHook: TCommandHook;
+  // CHANGE: ENHANCEMENT - A client's trade (IsTradeCommand) goes to the host and runs here only
+  // once the host has applied it (docs/network.md, Trades). Called by SubmitCommand for an
+  // outermost trade, before anything runs: it returns when the host applied the command, which
+  // then runs here, and raises ECommandRefused when the host refused it or did not answer.
+  TradeSubmitHook: TCommandHook;
+  // CHANGE: ENHANCEMENT - What SubmitTrade does with a refused trade of this machine's player:
+  // tells the player (a bubble), then ends the UI action that submitted it (the screens set it
+  // to break the UI message), so that nothing after the submit acts as if it had been done.
+  // Set in a session; without them SubmitTrade raises the refusal as SubmitCommand does.
+  TradeRefusedHook: procedure(Reason: TRefusalReason);
+  TradeAbortHook: procedure;
 
 function NewCommand(Kind: TCommandKind): TPlayerCommand;
 // Names Instance by kind and id; nil names nothing.
@@ -105,9 +116,26 @@ function CommandKindName(Kind: TCommandKind): AnsiString;
 function RefusalReasonOf(E: Exception): TRefusalReason;
 function RefusalReasonName(Reason: TRefusalReason): AnsiString;
 
-procedure RegisterCommand(Kind: TCommandKind; const Name: AnsiString; Executor: TCommandExecutor);
+// CHANGE: ENHANCEMENT - Trade: the command is a trade (docs/commands.md, Trades): a host applies
+// a client's as it arrives, and a client waits for the host's answer instead of predicting it.
+procedure RegisterCommand(
+    Kind: TCommandKind;
+    const Name: AnsiString;
+    Executor: TCommandExecutor;
+    Trade: Boolean = False
+);
+function IsTradeCommand(Kind: TCommandKind): Boolean;
 // Runs the command and tells the hooks.
 procedure SubmitCommand(const Command: TPlayerCommand);
+// CHANGE: ENHANCEMENT - SubmitCommand for a trade the UI submits: a refusal
+// (ECommandRefused: another human was first) goes to TradeRefusedHook and TradeAbortHook.
+procedure SubmitTrade(const Command: TPlayerCommand);
+// CHANGE: ENHANCEMENT - Runs another human's command that a host relays to this client
+// (docs/network.md, Trades): as the executor runs it, with no hook, and what it submits from
+// inside goes nowhere, as for a nested command.
+procedure ExecuteRelayedCommand(const Command: TPlayerCommand);
+// Whether SubmitCommand or ExecuteRelayedCommand runs a command on this thread.
+function CommandRunning: Boolean;
 // Runs the command only; the replay uses this.
 procedure ExecuteCommand(const Command: TPlayerCommand);
 implementation
@@ -127,6 +155,7 @@ const
 var
   Executors: array[0..MaximumCommandKind] of TCommandExecutor;
   KindNames: array[0..MaximumCommandKind] of AnsiString;
+  TradeKinds: array[0..MaximumCommandKind] of Boolean;
 threadvar
   // The commands SubmitCommand is executing on this thread.
   SubmitDepth: Integer;
@@ -364,7 +393,12 @@ begin
     Result := 'Command' + IntToStr(Kind);
 end;
 
-procedure RegisterCommand(Kind: TCommandKind; const Name: AnsiString; Executor: TCommandExecutor);
+procedure RegisterCommand(
+    Kind: TCommandKind;
+    const Name: AnsiString;
+    Executor: TCommandExecutor;
+    Trade: Boolean
+);
 begin
   if Kind > MaximumCommandKind then
     raise Exception.Create('Command kind out of range: ' + Name);
@@ -372,6 +406,17 @@ begin
     raise Exception.Create('Command kind registered twice: ' + Name);
   Executors[Kind] := Executor;
   KindNames[Kind] := Name;
+  TradeKinds[Kind] := Trade;
+end;
+
+function IsTradeCommand(Kind: TCommandKind): Boolean;
+begin
+  Result := (Kind <= MaximumCommandKind) and TradeKinds[Kind];
+end;
+
+function CommandRunning: Boolean;
+begin
+  Result := SubmitDepth > 0;
 end;
 
 procedure ExecuteCommand(const Command: TPlayerCommand);
@@ -397,13 +442,21 @@ end;
 
 procedure SubmitCommand(const Command: TPlayerCommand);
 var
-  Outermost: Boolean;
+  Outermost, Sent: Boolean;
 begin
   // On the turn thread a command is part of the job that runs it, not something a human did.
   if InTurnJob then
   begin
     ExecuteCommand(Command);
     Exit;
+  end;
+  // CHANGE: ENHANCEMENT - A client's trade runs only once the host has applied it; a refusal
+  // raises before anything runs here (docs/network.md, Trades).
+  Sent := False;
+  if (SubmitDepth = 0) and Assigned(TradeSubmitHook) and IsTradeCommand(Command.Kind) then
+  begin
+    TradeSubmitHook(Command);
+    Sent := True;
   end;
   if Assigned(BeforeCommandHook) then
     BeforeCommandHook(Command);
@@ -426,8 +479,37 @@ begin
   // command submitted from inside another one is submitted again when the receiver executes
   // the outer one, as the command log records only the outermost; a client sent both, and the
   // host ran the inner one twice (docs/network.md, Commands).
-  if Outermost and Assigned(NetworkCommandHook) then
+  if Outermost and not Sent and Assigned(NetworkCommandHook) then
     NetworkCommandHook(Command);
+end;
+
+procedure SubmitTrade(const Command: TPlayerCommand);
+var
+  Reason: TRefusalReason;
+begin
+  try
+    SubmitCommand(Command);
+  except
+    on E: ECommandRefused do
+    begin
+      if not Assigned(TradeAbortHook) then
+        raise;
+      Reason := E.Reason;
+      if Assigned(TradeRefusedHook) then
+        TradeRefusedHook(Reason);
+      TradeAbortHook;
+    end;
+  end;
+end;
+
+procedure ExecuteRelayedCommand(const Command: TPlayerCommand);
+begin
+  Inc(SubmitDepth);
+  try
+    ExecuteCommand(Command);
+  finally
+    Dec(SubmitDepth);
+  end;
 end;
 
 end.

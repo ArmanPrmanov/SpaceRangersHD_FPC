@@ -123,6 +123,7 @@ uses
   aPlayer,
   aPlayerActions,
   aShip,
+  aCommands,
   ThreadCalc,
   NetThread,
   NetProtocol,
@@ -212,6 +213,11 @@ var
   HostLossLogged: Boolean;
   // The host's box for a remote dialogue is open (HostTalkWait).
   HostTalkBoxOpen: Boolean;
+  // CHANGE: ENHANCEMENT - The network is pumped from the message loop between two of its
+  // messages (FramePumpHook), not from a wait inside a handler; the host's end turn waits for
+  // its peers (WaitModal nwHostPeers), where it applies their queues anyway (MayChangeUnderScreen).
+  InFramePump: Boolean;
+  HostPeersWaitOpen: Boolean;
   // The join's progress: when it last changed, and what it was.
   JoinProgressAt: QWord;
   JoinProgressMark: Int64;
@@ -583,9 +589,13 @@ end;
 procedure WaitModal(Kind: TNetWaitKind);
 var
   Closed: Cardinal;
+  SavedPeersWait: Boolean;
 begin
   if Kind in [nwClientDay, nwClientState] then
     Inc(ClientTalkWaits);
+  SavedPeersWait := HostPeersWaitOpen;
+  if Kind = nwHostPeers then
+    HostPeersWaitOpen := True;
   try
     NetFrame;
     repeat
@@ -601,6 +611,7 @@ begin
       end;
     until False;
   finally
+    HostPeersWaitOpen := SavedPeersWait;
     if Kind in [nwClientDay, nwClientState] then
       Dec(ClientTalkWaits);
   end;
@@ -689,6 +700,102 @@ begin
                   and ((CurrentScreenId <> screenStarMap) or StarMapScreen.NetDayDeferred)));
 end;
 
+// CHANGE: ENHANCEMENT - Whether a command from the network may change the game under the screen
+// now (docs/network.md, Trades): a peer's trade on the host, a relayed trade on a client. The
+// pump runs from the loop of the innermost screen between two of its messages, so no handler
+// is between a submit and its read of the results, no box or dialogue is above the screen and
+// no screen is being built; or the host waits at its end turn for its peers, where the queues
+// are applied next anyway. No command runs, and the screen does not close.
+function MayChangeUnderScreen: Boolean;
+begin
+  Result :=
+      (Galaxy <> nil)
+          and not CommandRunning
+          and not ScreenClosing
+          and not ExitScreenLoop
+          and not MemorySnapshotActive
+          and not (CurrentScreenId in NoGameScreens)
+          and (HostPeersWaitOpen or (InFramePump and (RunningScreenLoop <> nil)));
+end;
+
+function HostMayApplyTrades: Boolean;
+begin
+  Result := MayChangeUnderScreen;
+end;
+
+// CHANGE: ENHANCEMENT - A client's trade waits for the host's answer (TNetClient.SendTrade):
+// the window stays alive meanwhile, and the input that comes is dropped, so that the screen
+// takes no second action on what it showed before the answer.
+procedure TradeWaitIdle;
+var
+  Saved: TRuntimeCallbackGR;
+begin
+  Saved := FramePumpHook;
+  FramePumpHook := nil;
+  try
+    GR_WinMessage(nil);
+  finally
+    FramePumpHook := Saved;
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - What a bubble says when another human was first (TradeRefusedHook).
+function LocalRefusalText(Reason: TRefusalReason): WideString;
+const
+  Keys: array[TRefusalReason] of WideString = (
+      'Multiplayer.LateOther',
+      'Multiplayer.LateOutOfStock',
+      'Multiplayer.LateNoMoney',
+      'Multiplayer.LateItemGone',
+      'Multiplayer.LateOfferGone',
+      'Multiplayer.LateTargetGone',
+      'Multiplayer.LateNoRoom',
+      'Multiplayer.LateInUse'
+  );
+  English: array[TRefusalReason] of WideString = (
+      'Your action was not done: another player acted first.',
+      'Another player was first: not enough in stock.',
+      'Your action was not done: not enough money.',
+      'Another player was first: the item is gone.',
+      'Another player was first: the offer is no longer there.',
+      'Your action was not done: things changed before it.',
+      'Your sale was not done: the buyer has no room for it.',
+      'Another player is using it.'
+  );
+begin
+  Result := MultiplayerText(Copy(Keys[Reason], Length('Multiplayer.') + 1, MaxInt), English[Reason]);
+end;
+
+// TradeRefusedHook: the refusal as a bubble of the local human. A client shows the host's
+// refusal with the host's text (TNetClient), and the same text adds no second bubble.
+procedure ShowTradeRefusal(Reason: TRefusalReason);
+var
+  Text: WideString;
+begin
+  if (Galaxy = nil) or (LocalHuman = nil) then
+    Exit;
+  // A trade the host did not answer has its own bubble (TNetClient.SendTrade).
+  if (NetRole = nrClient) and CurrentClient.TakeNoAnswerShown then
+    Exit;
+  if NetRole = nrClient then
+    Text := RefusalText(Reason)
+  else
+    Text := LocalRefusalText(Reason);
+  LocalHuman.AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
+  NetLog('own trade refused: ' + RefusalReasonName(Reason));
+end;
+
+// FramePumpHook.
+procedure NetFramePump;
+begin
+  InFramePump := True;
+  try
+    NetFrame;
+  finally
+    InFramePump := False;
+  end;
+end;
+
 procedure NetFrame;
 begin
   if InPump or (GetCurrentThreadId <> MainRuntimeThreadId) then
@@ -709,6 +816,13 @@ begin
       nrClient:
         begin
           CurrentClient.Pump;
+          // CHANGE: ENHANCEMENT - The trades the host relayed run at a safe point, as a state is
+          // applied at one (docs/network.md, Trades).
+          if CurrentClient.HasRelayed
+              and not ApplyPending
+              and not (ClientFilmPlaying and (CurrentScreenId = screenStarMap))
+              and MayChangeUnderScreen then
+            CurrentClient.ApplyRelayed;
           // A client that does not wait for the day cannot show the host's dialogue, except at
           // the end of the film it plays, where the wait for the state answers it.
           if (ClientTalkWaits = 0)
@@ -735,9 +849,17 @@ end;
 
 procedure BeginNetSession(AsClient: Boolean);
 begin
-  FramePumpHook := @NetFrame;
+  FramePumpHook := @NetFramePump;
   TurnWaitPumpHook := @NetTurnWait;
   TurnJobsForbidden := AsClient;
+  // CHANGE: ENHANCEMENT - Trades (docs/network.md, Trades): the host applies a peer's at a
+  // point MayChangeUnderScreen allows; a client's wait keeps the window alive; a refused trade
+  // of this machine's player is a bubble and ends the UI action that submitted it.
+  if not AsClient and (CurrentHost <> nil) then
+    CurrentHost.MayApplyTrades := @HostMayApplyTrades;
+  TradeWaitIdleHook := @TradeWaitIdle;
+  TradeRefusedHook := @ShowTradeRefusal;
+  TradeAbortHook := @BreakUiMessage;
 end;
 
 procedure EndNetSession;
@@ -747,6 +869,9 @@ begin
   FramePumpHook := nil;
   TurnWaitPumpHook := nil;
   TurnJobsForbidden := False;
+  TradeWaitIdleHook := nil;
+  TradeRefusedHook := nil;
+  TradeAbortHook := nil;
   StopNetwork;
   // The network thread has stopped; the jobs it held can go.
   if StateJobs <> nil then

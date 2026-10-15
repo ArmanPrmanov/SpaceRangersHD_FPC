@@ -54,8 +54,9 @@ records the command, and the headless runner replays it.
 
 Each actions unit declares its kinds as constants in its own range and
 registers them in `initialization` with
-`RegisterCommand(Kind, 'Name', @Executor)`. Never renumber a kind: the
-numbers are part of the log format.
+`RegisterCommand(Kind, 'Name', @Executor)`, or
+`RegisterCommand(Kind, 'Name', @Executor, True)` for a trade (Trades). Never
+renumber a kind: the numbers are part of the log format.
 
 | Range | Unit |
 | --- | --- |
@@ -83,6 +84,44 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
     quoted; a higher price is refused, as is a price the money does not cover.
     Without it they pay the price as it stands, as before.
 
+## Trades
+
+A trade is a command that buys, sells or pays for something another human may
+want at the same time, or whose offer another human's command can take away. A
+host applies a client's trade as it arrives and answers it, and the client
+waits for that answer instead of predicting it; the host relays the applied
+trade to the other clients at the same planet or station
+([network.md](network.md), Trades). `IsTradeCommand(Kind)` says whether a kind
+is one. Their wrappers submit with `SubmitTrade`, so that a refusal (another
+human was first) tells the player and ends the UI action instead of escaping
+the screen.
+
+| Unit | Trades |
+| --- | --- |
+| `aShopActions` | `BuyEquipment` (102: equipment, and the hangar's hulls), `FinishStoredHullPurchase` (103), `TradeGoods` (110), `RepairHull` (120), `Refuel` (121) |
+| `aHoldActions` (the ship screen) | `SellHeld` (225), `RepairHeld`, `RefuelHeld`, `ReloadHeld`, `RepairAll`, `BuyRockets`, `SellHoldInventory`, `SellHoldArtefact`, `SellHoldGoods`, `SellStoredItem` |
+| `aStationActions` | `PayForModernization` (520), `BuyPirateNodes` (532), `BuySatellite` (552), `Invest` (565), `BuySpecialShip` (574), `BuildPirateShip` (580) |
+| `aPlanetActions` | `BuyMap` (413) |
+
+Not trades, though close:
+
+- The Dominion's orders (`RelocateDominion`, `OrderPirateAmbush`,
+  `OrderPirateAssault`, `OrderPirateRaid`) and `ChangeSide`: orders the day acts
+  on, not stock a screen shows; the host checks them again at the barrier and
+  refuses a stale one (`rrTargetGone`, `rrOfferGone`), and the day shows the
+  outcome. Applying them early would not change what the player sees before the
+  day.
+- Gifts to partners and the talk's demands and offers: a partner is one human's
+  (`PartnerShip`), so no other human competes; they run in the talk, which a
+  remote dialogue already runs as it arrives.
+- The per-human services (the bank, medical, science and military services,
+  stimulants, research programs and remains, `BuyPirateProgram`): they change
+  only the actor's own state and money.
+- Surface loot (`PickUpSurfaceLoot`): a pickup, not a purchase; refused by id
+  (`rrItemGone`) at the barrier.
+- The ship screen's hold commands (`TakeHoldEntry` and the like): the actor's
+  own ship. A trade after them applies them with it, in order.
+
 ## Threads
 
 - The UI thread submits commands while no turn job runs. It also submits
@@ -103,7 +142,11 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
   by the same rule.
 - `SubmitCommand` tells `BeforeCommandHook` and `AfterCommandHook` (the command
   log) and then `NetworkCommandHook` (a client sends the command to its host,
-  [network.md](network.md)). `NetworkCommandHook` hears only a command submitted
+  [network.md](network.md); a host relays a trade). On a client an outermost
+  trade goes to `TradeSubmitHook` first, which sends it and returns once the
+  host has applied it, or raises `ECommandRefused`; only then does it run.
+  `ExecuteRelayedCommand` runs another human's trade the host relayed, without
+  hooks. `NetworkCommandHook` hears only a command submitted
   while none executes on that thread: the host rebuilds the nested ones by
   executing the outer one, as a replay does. A command that raises tells `CommandFailedHook`
   instead of the last two and the exception goes on to the caller; the log

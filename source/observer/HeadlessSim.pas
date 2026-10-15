@@ -7,7 +7,8 @@ unit HeadlessSim;
 // TGalaxy.SaveToBuffer writes, so the save writer is the only serialiser.
 interface
 uses
-  aHuman;
+  aHuman,
+  aItem;
 const
   // --sim-new-game: the host generates a new game instead of loading a save.
   NewGameSave = '<new game>';
@@ -81,12 +82,21 @@ type
     // CHANGE: ENHANCEMENT - A client submits a command that submits another from inside it;
     // the host must run the inner one once (HeadlessNet).
     NetNested: Boolean;
+    // CHANGE: ENHANCEMENT - Trades between humans at one planet (HeadlessNet, docs/network.md,
+    // Tests): the host's clients join at its human's planet, and on their first day play a
+    // scripted shop turn instead of PlayHumanTurn.
+    NetShop: Boolean;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 // Shared with the networked runner (HeadlessNet).
 procedure Emit(const Line: AnsiString);
 procedure LoadSave(const FileName: AnsiString; Seed: Cardinal);
 procedure PlayHumanTurn(Human: THuman; Day, Index: Integer; var Plan: AnsiString);
+// CHANGE: ENHANCEMENT - Shared with HeadlessNet's shop run (NetShop).
+function ShopSlotIndexOf(Human: THuman; Item: TItem): Integer;
+function BuyShopItem(Human: THuman; Slot: Integer; Item: TItem): AnsiString;
+procedure SellToShop(Human: THuman; Item: TItem);
+function IsTradedBack(Item: TItem): Boolean;
 var
   // CHANGE: ENHANCEMENT - PlayHumanTurn buys one unit of the good with the smallest stock the
   // human could buy whole, when there is one (NetBuyRace).
@@ -113,7 +123,6 @@ uses
   aPlanetActions,
   aRuins,
   EC_Struct,
-  aItem,
   aPlanet,
   aPlayer,
   aPlayerActions,
@@ -980,6 +989,19 @@ begin
   SubmitFor(Human, Command);
 end;
 
+// CHANGE: ENHANCEMENT - A purchase of goods as the goods screen sends it (aShopActions.TradeGoods):
+// a refusal is only logged. On a networked client the host answers a trade before it runs here,
+// and refuses one another human made stale (docs/network.md, Trades); the turn goes on.
+procedure SubmitGoodsFor(Human: THuman; var Command: TPlayerCommand);
+begin
+  try
+    SubmitFor(Human, Command);
+  except
+    on E: ECommandRefused do
+      Emit('trade refused: ' + E.Message);
+  end;
+end;
+
 // Buys one unit of the first good the planet sells that the ranger can pay and carry. The
 // goods screen checks the same before it sends the command.
 function BuyOneGood(Human: THuman): Boolean;
@@ -1016,7 +1038,7 @@ begin
       AddInt(Command, Best);
       AddInt(Command, 1);
       AddInt(Command, 0);
-      SubmitFor(Human, Command);
+      SubmitGoodsFor(Human, Command);
       Exit(True);
     end;
   end;
@@ -1029,7 +1051,7 @@ begin
       AddInt(Command, Good);
       AddInt(Command, 1);
       AddInt(Command, 0);
-      SubmitFor(Human, Command);
+      SubmitGoodsFor(Human, Command);
       Exit(True);
     end;
 end;

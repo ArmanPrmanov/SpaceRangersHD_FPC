@@ -345,7 +345,9 @@ procedure SelectConstructionItem(Item: TEquipment; Source: Byte);
 procedure LinkRecoveredTypes;
 implementation
 uses
+  aCommands,
   aDialogActions,
+  aHoldActions,
   aPlayerActions,
   aPlanetActions,
   aStationActions,
@@ -3385,7 +3387,15 @@ begin
   end
   else
     Cost := Station.CalculateEquippedItemCostWithoutHull;
-  if Station.ModernizationSponsor then
+  // CHANGE: BUGFIX - Another human edits the station's ship: its screen would be refused
+  // (rrInUse), so the player is told and the dialogue goes on.
+  if Station.ModernizationSponsor and ShipScreenInUse(Station) then
+  begin
+    if Assigned(TradeRefusedHook) then
+      TradeRefusedHook(rrInUse);
+    M_Main(False);
+  end
+  else if Station.ModernizationSponsor then
   begin
     ShipScreen.ShipToInspect := LocalPlayer.DockedTo;
     MainPanel.ShipClicked(nil);

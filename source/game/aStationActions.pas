@@ -250,9 +250,19 @@ uses
   Globals,
   GR_Main;
 
+// CHANGE: ENHANCEMENT - A trade a screen submits; another human may have been first
+// (aCommands.SubmitTrade).
+procedure SubmitAny(const Command: TPlayerCommand);
+begin
+  if IsTradeCommand(Command.Kind) then
+    SubmitTrade(Command)
+  else
+    SubmitCommand(Command);
+end;
+
 procedure SubmitSimple(Kind: TCommandKind);
 begin
-  SubmitCommand(NewCommand(Kind));
+  SubmitAny(NewCommand(Kind));
 end;
 
 procedure SubmitInt(Kind: TCommandKind; Value: Integer);
@@ -261,7 +271,7 @@ var
 begin
   Command := NewCommand(Kind);
   AddInt(Command, Value);
-  SubmitCommand(Command);
+  SubmitAny(Command);
 end;
 
 procedure SubmitInt2(Kind: TCommandKind; Value1, Value2: Integer);
@@ -271,7 +281,7 @@ begin
   Command := NewCommand(Kind);
   AddInt(Command, Value1);
   AddInt(Command, Value2);
-  SubmitCommand(Command);
+  SubmitAny(Command);
 end;
 
 procedure SubmitRef(Kind: TCommandKind; Instance: TObject);
@@ -2573,7 +2583,7 @@ begin
   AddInt(Command, Kind);
   AddInt(Command, Cost);
   AddRef(Command, Target);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 // Moved from TfRuinsTalk.BuyBusinessCenterTradeAdvice; the screen builds the answer and the
@@ -3021,7 +3031,7 @@ begin
       AddInt(Command, Integer(Parts[I].Item.Id));
   end;
   AddInt(Command, ShopVisibleColumnCount);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
   Result := StrToInt(StationText2);
 end;
 
@@ -3348,6 +3358,8 @@ begin
 end;
 
 initialization
+  // CHANGE: ENHANCEMENT - The trades (True) apply on a host as they arrive (docs/commands.md,
+  // Trades).
   RegisterCommand(ckEnterBridgeScreen, 'EnterBridgeScreen', @ExecuteEnterBridgeScreen);
   RegisterCommand(ckEnterStation, 'EnterStation', @ExecuteEnterStation);
   RegisterCommand(ckClearStationDialog, 'ClearStationDialog', @ExecuteClearStationDialog);
@@ -3368,7 +3380,7 @@ initialization
       @ExecuteChangeInterceptorPassCount
   );
   RegisterCommand(ckSetInterceptorStrategy, 'SetInterceptorStrategy', @ExecuteSetInterceptorStrategy);
-  RegisterCommand(ckPayForModernization, 'PayForModernization', @ExecutePayForModernization);
+  RegisterCommand(ckPayForModernization, 'PayForModernization', @ExecutePayForModernization, True);
   RegisterCommand(ckDepositNodes, 'DepositNodes', @ExecuteDepositNodes);
   RegisterCommand(ckTakeServiceMicroModule, 'TakeServiceMicroModule', @ExecuteTakeServiceMicroModule);
   RegisterCommand(
@@ -3378,7 +3390,7 @@ initialization
   );
   RegisterCommand(ckChangeNationality, 'ChangeNationality', @ExecuteChangeNationality);
   RegisterCommand(ckChangeSide, 'ChangeSide', @ExecuteChangeSide);
-  RegisterCommand(ckBuyPirateNodes, 'BuyPirateNodes', @ExecuteBuyPirateNodes);
+  RegisterCommand(ckBuyPirateNodes, 'BuyPirateNodes', @ExecuteBuyPirateNodes, True);
   RegisterCommand(ckBuyPirateProgram, 'BuyPirateProgram', @ExecuteBuyPirateProgram);
   RegisterCommand(ckPirateBaseRepair, 'PirateBaseRepair', @ExecutePirateBaseRepair);
   RegisterCommand(ckBuySubCrack, 'BuySubCrack', @ExecuteBuySubCrack);
@@ -3396,7 +3408,7 @@ initialization
   );
   RegisterCommand(ckImproveEquipment, 'ImproveEquipment', @ExecuteImproveEquipment);
   RegisterCommand(ckScienceBaseRepair, 'ScienceBaseRepair', @ExecuteScienceBaseRepair);
-  RegisterCommand(ckBuySatellite, 'BuySatellite', @ExecuteBuySatellite);
+  RegisterCommand(ckBuySatellite, 'BuySatellite', @ExecuteBuySatellite, True);
   RegisterCommand(ckSellResearchRemains, 'SellResearchRemains', @ExecuteSellResearchRemains);
   RegisterCommand(ckSellResearchEquipment, 'SellResearchEquipment', @ExecuteSellResearchEquipment);
   RegisterCommand(ckSellResearchItem, 'SellResearchItem', @ExecuteSellResearchItem);
@@ -3406,15 +3418,15 @@ initialization
   RegisterCommand(ckOpenDeposit, 'OpenDeposit', @ExecuteOpenDeposit);
   RegisterCommand(ckCloseDeposit, 'CloseDeposit', @ExecuteCloseDeposit);
   RegisterCommand(ckBuyMedicalPolicy, 'BuyMedicalPolicy', @ExecuteBuyMedicalPolicy);
-  RegisterCommand(ckInvest, 'Invest', @ExecuteInvest);
+  RegisterCommand(ckInvest, 'Invest', @ExecuteInvest, True);
   RegisterCommand(ckBuyTradeAdvice, 'BuyTradeAdvice', @ExecuteBuyTradeAdvice);
   RegisterCommand(ckExamineDiseases, 'ExamineDiseases', @ExecuteExamineDiseases);
   RegisterCommand(ckTreatDisease, 'TreatDisease', @ExecuteTreatDisease);
   RegisterCommand(ckTreatAllDiseases, 'TreatAllDiseases', @ExecuteTreatAllDiseases);
   RegisterCommand(ckBuyStimulant, 'BuyStimulant', @ExecuteBuyStimulant);
-  RegisterCommand(ckBuySpecialShip, 'BuySpecialShip', @ExecuteBuySpecialShip);
+  RegisterCommand(ckBuySpecialShip, 'BuySpecialShip', @ExecuteBuySpecialShip, True);
   RegisterCommand(ckPriceSpecialShip, 'PriceSpecialShip', @ExecutePriceSpecialShip);
-  RegisterCommand(ckBuildPirateShip, 'BuildPirateShip', @ExecuteBuildPirateShip);
+  RegisterCommand(ckBuildPirateShip, 'BuildPirateShip', @ExecuteBuildPirateShip, True);
   RegisterCommand(ckImproveAtDominion, 'ImproveAtDominion', @ExecuteImproveAtDominion);
   RegisterCommand(ckBuyPirateLicense, 'BuyPirateLicense', @ExecuteBuyPirateLicense);
   RegisterCommand(ckQueueDominionTravel, 'QueueDominionTravel', @ExecuteQueueDominionTravel);

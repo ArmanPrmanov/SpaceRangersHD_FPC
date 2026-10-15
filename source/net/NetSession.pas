@@ -70,6 +70,8 @@ begin
   StarDayHook := @HostStarDay;
   DayCompletedHook := @HostDayCompleted;
   RemoteTalkHook := @HostRemoteTalk;
+  // CHANGE: ENHANCEMENT - The host relays the trades it applies (docs/network.md, Trades).
+  NetworkCommandHook := @HostCommandSubmitted;
   Result := Host;
 end;
 
@@ -83,6 +85,8 @@ begin
   StopNetwork;
   Client := TNetClient.Create(Address, Port, Name, Wait);
   NetworkCommandHook := @ClientCommandSubmitted;
+  // CHANGE: ENHANCEMENT - A trade waits for the host's answer instead of being predicted.
+  TradeSubmitHook := @ClientTradeSubmitted;
   Result := Client;
 end;
 
@@ -94,6 +98,7 @@ begin
   DayCompletedHook := nil;
   RemoteTalkHook := nil;
   NetworkCommandHook := nil;
+  TradeSubmitHook := nil;
   if Host <> nil then
   begin
     Host.Shutdown(ByeTimeoutMs);

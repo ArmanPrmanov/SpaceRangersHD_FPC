@@ -61,6 +61,18 @@ NET_NOTICE_MS = 5000
 # goods sold first is refused with (aCommands.RefusalReasonName).
 TRADE_GOODS_KIND = 110
 OUT_OF_STOCK = "out-of-stock"
+# Trades (docs/commands.md, Trades; docs/network.md, Trades): the host applies a client's as it
+# arrives and relays it to the clients at the same planet or station; nothing else is relayed.
+# The run with --sim-net-shop: a new game, two clients at the host's human's planet, NET_SHOP_DAYS
+# days.
+TRADE_KINDS = {
+    "BuyEquipment", "FinishStoredHullPurchase", "TradeGoods", "RepairHull", "Refuel",
+    "SellHeld", "RepairHeld", "RefuelHeld", "ReloadHeld", "RepairAll", "BuyRockets",
+    "SellHoldInventory", "SellHoldArtefact", "SellHoldGoods", "SellStoredItem",
+    "PayForModernization", "BuyPirateNodes", "BuySatellite", "Invest", "BuySpecialShip",
+    "BuildPirateShip", "BuyMap",
+}  # fmt: skip
+NET_SHOP_DAYS = 3
 # A networked process that runs longer than this has hung.
 NET_TIMEOUT = 600
 # Any other game run that takes longer than this has hung (the longest, 100 turns of a save,
@@ -410,7 +422,7 @@ def net_lines(output: str, prefix: str) -> list[dict[str, str]]:
 
 def run_network(
     args, binary: Path, save: Path | None, count: int, log: Path | None = None, leave: str = "",
-    race: bool = False, nested: bool = False,
+    race: bool = False, nested: bool = False, shop: bool = False,
 ):
     """One networked session: a host with `count` clients (Net1..NetN) for NET_DAYS days. Without
     a save the host plays a new game (--sim-new-game).
@@ -424,12 +436,14 @@ def run_network(
     play their films. With race, the clients buy goods whose whole stock they could pay for, and
     the host buys that stock first, once, so that a client's purchase is refused
     (--sim-net-buy-race). With nested, each client submits a command that submits another one
-    from inside it (--sim-net-nested). Returns (problem, host output, client outputs); problem is
-    '' when every process ended cleanly.
+    from inside it (--sim-net-nested). With shop, the clients join at the host's human's planet and
+    trade there on their first day (--sim-net-shop), for NET_SHOP_DAYS days. Returns (problem,
+    host output, client outputs); problem is '' when every process ended cleanly.
     """
+    days = NET_SHOP_DAYS if shop else NET_DAYS
     host_options = [
         f"--sim-save={save}" if save is not None else "--sim-new-game", "--sim-net-host=0", f"--sim-net-clients={count}",
-        f"--sim-turns={NET_DAYS}", f"--sim-seed={args.seed}", f"--sim-net-talk={NET_TALK_DAY}",
+        f"--sim-turns={days}", f"--sim-seed={args.seed}", f"--sim-net-talk={NET_TALK_DAY}",
     ]  # fmt: skip
     if not leave:
         host_options.append("--sim-net-talk-after-film")
@@ -441,6 +455,8 @@ def run_network(
         host_options.append("--sim-net-buy-race")
     if nested:
         host_options.append("--sim-net-nested")
+    if shop:
+        host_options.append("--sim-net-shop")
     host = GameProcess(binary, args.game_dir, host_options)
     port_line = host.wait_line("net host port=", NET_TIMEOUT)
     if not port_line:
@@ -460,6 +476,8 @@ def run_network(
             options.append("--sim-net-buy-race")
         if nested:
             options.append("--sim-net-nested")
+        if shop:
+            options.append("--sim-net-shop")
         clients.append(GameProcess(binary, args.game_dir, options))
     codes = []
     if leave in ("day", "talk"):
@@ -707,12 +725,19 @@ def check_refusal(host_output: str, outputs: list[str], log: Path | None) -> tup
         return f"the client did not get the refusal of purchase {first['seq']}: {refused}", ""
     if refused[0]["bubble"] != "1":
         return "the client did not show the refusal as a bubble", ""
+    # A trade is refused while the client waits for it, not at the barrier.
+    answered = [
+        line for output in outputs for line in net_lines(output, "net trade answered ")
+        if line["seq"] == first["seq"] and line["kind"] == "TradeGoods"
+    ]
+    if not answered or answered[0]["ok"] != "0" or answered[0]["reason"] != OUT_OF_STOCK:
+        return f"the client did not get the refusal of purchase {first['seq']} while it waited: {answered}", ""
     again = [line for output in outputs for line in net_lines(output, "net client refusal after state ")]
     if not again or again[0]["bubble"] != "1":
         return "the client did not show the refusal again after the next state", ""
     note = (
         f"a client's purchase of goods the host bought first (good {first['good']}) is refused "
-        f"({OUT_OF_STOCK}) and shown as a bubble"
+        f"({OUT_OF_STOCK}) while the client waits for it ({answered[0]['ms']} ms) and shown as a bubble"
     )
     if log is None:
         return "", note
@@ -782,6 +807,89 @@ def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
         f"{label}: {note}",
         f"{label}: a command a client submits from inside another reaches the host once",
         f"{label}: a client's session flag is refused, and the host's stays",
+    ]
+
+
+def check_network_shop(args, binary: Path) -> tuple[bool, list[str]]:
+    """Trades between humans at one planet (docs/network.md, Trades and Tests): a new game whose
+    host's human opens the planet's shop, and two clients that join there (--sim-net-shop).
+
+    Net1 buys an item X; the host applies it as it arrives and relays it to Net2, whose grid no
+    longer shows X; the host's own purchase of X, from its grid as it was, is refused (item-gone)
+    and the host's grid was rebuilt and its screen told. Net1 buys a good and sells it back, and
+    Net2 sees the planet's stock go down and up again from the relays. Net1 sells an item from
+    the ship screen: the three hold commands before the sale apply with it, in order. Net2's
+    purchase of X is refused (item-gone) while it waits for it. Only trades are relayed. A
+    purchase Net2 sends right after its end turn applies after that day. Every client state has
+    the host's hash."""
+    label = "new game, 3 humans trading at one planet"
+    problem, host_output, outputs = run_network(args, binary, None, 2, shop=True)
+    if not problem:
+        problem = compare_client_hashes(host_output, outputs)
+    if problem:
+        return False, [f"{label}: {problem}"]
+    net1, net2 = outputs[0], outputs[1]
+    id1 = fields(last_line(net1, "done net client ")).get("human")
+    id2 = fields(last_line(net2, "done net client ")).get("human")
+    bought = net_lines(net1, "net client shop bought ")
+    if not bought or bought[0]["reason"] != "":
+        return False, [f"{label}: Net1 did not buy its item: {bought}" + output_tail(net1)]
+    item = bought[0]["item"]
+    applied = net_lines(host_output, "net trade applied ")
+    if not any(line["human"] == id1 and line["kind"] == "BuyEquipment" for line in applied):
+        return False, [f"{label}: the host did not apply Net1's purchase as it came: {applied}"]
+    own = net_lines(host_output, "net host own trade refused ")
+    grid = net_lines(host_output, "net host shop grid ")
+    if not own or own[0]["reason"] != "item-gone":
+        return False, [f"{label}: the host's own purchase of item {item} was not refused: {own}" + output_tail(host_output)]
+    if not grid or grid[0]["shows"] != "0" or int(grid[0]["notified"]) < 1:
+        return False, [f"{label}: the host's grid was not rebuilt after Net1's purchase: {grid}"]
+    relay = net_lines(net2, "net client shop relay ")
+    if not relay:
+        return False, [f"{label}: Net2 saw no relay:" + output_tail(net2)]
+    relay = relay[0]
+    if relay["grid-shows-x"] != "0" or int(relay["low"]) >= int(relay["goods-before"]) or relay["after"] != relay["goods-before"]:
+        return False, [f"{label}: Net2's copy did not follow Net1's trades: {relay}"]
+    gone = net_lines(net2, "net client shop buy-gone ")
+    if not gone or gone[0]["reason"] != "item-gone":
+        return False, [f"{label}: Net2's purchase of item {item} was not refused: {gone}"]
+    answered = [line for line in net_lines(net2, "net trade answered ") if line["kind"] == "BuyEquipment"]
+    if not answered or answered[0]["ok"] != "0" or answered[0]["reason"] != "item-gone":
+        return False, [f"{label}: Net2 did not get the refusal while it waited: {answered}"]
+    sale = [line for line in applied if line["human"] == id1 and line["kind"] == "SellHeld"]
+    if not sale or sale[0]["before"] != "3":
+        return False, [f"{label}: the hold commands before Net1's sale did not apply with it: {sale}"]
+    relayed = net_lines(host_output, "net relayed ")
+    ran = net_lines(net2, "net relayed command ran ")
+    kinds = {line["kind"] for line in relayed} | {line["kind"] for line in ran}
+    if not relayed or not kinds <= TRADE_KINDS:
+        return False, [f"{label}: the host relayed {sorted(kinds - TRADE_KINDS) or 'nothing'}, not only trades"]
+    if not {"BuyEquipment", "TradeGoods"} <= {line["kind"] for line in relayed if line["human"] == id1}:
+        return False, [f"{label}: Net1's purchases were not relayed: {relayed}"]
+    sent = net_lines(net2, "net client shop sent after end turn ")
+    if not sent:
+        return False, [f"{label}: Net2 sent nothing after its end turn"]
+    seq = sent[0]["seq"]
+    host_lines = host_output.splitlines()
+    first_day = next((i for i, line in enumerate(host_lines) if line.startswith("net host day=")), None)
+    late = next(
+        (i for i, line in enumerate(host_lines)
+         if line.startswith("net trade applied ") and fields(line).get("human") == id2 and fields(line).get("seq") == seq),
+        None,
+    )  # fmt: skip
+    if first_day is None or late is None or late < first_day:
+        return False, [f"{label}: the purchase Net2 sent while the day ran was not applied after it"]
+    result = [line for line in net_lines(net2, "net client result ") if line["seq"] == seq]
+    if not result:
+        return False, [f"{label}: Net2 did not hear that its purchase {seq} was applied"]
+    return True, [
+        f"{label}: {NET_SHOP_DAYS} days, client hashes match the host's",
+        f"{label}: a purchase applies on the host as it comes ({bought[0]['item']}), the other client's grid "
+        "follows from the relay and its purchase of the item is refused (item-gone) while it waits, the host's own "
+        "purchase of it is refused and its grid rebuilt",
+        f"{label}: a sale of goods is seen by the other client; a sale from the ship screen applies with the 3 hold "
+        f"commands before it; only trades are relayed ({', '.join(sorted(kinds))})",
+        f"{label}: a purchase sent while the day runs applies after it",
     ]
 
 
@@ -1005,6 +1113,7 @@ def main() -> None:
         futures = {save: pool.submit(check_save, args, binary, save) for save in saves}
         futures.update({log: pool.submit(check_replay, args, binary, log) for log in replays})
         futures[Path("new game")] = pool.submit(check_new_game_network, args, binary)
+        futures[Path("new game shop")] = pool.submit(check_network_shop, args, binary)
         for path, future in futures.items():
             passed, notes = future.result()
             failed += not passed
