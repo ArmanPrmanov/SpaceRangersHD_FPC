@@ -19,7 +19,10 @@ has got.
 - Open issues: chaotic mode is seeded from the clock (Phase 1 entry); a
   loaded game drifts from the live one (Phase 3 entry); no converted
   screen has been exercised in the UI yet; the Phase 5 known gaps.
-- Latest entry: [2026-09-28-phase5.md](2026-09-28-phase5.md)
+- Multiplayer sync audit (2026-10-15): script builtins act on the host's
+  machine and human, and several commands race on shared objects. The fix
+  order is in the entry.
+- Latest entry: [2026-10-15-mp-audit.md](2026-10-15-mp-audit.md)
 
 ## Session entry format
 
