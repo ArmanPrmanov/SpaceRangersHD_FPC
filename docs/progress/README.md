@@ -22,7 +22,10 @@ has got.
 - Multiplayer sync audit (2026-10-15): script builtins act on the host's
   machine and human, and several commands race on shared objects. The fix
   order is in the entry.
-- Latest entry: [2026-10-15-mp-audit.md](2026-10-15-mp-audit.md)
+- Silent disconnects (2026-10-16): ping and a 10 s silence timeout, a
+  reconnection token with takeover, and the client's automatic reconnect
+  (protocol 9). The reconnect box and its Cancel are not hand-checked yet.
+- Latest entry: [2026-10-16-reconnect.md](2026-10-16-reconnect.md)
 
 ## Session entry format
 
