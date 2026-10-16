@@ -5,7 +5,9 @@ unit NetClient;
 // docs/network.md). A client never runs a day: it says Hello, sends every command its human
 // submits to the host (the command also runs here, as the prediction), and replaces its copy
 // of the game with each state the host sends, at a safe point. Films arrive before the state
-// of their day. Everything here runs on the UI thread.
+// of their day. Everything here runs on the UI thread. CHANGE: ENHANCEMENT - A joined client
+// that loses its host reconnects by itself, in place, with its token (docs/network.md,
+// Disconnects).
 interface
 uses
   Classes,
@@ -39,6 +41,9 @@ type
     // Whether it came as a delta.
     Delta: Boolean;
     LoadMs: Integer;
+    // CHANGE: ENHANCEMENT - It is the whole state after a reconnect (docs/network.md,
+    // Disconnects): the human holds the day again when the host has it so.
+    Rejoin: Boolean;
   end;
 
   // CHANGE: ENHANCEMENT - How far a join has come, for its progress (docs/network.md, Hosting
@@ -121,12 +126,38 @@ type
     FLateTrades: array of TNetSentTrade;
     FRelayed: array of TNetRelayedCommand;
     FNoAnswerShown: Boolean;
+    // CHANGE: ENHANCEMENT - Reconnection (docs/network.md, Disconnects): a client that has had
+    // a state and loses its host (the connection closed or went silent; not the host's Bye, not
+    // a refusal) connects again to the same address, as the same name with its token, for
+    // NetReconnectMs at most. When it started, when the next try may start, how many tries,
+    // why the connection was lost and why the last try failed.
+    FReconnecting: Boolean;
+    FReconnectStart: QWord;
+    FReconnectNextTry: QWord;
+    FReconnectTries: Integer;
+    FLossReason: AnsiString;
+    FReconnectError: AnsiString;
+    // Welcomed again, and the whole state after it not applied yet: commands are dropped,
+    // since the host's copy no longer has those before the loss. The pending state is that one.
+    FResyncing: Boolean;
+    FPendingRejoin: Boolean;
     procedure HandleMessage(Kind: TNetMessageKind; Payload: TBufEC);
     procedure ShowRefusal(const Refusal: TCommandResultMessage);
     procedure TakeLateTrade(const CommandResult: TCommandResultMessage);
     procedure GiveUp(const Text: AnsiString);
     procedure SayHello;
     procedure TakeConnection;
+    // CHANGE: ENHANCEMENT - The reconnection's steps: the connection closed; the loss starts
+    // a reconnect; one step of it from the pump; its end without the human back (Bye on a
+    // connection that is up, then GiveUp); what the old connection left goes.
+    procedure ConnectionLost(const Text: AnsiString);
+    procedure BeginReconnect(const Text: AnsiString);
+    procedure ReconnectStep;
+    procedure StopReconnect(const Text: AnsiString);
+    procedure DropConnectionState;
+    // Whether a message other than Hello may go to the host now: welcomed on this connection
+    // and not between a loss and the state after the reconnect.
+    function MaySend: Boolean;
   public
     // Connects and says Hello; Connected is False when it could not (Error says why). Without
     // Wait the connect runs on a thread of its own: Pump says Hello once it has connected,
@@ -212,8 +243,27 @@ type
     property HostName: WideString read FHostName;
     property Refused: Boolean read FRefused;
     property RefuseReason: WideString read FRefuseReason;
-    // The host said Bye or the connection closed.
+    // The host said Bye or the connection closed. CHANGE: ENHANCEMENT - A joined client's lost
+    // connection is HostLeft only once the reconnect has failed or was cancelled.
     property HostLeft: Boolean read FHostLeft;
+    // CHANGE: ENHANCEMENT - The connection to the host was lost and the client connects again
+    // (docs/network.md, Disconnects); until the host's Welcome names the same human. Connected
+    // stays True meanwhile, and commands are dropped. How long it has tried, and how long it
+    // may go on (ms).
+    function Reconnecting: Boolean;
+    function ReconnectElapsedMs: Integer;
+    function ReconnectRemainingMs: Integer;
+    property ReconnectTries: Integer read FReconnectTries;
+    // The player gave up waiting: the client says Bye on a connection that is up and ends as
+    // HostLeft, Error saying so.
+    procedure CancelReconnect;
+    // The whole state after a reconnect waits to be applied: the screens apply it at the next
+    // safe point, also outside a wait for the day.
+    function RejoinStatePending: Boolean;
+    // For the tests: the connection is lost now, as if it had closed. With KeepOld the old
+    // connection stays open in the network thread, frozen, until it ends, so that the host sees
+    // only silence and a takeover; without, it closes.
+    procedure LoseConnection(KeepOld: Boolean);
     // CHANGE: ENHANCEMENT - The reconnection token the host gave (Welcome), or the one given to
     // Create until then; 0: none. And where and as whom this client joined, for joining again.
     property Token: QWord read FToken;
@@ -242,6 +292,9 @@ var
   ClientTradeTimeoutMs: Integer = 10000;
   ClientTradeIdleMs: Integer = 100;
   TradeWaitIdleHook: procedure;
+  // CHANGE: ENHANCEMENT - How long a client that lost its host tries to connect again
+  // (docs/network.md, Disconnects); a variable, so that the tests can shorten it.
+  NetReconnectMs: Integer = 60000;
 // NetworkCommandHook of a client: sends the command to the host.
 procedure ClientCommandSubmitted(const Command: TPlayerCommand);
 // CHANGE: ENHANCEMENT - aCommands.TradeSubmitHook of a client (TNetClient.SendTrade).
@@ -261,6 +314,10 @@ uses
 const
   ConnectTimeoutMs = 10000;
   KeptCommandResults = 64;
+  // CHANGE: ENHANCEMENT - A reconnect's try connects for this long at most, and the next try
+  // starts this long after one failed.
+  ReconnectConnectTimeoutMs = 5000;
+  ReconnectPauseMs = 1000;
 
 function TradeNoAnswerText: WideString;
 begin
@@ -404,11 +461,183 @@ begin
     FError := Text;
   NetLog(Text);
   FHostLeft := True;
+  // CHANGE: ENHANCEMENT - A refusal or a bad message ends a reconnect too.
+  FReconnecting := False;
+  FResyncing := False;
+  if FAttempt <> nil then
+  begin
+    FAttempt.Abandon;
+    FAttempt := nil;
+  end;
 end;
 
 function TNetClient.Connected: Boolean;
 begin
-  Result := ((FPeerId >= 0) or (FAttempt <> nil)) and not FHostLeft and not FRefused;
+  // CHANGE: ENHANCEMENT - Between two tries of a reconnect there is neither a peer nor a connect.
+  Result := ((FPeerId >= 0) or (FAttempt <> nil) or FReconnecting) and not FHostLeft and not FRefused;
+end;
+
+function TNetClient.MaySend: Boolean;
+begin
+  Result := Connected and (FPeerId >= 0) and not FReconnecting and not FResyncing;
+end;
+
+function TNetClient.Reconnecting: Boolean;
+begin
+  Result := FReconnecting and not FHostLeft;
+end;
+
+function TNetClient.ReconnectElapsedMs: Integer;
+begin
+  if not Reconnecting then
+    Exit(0);
+  Result := Integer(GetTickCount64 - FReconnectStart);
+end;
+
+function TNetClient.ReconnectRemainingMs: Integer;
+begin
+  if not Reconnecting then
+    Exit(0);
+  Result := NetReconnectMs - ReconnectElapsedMs;
+  if Result < 0 then
+    Result := 0;
+end;
+
+function TNetClient.RejoinStatePending: Boolean;
+begin
+  Result := FHasPending and FPendingRejoin;
+end;
+
+// What came on the old connection and belongs to it goes: films, the talk, relays, results,
+// the trades the host has not answered (a trade SendTrade waits for is refused there).
+procedure TNetClient.DropConnectionState;
+var
+  I: Integer;
+begin
+  for I := 0 to FFilms.Count - 1 do
+    TObject(FFilms[I]).Free;
+  FFilms.Clear;
+  FHasTalk := False;
+  FRelayed := nil;
+  FLateTrades := nil;
+  FResults := nil;
+end;
+
+// CHANGE: ENHANCEMENT - The connection to the host closed: a try of a reconnect failed; a
+// joined client starts to reconnect; otherwise it gives up (docs/network.md, Disconnects).
+procedure TNetClient.ConnectionLost(const Text: AnsiString);
+begin
+  if FReconnecting then
+  begin
+    FReconnectError := Text;
+    NetLog(Format('client reconnect try=%d failed: %s', [FReconnectTries, Text]));
+    FThread.RemovePeer(FPeerId);
+    FPeerId := -1;
+    FReconnectNextTry := GetTickCount64 + ReconnectPauseMs;
+  end
+  else if FStateReceived and not FRefused and (NetReconnectMs > 0) then
+    BeginReconnect(Text)
+  else
+    GiveUp(Text);
+end;
+
+procedure TNetClient.BeginReconnect(const Text: AnsiString);
+begin
+  NetLog(Format('client lost the host: %s; reconnecting for %d s', [Text, (NetReconnectMs + 500) div 1000]));
+  if FPeerId >= 0 then
+    FThread.RemovePeer(FPeerId);
+  FPeerId := -1;
+  FLossReason := Text;
+  FReconnectError := Text;
+  FReconnecting := True;
+  FResyncing := False;
+  FReconnectStart := GetTickCount64;
+  FReconnectNextTry := FReconnectStart;
+  FReconnectTries := 0;
+  DropConnectionState;
+end;
+
+// From the pump while it reconnects: a connect that has ended gets Hello, or the next try
+// starts after a pause; the window's end gives up, also while Welcome has not come.
+procedure TNetClient.ReconnectStep;
+var
+  Connection: TNetConnection;
+  Error: AnsiString;
+  Tick: QWord;
+  Remaining: Int64;
+begin
+  if FHostLeft then
+    Exit;
+  Tick := GetTickCount64;
+  Remaining := Int64(FReconnectStart) + NetReconnectMs - Int64(Tick);
+  if (FAttempt <> nil) and FAttempt.Done then
+  begin
+    Connection := FAttempt.Take(Error);
+    FAttempt.Release;
+    FAttempt := nil;
+    if Connection <> nil then
+    begin
+      FPeerId := FThread.AddConnection(Connection);
+      NetLog(Format('client reconnect try=%d connected after=%d ms', [FReconnectTries, Tick - FReconnectStart]));
+      SayHello;
+      Exit;
+    end;
+    FReconnectError := 'cannot connect to ' + FAddress + ':' + IntToStr(FPort) + ': ' + Error;
+    NetLog(Format('client reconnect try=%d failed: %s', [FReconnectTries, FReconnectError]));
+    FReconnectNextTry := Tick + ReconnectPauseMs;
+  end;
+  if Remaining <= 0 then
+  begin
+    NetLog(Format('client reconnect failed after=%d ms tries=%d', [Tick - FReconnectStart, FReconnectTries]));
+    StopReconnect(
+        Format('could not reconnect within %d s: %s', [(NetReconnectMs + 500) div 1000, FReconnectError])
+    );
+    Exit;
+  end;
+  if (FAttempt = nil) and (FPeerId < 0) and (Tick >= FReconnectNextTry) then
+  begin
+    Inc(FReconnectTries);
+    NetLog(Format('client reconnect try=%d after=%d ms', [FReconnectTries, Tick - FReconnectStart]));
+    if Remaining > ReconnectConnectTimeoutMs then
+      Remaining := ReconnectConnectTimeoutMs;
+    FAttempt := TNetConnectAttempt.Create(FAddress, FPort, Integer(Remaining));
+  end;
+end;
+
+procedure TNetClient.StopReconnect(const Text: AnsiString);
+begin
+  FReconnecting := False;
+  FResyncing := False;
+  if FAttempt <> nil then
+  begin
+    FAttempt.Abandon;
+    FAttempt := nil;
+  end;
+  if (FPeerId >= 0) and not FThread.IsClosed(FPeerId) then
+  begin
+    FThread.Send(FPeerId, nkBye, nil, 0);
+    FThread.ClosePeer(FPeerId);
+    FThread.WaitIdle(1000);
+  end;
+  GiveUp(Text);
+end;
+
+procedure TNetClient.CancelReconnect;
+begin
+  if not Reconnecting then
+    Exit;
+  NetLog(Format('client reconnect cancelled after=%d ms tries=%d', [ReconnectElapsedMs, FReconnectTries]));
+  StopReconnect('reconnecting was cancelled; ' + FLossReason);
+end;
+
+procedure TNetClient.LoseConnection(KeepOld: Boolean);
+begin
+  if (FPeerId < 0) or FHostLeft or FReconnecting then
+    Exit;
+  // The thread keeps the frozen peer until it ends.
+  if KeepOld then
+    FPeerId := -1;
+  ConnectionLost('the connection was dropped by the test');
 end;
 
 function TNetClient.JoinPhase: TNetJoinPhase;
@@ -446,6 +675,33 @@ begin
     nkWelcome:
       begin
         Welcome := DecodeWelcome(Payload);
+        // CHANGE: ENHANCEMENT - A reconnect gets its human back, or ends: the host's copy of the
+        // game starts again from the whole state that follows, so the bases go, and the host
+        // numbers the commands of this connection from 1.
+        if FReconnecting then
+        begin
+          if Welcome.HumanId <> FHumanId then
+          begin
+            StopReconnect(
+                Format('could not reconnect: the host gave human %d, not %d', [Welcome.HumanId, FHumanId])
+            );
+            Exit;
+          end;
+          FReconnecting := False;
+          FResyncing := True;
+          FBase.Clear;
+          FBaseSerial := 0;
+          FPreviousBase.Clear;
+          FPreviousBaseSerial := 0;
+          FCommandSequence := 0;
+          DropConnectionState;
+          NetLog(
+              Format(
+                  'client reconnected human=%d after=%d ms tries=%d',
+                  [Welcome.HumanId, GetTickCount64 - FReconnectStart, FReconnectTries]
+              )
+          );
+        end;
         FHumanId := Welcome.HumanId;
         FHostName := Welcome.HostName;
         FToken := Welcome.Token;
@@ -485,6 +741,10 @@ begin
         FPendingReceived := Payload.DataSize;
         FHasPending := True;
         FStateReceived := True;
+        // CHANGE: ENHANCEMENT - The whole state after a reconnect (no base is left to be a
+        // delta against).
+        if FResyncing then
+          FPendingRejoin := True;
       end;
     nkFilm:
       begin
@@ -525,10 +785,15 @@ begin
       begin
         FHostLeft := True;
         FHostSaidBye := True;
+        FReconnecting := False;
+        FResyncing := False;
         NetLog('the host left');
       end;
     nkNewHuman:
-      if not FWelcomed then
+      // CHANGE: ENHANCEMENT - The host has lost the human: a reconnect cannot choose another.
+      if FReconnecting then
+        StopReconnect(Format('could not reconnect: the host has no human %d of that name', [FHumanId]))
+      else if not FWelcomed then
       begin
         FCharacterWanted := True;
         NetLog('the host asks for a character');
@@ -604,6 +869,26 @@ var
     Pump;
   end;
 
+  // CHANGE: ENHANCEMENT - Refused here as one the host did not answer: its bubble says so.
+  procedure Unanswered(Sequence: Cardinal; const Why: AnsiString);
+  begin
+    NetLog(
+        Format(
+            'trade unanswered seq=%d kind=%s ms=%d%s',
+            [Sequence, CommandKindName(Command.Kind), GetTickCount64 - Start, Why]
+        )
+    );
+    if (Galaxy <> nil) and (LocalHuman <> nil) and (LocalHuman.Id = FHumanId) then
+    begin
+      LocalHuman.AddOrUpdateBubble(0, Galaxy.CurrentTurn, TradeNoAnswerText, '');
+      FNoAnswerShown := True;
+    end;
+    raise ECommandRefused.CreateReason(
+        rrOther,
+        CommandKindName(Command.Kind) + ': the host did not answer'
+    );
+  end;
+
 begin
   FNoAnswerShown := False;
   if not Connected or (FHumanId < 0) then
@@ -618,6 +903,12 @@ begin
         rrOther,
         CommandKindName(Command.Kind) + ': the host has not answered the last trade'
     );
+  // CHANGE: ENHANCEMENT - Between a loss and the state after the reconnect nothing goes
+  // (docs/network.md, Disconnects).
+  if FReconnecting or FResyncing then
+    Unanswered(0, ' (reconnecting)');
+  if not Connected then
+    raise ECommandRefused.CreateReason(rrOther, CommandKindName(Command.Kind) + ': the host is gone');
   SendCommand(Command);
   Sent.Sequence := FCommandSequence;
   Sent.Command := Command;
@@ -629,24 +920,14 @@ begin
     begin
       if not Connected then
         raise ECommandRefused.CreateReason(rrOther, CommandKindName(Command.Kind) + ': the host is gone');
+      // CHANGE: ENHANCEMENT - The connection was lost meanwhile: the answer will not come on
+      // the new one, so the trade is not kept for it.
+      if FReconnecting or FResyncing then
+        Unanswered(Sent.Sequence, ' (the connection was lost)');
       if GetTickCount64 >= Deadline then
       begin
         Insert(Sent, FLateTrades, Length(FLateTrades));
-        NetLog(
-            Format(
-                'trade unanswered seq=%d kind=%s ms=%d',
-                [Sent.Sequence, CommandKindName(Command.Kind), GetTickCount64 - Start]
-            )
-        );
-        if (Galaxy <> nil) and (LocalHuman <> nil) and (LocalHuman.Id = FHumanId) then
-        begin
-          LocalHuman.AddOrUpdateBubble(0, Galaxy.CurrentTurn, TradeNoAnswerText, '');
-          FNoAnswerShown := True;
-        end;
-        raise ECommandRefused.CreateReason(
-            rrOther,
-            CommandKindName(Command.Kind) + ': the host did not answer'
-        );
+        Unanswered(Sent.Sequence, '');
       end;
       WaitTick;
     end;
@@ -737,12 +1018,16 @@ var
   Kind: TNetMessageKind;
   Payload: TBufEC;
 begin
-  TakeConnection;
+  // CHANGE: ENHANCEMENT - A reconnect makes its own connections (docs/network.md, Disconnects).
+  if FReconnecting then
+    ReconnectStep
+  else
+    TakeConnection;
   if FPeerId < 0 then
     Exit;
   Payload := TBufEC.Create;
   try
-    while FThread.Receive(FPeerId, Kind, Payload) do
+    while (FPeerId >= 0) and FThread.Receive(FPeerId, Kind, Payload) do
       try
         HandleMessage(Kind, Payload);
       except
@@ -752,8 +1037,10 @@ begin
   finally
     Payload.Free;
   end;
-  if not FHostLeft and FThread.IsClosed(FPeerId) then
-    GiveUp('the connection closed: ' + FThread.PeerError(FPeerId));
+  // CHANGE: ENHANCEMENT - What the old connection still held has been read; a joined client
+  // reconnects instead of giving up.
+  if not FHostLeft and (FPeerId >= 0) and FThread.IsClosed(FPeerId) then
+    ConnectionLost('the connection closed: ' + FThread.PeerError(FPeerId));
 end;
 
 function TNetClient.HasState: Boolean;
@@ -778,6 +1065,7 @@ begin
   Result.StateBytes := FPending.DataSize;
   Result.ReceivedBytes := FPendingReceived;
   Result.Delta := FPendingHeader.BaseSerial <> 0;
+  Result.Rejoin := FPendingRejoin;
   Start := GetTickCount64;
   // The state fills the local human's state into the THuman that is local, which is this
   // client's own until now.
@@ -813,6 +1101,16 @@ begin
   FPending.Clear;
   FBaseSerial := FPendingHeader.Serial;
   FHasPending := False;
+  // CHANGE: ENHANCEMENT - The state after a reconnect ends the resync: commands go again. A
+  // state applied while reconnecting (it came before the loss) is not acknowledged on the new
+  // connection.
+  if FPendingRejoin then
+  begin
+    FPendingRejoin := False;
+    FResyncing := False;
+  end;
+  if not MaySend then
+    Exit;
   Payload := TBufEC.Create;
   try
     EncodeAck(FBaseSerial, Payload);
@@ -828,6 +1126,13 @@ var
 begin
   if not Connected or (FHumanId < 0) then
     Exit;
+  // CHANGE: ENHANCEMENT - Lost with the connection: the state after the reconnect replaces
+  // what it predicted (docs/network.md, Disconnects).
+  if not MaySend then
+  begin
+    NetLog(Format('command dropped while reconnecting kind=%s', [CommandKindName(Command.Kind)]));
+    Exit;
+  end;
   Payload := TBufEC.Create;
   try
     Inc(FCommandSequence);
@@ -863,7 +1168,7 @@ var
   Chat: TChatMessage;
   Payload: TBufEC;
 begin
-  if not Connected then
+  if not MaySend then
     Exit;
   Chat.SenderId := FHumanId;
   Chat.Text := Text;
@@ -884,6 +1189,9 @@ end;
 
 procedure TNetClient.Leave(TimeoutMs: Integer);
 begin
+  // CHANGE: ENHANCEMENT - Also in the middle of a reconnect.
+  FReconnecting := False;
+  FResyncing := False;
   if FAttempt <> nil then
   begin
     FAttempt.Abandon;
@@ -968,7 +1276,8 @@ end;
 
 procedure TNetClient.SendTalkDone;
 begin
-  if Connected then
+  // CHANGE: ENHANCEMENT - A talk of the lost connection is not answered on the new one.
+  if MaySend then
     FThread.Send(FPeerId, nkTalkDone, nil, 0);
 end;
 

@@ -65,6 +65,8 @@ type
   end;
 
   TNetHost = class;
+  // CHANGE: ENHANCEMENT - Peers of the network thread, by id.
+  TPeerIds = array of Integer;
   // CHANGE: ENHANCEMENT - For the tests: told before (Done False) and after (Done True) the host
   // applies a peer's trade as it arrives; Queued is the trade, Applied whether it was.
   TNetTradeHook = procedure(
@@ -220,6 +222,10 @@ type
     // and the peers' queued commands are dropped. At a quiet point on the UI thread, before
     // Shutdown says Bye.
     procedure DisconnectHumans;
+    // CHANGE: ENHANCEMENT - For the tests (docs/network.md, Tests): the network thread stops
+    // reading, writing and pinging every peer's connection (TNetThread.FreezePeer), so that the
+    // clients see only silence. Returns the peers it froze, for RemovePeer later.
+    function FreezePeers: TPeerIds;
     // On the turn thread: asks Human, whose talk fields are set, through its
     // client (docs/network.md, Remote dialogue). Sends TalkRequest, then reads only that
     // peer's inbox: each Command of the human runs at once through SubmitCommand, recorded as
@@ -1612,6 +1618,18 @@ begin
       Continue;
     SetLength(Peer.Queue, 0);
     DisconnectHuman(Human, Peer);
+  end;
+end;
+
+function TNetHost.FreezePeers: TPeerIds;
+var
+  I: Integer;
+begin
+  SetLength(Result, FPeers.Count);
+  for I := 0 to FPeers.Count - 1 do
+  begin
+    Result[I] := THostPeer(FPeers[I]).PeerId;
+    FThread.FreezePeer(Result[I]);
   end;
 end;
 

@@ -19,7 +19,7 @@ Read [humans.md](humans.md) (the barrier, hot-seat, `ActingHuman`) and
 | `source/net/NetProtocol.pas` | message kinds, their encoding, protocol version, the data hash |
 | `source/net/NetThread.pas` | the network thread: owns every socket, moves bytes, queues whole messages per peer |
 | `source/net/NetHost.pas` | the host session: peers, joins, commands in, states and films out |
-| `source/net/NetClient.pas` | the client session: hello, commands out, films and states in |
+| `source/net/NetClient.pas` | the client session: hello, commands out, films and states in, the reconnect |
 | `source/net/NetSession.pas` | what the rest of the game calls: role, pump, hooks |
 | `source/observer/HeadlessNet.pas` | the headless host and client for tests (Tests) |
 | `source/screens/NetPlay.pas` | the game's screens in a session: `--host`/`--join`, the waits, the client's film and state (The day, Films, Applying state, Waiting) |
@@ -83,7 +83,9 @@ once per message-loop iteration.
 - **A client's connect** runs on a thread of its own (`TNetConnectAttempt`), so
   that the join can show its progress and be cancelled; the connection then
   goes to the network thread (`TNetThread.AddConnection`). A cancelled connect
-  closes its connection when it comes.
+  closes its connection when it comes. A reconnect (Disconnects) connects the
+  same way, from the client's pump, on the same `TNetClient` and its network
+  thread: the old peer is removed and the new connection is added.
 - Sending is thread-safe: it appends to the peer's outbox under the lock.
 
 ## Messages
@@ -173,7 +175,7 @@ answers it, also when it applied it, and `RelayCommand`, Trades; 8:
    this hosting session and given again at each rejoin (`TNetHost.HumanToken`).
    The client keeps it (`TNetClient.Token`) and sends it in its Hello; a
    `TNetClient` created with a token (the constructor's `Token`) says Hello
-   with it.
+   with it, and so does its reconnect (Disconnects).
 
 A human who joins or leaves is a normal operation. Human ids are ship ids and
 are never reused, so a log or a save can name a human who has left.
@@ -684,8 +686,10 @@ an English fallback, as `Multiplayer.Turn` does: `Multiplayer.Waiting`
 `Multiplayer.DayRuns`, `Multiplayer.WaitingHost`, `Multiplayer.WaitingPlayers`,
 `Multiplayer.WaitingTalk` ("Waiting for <Players> to answer a hail."), the
 join's `Multiplayer.JoinConnecting`, `JoinWaiting`, `JoinReceivingStart`,
-`JoinReceiving`, and for the main menu `Multiplayer.Refused`,
-`Multiplayer.Lost`, `Multiplayer.HostLeft`, `Multiplayer.NoState`. None is in
+`JoinReceiving`, the reconnect's `Multiplayer.Reconnecting` ("The connection to
+the host is lost. Reconnecting... (<Seconds> s)"), and for the main menu
+`Multiplayer.Refused`, `Multiplayer.Lost`, `Multiplayer.HostLeft`,
+`Multiplayer.NoState`. None is in
 the game's language data. The only way to add texts to it is a mod: a selected
 mod's `Mods\<mod>\CFG\<language>\Lang.dat` is merged into it
 (`GR_Main.LoadDatConfigAndModOverrides`), in the game's binary `.dat` format. The port
@@ -702,6 +706,36 @@ jump screen, with no box or dialogue above it, `LostHostLeaveScreens`), not
 while the star map plays a film (its end leaves anyway), and never from a shop
 or the ship screen, which move goods when they close. It does not offer to play
 on offline: the client's copy is a prediction the host no longer backs.
+
+**Reconnecting.** A joined client whose connection was lost first reconnects
+(Disconnects); `Connected` stays true meanwhile, so neither `NetFrame` nor
+`LeaveLostGame` goes to the menu, and only a reconnect that fails or is
+cancelled ends as above. While it reconnects:
+
+- A wait for the day (`nwClientDay`, `nwClientState`) shows
+  `Multiplayer.Reconnecting` with the seconds left instead of whom it waits for,
+  and has a Cancel (also Escape); it opens again without one when the reconnect
+  ends, and the state after it ends the wait as any state does.
+- Outside such a wait, a box with the same text and Cancel
+  (`NetPlay.ClientReconnectWait`, `nwReconnect`) opens over the innermost screen
+  from the frame pump, between two messages of that screen's loop
+  (`RunningScreenLoop`), over any screen of a game, a shop too, since the box
+  changes nothing; not while the star map plays the host's film (its end waits
+  anyway, and then shows the reconnect). It pumps every 20 ms, shows the seconds
+  again at most twice a second, and closes by itself when the host has let the
+  client in again (`Welcome` as the same human).
+- Cancel says `Bye` on a connection that is up, ends the client as host lost
+  (`Error` "reconnecting was cancelled; ..."), and the lost game leaves for
+  the main menu at the next safe screen as above.
+- The whole state after the reconnect can come while no wait is open (the
+  player was in the middle of the turn). It is applied between screens like any
+  other (Applying state), once a screen that starts a day is the one open (the
+  same safe screens and conditions as for leaving, `NetPlay.ApplyRejoinState`):
+  that screen closes and the human's screen opens on the host's state, where the
+  human plays its turn again and ends it. In a wait, or on the jump screen, the
+  wait or the jump screen's tick applies it. Until it is applied, the commands
+  the client submits are dropped (logged `command dropped while reconnecting`)
+  and a trade is refused as unanswered (`Multiplayer.TradeNoAnswer`).
 
 ## Remote dialogue
 
@@ -820,13 +854,45 @@ of the executing command, or the script's human), not the host's.
   TCP connection. The network thread closes one that has received nothing for
   `NetSilenceTimeoutMs` (Threads); from then on it is an ordinary closed
   connection: the host logs `connection of peer N (name) lost: no answer for
-  10 s` and disconnects the human as above, and a client sees its host lost
-  (`TNetClient.HostLeft`, `Error` "the connection closed: no answer for 10 s",
-  `HostSaidBye` false). Our own ping rather than TCP keepalive, which starts
-  after 2 h by default and is set up differently on each OS.
+  10 s` and disconnects the human as above, and a client sees its connection
+  closed ("the connection closed: no answer for 10 s") and reconnects (below).
+  Our own ping rather than TCP keepalive, which starts after 2 h by default and
+  is set up differently on each OS.
 - It rejoins by joining with the same ranger name (Joining); a client that
   still has its token can take its human over before the timeout (Joining,
   Takeover).
+- **The client reconnects by itself.** A client that has had a state and
+  whose connection closes or goes silent (not the host's `Bye`, not a refusal)
+  does not give up: `TNetClient` connects again in place, on the same object
+  and network thread (so every reference to it stays valid), to the same
+  address with the same name and its token, for `NetReconnectMs` (60 s, a
+  variable) at most. It logs `client lost the host: <why>; reconnecting for 60
+  s`, removes the old peer and drops what came on it: films, the held talk,
+  relays, results, and the trades the host has not answered. Each try is a
+  `TNetConnectAttempt` of 5 s at most (`client reconnect try=N`), 1 s after the
+  last failed one; a connect that succeeds says Hello and waits for `Welcome`.
+  `Reconnecting` is true until then (`ReconnectElapsedMs`,
+  `ReconnectRemainingMs`, `CancelReconnect`), and `Connected` stays true, so the
+  screens keep waiting (Waiting). The host takes the Hello as any: a takeover
+  while it still counts the old connection, a rejoin once it has timed it out.
+  `Welcome` as the same human ends it (`client reconnected human= after= ms
+  tries=`): the delta bases go (the state that follows is whole and taken as
+  whole) and the command numbers start again from 1 (the host numbers per
+  connection). The whole `State` comes into the usual slot, marked as the
+  rejoin's (`RejoinStatePending`, `TNetApplyReport.Rejoin`) and is applied at a
+  safe point (Waiting). Until it is applied, commands are dropped and not
+  numbered; a trade `SendTrade` waits for when the connection is lost is
+  refused as unanswered at once (`rrOther`, the `Multiplayer.TradeNoAnswer`
+  bubble) and not kept for a later answer, and so is a trade submitted then. A
+  state that came before the loss and was not applied yet stays and is applied
+  as usual; it is not acknowledged on the new connection.
+- **It ends as host lost** (`HostLeft`, `HostSaidBye` false, `Error` why, and
+  the main menu says so, Waiting) when `Welcome` names another human ("could not
+  reconnect: the host gave human N, not M"), the host asks for a character
+  (`NewHuman`: it no longer has the human), refuses, says `Bye`, or the window
+  ends ("could not reconnect within 60 s: <the last try's error>", logged
+  `client reconnect failed after= ms tries=`), and when the player cancels. It
+  says `Bye` on a connection that is up.
 - Humans in a save that the host loads start disconnected, except the host's.
 - `Connected` is not saved; it is session state, not game state.
 
@@ -885,7 +951,9 @@ of the executing command, or the script's human), not the host's.
 - Headless, for tests: `--sim-net-host=PORT --sim-net-clients=N` with
   `--sim-save` (or `--sim-new-game`: the new-game screen's defaults) and
   `--sim-turns=DAYS`, and `--sim-net-join=HOST:PORT --sim-net-name=NAME` with `--sim-net-leave-at=DAY`
-  or `--sim-net-silent-at=DAY [--sim-net-takeover]`; see Tests for the others.
+  or `--sim-net-silent-at=DAY [--sim-net-takeover]` and `--sim-net-reconnect-ms=MS`; the host
+  takes `--sim-net-stop-at=DAY`, `--sim-net-host-silent-at=DAY` and `--sim-net-host-exit-at=DAY`;
+  see Tests for the others.
 
 ## Tests
 
@@ -914,11 +982,26 @@ human and which the client must notice by itself within 5 s (both print
 connection go silent before its turn of day 3 (`--sim-net-silent-at=3`,
 `check_silence`): the host must time it out (`lost: no answer for`) and
 disconnect its human 8 to 13 s after the client went silent (the timeout, less
-the ping interval its last bytes may be older), run the days without it, and
-give the human back to a later rejoin. A seventh has the client join again at
-once, with its token, in the same process (`--sim-net-takeover`,
-`check_takeover`): the host must take the human over within 3 s, without timing
-the old connection out, and the client must play on with the host's hashes. The runs print the sizes of
+the ping interval its last bytes may be older) and run the days without it; the
+client then drops the frozen connection and reconnects by itself, in the same
+process (TNetClient's reconnect): the host takes it as a rejoin, and the client
+must get its human back and apply the whole state (`rejoin=1`) with the host's
+hash (the host, which does not wait for an away human, may have run the other
+days by then). A seventh has the client reconnect at once, with its token, while
+the frozen connection stays open (`--sim-net-takeover`, `check_takeover`): the
+host must take the human over within 3 s, without timing the old connection
+out, and the client must play on with the host's hashes. An eighth has the host
+go silent after day 3 (`--sim-net-host-silent-at=3`, `check_host_silence`): the
+client must time it out 8 to 13 s later, reconnect (the host still counts the
+frozen connection, so it is a takeover), get its human back and play the other
+days with the host's hashes. A ninth has the host end after day 3 without `Bye`
+(`--sim-net-host-exit-at=3`, `check_reconnect_gives_up`), and the client tries
+to reconnect for 8 s (`--sim-net-reconnect-ms=8000`): it must give up 8 to 14 s
+after the loss and end as host lost ("could not reconnect within"). The unit
+tests (`tests/TestNet.pas`) run a `TNetClient` against a scripted host on a
+network thread: the reconnect with name and token, commands dropped meanwhile,
+the rejoin's state, and its ends (another human, Cancel, the window; a refusal
+and `Bye` start none). The runs print the sizes of
 whole states, deltas and films, and the load time, per day. Once per run, a host
 that starts a new game (`--sim-new-game`) and one client check the hashes too: a
 new game's galaxy has not been through a load, so this checks that a load gives
@@ -1002,12 +1085,23 @@ The headless runner (`HeadlessNet`):
   client host left bye=1 tick=`. With `--sim-net-silent-at=DAY`, after its
   DAY-th state and before that day's turn, it freezes its connection
   (`TNetClient.FreezeConnection`) and prints `net client silent day= human=
-  takeover= tick=`; then it stays alive, reading nothing, for the silence
-  timeout and 3 s more, and ends. With `--sim-net-takeover` it joins again at
-  once instead, on a new connection with the same name and its token
-  (`NetSession.JoinAgain`; the frozen client stays until the end), and plays
-  on. The host's lines for a disconnect, a lost connection and a takeover end
-  with `tick=`.
+  takeover= tick=`; then it waits, reading nothing, for the silence timeout and
+  0.5 s more, and drops the connection as if it had closed
+  (`TNetClient.LoseConnection`), so it reconnects by itself and plays on. With
+  `--sim-net-takeover` it drops it at once and the frozen connection stays open
+  until the end, so the host still counts it. The state after a reconnect says
+  `rejoin=1` in its day line, and the turn of its day is played again (the host
+  never got the one sent before the loss). With `--sim-net-reconnect-ms=MS` it
+  tries to reconnect for MS. The host's lines for a disconnect, a lost
+  connection and a takeover end with `tick=`, and so do the client's steps of a
+  reconnect (`net client lost the host`, `net client reconnect ...`).
+- **A silent host.** `--sim-net-host-silent-at=DAY` on the host: after DAY days,
+  once every client has the state, it freezes every peer
+  (`TNetHost.FreezePeers`), prints `net host silent day= peers= exit=0 tick=`
+  and goes on; the peers still there after the silence timeout and 5 s more are
+  removed (`net host dropped the frozen peers`). `--sim-net-host-exit-at=DAY`
+  freezes them the same way (`exit=1`) and ends without `Bye` (`done net host
+  exited`), so its sockets close and nothing listens.
 - **Stopping.** `--sim-net-stop-at=DAY` on the host: after DAY days, once every
   client has the state, it stops hosting as the in-game menu does
   (`DisconnectHumans`, then `Bye`) and prints `net host stopped hosting day=
@@ -1067,6 +1161,15 @@ star's film once; every client in that star gets it.
 - A client that loses its host on a screen that does not start a day (a shop,
   the ship, the galaxy map) finds out when it next opens one of those.
 - Chat is in the protocol (the host relays it); nothing shows it.
+- A reconnect loses the client's actions since the last state the host took
+  for it: at most one day's commands of one human, which the host never got or
+  dropped with the old connection. Until the state after the reconnect is
+  applied the client drops its commands; a client that stays in a shop or on
+  the ship screen meanwhile plays on its old copy (its trades are refused as
+  unanswered) until it leaves for a screen that starts a day.
+- The reconnect's box and the waits' Cancel are not exercised by the tests (no
+  window runs in them); the headless client reconnects through the same
+  `TNetClient` code.
 - A host whose player keeps a box open holds its clients' trades; they give up
   after 10 s and get the answer later (Trades).
 - `ContinueUntilArrival` and `EndedTurn` are not in a state; this is harmless

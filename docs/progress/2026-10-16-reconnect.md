@@ -94,4 +94,35 @@ the progress status.
 
 ## Results
 
-(filled in as the stages land)
+**Stage A** (4207331): `tools/test.py` 5/5 (goldens unchanged, replays). A
+client that goes silent is timed out and disconnected by the host after about
+8.9 s (the 10 s timeout less the age of its last ping); a client that joins
+again with its token is taken over in 15 ms, without a timeout.
+
+**Stage B.** The reconnect lives in `TNetClient` (`ConnectionLost`,
+`BeginReconnect`, `ReconnectStep`, `StopReconnect`, `CancelReconnect`,
+`LoseConnection` for the tests): in place, on the same object and network
+thread, a new `TNetConnectAttempt` per try (5 s at most, 1 s apart) and the
+old peer removed. `Connected` stays true while it reconnects, so the screens
+keep waiting; commands are dropped until the state after the reconnect is
+applied. `NetPlay` shows the reconnect in the client's waits (with Cancel) and
+in a box of its own over the innermost screen (`ClientReconnectWait`), and
+applies the rejoin's state at the next safe screen when no wait is open
+(`ApplyRejoinState`, the screens `LeaveLostGame` leaves from).
+`NetSession.JoinAgain` is gone. Measured with `tools/test.py` (5/5, goldens
+unchanged, replays), per save:
+
+| Run | Measured |
+| --- | --- |
+| client silent, then drops the frozen connection (rejoin) | host disconnects it after 8.7–9.0 s; welcomed again 47–438 ms after the drop (the host takes joins between days), 1 try |
+| client silent, reconnects at once (takeover) | taken over in 0–15 ms, welcomed after 16–31 ms; 8 states after it with the host's hashes |
+| host silent after day 3 | the client times it out after 9.3–9.4 s and is taken over in 31–63 ms, 1 try; 8 states after it with the host's hashes |
+| host ends without Bye after day 3, window 8 s | noticed in 0–16 ms; 3 tries; gives up 8.0 s after the loss |
+
+Unit tests (`tests/TestNet.pas`, a `TNetClient` against a scripted host): 540
+checks pass. The reconnect box, the waits' Cancel and the apply of a rejoin
+state outside a wait are not exercised (no window runs in the tests); the
+headless client goes through the same `TNetClient` code. In one full run the
+new game's buy race (`check_refusal`, "the host never bought a client's goods
+first") failed once and passed in four runs alone and in the next full run;
+it does not touch the reconnect.

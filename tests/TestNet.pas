@@ -7,12 +7,14 @@ implementation
 uses
   SysUtils,
   EC_Buf,
+  GR_Main,
   aCommands,
   NetNative,
   NetTransport,
   NetDelta,
   NetProtocol,
   NetThread,
+  NetClient,
   NetPlay,
   TestSupport;
 
@@ -592,6 +594,216 @@ begin
   end;
 end;
 
+type
+  // CHANGE: ENHANCEMENT - What a reconnect check waits for the client to be.
+  TClientWait = (cwJoined, cwReconnecting, cwWelcomed, cwRejoinState, cwLeft);
+
+function ClientIs(Client: TNetClient; What: TClientWait): Boolean;
+begin
+  case What of
+    cwJoined:
+      Result := Client.JoinPhase = jpJoined;
+    cwReconnecting:
+      Result := Client.Reconnecting;
+    cwWelcomed:
+      Result := not Client.Reconnecting;
+    cwRejoinState:
+      Result := Client.RejoinStatePending;
+  else
+    Result := Client.HostLeft;
+  end;
+end;
+
+// Pumps Client until it is What, for TimeoutMs at most.
+function PumpUntil(Client: TNetClient; What: TClientWait; TimeoutMs: Integer = 10000): Boolean;
+var
+  Deadline: QWord;
+begin
+  Deadline := GetTickCount64 + QWord(TimeoutMs);
+  repeat
+    Client.Pump;
+    Result := ClientIs(Client, What);
+    if Result then
+      Exit;
+    NetInboxEvent.WaitFor(5);
+  until GetTickCount64 > Deadline;
+end;
+
+// The scripted host's side: the next peer's Hello, while Client pumps (its reconnect connects
+// from the pump).
+function TakeHello(Host: TNetThread; Client: TNetClient; out Peer: Integer; out Hello: THelloMessage): Boolean;
+var
+  Kind: TNetMessageKind;
+  Deadline: QWord;
+begin
+  Hello := Default(THelloMessage);
+  Peer := -1;
+  Result := False;
+  Deadline := GetTickCount64 + 5000;
+  while (Peer < 0) and not Host.TakeNewPeer(Peer) and (GetTickCount64 < Deadline) do
+  begin
+    if Client <> nil then
+      Client.Pump;
+    Sleep(1);
+  end;
+  while (Peer > 0) and not Result and (GetTickCount64 < Deadline) do
+  begin
+    // The Hello goes once the pump has seen the connect end.
+    if Client <> nil then
+      Client.Pump;
+    Result := Host.Receive(Peer, Kind, ThreadPayload) and (Kind = nkHello);
+    Sleep(1);
+  end;
+  if Result then
+    Hello := DecodeHello(ThreadPayload);
+end;
+
+procedure SendWelcome(Host: TNetThread; Peer, HumanId: Integer; Token: QWord);
+var
+  Welcome: TWelcomeMessage;
+  Payload: TBufEC;
+begin
+  Welcome.HumanId := HumanId;
+  Welcome.HostName := 'Host';
+  Welcome.Token := Token;
+  Payload := TBufEC.Create;
+  try
+    EncodeWelcome(Welcome, Payload);
+    Host.Send(Peer, nkWelcome, Payload);
+  finally
+    Payload.Free;
+  end;
+end;
+
+procedure SendWholeState(Host: TNetThread; Peer, Serial: Integer);
+var
+  Header: TStateHeader;
+  State, Compressed, Payload: TBufEC;
+begin
+  Header.Serial := Serial;
+  Header.BaseSerial := 0;
+  Header.Day := 1;
+  Header.Hash := 0;
+  State := TBufEC.Create;
+  Compressed := TBufEC.Create;
+  Payload := TBufEC.Create;
+  try
+    FillState(State, 100, Serial);
+    CompressState(State, nil, Compressed);
+    EncodeStateHeader(Header, Payload);
+    Payload.AddBytes(Compressed.Data, Compressed.DataSize);
+    Host.Send(Peer, nkState, Payload);
+  finally
+    State.Free;
+    Compressed.Free;
+    Payload.Free;
+  end;
+end;
+
+// A client joined to the scripted host as human 7 with token 42: Hello, Welcome, a whole state.
+function JoinedClient(Host: TNetThread; out Peer: Integer): TNetClient;
+var
+  Hello: THelloMessage;
+begin
+  Result := TNetClient.Create('127.0.0.1', Host.ListenPort, 'Tester');
+  Check(TakeHello(Host, nil, Peer, Hello) and (Hello.Token = 0), 'a client says Hello without a token');
+  SendWelcome(Host, Peer, 7, 42);
+  SendWholeState(Host, Peer, 1);
+  Check(PumpUntil(Result, cwJoined) and (Result.HumanId = 7) and (Result.Token = 42), 'it is joined');
+end;
+
+// CHANGE: ENHANCEMENT - Reconnection (docs/network.md, Disconnects), against a scripted host on
+// a network thread: a joined client whose connection closes reconnects with its name and token
+// and drops commands meanwhile; Welcome as the same human ends it, and the whole state after it
+// waits as the rejoin's; Welcome as another human, Cancel or the end of the window end it as
+// host lost; a refusal and the host's Bye are no loss to reconnect from.
+procedure RunReconnectTests;
+var
+  Host: TNetThread;
+  Client: TNetClient;
+  Peer: Integer;
+  Hello: THelloMessage;
+  Kind: TNetMessageKind;
+  SavedWindow: Integer;
+  Start, Elapsed: QWord;
+begin
+  // The client logs its steps (NetLog) into the session log, which the game opens at startup.
+  AssignFile(SessionLog, IncludeTrailingPathDelimiter(GetTempDir(False)) + 'SpaceRangersNetTests.log');
+  Rewrite(SessionLog);
+  CloseFile(SessionLog);
+  SavedWindow := NetReconnectMs;
+  Host := TNetThread.Create(0);
+  ThreadPayload := TBufEC.Create;
+  Client := nil;
+  try
+    Client := JoinedClient(Host, Peer);
+    Check(not Client.RejoinStatePending, 'a join''s state is no rejoin''s');
+    Host.RemovePeer(Peer);
+    Check(PumpUntil(Client, cwReconnecting), 'a lost connection starts a reconnect');
+    Check(Client.Connected and not Client.HostLeft and (Client.Error = ''), 'the client still counts as connected');
+    Check(Client.ReconnectRemainingMs > 0, 'it has time left');
+    Client.SendCommand(NewCommand(43));
+    CheckInt(0, Client.LastCommandSequence, 'a command while it reconnects is dropped');
+    Check(TakeHello(Host, Client, Peer, Hello), 'it connects again');
+    Check((Hello.Token = 42) and (Hello.Name = 'Tester'), 'with its name and token');
+    SendWelcome(Host, Peer, 7, 42);
+    Check(PumpUntil(Client, cwWelcomed) and not Client.HostLeft, 'Welcome as the same human ends the reconnect');
+    Client.SendCommand(NewCommand(43));
+    CheckInt(0, Client.LastCommandSequence, 'commands wait for the state after it');
+    SendWholeState(Host, Peer, 5);
+    Check(PumpUntil(Client, cwRejoinState), 'the whole state after it waits as the rejoin''s');
+    Host.RemovePeer(Peer);
+    Check(PumpUntil(Client, cwReconnecting), 'a second loss reconnects again');
+    Check(TakeHello(Host, Client, Peer, Hello), 'and connects again');
+    SendWelcome(Host, Peer, 8, 43);
+    Check(PumpUntil(Client, cwLeft) and not Client.HostSaidBye, 'Welcome as another human ends it as host lost');
+    Check(Pos('gave human 8', Client.Error) > 0, 'the error says why: ' + Client.Error);
+    Check(WaitMessage(Host, Peer, Kind) and (Kind = nkBye), 'and the client says Bye');
+    FreeAndNil(Client);
+
+    Client := JoinedClient(Host, Peer);
+    Host.Send(Peer, nkRefuse, nil, 0);
+    Check(PumpUntil(Client, cwLeft) and Client.Refused, 'a refusal ends the client');
+    Host.RemovePeer(Peer);
+    Client.Pump;
+    Check(not Client.Reconnecting and (WaitNewPeer(Host) < 0), 'and it does not connect again');
+    FreeAndNil(Client);
+
+    Client := JoinedClient(Host, Peer);
+    Host.Send(Peer, nkBye, nil, 0);
+    Check(PumpUntil(Client, cwLeft) and Client.HostSaidBye and not Client.Reconnecting, 'the host''s Bye is no loss');
+    FreeAndNil(Client);
+
+    Client := JoinedClient(Host, Peer);
+    Host.RemovePeer(Peer);
+    Check(PumpUntil(Client, cwReconnecting), 'a reconnect to cancel');
+    Client.CancelReconnect;
+    Check(Client.HostLeft and not Client.Reconnecting and not Client.Connected, 'Cancel ends it as host lost');
+    Check(Pos('cancelled', Client.Error) > 0, 'the error says so: ' + Client.Error);
+    FreeAndNil(Client);
+
+    NetReconnectMs := 1500;
+    Client := JoinedClient(Host, Peer);
+    // The host is gone: nothing listens any more.
+    FreeAndNil(Host);
+    Check(PumpUntil(Client, cwReconnecting), 'a reconnect to a host that is gone');
+    Start := GetTickCount64;
+    Check(PumpUntil(Client, cwLeft), 'it gives up');
+    Elapsed := GetTickCount64 - Start;
+    Check(
+        (Elapsed + 100 >= 1500) and (Elapsed < 1500 + 1000),
+        'after the window (' + IntToStr(Elapsed) + ' ms)'
+    );
+    Check(Pos('could not reconnect within 2 s', Client.Error) > 0, 'the error says why: ' + Client.Error);
+    Check(Client.ReconnectTries >= 1, 'after a try at least');
+  finally
+    NetReconnectMs := SavedWindow;
+    Client.Free;
+    Host.Free;
+    FreeAndNil(ThreadPayload);
+  end;
+end;
+
 // The menus' address parsing (NetPlay.ParseNetAddress) and the host's addresses.
 procedure RunAddressTests;
 var
@@ -621,6 +833,7 @@ begin
   RunProtocolTests;
   RunThreadTests;
   RunLivenessTests;
+  RunReconnectTests;
   RunAddressTests;
 end;
 

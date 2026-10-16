@@ -66,10 +66,19 @@ type
     NetCancelJoin: Boolean;
     NetStopAt: Integer;
     // CHANGE: ENHANCEMENT - Silent losses (docs/network.md, Tests): after NetSilentAt days (0:
-    // never) a client freezes its connection, so the host must time it out; with NetTakeover
-    // it joins again at once with its token instead, and the host must take its human over.
+    // never) a client freezes its connection, so the host must time it out, and then drops it and
+    // reconnects by itself; with NetTakeover it reconnects at once with its token, the frozen
+    // connection still open, and the host must take its human over.
     NetSilentAt: Integer;
     NetTakeover: Boolean;
+    // CHANGE: ENHANCEMENT - Reconnection (docs/network.md, Tests): after NetHostSilentAt days the
+    // host freezes every peer for longer than the silence timeout and then drops those left, so
+    // that its clients time it out and reconnect; after NetHostExitAt days it freezes them and
+    // ends without Bye, so that they cannot. NetReconnectMs (0: NetClient's) is how long a
+    // client tries to reconnect.
+    NetHostSilentAt: Integer;
+    NetHostExitAt: Integer;
+    NetReconnectMs: Integer;
     // CHANGE: ENHANCEMENT - A refused command (docs/network.md, Tests): a client buys the good
     // whose whole stock it could pay for (BuyWholeStockGood), and the host, before it applies
     // the queues, buys that stock first in the client's human's name, once: the client's

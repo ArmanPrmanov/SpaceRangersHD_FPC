@@ -60,13 +60,18 @@ NET_NOTICE_MS = 5000
 # Silent losses (docs/network.md, Disconnects): with one client, a sixth run has the client's
 # connection go silent before the turn of day NET_SILENT_DAY (--sim-net-silent-at), so the host
 # must time it out after NetSilenceTimeoutMs (NET_SILENCE_MS; the client pings every NET_PING_MS
-# when it has nothing to send, so its last bytes may be that much older), and a seventh has it
-# join again at once with its token (--sim-net-takeover), which the host must take within
-# NET_TAKEOVER_MS.
+# when it has nothing to send, so its last bytes may be that much older), and the client then
+# reconnects by itself; a seventh has it reconnect at once with its token (--sim-net-takeover),
+# which the host must take within NET_TAKEOVER_MS. An eighth has the host go silent after day
+# NET_SILENT_DAY (--sim-net-host-silent-at): the client must time it out and reconnect; a ninth
+# has the host vanish then (--sim-net-host-exit-at): the client must give up after its reconnect
+# window, NET_GIVE_UP_MS (--sim-net-reconnect-ms); each try connects for NET_TRY_MS at most.
 NET_SILENT_DAY = 3
 NET_SILENCE_MS = 10000
 NET_PING_MS = 2000
 NET_TAKEOVER_MS = 3000
+NET_GIVE_UP_MS = 8000
+NET_TRY_MS = 5000
 # The command kind of TradeGoods (source/game/aShopActions.pas), and the reason a purchase of
 # goods sold first is refused with (aCommands.RefusalReasonName).
 TRADE_GOODS_KIND = 110
@@ -451,8 +456,11 @@ def run_network(
     after "day", a join as Net1 that cancels itself once let in comes first (the last client
     output is the real rejoin's, the one before it the cancelled one's). With leave "stop" the
     host stops hosting after NET_STOP_DAY days. With leave "silent" Net1's connection goes silent
-    before its turn of day NET_SILENT_DAY and Net1 joins again, as after "talk", once its process
-    has ended; with "takeover" it joins again at once with its token, in the same process.
+    before its turn of day NET_SILENT_DAY and Net1 reconnects in the same process once the host
+    must have timed it out; with "takeover" it reconnects at once with its token. With leave
+    "host-silent" the host goes silent after NET_SILENT_DAY days and the clients reconnect; with
+    "host-exit" it ends then without Bye, and the clients, which try to reconnect for
+    NET_GIVE_UP_MS, fail (their exit code is not checked).
     Without leave the talk comes while the clients
     play their films. With race, the clients buy goods whose whole stock they could pay for, and
     the host buys that stock first, once, so that a client's purchase is refused
@@ -470,6 +478,10 @@ def run_network(
         host_options.append("--sim-net-talk-after-film")
     elif leave == "stop":
         host_options.append(f"--sim-net-stop-at={NET_STOP_DAY}")
+    elif leave == "host-silent":
+        host_options.append(f"--sim-net-host-silent-at={NET_SILENT_DAY}")
+    elif leave == "host-exit":
+        host_options.append(f"--sim-net-host-exit-at={NET_SILENT_DAY}")
     if log is not None:
         host_options.append(f"--record-commands={log}")
     if race:
@@ -495,6 +507,8 @@ def run_network(
             options.append(f"--sim-net-silent-at={NET_SILENT_DAY}")
             if leave == "takeover":
                 options.append("--sim-net-takeover")
+        elif leave == "host-exit":
+            options.append(f"--sim-net-reconnect-ms={NET_GIVE_UP_MS}")
         elif not leave:
             options.append(f"--sim-net-film-ms={NET_FILM_MS}")
         if race:
@@ -505,7 +519,7 @@ def run_network(
             options.append("--sim-net-shop")
         clients.append(GameProcess(binary, args.game_dir, options))
     codes = []
-    if leave in ("day", "talk", "silent"):
+    if leave in ("day", "talk"):
         codes.append(clients[0].finish())
         # The days go on while it is away: wait for a day the host runs without it.
         deadline = time.monotonic() + NET_TIMEOUT
@@ -534,7 +548,7 @@ def run_network(
     if host_code != 0:
         return "the host failed:" + output_tail(host.output), host.output, outputs
     for code, output in zip(codes, outputs):
-        if code != 0:
+        if code != 0 and leave != "host-exit":
             return "a client failed:" + output_tail(output), host.output, outputs
     return "", host.output, outputs
 
@@ -731,6 +745,14 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
         if problem:
             return False, [*notes, f"{label} takeover: {problem}"]
         notes.append(f"{label}: {note}")
+        problem, note = check_host_silence(args, binary, save, count)
+        if problem:
+            return False, [*notes, f"{label} silent host: {problem}"]
+        notes.append(f"{label}: {note}")
+        problem, note = check_reconnect_gives_up(args, binary, save, count)
+        if problem:
+            return False, [*notes, f"{label} vanished host: {problem}"]
+        notes.append(f"{label}: {note}")
     return True, notes
 
 
@@ -739,11 +761,40 @@ def tick_lines(output: str, text: str) -> list[dict[str, str]]:
     return [fields(line) for line in output.splitlines() if text in line]
 
 
+def states_after(output: str, prefix: str) -> list[dict[str, str]]:
+    """The states a client applied after its first line that starts with prefix."""
+    lines = output.splitlines()
+    went = next((i for i, line in enumerate(lines) if line.startswith(prefix)), len(lines))
+    return [fields(line) for line in lines[went:] if line.startswith("net client day=")]
+
+
+def check_reconnected(
+    output: str, human: str | None, after: str, play_on: bool = True
+) -> tuple[str, list[dict[str, str]]]:
+    """The client reconnected in place (TNetClient's reconnect) after its first line that starts
+    with after: it was welcomed as the same human, applied a whole state marked rejoin=1, with
+    play_on played on with at least one more state, and ended as that human. Returns what is
+    wrong, and the states it applied after the line."""
+    reconnected = tick_lines(output, "net client reconnected ")
+    states = states_after(output, after)
+    done = fields(last_line(output, "done net client "))
+    if not reconnected:
+        return "the client did not reconnect:" + output_tail(output), states
+    if human in (None, "-1") or reconnected[0].get("human") != human or done.get("human") != human:
+        return f"the client reconnected as human {reconnected[0].get('human')}, not {human}", states
+    rejoins = [i for i, line in enumerate(states) if line.get("rejoin") == "1"]
+    if not rejoins or (play_on and rejoins[0] + 1 >= len(states)):
+        return f"the client did not play on after the reconnect: {len(states)} states", states
+    return "", states
+
+
 def check_silence(args, binary: Path, save: Path, count: int) -> tuple[str, str]:
     """A client whose connection goes silent before its turn of day NET_SILENT_DAY
     (--sim-net-silent-at): its socket stays open, it reads and writes nothing. The host must time
-    it out after NET_SILENCE_MS ("no answer for"), disconnect its human, run the days without it,
-    and give the human back when it joins again. Returns what is wrong, and a note."""
+    it out after NET_SILENCE_MS ("no answer for"), disconnect its human and run the days without
+    it; the client then drops the frozen connection and reconnects by itself, in the same
+    process, with its token: a rejoin, since the host has let the human go. It must get its
+    human back and play on with the host's hashes. Returns what is wrong, and a note."""
     problem, host_output, outputs = run_network(args, binary, save, count, leave="silent")
     if not problem:
         problem = compare_client_hashes(host_output, outputs)
@@ -760,24 +811,32 @@ def check_silence(args, binary: Path, save: Path, count: int) -> tuple[str, str]
     if not NET_SILENCE_MS - NET_PING_MS - 500 <= delay <= NET_SILENCE_MS + 3000:
         return f"the host disconnected the silent client after {delay} ms", ""
     away = [line for line in net_lines(host_output, "net host day=") if line["away"] == "1"]
-    first = fields(last_line(outputs[0], "done net client "))
-    second = fields(last_line(outputs[-1], "done net client "))
     if not away:
         return "no day ran while the client was silent", ""
-    if first.get("human") in (None, "-1") or first.get("human") != second.get("human"):
-        return f"the rejoined client got human {second.get('human')}, not {first.get('human')}", ""
+    if len(outputs) != 1:
+        return f"{len(outputs)} client processes, not one", ""
+    if "(Net1) taken over " in host_output or "(Net1) rejoined" not in host_output:
+        return "the host did not take the reconnect as a rejoin:" + output_tail(host_output), ""
+    # The host runs the days without the human quickly, so it may have run them all by the time
+    # the client is back; the other reconnect runs check that a client plays on.
+    problem, states = check_reconnected(outputs[0], silent[0].get("human"), "net client silent ", False)
+    if problem:
+        return problem, ""
+    reconnected = tick_lines(outputs[0], "net client reconnected ")
     return "", (
         f"a client whose connection goes silent before day {NET_SILENT_DAY} is timed out and "
-        f"disconnected after {delay} ms; {len(away)} days ran without it, and it gets its human back"
+        f"disconnected after {delay} ms; {len(away)} days ran without it; it drops the connection, "
+        f"reconnects by itself in {reconnected[0]['after']} ms ({reconnected[0]['tries']} tries), "
+        f"gets its human back as a rejoin ({len(states)} states with the host's hashes after it)"
     )
 
 
 def check_takeover(args, binary: Path, save: Path, count: int) -> tuple[str, str]:
-    """A client whose connection goes silent before its turn of day NET_SILENT_DAY and that joins
-    again at once, as the same name with its token (--sim-net-takeover): the host must take the
-    human over from the silent connection within NET_TAKEOVER_MS, well before any timeout, send
-    it a whole state, and the client must play on with the host's hashes. Returns what is wrong,
-    and a note."""
+    """A client whose connection goes silent before its turn of day NET_SILENT_DAY and that
+    reconnects at once, in place, as the same name with its token, while the frozen connection
+    stays open (--sim-net-takeover): the host must take the human over from the silent
+    connection within NET_TAKEOVER_MS, well before any timeout, send it a whole state, and the
+    client must play on with the host's hashes. Returns what is wrong, and a note."""
     problem, host_output, outputs = run_network(args, binary, save, count, leave="takeover")
     if not problem:
         problem = compare_client_hashes(host_output, outputs)
@@ -798,15 +857,89 @@ def check_takeover(args, binary: Path, save: Path, count: int) -> tuple[str, str
     over = next(i for i, line in enumerate(lines) if "(Net1) taken over " in line)
     if not any("(Net1) rejoined" in line for line in lines[over:]):
         return "the new connection did not rejoin", ""
-    client = outputs[0].splitlines()
-    went = next(i for i, line in enumerate(client) if line.startswith("net client silent "))
-    after = [fields(line) for line in client[went:] if line.startswith("net client day=")]
-    done = fields(last_line(outputs[0], "done net client "))
-    if len(after) < 2 or done.get("human") != silent[0].get("human"):
-        return f"the client did not play on as human {silent[0].get('human')}: {len(after)} states", ""
+    problem, states = check_reconnected(outputs[0], silent[0].get("human"), "net client silent ")
+    if problem:
+        return problem, ""
+    reconnected = tick_lines(outputs[0], "net client reconnected ")
     return "", (
-        f"a client that joins again with its token after its connection went silent is taken over "
-        f"in {max(delay, 0)} ms and plays on ({len(after)} states with the host's hashes)"
+        f"a client that reconnects in place with its token after its connection went silent is "
+        f"taken over in {max(delay, 0)} ms (welcomed after {reconnected[0]['after']} ms) and plays "
+        f"on ({len(states)} states with the host's hashes)"
+    )
+
+
+def check_host_silence(args, binary: Path, save: Path, count: int) -> tuple[str, str]:
+    """A host that goes silent after NET_SILENT_DAY days (--sim-net-host-silent-at): it freezes
+    every peer, so its clients hear nothing. The client must notice within NET_SILENCE_MS (less
+    the host's ping interval), reconnect with its token (the host still counts the frozen
+    connection, so it takes the human over), get its human back and play on with the host's
+    hashes. Returns what is wrong, and a note."""
+    problem, host_output, outputs = run_network(args, binary, save, count, leave="host-silent")
+    if not problem:
+        problem = compare_client_hashes(host_output, outputs)
+    if problem:
+        return problem, ""
+    silent = tick_lines(host_output, "net host silent ")
+    if not silent or silent[0].get("exit") != "0":
+        return "the host did not go silent:" + output_tail(host_output), ""
+    lost = tick_lines(outputs[0], "net client lost the host")
+    if not lost or "no answer for" not in last_line(outputs[0], "net client lost the host"):
+        return "the client did not time the host out:" + output_tail(outputs[0]), ""
+    delay = int(lost[0]["tick"]) - int(silent[0]["tick"])
+    if not NET_SILENCE_MS - NET_PING_MS - 500 <= delay <= NET_SILENCE_MS + 3000:
+        return f"the client noticed the silent host after {delay} ms", ""
+    if "(Net1) taken over " not in host_output and "(Net1) rejoined" not in host_output:
+        return "the host did not take the reconnect:" + output_tail(host_output), ""
+    days = net_lines(host_output, "net host day=")
+    if len(days) != NET_DAYS:
+        return f"the host ran {len(days)} days", ""
+    human = fields(last_line(outputs[0], "net client day=")).get("human")
+    problem, states = check_reconnected(outputs[0], human, "net client lost the host")
+    if problem:
+        return problem, ""
+    reconnected = tick_lines(outputs[0], "net client reconnected ")
+    how = "taken over" if "(Net1) taken over " in host_output else "rejoined"
+    return "", (
+        f"a host that goes silent after day {NET_SILENT_DAY} is timed out by its client after "
+        f"{delay} ms; the client reconnects in {reconnected[0]['after']} ms "
+        f"({reconnected[0]['tries']} tries, {how}), gets human {human} back and plays on "
+        f"({len(states)} states with the host's hashes)"
+    )
+
+
+def check_reconnect_gives_up(args, binary: Path, save: Path, count: int) -> tuple[str, str]:
+    """A host that ends after NET_SILENT_DAY days without Bye (--sim-net-host-exit-at): its
+    clients see the connection close, try to reconnect for NET_GIVE_UP_MS
+    (--sim-net-reconnect-ms) and give up, ending as host lost with the reason. Returns what is
+    wrong, and a note."""
+    problem, host_output, outputs = run_network(args, binary, save, count, leave="host-exit")
+    if not problem:
+        problem = compare_client_hashes(host_output, outputs)
+    if problem:
+        return problem, ""
+    gone = tick_lines(host_output, "net host silent ")
+    if not gone or gone[0].get("exit") != "1" or "done net host exited " not in host_output:
+        return "the host did not vanish:" + output_tail(host_output), ""
+    lost = tick_lines(outputs[0], "net client lost the host")
+    tries = tick_lines(outputs[0], "net client reconnect try=")
+    failed = tick_lines(outputs[0], "net client reconnect failed after=")
+    if not lost:
+        return "the client did not notice the host was gone:" + output_tail(outputs[0]), ""
+    if not failed or not tries:
+        return "the client did not give up reconnecting:" + output_tail(outputs[0]), ""
+    if "net client reconnected " in outputs[0]:
+        return "the client reconnected to a host that is gone", ""
+    if "net client failed: could not reconnect within " not in outputs[0]:
+        return "the client did not end as host lost:" + output_tail(outputs[0]), ""
+    notice = int(lost[0]["tick"]) - int(gone[0]["tick"])
+    window = int(failed[0]["tick"]) - int(lost[0]["tick"])
+    if not NET_GIVE_UP_MS <= window <= NET_GIVE_UP_MS + NET_TRY_MS + 1000:
+        return f"the client gave up {window} ms after it lost the host", ""
+    attempts = len({line["try"] for line in tries})
+    return "", (
+        f"a host that vanishes after day {NET_SILENT_DAY} is noticed by its client in "
+        f"{max(notice, 0)} ms; the client tries to reconnect {attempts} times and gives up "
+        f"{window} ms after the loss (window {NET_GIVE_UP_MS} ms), ending as host lost"
     )
 
 

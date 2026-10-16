@@ -293,6 +293,14 @@ begin
       Simulation.NetSilentAt := StrToInt(Copy(Argument, 21, MaxInt))
     else if Argument = '--sim-net-takeover' then
       Simulation.NetTakeover := True
+    // CHANGE: ENHANCEMENT - A host that goes silent or vanishes, and a client's reconnect window
+    // (docs/network.md, Tests).
+    else if Pos('--sim-net-host-silent-at=', Argument) = 1 then
+      Simulation.NetHostSilentAt := StrToInt(Copy(Argument, 26, MaxInt))
+    else if Pos('--sim-net-host-exit-at=', Argument) = 1 then
+      Simulation.NetHostExitAt := StrToInt(Copy(Argument, 24, MaxInt))
+    else if Pos('--sim-net-reconnect-ms=', Argument) = 1 then
+      Simulation.NetReconnectMs := StrToInt(Copy(Argument, 24, MaxInt))
     // CHANGE: ENHANCEMENT - A client's purchase of goods that the host's day sold first: the
     // host refuses it and tells the client (docs/network.md, Tests).
     else if Argument = '--sim-net-buy-race' then

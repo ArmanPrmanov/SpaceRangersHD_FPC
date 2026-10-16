@@ -73,15 +73,21 @@ uses
 const
   // Without progress for this long, a run fails instead of hanging the test.
   StallTimeoutMs = 120000;
-  // CHANGE: ENHANCEMENT - A silent client (--sim-net-silent-at) stays this long past the host's
-  // silence timeout before it ends.
-  SilentLingerMs = 3000;
+  // CHANGE: ENHANCEMENT - A silent client (--sim-net-silent-at) drops its frozen connection this
+  // long past the host's silence timeout and reconnects: the host has let its human go by then
+  // and runs a day without it, and the client is back for the days after it.
+  SilentLingerMs = 500;
+  // CHANGE: ENHANCEMENT - A silent host (--sim-net-host-silent-at) drops the peers it froze this
+  // long past the silence timeout.
+  HostSilentLingerMs = 5000;
 
 procedure EmitNetEvent(const Text: AnsiString);
 begin
   // CHANGE: ENHANCEMENT - A disconnect, a lost connection and a takeover say when, so that the
   // tests can check how soon silence is noticed (docs/network.md, Tests).
-  if (Pos(') disconnected', Text) > 0) or (Pos(') lost: ', Text) > 0) or (Pos(') taken over ', Text) > 0) then
+  // CHANGE: ENHANCEMENT - So do the steps of a client's reconnect.
+  if (Pos(') disconnected', Text) > 0) or (Pos(') lost: ', Text) > 0) or (Pos(') taken over ', Text) > 0)
+      or (Pos('client lost the host', Text) = 1) or (Pos('client reconnect', Text) = 1) then
     Emit(Format('net %s tick=%d', [Text, GetTickCount64]))
   else
     Emit('net ' + Text);
@@ -725,8 +731,28 @@ var
   Job: TNetStateJob;
   FilmBytes, StateBytes, Away: Integer;
   FilmRawStart: Int64;
+  // CHANGE: ENHANCEMENT - --sim-net-host-silent-at: the peers frozen, and until when.
+  Frozen: TPeerIds;
+  FrozenUntil: QWord;
+
+  // The frozen peers that are still there (a client that reconnected took its human over and
+  // the host removed its old peer) close once the silence has lasted long enough.
+  procedure DropFrozenPeers;
+  var
+    I: Integer;
+  begin
+    if (Length(Frozen) = 0) or (GetTickCount64 < FrozenUntil) then
+      Exit;
+    for I := 0 to High(Frozen) do
+      Host.Thread.RemovePeer(Frozen[I]);
+    Emit(Format('net host dropped the frozen peers count=%d tick=%d', [Length(Frozen), GetTickCount64]));
+    Frozen := nil;
+  end;
+
 begin
   Result := 0;
+  Frozen := nil;
+  FrozenUntil := 0;
   LoadSave(Options.SavePath, Options.Seed);
   Emit(Format('sim save=%s seed=%d day=%d', [Options.SavePath, Options.Seed, Galaxy.CurrentTurn]));
   // The tests compare every state's hash with the host's, in release builds too.
@@ -805,6 +831,7 @@ begin
       try
         repeat
           Host.Pump;
+          DropFrozenPeers;
           if Host.PeersReady then
             Break;
           if GetTickCount64 > Deadline then
@@ -892,12 +919,47 @@ begin
         );
         Exit(0);
       end;
+      // CHANGE: ENHANCEMENT - --sim-net-host-silent-at and --sim-net-host-exit-at: once every
+      // client has the state, the host goes silent: every peer is frozen, so that the clients
+      // hear nothing and time it out (docs/network.md, Tests). A silent host goes on and drops
+      // what is left of them after the timeout and HostSilentLingerMs; an exiting one ends
+      // without Bye, so that its clients cannot reconnect.
+      if ((Options.NetHostSilentAt > 0) and (Day = Options.NetHostSilentAt))
+          or ((Options.NetHostExitAt > 0) and (Day = Options.NetHostExitAt)) then
+      begin
+        Deadline := GetTickCount64 + StallTimeoutMs;
+        while not Host.AllAcked(Host.LastSerial) do
+        begin
+          if GetTickCount64 > Deadline then
+          begin
+            Emit('net host failed: the clients did not take the state before the silence');
+            Exit(1);
+          end;
+          Host.Pump;
+          NetInboxEvent.WaitFor(5);
+        end;
+        Frozen := Host.FreezePeers;
+        FrozenUntil := GetTickCount64 + QWord(NetSilenceTimeoutMs) + HostSilentLingerMs;
+        Emit(
+            Format(
+                'net host silent day=%d peers=%d exit=%d tick=%d',
+                [Galaxy.CurrentTurn, Length(Frozen), Ord(Day = Options.NetHostExitAt), GetTickCount64]
+            )
+        );
+        if Day = Options.NetHostExitAt then
+        begin
+          StopNetwork;
+          Emit(Format('done net host exited days=%d day=%d', [Day, Galaxy.CurrentTurn]));
+          Exit(0);
+        end;
+      end;
     end;
     // The end: every client there has the last state, and as many as came at the start are
     // there (one that left may rejoin at the end).
     Deadline := GetTickCount64 + StallTimeoutMs;
     repeat
       Host.Pump;
+      DropFrozenPeers;
       if (Host.JoinedCount >= Options.NetClients) and Host.AllAcked(Host.LastSerial) then
         Break;
       if GetTickCount64 > Deadline then
@@ -1048,11 +1110,13 @@ var
   Character: TJoinCharacter;
   Outcome: TCommandResultMessage;
   RefusalShown: WideString;
-  // CHANGE: ENHANCEMENT - The client whose connection went silent (--sim-net-takeover).
-  Frozen: TNetClient;
+  // CHANGE: ENHANCEMENT - The connection has gone silent (--sim-net-silent-at), once.
+  WentSilent: Boolean;
 begin
   Result := 0;
-  Frozen := nil;
+  WentSilent := False;
+  if Options.NetReconnectMs > 0 then
+    NetReconnectMs := Options.NetReconnectMs;
   Colon := LastDelimiter(':', Options.NetJoin);
   Address := Copy(Options.NetJoin, 1, Colon - 1);
   Port := StrToInt(Copy(Options.NetJoin, Colon + 1, MaxInt));
@@ -1169,12 +1233,16 @@ begin
       Inc(Days);
       if Report.Hash <> Report.HostHash then
         Inc(Mismatches);
+      // CHANGE: ENHANCEMENT - The state after a reconnect: the turn of its day is played again,
+      // since the host never got the one sent before the loss (rejoin=1).
+      if Report.Rejoin then
+        LastPlayedDay := -1;
       Emit(
           Format(
-              'net client day=%d serial=%d hash=%s match=%d human=%d state=%d received=%d delta=%d film=%d films=%d load=%d',
+              'net client day=%d serial=%d hash=%s match=%d human=%d state=%d received=%d delta=%d film=%d films=%d load=%d rejoin=%d',
               [Report.Day, Report.Serial, HashText(Report.Hash), Ord(Report.Hash = Report.HostHash),
                   Client.HumanId, Report.StateBytes, Report.ReceivedBytes, Ord(Report.Delta),
-                  FilmBytes, FilmCount, Report.LoadMs]
+                  FilmBytes, FilmCount, Report.LoadMs, Ord(Report.Rejoin)]
           )
       );
       FilmBytes := 0;
@@ -1198,10 +1266,13 @@ begin
       end;
       // CHANGE: ENHANCEMENT - --sim-net-silent-at: the connection goes silent before this day's
       // turn, as a lost link does: open, but nothing read or written. Without --sim-net-takeover
-      // the process stays alive until the host must have timed it out, then ends; with it, it
-      // joins again at once with its token and plays on (docs/network.md, Tests).
-      if (Options.NetSilentAt > 0) and (Days >= Options.NetSilentAt) and (Frozen = nil) then
+      // the client waits until the host must have timed it out, then drops the connection; with
+      // it, at once, and the frozen one stays open, so the host still counts it. Either way the
+      // client reconnects by itself (TNetClient's reconnect) with its token, gets the whole
+      // state and plays on (docs/network.md, Tests).
+      if (Options.NetSilentAt > 0) and (Days >= Options.NetSilentAt) and not WentSilent then
       begin
+        WentSilent := True;
         Client.FreezeConnection;
         Emit(
             Format(
@@ -1214,9 +1285,8 @@ begin
           Deadline := GetTickCount64 + QWord(NetSilenceTimeoutMs) + SilentLingerMs;
           while GetTickCount64 < Deadline do
             Sleep(50);
-          Break;
         end;
-        Client := JoinAgain(Frozen);
+        Client.LoseConnection(Options.NetTakeover);
         Deadline := GetTickCount64 + StallTimeoutMs;
         Continue;
       end;
@@ -1274,7 +1344,6 @@ begin
   finally
     BuyWholeStockGood := False;
     StopNetwork;
-    Frozen.Free;
     NetLogHook := nil;
   end;
 end;

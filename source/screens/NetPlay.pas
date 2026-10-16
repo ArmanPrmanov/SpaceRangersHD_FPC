@@ -171,8 +171,9 @@ const
 
 type
   // CHANGE: ENHANCEMENT - nwHostTalk: the host's day waits for a remote human's answer to a
-  // dialogue; nwJoin: a join waits for the host's state.
-  TNetWaitKind = (nwHostPeers, nwClientDay, nwClientState, nwHostTalk, nwJoin);
+  // dialogue; nwJoin: a join waits for the host's state. CHANGE: ENHANCEMENT - nwReconnect: a
+  // client that lost its host waits for the reconnect, outside a wait for the day.
+  TNetWaitKind = (nwHostPeers, nwClientDay, nwClientState, nwHostTalk, nwJoin, nwReconnect);
 
   // A message box without buttons (a join's has Cancel) that closes by itself once what it
   // waits for has come.
@@ -213,6 +214,10 @@ var
   HostLossLogged: Boolean;
   // The host's box for a remote dialogue is open (HostTalkWait).
   HostTalkBoxOpen: Boolean;
+  // CHANGE: ENHANCEMENT - The client's box for a reconnect is open (ClientReconnectWait); the
+  // state after the reconnect has been asked to be applied (ApplyRejoinState), logged once.
+  ReconnectBoxOpen: Boolean;
+  RejoinApplyLogged: Boolean;
   // CHANGE: ENHANCEMENT - The network is pumped from the message loop between two of its
   // messages (FramePumpHook), not from a wait inside a handler; the host's end turn waits for
   // its peers (WaitModal nwHostPeers), where it applies their queues anyway (MayChangeUnderScreen).
@@ -332,6 +337,27 @@ begin
       );
 end;
 
+// CHANGE: ENHANCEMENT - The client reconnects to its host (docs/network.md, Disconnects), with
+// the seconds it may still try.
+function ReconnectText: WideString;
+var
+  Seconds: Integer;
+begin
+  Seconds := (CurrentClient.ReconnectRemainingMs + 999) div 1000;
+  Result :=
+      MultiplayerText(
+          'Reconnecting',
+          'The connection to the host is lost. Reconnecting... (<Seconds> s)'
+      );
+  ReplaceTextToken(Result, '<Seconds>', WideString(IntToStr(Seconds)), '<color=255,240,100>');
+end;
+
+// CHANGE: ENHANCEMENT - A client's wait shows the reconnect instead while there is one.
+function ClientReconnecting: Boolean;
+begin
+  Result := (NetRole = nrClient) and CurrentClient.Reconnecting;
+end;
+
 function KilobytesText(Bytes: Integer): WideString;
 begin
   Result := WideString(IntToStr((Bytes + 1023) div 1024)) + ' KB';
@@ -422,6 +448,8 @@ begin
               or CurrentClient.CharacterWanted
               or not CurrentClient.Connected
               or JoinStalled;
+    nwReconnect:
+      Result := (CurrentClient = nil) or not CurrentClient.Reconnecting;
     nwClientDay:
       begin
         Client := CurrentClient;
@@ -437,6 +465,9 @@ end;
 
 function WaitText(Kind: TNetWaitKind): WideString;
 begin
+  // CHANGE: ENHANCEMENT - The client's waits say that it reconnects, and have a Cancel then.
+  if (Kind in [nwClientDay, nwClientState, nwReconnect]) and ClientReconnecting then
+    Exit(ReconnectText);
   case Kind of
     nwHostPeers:
       Result := HostWaitText;
@@ -449,11 +480,21 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - The buttons of a client's wait: a Cancel while it reconnects.
+function WaitOptions(Kind: TNetWaitKind): Cardinal;
+begin
+  Result := 0;
+  if (Kind in [nwClientDay, nwClientState, nwReconnect]) and ClientReconnecting then
+    Result := mbgCancel;
+end;
+
 // Pumps the network; on the host also frees the states sent and sends the state of a day that
 // has run once the host is quiet after it.
 procedure NetFrame; forward;
 // CHANGE: ENHANCEMENT - A client that lost its host goes to the main menu at a safe screen.
 procedure LeaveLostGame; forward;
+// CHANGE: ENHANCEMENT - The state after a reconnect is applied at a safe screen.
+procedure ApplyRejoinState; forward;
 
 procedure TNetWaitBoxGI.OnOpen;
 begin
@@ -480,8 +521,10 @@ begin
   if WaitDone(Kind) then
     RequestClose(mbgResultOK)
   // A join's progress changes often; its box opens again at most every JoinRetextMs.
-  else if ((Kind <> nwJoin) or (GetTickCount64 >= OpenedAt + JoinRetextMs))
-      and (WaitText(Kind) <> MessageText) then
+  // CHANGE: ENHANCEMENT - A reconnect's seconds too; and a client's wait opens again with a
+  // Cancel when the reconnect starts, without one when it ends.
+  else if (((Kind <> nwJoin) and not ClientReconnecting) or (GetTickCount64 >= OpenedAt + JoinRetextMs))
+      and ((WaitText(Kind) <> MessageText) or (WaitOptions(Kind) <> Options)) then
     RequestClose(WaitRetext);
 end;
 
@@ -605,8 +648,12 @@ begin
         Break
       else
       begin
-        Closed := RunWaitBox(Kind, WaitText(Kind));
-        if (Closed <> mbgResultOK) and (Closed <> WaitRetext) then
+        Closed := RunWaitBox(Kind, WaitText(Kind), WaitOptions(Kind));
+        // CHANGE: ENHANCEMENT - The player gave up the reconnect: the client is gone, which
+        // the wait sees next (docs/network.md, Waiting).
+        if (Closed = mbgResultCancel) and (CurrentClient <> nil) then
+          CurrentClient.CancelReconnect
+        else if (Closed <> mbgResultOK) and (Closed <> WaitRetext) then
           Break;
       end;
     until False;
@@ -785,6 +832,47 @@ begin
   NetLog('own trade refused: ' + RefusalReasonName(Reason));
 end;
 
+// CHANGE: ENHANCEMENT - The client reconnects to its host (docs/network.md, Waiting): a box with
+// Cancel (also Escape) over the innermost screen until the reconnect ends, from the frame pump
+// between two messages of that screen's loop, so over any screen of a game, a shop too: the
+// box changes nothing. Not while a wait for the day is open (it says the same with its own
+// Cancel), nor while the star map plays the host's film, whose end waits anyway. It closes by
+// itself when the host has let the client in again; Cancel ends the reconnect, and the lost
+// game leaves for the main menu at the next safe screen (LeaveLostGame).
+procedure ClientReconnectWait;
+var
+  Closed: Cardinal;
+begin
+  if ReconnectBoxOpen
+      or not ClientInGame
+      or not ClientReconnecting
+      or ScreenClosing
+      or ExitScreenLoop
+      or (ClientFilmPlaying and (CurrentScreenId = screenStarMap))
+      or (ClientTalkWaits > 0)
+      or (CurrentScreenId in NoGameScreens)
+      or (RunningScreenLoop = nil) then
+    Exit;
+  ReconnectBoxOpen := True;
+  try
+    repeat
+      if WaitDone(nwReconnect) then
+        Break;
+      Closed := RunWaitBox(nwReconnect, WaitText(nwReconnect), WaitOptions(nwReconnect));
+      if Closed = mbgResultCancel then
+      begin
+        if CurrentClient <> nil then
+          CurrentClient.CancelReconnect;
+        Break;
+      end;
+      if (Closed <> mbgResultOK) and (Closed <> WaitRetext) then
+        Break;
+    until False;
+  finally
+    ReconnectBoxOpen := False;
+  end;
+end;
+
 // FramePumpHook.
 procedure NetFramePump;
 begin
@@ -794,6 +882,8 @@ begin
   finally
     InFramePump := False;
   end;
+  // CHANGE: ENHANCEMENT - Outside NetFrame, so that the box's own pump runs.
+  ClientReconnectWait;
 end;
 
 procedure NetFrame;
@@ -830,9 +920,14 @@ begin
               and not CurrentClient.MayHoldTalk(ClientFilmPlaying and (CurrentScreenId = screenStarMap)) then
             AnswerClientTalk;
           // CHANGE: ENHANCEMENT - The host left or stopped hosting while the client plays its
-          // turn: back to the main menu at the next safe screen, which says why.
+          // turn: back to the main menu at the next safe screen, which says why. CHANGE:
+          // ENHANCEMENT - A lost connection is not that while the client reconnects (Connected
+          // stays True); the whole state after the reconnect, which may come while no wait for
+          // the day is open, is applied at the next safe screen (docs/network.md, Disconnects).
           if ClientInGame and not CurrentClient.Connected then
-            LeaveLostGame;
+            LeaveLostGame
+          else if ClientInGame and CurrentClient.RejoinStatePending and not ApplyPending then
+            ApplyRejoinState;
         end;
     end;
   finally
@@ -885,6 +980,7 @@ begin
   ClientFilmPlaying := False;
   ClientInGame := False;
   HostLossLogged := False;
+  RejoinApplyLogged := False;
 end;
 
 // The client goes back to the main menu, which says Text. The session ends between screens.
@@ -1254,6 +1350,7 @@ var
   I: Integer;
 begin
   ApplyPending := False;
+  RejoinApplyLogged := False;
   Client := CurrentClient;
   if (Client = nil) or not Client.HasState then
   begin
@@ -1458,6 +1555,23 @@ begin
   FollowJoin(Screen);
 end;
 
+// CHANGE: ENHANCEMENT - The screen a client may close now, outside a wait for the day, to
+// leave the game or to apply a state (LostHostLeaveScreens); nil when none.
+function SafeClientScreen: TMessageLoopGI;
+begin
+  Result := nil;
+  if ScreenClosing
+      or (ClientFilmPlaying and (CurrentScreenId = screenStarMap))
+      or (ClientTalkWaits > 0)
+      or ExitScreenLoop
+      or not (CurrentScreenId in LostHostLeaveScreens) then
+    Exit;
+  Result := RunningScreenLoop;
+  if (Result <> nil)
+      and ((Result <> TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)])) or (Result.ExitCode <> 0)) then
+    Result := nil;
+end;
+
 // CHANGE: ENHANCEMENT - The client lost its host while it plays its turn (NetFrame). It leaves
 // for the main menu, which says why, once a screen that starts a day is the one open: not in a
 // shop, a dialogue or a box, and not while the star map plays a film, whose end leaves anyway.
@@ -1470,18 +1584,31 @@ begin
     HostLossLogged := True;
     NetLog('the host is gone; the game goes back to the main menu at the next safe screen');
   end;
-  if ScreenClosing
-      or (ClientFilmPlaying and (CurrentScreenId = screenStarMap))
-      or (ClientTalkWaits > 0)
-      or ExitScreenLoop
-      or not (CurrentScreenId in LostHostLeaveScreens) then
+  Screen := SafeClientScreen;
+  if Screen <> nil then
+    LeaveForMainMenu(Screen, ClientGoneText);
+end;
+
+// CHANGE: ENHANCEMENT - The client reconnected while it played its turn (docs/network.md,
+// Disconnects): the host's whole state is applied between screens, as at the end of a wait,
+// once a screen that starts a day is the one open (SafeClientScreen: not a shop or the ship
+// screen, which move goods when they close, no box above it, no film). Its commands are
+// dropped until then (TNetClient.SendCommand). A wait for the day or the jump screen's tick
+// apply it themselves.
+procedure ApplyRejoinState;
+var
+  Screen: TMessageLoopGI;
+begin
+  if not RejoinApplyLogged then
+  begin
+    RejoinApplyLogged := True;
+    NetLog('the state after the reconnect is applied at the next safe screen');
+  end;
+  Screen := SafeClientScreen;
+  if Screen = nil then
     Exit;
-  Screen := RunningScreenLoop;
-  if (Screen = nil)
-      or (Screen <> TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]))
-      or (Screen.ExitCode <> 0) then
-    Exit;
-  LeaveForMainMenu(Screen, ClientGoneText);
+  RejoinApplyLogged := False;
+  RequestApply(Screen, False, False, False);
 end;
 
 function HostRunningGame(Port: Integer): Integer;
