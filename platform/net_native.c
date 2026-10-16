@@ -15,6 +15,7 @@
 #define FD_SETSIZE 256
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <bcrypt.h>
 typedef SOCKET sr_socket;
 #define SR_INVALID INVALID_SOCKET
 #define sr_close_socket closesocket
@@ -269,6 +270,26 @@ int sr_net_wait_many(const int64_t *handles, int count, int timeout_ms) {
 void sr_net_close(int64_t handle) {
   if (handle >= 0)
     sr_close_socket((sr_socket)handle);
+}
+
+// Random bytes from the operating system (docs/network.md, Joining: the reconnection token).
+// Never the game's generators, which its determinism depends on. Returns 1, or 0 when the
+// system gave none.
+int sr_random_bytes(void *data, int size) {
+  if (size <= 0)
+    return 1;
+#ifdef _WIN32
+  return BCryptGenRandom(NULL, (PUCHAR)data, (ULONG)size, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+#else
+  FILE *source = fopen("/dev/urandom", "rb");
+  if (source == NULL) {
+    set_error("open /dev/urandom", errno);
+    return 0;
+  }
+  size_t got = fread(data, 1, (size_t)size, source);
+  fclose(source);
+  return got == (size_t)size;
+#endif
 }
 
 static void append_address(char *out, int capacity, const struct in_addr *address) {

@@ -287,6 +287,12 @@ begin
       Simulation.NetCancelJoin := True
     else if Pos('--sim-net-stop-at=', Argument) = 1 then
       Simulation.NetStopAt := StrToInt(Copy(Argument, 19, MaxInt))
+    // CHANGE: ENHANCEMENT - A client that goes silent, and one that joins again with its token
+    // (docs/network.md, Tests).
+    else if Pos('--sim-net-silent-at=', Argument) = 1 then
+      Simulation.NetSilentAt := StrToInt(Copy(Argument, 21, MaxInt))
+    else if Argument = '--sim-net-takeover' then
+      Simulation.NetTakeover := True
     // CHANGE: ENHANCEMENT - A client's purchase of goods that the host's day sold first: the
     // host refuses it and tells the client (docs/network.md, Tests).
     else if Argument = '--sim-net-buy-race' then

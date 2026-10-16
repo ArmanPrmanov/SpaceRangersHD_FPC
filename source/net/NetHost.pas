@@ -53,6 +53,8 @@ type
     // Messages the turn thread took during a talk and left for the pump (TNetMessage), in
     // arrival order; the pump handles them before the inbox.
     Deferred: TList;
+    // CHANGE: ENHANCEMENT - Its Hello was checked for a takeover (TNetHost.TakeOver).
+    TakeOverChecked: Boolean;
     destructor Destroy; override;
     function EndTurnIndex: Integer;
     // CHANGE: ENHANCEMENT - The index of the first StopContinuing in the queue; -1 when none.
@@ -103,7 +105,18 @@ type
     // the queues are being applied at the barrier (ApplyQueues), which relays nothing.
     FTradesAllowed: Boolean;
     FApplyingQueues: Boolean;
+    // CHANGE: ENHANCEMENT - The reconnection token of each human welcomed in this hosting
+    // session (docs/network.md, Joining), by human id.
+    FTokenHumans: array of Integer;
+    FTokens: array of QWord;
     function FindPeer(PeerId: Integer): THostPeer;
+    // The human's token; with Issue, one is issued (NewToken) when it has none yet, at its
+    // first Welcome in this session. 0: none.
+    function HumanToken(HumanId: Integer; Issue: Boolean): QWord;
+    // CHANGE: ENHANCEMENT - A Hello whose name is a connected remote human's and whose token is
+    // that human's: the old peer is removed at once and leaves at the next quiet point, where
+    // the new one rejoins. Whether it was.
+    function TakeOver(Peer: THostPeer): Boolean;
     function ReceiveUnlessInTalk(
         Peer: THostPeer;
         out Kind: TNetMessageKind;
@@ -552,12 +565,34 @@ begin
             Peer.Leaving := True;
           end;
         end;
-      if FThread.IsClosed(Peer.PeerId) then
+      if not Peer.Leaving and FThread.IsClosed(Peer.PeerId) then
+      begin
+        // CHANGE: ENHANCEMENT - Why, for the log: closed by the other side, a failed socket, or
+        // silence (NetThread.NetSilenceTimeoutMs).
+        NetLog(
+            Format(
+                'connection of peer %d (%s) lost: %s',
+                [Peer.PeerId, UTF8Encode(Peer.Hello.Name), FThread.PeerError(Peer.PeerId)]
+            )
+        );
         Peer.Leaving := True;
+      end;
     end;
   finally
     Payload.Free;
   end;
+  // CHANGE: ENHANCEMENT - A Hello that brings a connected human's token takes that human over
+  // (docs/network.md, Joining). Not while a job runs: it may free a ranger whose name this reads.
+  if not IsTurnCalculationRunning then
+    for I := 0 to FPeers.Count - 1 do
+    begin
+      Peer := THostPeer(FPeers[I]);
+      if (Peer.State = hpPendingJoin) and not Peer.Leaving and not Peer.TakeOverChecked then
+      begin
+        Peer.TakeOverChecked := True;
+        TakeOver(Peer);
+      end;
+    end;
   if FTradesAllowed then
     ApplyWaitingTrades;
   FTradesAllowed := False;
@@ -647,6 +682,47 @@ begin
       Exit;
   end;
   Result := nil;
+end;
+
+function TNetHost.HumanToken(HumanId: Integer; Issue: Boolean): QWord;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FTokenHumans) do
+    if FTokenHumans[I] = HumanId then
+      Exit(FTokens[I]);
+  Result := 0;
+  if not Issue then
+    Exit;
+  Result := NewToken;
+  Insert(HumanId, FTokenHumans, Length(FTokenHumans));
+  Insert(Result, FTokens, Length(FTokens));
+end;
+
+function TNetHost.TakeOver(Peer: THostPeer): Boolean;
+var
+  Human: THuman;
+  Old: THostPeer;
+begin
+  Result := False;
+  if Peer.Hello.Token = 0 then
+    Exit;
+  Human := FindNamedHuman(Peer.Hello.Name);
+  // A human that is not connected is an ordinary rejoin; without the token the join is refused
+  // as before (ProcessJoins), so nobody throws a live player out by typing its name.
+  if (Human = nil) or (Human = LocalHuman) or not Human.Connected
+      or (HumanToken(Human.Id, False) <> Peer.Hello.Token) then
+    Exit;
+  Old := PeerOfHuman(FPeers, Human.Id);
+  // One that is leaving anyway goes at the next quiet point, before the joins.
+  if (Old = nil) or (Old = Peer) or Old.Leaving then
+    Exit;
+  NetLog(Format('human %d (%s) taken over by a new connection', [Human.Id, UTF8Encode(Peer.Hello.Name)]));
+  // At once, so that nothing more goes to the old connection; the peer itself stays until
+  // ProcessLeaving disconnects its human, and then the new peer rejoins (ProcessJoins).
+  FThread.RemovePeer(Old.PeerId);
+  Old.Leaving := True;
+  Result := True;
 end;
 
 // A pending join that can be taken: its name is a human's (a rejoin, or a refusal), or it is
@@ -834,6 +910,8 @@ begin
       Payload.Clear;
       Welcome.HumanId := Human.Id;
       Welcome.HostName := FName;
+      // CHANGE: ENHANCEMENT - The same token for every join of the human in this session.
+      Welcome.Token := HumanToken(Human.Id, True);
       EncodeWelcome(Welcome, Payload);
       FThread.Send(Peer.PeerId, nkWelcome, Payload);
       Inc(Joined);

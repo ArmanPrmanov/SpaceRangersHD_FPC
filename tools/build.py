@@ -408,7 +408,7 @@ def build_windows(release: bool, rebuild: bool = False) -> Path:
         "-Wall", "-Wextra", "-DSDL_MAIN_HANDLED", f"-I{prefix}/include",
         ROOT / "platform/game_native.c", ROOT / "platform/windows_native.c",
         ROOT / "platform/net_native.c", f"-L{prefix}/lib", "-lSDL2_mixer", "-lSDL2", "-ljpeg",
-        "-lzstd", "-lws2_32", "-o", game / "gamenative.dll",
+        "-lzstd", "-lws2_32", "-lbcrypt", "-o", game / "gamenative.dll",
     ], rebuild, env)  # fmt: skip
     # The Windows RTL owns the `windows` and `messages` unit names; compile a staged
     # copy with the shims renamed instead of renaming them in the repository.

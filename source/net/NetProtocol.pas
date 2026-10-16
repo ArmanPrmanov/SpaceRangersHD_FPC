@@ -18,7 +18,8 @@ const
   // 6: Command carries the client's number for it, and CommandResult. 7: a host applies a
   // trade as it arrives and answers it (CommandResult, also when applied), and RelayCommand.
   // 8: RelayCommand carries a ship screen sale as its effect (aHoldActions.ckRelayedSale).
-  ProtocolVersion = 8;
+  // 9: Hello and Welcome carry the reconnection token, and Ping.
+  ProtocolVersion = 9;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 
@@ -45,6 +46,10 @@ const
   // client's human's planet or station (docs/network.md, Trades): that human's id, then the
   // encoded command.
   nkRelayCommand = 16;
+  // CHANGE: ENHANCEMENT - both ways, no payload: the connection is alive (docs/network.md,
+  // Disconnects). The network thread sends it when it has sent nothing for a while and swallows
+  // it on arrival; no inbox sees it.
+  nkPing = 17;
 type
   // CHANGE: ENHANCEMENT - host -> client: a command the client sent, named by the number the
   // client gave it (Command), was applied (Ok) or refused, and why (docs/network.md,
@@ -71,11 +76,18 @@ type
     // The ranger name; a disconnected human whose ranger has it is taken back (rejoin).
     Name: WideString;
     Spectator: Boolean;
+    // CHANGE: ENHANCEMENT - The token the host gave this human's last Welcome (0: none); a Hello
+    // with a connected human's name and its token takes that human over (docs/network.md,
+    // Joining).
+    Token: QWord;
   end;
   // host -> client: the client's human.
   TWelcomeMessage = record
     HumanId: Integer;
     HostName: WideString;
+    // CHANGE: ENHANCEMENT - The human's reconnection token, random, one per human for the
+    // hosting session.
+    Token: QWord;
   end;
   // host -> client: a state, whole (BaseSerial 0) or a delta against the state numbered
   // BaseSerial. The zstd bytes (NetDelta) follow the header to the end of the payload. States
@@ -140,6 +152,10 @@ procedure EncodeHello(const Message: THelloMessage; Buffer: TBufEC);
 function DecodeHello(Buffer: TBufEC): THelloMessage;
 procedure EncodeWelcome(const Message: TWelcomeMessage; Buffer: TBufEC);
 function DecodeWelcome(Buffer: TBufEC): TWelcomeMessage;
+// CHANGE: ENHANCEMENT - A reconnection token (Welcome): 8 random bytes from the operating
+// system (sr_random_bytes), never 0, never from Random or the game's generators. Raises when
+// the system gives none.
+function NewToken: QWord;
 procedure EncodeRefuse(const Reason: WideString; Buffer: TBufEC);
 function DecodeRefuse(Buffer: TBufEC): WideString;
 // Writes the header; the caller appends the compressed state.
@@ -211,6 +227,7 @@ begin
     nkCharacter: Result := 'Character';
     nkCommandResult: Result := 'CommandResult';
     nkRelayCommand: Result := 'RelayCommand';
+    nkPing: Result := 'Ping';
   else
     Result := 'Kind' + IntToStr(Kind);
   end;
@@ -240,6 +257,7 @@ begin
   AddQWord(Buffer, Message.DataHash);
   Buffer.AddWideStringZ(Message.Name);
   Buffer.AddBoolean(Message.Spectator);
+  AddQWord(Buffer, Message.Token);
 end;
 
 function DecodeHello(Buffer: TBufEC): THelloMessage;
@@ -253,6 +271,7 @@ begin
   Result.DataHash := GetQWord(Buffer);
   Result.Name := Buffer.ReadWideString;
   Result.Spectator := Buffer.GetBoolean;
+  Result.Token := GetQWord(Buffer);
 end;
 
 procedure EncodeCharacter(const Message: TCharacterMessage; Buffer: TBufEC);
@@ -289,12 +308,23 @@ procedure EncodeWelcome(const Message: TWelcomeMessage; Buffer: TBufEC);
 begin
   Buffer.AddInt32(Message.HumanId);
   Buffer.AddWideStringZ(Message.HostName);
+  AddQWord(Buffer, Message.Token);
 end;
 
 function DecodeWelcome(Buffer: TBufEC): TWelcomeMessage;
 begin
   Result.HumanId := Buffer.GetInt32;
   Result.HostName := Buffer.ReadWideString;
+  Result.Token := GetQWord(Buffer);
+end;
+
+function NewToken: QWord;
+begin
+  Result := 0;
+  // 0 means no token; the system's generator gives it once in 2^64.
+  while Result = 0 do
+    if sr_random_bytes(@Result, SizeOf(Result)) = 0 then
+      raise Exception.Create('No random bytes from the system: ' + AnsiString(sr_net_error));
 end;
 
 procedure EncodeRefuse(const Reason: WideString; Buffer: TBufEC);

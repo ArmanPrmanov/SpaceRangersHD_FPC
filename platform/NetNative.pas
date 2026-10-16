@@ -17,6 +17,9 @@ function sr_net_wait_many(Handles: PInt64; Count, TimeoutMs: Integer): Integer; 
 procedure sr_net_close(Handle: Int64); cdecl; external 'gamenative';
 // The machine's IPv4 addresses, comma-separated, into Output; returns how many.
 function sr_net_local_addresses(Output: PAnsiChar; Capacity: Integer): Integer; cdecl; external 'gamenative';
+// CHANGE: ENHANCEMENT - Size random bytes from the operating system into Data (the reconnection
+// token; never the game's generators); 0 when it gave none.
+function sr_random_bytes(Data: Pointer; Size: Integer): Integer; cdecl; external 'gamenative';
 // XXH64 of one block; chained over a file's chunks by passing the last result as the seed.
 function sr_hash64(Data: Pointer; Size: Int64; Seed: QWord): QWord; cdecl; external 'gamenative';
 function sr_zstd_bound(Size: Int64): Int64; cdecl; external 'gamenative';

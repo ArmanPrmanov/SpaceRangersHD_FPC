@@ -6,6 +6,10 @@ unit NetThread;
 // sockets a few milliseconds at a time, sends what is queued, cuts what arrives into
 // messages and appends them to the peer's inbox, and compresses states. It never touches
 // game state. Other threads reach a peer by its id; every inbox and outbox is under one lock.
+// CHANGE: ENHANCEMENT - Liveness (docs/network.md, Disconnects): each connection gets a Ping
+// when nothing went to it for NetPingIntervalMs, and one that has received no byte for
+// NetSilenceTimeoutMs is closed ("no answer for N s"), so a silent loss looks like any closed
+// connection to the host and the client. Ping never reaches an inbox.
 interface
 uses
   Classes,
@@ -118,6 +122,10 @@ type
     procedure ClosePeer(PeerId: Integer);
     // Forgets the peer and closes its connection at once.
     procedure RemovePeer(PeerId: Integer);
+    // CHANGE: ENHANCEMENT - For the tests: the thread stops reading, writing and pinging the
+    // peer, and does not time it out, but keeps its socket open, so the other side sees only
+    // silence. Nothing undoes it; RemovePeer or the thread's end closes the socket.
+    procedure FreezePeer(PeerId: Integer);
     // Queues the job's state behind what is already queued for each target. The job must
     // stay alive until Done.
     procedure QueueStateJob(Job: TNetStateJob);
@@ -158,6 +166,11 @@ type
 var
   // Set when a message arrives or a connection closes; the pump can wait on it.
   NetInboxEvent: TEvent;
+  // CHANGE: ENHANCEMENT - A connection that has been sent nothing for NetPingIntervalMs gets a
+  // Ping; one that has received nothing for NetSilenceTimeoutMs is closed. Variables, so that
+  // the tests can shorten them (and a slower link could lengthen the timeout).
+  NetPingIntervalMs: Integer = 2000;
+  NetSilenceTimeoutMs: Integer = 10000;
 implementation
 uses
   SysUtils,
@@ -182,6 +195,10 @@ type
     BytesSent, BytesReceived: Int64;
     // The message being received (TNetConnection.IncomingProgress).
     IncomingHave, IncomingSize: Integer;
+    // CHANGE: ENHANCEMENT - When bytes last left for the peer and last came from it
+    // (GetTickCount64), for the ping and the silence timeout; whether the tests froze it.
+    LastSent, LastReceived: QWord;
+    Frozen: Boolean;
     constructor Create;
     destructor Destroy; override;
   end;
@@ -353,6 +370,8 @@ var
 begin
   Peer := TNetPeer.Create;
   Peer.Connection := Connection;
+  Peer.LastSent := GetTickCount64;
+  Peer.LastReceived := Peer.LastSent;
   FLock.Enter;
   try
     Peer.Id := FNextPeerId;
@@ -549,6 +568,20 @@ begin
   end;
 end;
 
+procedure TNetThread.FreezePeer(PeerId: Integer);
+var
+  Peer: TNetPeer;
+begin
+  FLock.Enter;
+  try
+    Peer := TNetPeer(FindPeer(PeerId));
+    if Peer <> nil then
+      Peer.Frozen := True;
+  finally
+    FLock.Leave;
+  end;
+end;
+
 procedure TNetThread.QueueStateJob(Job: TNetStateJob);
 var
   I: Integer;
@@ -582,7 +615,8 @@ begin
     for I := 0 to FPeers.Count - 1 do
     begin
       Peer := TNetPeer(FPeers[I]);
-      if not Peer.Closed and ((Peer.Outbox.Count > 0) or (Peer.Unsent > 0)) then
+      // A frozen peer sends nothing more.
+      if not Peer.Closed and not Peer.Frozen and ((Peer.Outbox.Count > 0) or (Peer.Unsent > 0)) then
         Result := False;
     end;
   finally
@@ -630,7 +664,8 @@ var
   Message: TNetMessage;
   Kind: TNetMessageKind;
   Payload: TBufEC;
-  Arrived: Boolean;
+  Arrived, MayPing: Boolean;
+  Tick: QWord;
 begin
   Result := False;
   Peers := TList.Create;
@@ -650,19 +685,23 @@ begin
     finally
       FLock.Leave;
     end;
+    Tick := GetTickCount64;
     for I := 0 to Peers.Count - 1 do
     begin
       Peer := TNetPeer(Peers[I]);
       Outgoing.Clear;
       FLock.Enter;
       try
-        if Peer.Closed then
+        if Peer.Closed or Peer.Frozen then
           Continue;
         while (Peer.Outbox.Count > 0) and not TNetMessage(Peer.Outbox[0]).Pending do
         begin
           Outgoing.Add(Peer.Outbox[0]);
           Peer.Outbox.Delete(0);
         end;
+        // CHANGE: ENHANCEMENT - A ping goes behind everything queued, never in the place of a
+        // state still being compressed, and not to a peer that is to close.
+        MayPing := (Peer.Outbox.Count = 0) and not Peer.CloseRequested;
       finally
         FLock.Leave;
       end;
@@ -672,10 +711,17 @@ begin
         Peer.Connection.Send(Message.Kind, Message.Payload);
         Message.Free;
       end;
+      // Bytes that still wait for the socket keep the line busy enough.
+      if MayPing and (Outgoing.Count = 0) and (Peer.Connection.PendingSendBytes = 0)
+          and (Int64(Tick) - Int64(Peer.LastSent) >= NetPingIntervalMs) then
+        Peer.Connection.Send(nkPing, nil, 0);
       Peer.Connection.Poll;
       Arrived := False;
       while Peer.Connection.Receive(Kind, Payload) do
       begin
+        // Its bytes have counted as life; nobody else wants it.
+        if Kind = nkPing then
+          Continue;
         Message := TNetMessage.Create(Kind, Payload.Data, Payload.DataSize);
         FLock.Enter;
         try
@@ -688,11 +734,23 @@ begin
       FLock.Enter;
       try
         Peer.Unsent := Peer.Connection.PendingSendBytes;
+        // Any byte counts, so a large message that arrives slowly is no silence.
+        if Peer.Connection.BytesSent <> Peer.BytesSent then
+          Peer.LastSent := Tick;
+        if Peer.Connection.BytesReceived <> Peer.BytesReceived then
+          Peer.LastReceived := Tick;
         Peer.BytesSent := Peer.Connection.BytesSent;
         Peer.BytesReceived := Peer.Connection.BytesReceived;
         Peer.Connection.IncomingProgress(Peer.IncomingHave, Peer.IncomingSize);
         if Peer.CloseRequested and (Peer.Outbox.Count = 0) and (Peer.Unsent = 0) then
           Peer.Connection.Close;
+        // CHANGE: ENHANCEMENT - The other side pings when it has nothing to send, so silence
+        // this long means it is gone (docs/network.md, Disconnects).
+        if not Peer.Connection.Closed
+            and (Int64(Tick) - Int64(Peer.LastReceived) >= NetSilenceTimeoutMs) then
+          Peer.Connection.Abort(
+              AnsiString(Format('no answer for %d s', [(NetSilenceTimeoutMs + 500) div 1000]))
+          );
         if Peer.Connection.Closed then
         begin
           Peer.Closed := True;
@@ -949,7 +1007,8 @@ begin
     for I := 0 to FPeers.Count - 1 do
     begin
       Peer := TNetPeer(FPeers[I]);
-      if not Peer.Closed and (Peer.Connection.Handle >= 0) then
+      // A frozen peer's unread bytes would wake the wait at once, every time.
+      if not Peer.Closed and not Peer.Frozen and (Peer.Connection.Handle >= 0) then
       begin
         Handles[Count] := Peer.Connection.Handle;
         Inc(Count);

@@ -28,6 +28,10 @@ function JoinGame(
     const Name: WideString;
     Wait: Boolean = True
 ): TNetClient;
+// CHANGE: ENHANCEMENT - For the takeover test (docs/network.md, Tests): the session's client joins
+// again on a new connection, at the same address, as the same name and with its token, and
+// becomes CurrentClient. The old client is left as it is, for the caller to free.
+function JoinAgain(out Old: TNetClient): TNetClient;
 // Leaves the session (Bye to the peers), clears the hooks and frees the host or client.
 procedure StopNetwork;
 // Takes what arrived. The UI calls it every frame and at safe points; the headless runner
@@ -87,6 +91,13 @@ begin
   NetworkCommandHook := @ClientCommandSubmitted;
   // CHANGE: ENHANCEMENT - A trade waits for the host's answer instead of being predicted.
   TradeSubmitHook := @ClientTradeSubmitted;
+  Result := Client;
+end;
+
+function JoinAgain(out Old: TNetClient): TNetClient;
+begin
+  Old := Client;
+  Client := TNetClient.Create(Old.Address, Old.Port, Old.Name, False, Old.Token);
   Result := Client;
 end;
 

@@ -13,7 +13,7 @@ Read [humans.md](humans.md) (the barrier, hot-seat, `ActingHuman`) and
 
 | Unit | What it holds |
 | --- | --- |
-| `platform/net_native.c`, `platform/NetNative.pas` | sockets (Winsock / BSD) and zstd |
+| `platform/net_native.c`, `platform/NetNative.pas` | sockets (Winsock / BSD), zstd, and the OS's random bytes (`sr_random_bytes`) |
 | `source/net/NetTransport.pas` | `TNetConnection`: length-prefixed messages over TCP; `TNetListener` |
 | `source/net/NetDelta.pas` | `CompressState` / `ExpandState`: whole states, deltas (zstd with the old state as reference, like `--patch-from`) and films |
 | `source/net/NetProtocol.pas` | message kinds, their encoding, protocol version, the data hash |
@@ -47,7 +47,18 @@ once per message-loop iteration.
 - **The network thread** owns the listener and every connection. It waits on
   the sockets (a few ms), sends what is queued, and cuts received bytes into
   messages, which it appends to the peer's inbox under one lock. It sets
-  `NetInboxEvent` when a message arrives. It never touches game state.
+  `NetInboxEvent` when a message arrives. It never touches game state. It also
+  keeps each connection alive: a connection that has been sent nothing for
+  `NetPingIntervalMs` (2 s) gets a `Ping`, behind what is queued and never in
+  the place of a state still being compressed, nor once its close was asked
+  for; one that has received no byte for `NetSilenceTimeoutMs` (10 s) is closed
+  with the error "no answer for 10 s" (Disconnects). Any byte counts, so a
+  large state that arrives slowly is no silence. The thread swallows `Ping`;
+  no inbox sees it. Both are variables, so the unit tests shorten them. Pings
+  and the timeout live only here, never in a screen's loop, so a long day or
+  an open box cannot cause a false timeout. `TNetThread.FreezePeer` (tests
+  only) stops reading, writing, pinging and timing out one peer and keeps its
+  socket open, so the other side sees only silence.
 - **The UI thread** pumps the inboxes once per frame (`NetPlay`'s frame hook,
   `GR_Main.FramePumpHook`, called by `GR_WinMessage`) and at the safe points
   below. Everything that changes the game from the network happens in the pump
@@ -84,8 +95,8 @@ protocol; never renumber one, add new ones at the end and bump
 
 | Kind | Direction | Payload |
 | --- | --- | --- |
-| `Hello` | client → host | protocol version, game version text, data hash, human name, whether it spectates |
-| `Welcome` | host → client | the client's human id, the host's name |
+| `Hello` | client → host | protocol version, game version text, data hash, human name, whether it spectates, the reconnection token it holds (0: none) |
+| `Welcome` | host → client | the client's human id, the host's name, the human's reconnection token |
 | `Refuse` | host → client | reason text; the host then closes |
 | `State` | host → client | state number, base state number (0 = whole), day number, state hash, zstd bytes (`NetDelta`) |
 | `Film` | host → client | day number, star id, zstd bytes of the film (`TEFilm.SaveToBuffer`, `CompressState` with no reference) |
@@ -94,12 +105,13 @@ protocol; never renumber one, add new ones at the end and bump
 
 The host numbers its states from 1. A day number cannot name a base: a join
 between two days sends a state of the same day as the one before it.
-`ProtocolVersion` is 8 (2: `TalkRequest` has its payload; 3: `Status` names
+`ProtocolVersion` is 9 (2: `TalkRequest` has its payload; 3: `Status` names
 the human whose answer to a dialogue the day waits for; 4: `NewHuman` and
 `Character`; 5: `Film` is compressed; 6: `Command` carries the client's number
 for it, and `CommandResult`; 7: the host applies a trade as it arrives and
 answers it, also when it applied it, and `RelayCommand`, Trades; 8:
-`RelayCommand` carries a ship screen sale as its effect, `RelayedSale`, Trades).
+`RelayCommand` carries a ship screen sale as its effect, `RelayedSale`, Trades;
+9: `Hello` and `Welcome` carry the reconnection token, and `Ping`, Disconnects).
 | `Status` | host → client | per human: id, name, connected, holds the day; whether a day is running; the human whose answer to a dialogue the day waits for (0: none) |
 | `TalkRequest` | host → client | human id, ship id, planet id (0: none), scripted, talk kind, amount, text: the human's talk fields (Remote dialogue) |
 | `TalkDone` | client → host | nothing: the client's answer is complete, or it cannot show the talk |
@@ -109,6 +121,7 @@ answers it, also when it applied it, and `RelayCommand`, Trades; 8:
 | `Character` | client → host | name, race, character preset, portrait, two starting skills, two starting items |
 | `CommandResult` | host → client | the command's number (as in `Command`), its kind, applied (1) or refused (0), the reason (a byte, `aCommands.TRefusalReason`), the exception's text; sent for a refused command (Commands) and for every trade the host applied (Trades) |
 | `RelayCommand` | host → client | a human id, then an encoded `TPlayerCommand`: a trade the host applied, of another human at the client's human's planet or station, or for a ship screen sale its effect (`RelayedSale`) (Trades) |
+| `Ping` | both | nothing: the connection is alive; sent and swallowed by the network thread (Threads) |
 
 ## Joining
 
@@ -116,7 +129,18 @@ answers it, also when it applied it, and `RelayCommand`, Trades; 8:
 2. The host refuses when the protocol version or the data hash differs. Build
    hashes may differ, since platforms differ. It also refuses an empty name, a
    spectator (not supported yet), a name whose human is connected, and a join
-   when no planet takes a new human.
+   when no planet takes a new human. **Takeover.** A Hello whose name is a
+   connected remote human's and whose token is that human's (not 0) takes the
+   human over instead (`TNetHost.TakeOver`, from the pump, not while a job
+   runs: a job may free a ranger whose name it reads): the host logs `human N
+   (name) taken over by a new connection`, removes the old peer from the network
+   thread at once (`RemovePeer`, so nothing more goes to it; `IsClosed` is
+   true from then on) and marks it leaving. A remote talk runs in a job, so
+   a talk of that human ends first, by the silence timeout or its answer. At the next quiet point
+   `ProcessLeaving` disconnects it (Disconnects) and `ProcessJoins` lets the new
+   peer rejoin (step 4), in the same pump. Without the token (another machine,
+   a restarted game) the refusal stays; the silence timeout frees the name
+   within 10 s anyway, so nobody throws a live player out by typing its name.
 3. The host takes the join at a quiet point: no turn job running and no day
    under way. A join that arrives mid-day waits in the peer's inbox. Joins
    that wait together are taken in name order.
@@ -141,7 +165,15 @@ answers it, also when it applied it, and `RelayCommand`, Trades; 8:
    the preset, so an older log replays as before. The command log records it.
    The headless test clients choose a fixed character.
 5. The host sends `Welcome` and a whole `State`. The client loads it, makes its
-   human the local one and opens its screen (Applying state).
+   human the local one and opens its screen (Applying state). `Welcome`
+   carries the human's reconnection token: 64 random bits from the OS
+   (`NetProtocol.NewToken`, `sr_random_bytes` in `net_native.c`:
+   `BCryptGenRandom` / `/dev/urandom`; never `Random` or the game's generators,
+   which its determinism depends on), issued at the human's first Welcome in
+   this hosting session and given again at each rejoin (`TNetHost.HumanToken`).
+   The client keeps it (`TNetClient.Token`) and sends it in its Hello; a
+   `TNetClient` created with a token (the constructor's `Token`) says Hello
+   with it.
 
 A human who joins or leaves is a normal operation. Human ids are ship ids and
 are never reused, so a log or a save can name a human who has left.
@@ -784,7 +816,17 @@ of the executing command, or the script's human), not the host's.
   point, in `Session.Humans` order, before joins, and drops the peer's queued
   commands. A rejoin restores nothing: the human takes its ranger back as it
   stands.
-- It rejoins by joining with the same ranger name (Joining).
+- **A silent loss** (Wi-Fi gone, a cable pulled, a machine asleep) closes no
+  TCP connection. The network thread closes one that has received nothing for
+  `NetSilenceTimeoutMs` (Threads); from then on it is an ordinary closed
+  connection: the host logs `connection of peer N (name) lost: no answer for
+  10 s` and disconnects the human as above, and a client sees its host lost
+  (`TNetClient.HostLeft`, `Error` "the connection closed: no answer for 10 s",
+  `HostSaidBye` false). Our own ping rather than TCP keepalive, which starts
+  after 2 h by default and is set up differently on each OS.
+- It rejoins by joining with the same ranger name (Joining); a client that
+  still has its token can take its human over before the timeout (Joining,
+  Takeover).
 - Humans in a save that the host loads start disconnected, except the host's.
 - `Connected` is not saved; it is session state, not game state.
 
@@ -842,8 +884,8 @@ of the executing command, or the script's human), not the host's.
   `Multiplayer.*` keys with English fallbacks (`MultiplayerText`).
 - Headless, for tests: `--sim-net-host=PORT --sim-net-clients=N` with
   `--sim-save` (or `--sim-new-game`: the new-game screen's defaults) and
-  `--sim-turns=DAYS`, and `--sim-net-join=HOST:PORT --sim-net-name=NAME` with `--sim-net-leave-at=DAY`; see Tests for the
-  others.
+  `--sim-turns=DAYS`, and `--sim-net-join=HOST:PORT --sim-net-name=NAME` with `--sim-net-leave-at=DAY`
+  or `--sim-net-silent-at=DAY [--sim-net-takeover]`; see Tests for the others.
 
 ## Tests
 
@@ -868,7 +910,15 @@ With one client, a join as the leaver's name that cancels itself once let in
 and the rejoin still gets the human back; and a fifth run has the host stop
 hosting after 3 days (`--sim-net-stop-at=3`), which must disconnect the client's
 human and which the client must notice by itself within 5 s (both print
-`GetTickCount64`, which is system-wide on Windows). The runs print the sizes of
+`GetTickCount64`, which is system-wide on Windows). A sixth run has the client's
+connection go silent before its turn of day 3 (`--sim-net-silent-at=3`,
+`check_silence`): the host must time it out (`lost: no answer for`) and
+disconnect its human 8 to 13 s after the client went silent (the timeout, less
+the ping interval its last bytes may be older), run the days without it, and
+give the human back to a later rejoin. A seventh has the client join again at
+once, with its token, in the same process (`--sim-net-takeover`,
+`check_takeover`): the host must take the human over within 3 s, without timing
+the old connection out, and the client must play on with the host's hashes. The runs print the sizes of
 whole states, deltas and films, and the load time, per day. Once per run, a host
 that starts a new game (`--sim-new-game`) and one client check the hashes too: a
 new game's galaxy has not been through a load, so this checks that a load gives
@@ -949,7 +999,15 @@ The headless runner (`HeadlessNet`):
   talk (`AcceptScriptedTalk`) and prints `net client talk ship= kind= answered=
   response= human= held= wait=`. A `Status` that names a talk prints `net the
   day waits for human N to answer a hail`; a host that says `Bye` prints `net
-  client host left bye=1 tick=`.
+  client host left bye=1 tick=`. With `--sim-net-silent-at=DAY`, after its
+  DAY-th state and before that day's turn, it freezes its connection
+  (`TNetClient.FreezeConnection`) and prints `net client silent day= human=
+  takeover= tick=`; then it stays alive, reading nothing, for the silence
+  timeout and 3 s more, and ends. With `--sim-net-takeover` it joins again at
+  once instead, on a new connection with the same name and its token
+  (`NetSession.JoinAgain`; the frozen client stays until the end), and plays
+  on. The host's lines for a disconnect, a lost connection and a takeover end
+  with `tick=`.
 - **Stopping.** `--sim-net-stop-at=DAY` on the host: after DAY days, once every
   client has the state, it stops hosting as the in-game menu does
   (`DisconnectHumans`, then `Bye`) and prints `net host stopped hosting day=

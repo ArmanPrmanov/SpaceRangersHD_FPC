@@ -80,6 +80,9 @@ type
     FRefused: Boolean;
     FRefuseReason: WideString;
     FHostLeft: Boolean;
+    // CHANGE: ENHANCEMENT - The reconnection token: the one given to Create, then the last
+    // Welcome's; Hello carries it (docs/network.md, Joining).
+    FToken: QWord;
     // The last state applied here, uncompressed: the base of the next delta.
     FBase: TBufEC;
     FBaseSerial: Integer;
@@ -127,12 +130,15 @@ type
   public
     // Connects and says Hello; Connected is False when it could not (Error says why). Without
     // Wait the connect runs on a thread of its own: Pump says Hello once it has connected,
-    // and Connected stays True meanwhile (JoinPhase is jpConnecting).
+    // and Connected stays True meanwhile (JoinPhase is jpConnecting). CHANGE: ENHANCEMENT -
+    // Token is the reconnection token Hello carries (0: none): with the one an earlier client
+    // of the same human got (Token), the host takes that human over from its old connection.
     constructor Create(
         const Address: AnsiString;
         Port: Integer;
         const Name: WideString;
-        Wait: Boolean = True
+        Wait: Boolean = True;
+        Token: QWord = 0
     );
     destructor Destroy; override;
     function Connected: Boolean;
@@ -208,6 +214,16 @@ type
     property RefuseReason: WideString read FRefuseReason;
     // The host said Bye or the connection closed.
     property HostLeft: Boolean read FHostLeft;
+    // CHANGE: ENHANCEMENT - The reconnection token the host gave (Welcome), or the one given to
+    // Create until then; 0: none. And where and as whom this client joined, for joining again.
+    property Token: QWord read FToken;
+    property Address: AnsiString read FAddress;
+    property Port: Integer read FPort;
+    property Name: WideString read FName;
+    // CHANGE: ENHANCEMENT - For the tests (docs/network.md, Tests): the network thread stops
+    // reading, writing and pinging the connection but keeps it open (TNetThread.FreezePeer), so
+    // the host sees only silence.
+    procedure FreezeConnection;
     // CHANGE: ENHANCEMENT - The host said Bye: it quit or stopped hosting; otherwise the
     // connection was lost (Error).
     property HostSaidBye: Boolean read FHostSaidBye;
@@ -291,11 +307,13 @@ constructor TNetClient.Create(
     const Address: AnsiString;
     Port: Integer;
     const Name: WideString;
-    Wait: Boolean
+    Wait: Boolean;
+    Token: QWord
 );
 begin
   inherited Create;
   FName := Name;
+  FToken := Token;
   FAddress := Address;
   FPort := Port;
   FHumanId := -1;
@@ -350,6 +368,7 @@ begin
   Hello.DataHash := DataHash;
   Hello.Name := FName;
   Hello.Spectator := False;
+  Hello.Token := FToken;
   Payload := TBufEC.Create;
   try
     EncodeHello(Hello, Payload);
@@ -429,6 +448,7 @@ begin
         Welcome := DecodeWelcome(Payload);
         FHumanId := Welcome.HumanId;
         FHostName := Welcome.HostName;
+        FToken := Welcome.Token;
         FWelcomed := True;
         NetLog(Format('joined as human %d', [FHumanId]));
       end;
@@ -854,6 +874,12 @@ begin
   finally
     Payload.Free;
   end;
+end;
+
+procedure TNetClient.FreezeConnection;
+begin
+  if FPeerId >= 0 then
+    FThread.FreezePeer(FPeerId);
 end;
 
 procedure TNetClient.Leave(TimeoutMs: Integer);

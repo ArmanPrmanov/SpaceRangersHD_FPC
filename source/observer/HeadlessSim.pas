@@ -65,6 +65,11 @@ type
     NetFilmMs: Integer;
     NetCancelJoin: Boolean;
     NetStopAt: Integer;
+    // CHANGE: ENHANCEMENT - Silent losses (docs/network.md, Tests): after NetSilentAt days (0:
+    // never) a client freezes its connection, so the host must time it out; with NetTakeover
+    // it joins again at once with its token instead, and the host must take its human over.
+    NetSilentAt: Integer;
+    NetTakeover: Boolean;
     // CHANGE: ENHANCEMENT - A refused command (docs/network.md, Tests): a client buys the good
     // whose whole stock it could pay for (BuyWholeStockGood), and the host, before it applies
     // the queues, buys that stock first in the client's human's name, once: the client's

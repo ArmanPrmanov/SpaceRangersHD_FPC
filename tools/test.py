@@ -57,6 +57,16 @@ NET_FILM_MS = 500
 NET_STOP_DAY = 3
 # A client notices that the host stopped hosting within this many ms.
 NET_NOTICE_MS = 5000
+# Silent losses (docs/network.md, Disconnects): with one client, a sixth run has the client's
+# connection go silent before the turn of day NET_SILENT_DAY (--sim-net-silent-at), so the host
+# must time it out after NetSilenceTimeoutMs (NET_SILENCE_MS; the client pings every NET_PING_MS
+# when it has nothing to send, so its last bytes may be that much older), and a seventh has it
+# join again at once with its token (--sim-net-takeover), which the host must take within
+# NET_TAKEOVER_MS.
+NET_SILENT_DAY = 3
+NET_SILENCE_MS = 10000
+NET_PING_MS = 2000
+NET_TAKEOVER_MS = 3000
 # The command kind of TradeGoods (source/game/aShopActions.pas), and the reason a purchase of
 # goods sold first is refused with (aCommands.RefusalReasonName).
 TRADE_GOODS_KIND = 110
@@ -440,7 +450,10 @@ def run_network(
     it something, without answering. Once the host has run a day without it, Net1 joins again;
     after "day", a join as Net1 that cancels itself once let in comes first (the last client
     output is the real rejoin's, the one before it the cancelled one's). With leave "stop" the
-    host stops hosting after NET_STOP_DAY days. Without leave the talk comes while the clients
+    host stops hosting after NET_STOP_DAY days. With leave "silent" Net1's connection goes silent
+    before its turn of day NET_SILENT_DAY and Net1 joins again, as after "talk", once its process
+    has ended; with "takeover" it joins again at once with its token, in the same process.
+    Without leave the talk comes while the clients
     play their films. With race, the clients buy goods whose whole stock they could pay for, and
     the host buys that stock first, once, so that a client's purchase is refused
     (--sim-net-buy-race). With nested, each client submits a command that submits another one
@@ -478,6 +491,10 @@ def run_network(
             options.append(f"--sim-net-leave-at={NET_LEAVE_DAY}")
         elif leave == "talk" and index == 0:
             options.append("--sim-net-talk-leave")
+        elif leave in ("silent", "takeover") and index == 0:
+            options.append(f"--sim-net-silent-at={NET_SILENT_DAY}")
+            if leave == "takeover":
+                options.append("--sim-net-takeover")
         elif not leave:
             options.append(f"--sim-net-film-ms={NET_FILM_MS}")
         if race:
@@ -488,7 +505,7 @@ def run_network(
             options.append("--sim-net-shop")
         clients.append(GameProcess(binary, args.game_dir, options))
     codes = []
-    if leave in ("day", "talk"):
+    if leave in ("day", "talk", "silent"):
         codes.append(clients[0].finish())
         # The days go on while it is away: wait for a day the host runs without it.
         deadline = time.monotonic() + NET_TIMEOUT
@@ -706,7 +723,91 @@ def check_network(args, binary: Path, save: Path, count: int) -> tuple[bool, lis
             f"{label}: a host that stops hosting after day {NET_STOP_DAY} disconnects its client, "
             f"which notices it by itself within {max(delay, 0)} ms"
         )
+        problem, note = check_silence(args, binary, save, count)
+        if problem:
+            return False, [*notes, f"{label} silent client: {problem}"]
+        notes.append(f"{label}: {note}")
+        problem, note = check_takeover(args, binary, save, count)
+        if problem:
+            return False, [*notes, f"{label} takeover: {problem}"]
+        notes.append(f"{label}: {note}")
     return True, notes
+
+
+def tick_lines(output: str, text: str) -> list[dict[str, str]]:
+    """The lines of a run that contain text, with their fields (tick= among them)."""
+    return [fields(line) for line in output.splitlines() if text in line]
+
+
+def check_silence(args, binary: Path, save: Path, count: int) -> tuple[str, str]:
+    """A client whose connection goes silent before its turn of day NET_SILENT_DAY
+    (--sim-net-silent-at): its socket stays open, it reads and writes nothing. The host must time
+    it out after NET_SILENCE_MS ("no answer for"), disconnect its human, run the days without it,
+    and give the human back when it joins again. Returns what is wrong, and a note."""
+    problem, host_output, outputs = run_network(args, binary, save, count, leave="silent")
+    if not problem:
+        problem = compare_client_hashes(host_output, outputs)
+    if problem:
+        return problem, ""
+    silent = net_lines(outputs[0], "net client silent ")
+    lost = tick_lines(host_output, "(Net1) lost: no answer for ")
+    gone = tick_lines(host_output, "(Net1) disconnected")
+    if not silent or silent[0].get("takeover") != "0":
+        return "the client did not go silent:" + output_tail(outputs[0]), ""
+    if not lost or not gone:
+        return "the host did not time the client out:" + output_tail(host_output), ""
+    delay = int(gone[0]["tick"]) - int(silent[0]["tick"])
+    if not NET_SILENCE_MS - NET_PING_MS - 500 <= delay <= NET_SILENCE_MS + 3000:
+        return f"the host disconnected the silent client after {delay} ms", ""
+    away = [line for line in net_lines(host_output, "net host day=") if line["away"] == "1"]
+    first = fields(last_line(outputs[0], "done net client "))
+    second = fields(last_line(outputs[-1], "done net client "))
+    if not away:
+        return "no day ran while the client was silent", ""
+    if first.get("human") in (None, "-1") or first.get("human") != second.get("human"):
+        return f"the rejoined client got human {second.get('human')}, not {first.get('human')}", ""
+    return "", (
+        f"a client whose connection goes silent before day {NET_SILENT_DAY} is timed out and "
+        f"disconnected after {delay} ms; {len(away)} days ran without it, and it gets its human back"
+    )
+
+
+def check_takeover(args, binary: Path, save: Path, count: int) -> tuple[str, str]:
+    """A client whose connection goes silent before its turn of day NET_SILENT_DAY and that joins
+    again at once, as the same name with its token (--sim-net-takeover): the host must take the
+    human over from the silent connection within NET_TAKEOVER_MS, well before any timeout, send
+    it a whole state, and the client must play on with the host's hashes. Returns what is wrong,
+    and a note."""
+    problem, host_output, outputs = run_network(args, binary, save, count, leave="takeover")
+    if not problem:
+        problem = compare_client_hashes(host_output, outputs)
+    if problem:
+        return problem, ""
+    silent = net_lines(outputs[0], "net client silent ")
+    taken = tick_lines(host_output, "(Net1) taken over by a new connection")
+    if not silent or silent[0].get("takeover") != "1":
+        return "the client did not go silent:" + output_tail(outputs[0]), ""
+    if not taken:
+        return "the host did not take the human over:" + output_tail(host_output), ""
+    delay = int(taken[0]["tick"]) - int(silent[0]["tick"])
+    if delay > NET_TAKEOVER_MS:
+        return f"the host took the human over after {delay} ms", ""
+    if "(Net1) lost: no answer for " in host_output:
+        return "the host timed the old connection out", ""
+    lines = host_output.splitlines()
+    over = next(i for i, line in enumerate(lines) if "(Net1) taken over " in line)
+    if not any("(Net1) rejoined" in line for line in lines[over:]):
+        return "the new connection did not rejoin", ""
+    client = outputs[0].splitlines()
+    went = next(i for i, line in enumerate(client) if line.startswith("net client silent "))
+    after = [fields(line) for line in client[went:] if line.startswith("net client day=")]
+    done = fields(last_line(outputs[0], "done net client "))
+    if len(after) < 2 or done.get("human") != silent[0].get("human"):
+        return f"the client did not play on as human {silent[0].get('human')}: {len(after)} states", ""
+    return "", (
+        f"a client that joins again with its token after its connection went silent is taken over "
+        f"in {max(delay, 0)} ms and plays on ({len(after)} states with the host's hashes)"
+    )
 
 
 def check_refusal(host_output: str, outputs: list[str], log: Path | None) -> tuple[str, str]:

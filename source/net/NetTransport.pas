@@ -39,6 +39,9 @@ type
     // Sends everything queued, waiting up to TimeoutMs.
     function FlushAll(TimeoutMs: Integer): Boolean;
     procedure Close;
+    // CHANGE: ENHANCEMENT - Closes the connection with Text as its Error (unless it has one), as
+    // a failed socket call does: the network thread's silence timeout.
+    procedure Abort(const Text: AnsiString);
     function PendingSendBytes: Integer;
     // CHANGE: ENHANCEMENT - The message being received: the bytes of it that are here and its
     // whole size with the length prefix (0 and 0 when none has started), for a join's progress.
@@ -144,6 +147,11 @@ begin
   if FError = '' then
     FError := Text;
   Close;
+end;
+
+procedure TNetConnection.Abort(const Text: AnsiString);
+begin
+  Fail(Text);
 end;
 
 procedure TNetConnection.Close;

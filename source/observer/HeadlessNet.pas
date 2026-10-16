@@ -73,10 +73,18 @@ uses
 const
   // Without progress for this long, a run fails instead of hanging the test.
   StallTimeoutMs = 120000;
+  // CHANGE: ENHANCEMENT - A silent client (--sim-net-silent-at) stays this long past the host's
+  // silence timeout before it ends.
+  SilentLingerMs = 3000;
 
 procedure EmitNetEvent(const Text: AnsiString);
 begin
-  Emit('net ' + Text);
+  // CHANGE: ENHANCEMENT - A disconnect, a lost connection and a takeover say when, so that the
+  // tests can check how soon silence is noticed (docs/network.md, Tests).
+  if (Pos(') disconnected', Text) > 0) or (Pos(') lost: ', Text) > 0) or (Pos(') taken over ', Text) > 0) then
+    Emit(Format('net %s tick=%d', [Text, GetTickCount64]))
+  else
+    Emit('net ' + Text);
 end;
 
 function HashText(Value: QWord): AnsiString;
@@ -1040,8 +1048,11 @@ var
   Character: TJoinCharacter;
   Outcome: TCommandResultMessage;
   RefusalShown: WideString;
+  // CHANGE: ENHANCEMENT - The client whose connection went silent (--sim-net-takeover).
+  Frozen: TNetClient;
 begin
   Result := 0;
+  Frozen := nil;
   Colon := LastDelimiter(':', Options.NetJoin);
   Address := Copy(Options.NetJoin, 1, Colon - 1);
   Port := StrToInt(Copy(Options.NetJoin, Colon + 1, MaxInt));
@@ -1185,6 +1196,30 @@ begin
         Emit(Format('net client left day=%d human=%d', [Galaxy.CurrentTurn, Client.HumanId]));
         Break;
       end;
+      // CHANGE: ENHANCEMENT - --sim-net-silent-at: the connection goes silent before this day's
+      // turn, as a lost link does: open, but nothing read or written. Without --sim-net-takeover
+      // the process stays alive until the host must have timed it out, then ends; with it, it
+      // joins again at once with its token and plays on (docs/network.md, Tests).
+      if (Options.NetSilentAt > 0) and (Days >= Options.NetSilentAt) and (Frozen = nil) then
+      begin
+        Client.FreezeConnection;
+        Emit(
+            Format(
+                'net client silent day=%d human=%d takeover=%d tick=%d',
+                [Galaxy.CurrentTurn, Client.HumanId, Ord(Options.NetTakeover), GetTickCount64]
+            )
+        );
+        if not Options.NetTakeover then
+        begin
+          Deadline := GetTickCount64 + QWord(NetSilenceTimeoutMs) + SilentLingerMs;
+          while GetTickCount64 < Deadline do
+            Sleep(50);
+          Break;
+        end;
+        Client := JoinAgain(Frozen);
+        Deadline := GetTickCount64 + StallTimeoutMs;
+        Continue;
+      end;
       // One turn a day: a state that comes again for the same day (another join) is only
       // applied.
       if HumanHoldsDay(LocalHuman) and (Galaxy.CurrentTurn <> LastPlayedDay) then
@@ -1239,6 +1274,7 @@ begin
   finally
     BuyWholeStockGood := False;
     StopNetwork;
+    Frozen.Free;
     NetLogHook := nil;
   end;
 end;

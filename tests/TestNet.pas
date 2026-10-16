@@ -171,6 +171,7 @@ var
   Outcome, OutcomeBack: TCommandResultMessage;
   Refusal: Exception;
   Human: Integer;
+  Token: QWord;
 begin
   Buffer := TBufEC.Create;
   try
@@ -179,6 +180,7 @@ begin
     Hello.DataHash := QWord($0123456789ABCDEF);
     Hello.Name := 'Рейнджер';
     Hello.Spectator := True;
+    Hello.Token := QWord($8877665544332211);
     EncodeHello(Hello, Buffer);
     Buffer.SetPosition(0);
     HelloBack := DecodeHello(Buffer);
@@ -187,6 +189,7 @@ begin
             and HelloBack.Spectator and Buffer.IsAtEnd,
         'Hello round trips'
     );
+    Check(HelloBack.Token = QWord($8877665544332211), 'Hello carries the token');
     CheckText(Hello.Name, HelloBack.Name, 'Hello keeps the name');
     Buffer.Clear;
     Buffer.AddInt32(ProtocolVersion + 1);
@@ -197,12 +200,14 @@ begin
     Buffer.Clear;
     Welcome.HumanId := 4711;
     Welcome.HostName := 'Host';
+    Welcome.Token := QWord($F00DFACECAFEBEEF);
     EncodeWelcome(Welcome, Buffer);
     EncodeRefuse('full', Buffer);
     EncodeAck(-3, Buffer);
     Buffer.SetPosition(0);
     Welcome := DecodeWelcome(Buffer);
     Check((Welcome.HumanId = 4711) and (Welcome.HostName = 'Host'), 'Welcome round trips');
+    Check(Welcome.Token = QWord($F00DFACECAFEBEEF), 'Welcome carries the token');
     CheckText('full', DecodeRefuse(Buffer), 'Refuse round trips');
     CheckInt(-3, DecodeAck(Buffer), 'Ack round trips');
     Check(Buffer.IsAtEnd, 'Welcome, Refuse and Ack leave nothing over');
@@ -347,6 +352,10 @@ begin
     CheckText('RelayCommand', WideString(MessageKindName(nkRelayCommand)), 'kind names');
     Check(not IsTradeCommand(65535) and not IsTradeCommand(0), 'an unknown kind is no trade');
     CheckText('TalkDone', WideString(MessageKindName(nkTalkDone)), 'kind names');
+    CheckText('Ping', WideString(MessageKindName(nkPing)), 'kind names');
+    // CHANGE: ENHANCEMENT - Tokens come from the system, never 0.
+    Token := NewToken;
+    Check((Token <> 0) and (NewToken <> Token), 'tokens are random and not 0');
     // XXH64 of nothing with seed 0, the published value.
     Check(sr_hash64(nil, 0, 0) = QWord($EF46DB3751D8E999), 'the data hash is XXH64');
   finally
@@ -472,6 +481,117 @@ begin
   end;
 end;
 
+function WaitNewPeer(Thread: TNetThread): Integer;
+var
+  Deadline: QWord;
+begin
+  Result := -1;
+  Deadline := GetTickCount64 + 5000;
+  while not Thread.TakeNewPeer(Result) and (GetTickCount64 < Deadline) do
+    Sleep(1);
+end;
+
+// CHANGE: ENHANCEMENT - Liveness (docs/network.md, Disconnects), with the ping and the timeout
+// shortened: an idle pair stays open over several timeouts and no Ping reaches an inbox; a peer
+// whose message comes a few bytes at a time is not timed out; a frozen peer is closed by the
+// other side within the timeout, and the error says why.
+procedure RunLivenessTests;
+const
+  PingMs = 200;
+  TimeoutMs = 1000;
+  SlowSize = 1000;
+var
+  Host, Client: TNetThread;
+  Raw: TNetConnection;
+  ClientPeer, HostPeer, RawPeer, I: Integer;
+  SavedPing, SavedTimeout: Integer;
+  Start, Elapsed, Deadline: QWord;
+  Kind: TNetMessageKind;
+  Sent, Received: Int64;
+  Header: array[0..4] of Byte;
+  Slow: array[0..SlowSize - 2] of Byte;
+  Offset: Integer;
+begin
+  SavedPing := NetPingIntervalMs;
+  SavedTimeout := NetSilenceTimeoutMs;
+  NetPingIntervalMs := PingMs;
+  NetSilenceTimeoutMs := TimeoutMs;
+  Host := TNetThread.Create(0);
+  Client := TNetThread.Create(-1);
+  Raw := nil;
+  ThreadPayload := TBufEC.Create;
+  try
+    ClientPeer := Client.Connect('127.0.0.1', Host.ListenPort, 5000);
+    HostPeer := WaitNewPeer(Host);
+    Check((ClientPeer > 0) and (HostPeer > 0), 'a pair for the liveness checks connects');
+    Sleep(4 * TimeoutMs);
+    Check(
+        not Host.IsClosed(HostPeer) and not Client.IsClosed(ClientPeer),
+        'an idle pair stays open over several timeouts'
+    );
+    Host.PeerTraffic(HostPeer, Sent, Received);
+    Check((Sent > 0) and (Received > 0), 'an idle pair pings both ways');
+    Check(
+        not Host.Receive(HostPeer, Kind, ThreadPayload) and not Client.Receive(ClientPeer, Kind, ThreadPayload),
+        'no Ping reaches an inbox'
+    );
+    Client.Send(ClientPeer, nkChat, nil, 0);
+    Check(WaitMessage(Host, HostPeer, Kind) and (Kind = nkChat), 'a message after the pings arrives');
+    Check(not Host.Receive(HostPeer, Kind, ThreadPayload), 'and nothing else');
+
+    // A message whose bytes come slowly: its length, then a few bytes at a time, each well
+    // within the timeout, for three timeouts; the raw side never pings.
+    Raw := TNetConnection.Connect('127.0.0.1', Host.ListenPort, 5000);
+    RawPeer := WaitNewPeer(Host);
+    Check((Raw <> nil) and (RawPeer > 0), 'a raw connection connects');
+    if Raw = nil then
+      Exit;
+    PInteger(@Header[0])^ := SlowSize;
+    Header[4] := nkChat;
+    for I := 0 to High(Slow) do
+      Slow[I] := Byte(I);
+    Check(sr_net_send(Raw.Handle, @Header[0], 5) = 5, 'the slow message''s header goes');
+    Offset := 0;
+    Deadline := GetTickCount64 + 3 * TimeoutMs;
+    while GetTickCount64 < Deadline do
+    begin
+      sr_net_send(Raw.Handle, @Slow[Offset], 10);
+      Inc(Offset, 10);
+      Sleep(TimeoutMs div 3);
+    end;
+    Check(not Host.IsClosed(RawPeer), 'a peer whose message arrives slowly is not timed out');
+    sr_net_send(Raw.Handle, @Slow[Offset], Length(Slow) - Offset);
+    Check(
+        WaitMessage(Host, RawPeer, Kind) and (Kind = nkChat) and (ThreadPayload.DataSize = Length(Slow))
+            and CompareMem(ThreadPayload.Data, @Slow[0], Length(Slow)),
+        'the slow message arrives whole'
+    );
+
+    // Frozen: the socket stays open and the host hears nothing more.
+    Client.FreezePeer(ClientPeer);
+    Start := GetTickCount64;
+    while not Host.IsClosed(HostPeer) and (GetTickCount64 < Start + 3 * TimeoutMs) do
+      NetInboxEvent.WaitFor(5);
+    Elapsed := GetTickCount64 - Start;
+    Check(Host.IsClosed(HostPeer), 'a frozen peer is closed by the other side');
+    // It may have last sent a ping up to one interval before it froze.
+    Check(
+        (Elapsed + PingMs + 100 >= TimeoutMs) and (Elapsed < TimeoutMs + 500),
+        'within the timeout (' + IntToStr(Elapsed) + ' ms)'
+    );
+    CheckText('no answer for 1 s', WideString(Host.PeerError(HostPeer)), 'the error says why');
+    Check(not Client.IsClosed(ClientPeer), 'the frozen side keeps its socket');
+    Check(Client.IsIdle, 'a frozen peer does not keep its thread busy');
+  finally
+    Raw.Free;
+    Client.Free;
+    Host.Free;
+    FreeAndNil(ThreadPayload);
+    NetPingIntervalMs := SavedPing;
+    NetSilenceTimeoutMs := SavedTimeout;
+  end;
+end;
+
 // The menus' address parsing (NetPlay.ParseNetAddress) and the host's addresses.
 procedure RunAddressTests;
 var
@@ -500,6 +620,7 @@ begin
   RunTransportTests;
   RunProtocolTests;
   RunThreadTests;
+  RunLivenessTests;
   RunAddressTests;
 end;
 
