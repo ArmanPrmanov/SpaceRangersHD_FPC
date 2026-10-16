@@ -241,7 +241,12 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   other humans' grids there (`aShopStock.ShopStockChanged`) and tells the local
   equipment shop screen (`SimEvents.NotifyShopStockChanged`); a host that
   applies a trade as it arrives, and a client that applies another human's
-  trade, refresh the open shop that way.
+  trade, refresh the open shop that way. Hulls for sale are items of that
+  stock, shown in the equipment shop's grid. The hangar has no list of them: it
+  shows the ships docked there (`THuman.HangarShipIds`, by id, checked again
+  every 20 ms). A docked ship's picture is loaded when it appears, so the same
+  notification redraws the other humans' rangers in an open hangar
+  (`TfHangar.RefreshOtherHumansPortraits`): one that bought a hull shows it.
 - When the host's human has ended its turn and every peer is ready, the host
   applies the queued commands, human by human in `Session.Humans` order, each
   queue up to and including its `EndTurn`, through `SubmitCommand`, so the
@@ -1004,9 +1009,6 @@ star's film once; every client in that star gets it.
 - A client that loses its host on a screen that does not start a day (a shop,
   the ship, the galaxy map) finds out when it next opens one of those.
 - Chat is in the protocol (the host relays it); nothing shows it.
-- The hangar's hulls for sale (`HangarShipIds`, a display cache) are not
-  rebuilt when another human's relayed purchase takes one; the equipment shop's
-  grid is.
 - A host whose player keeps a box open holds its clients' trades; they give up
   after 10 s and get the answer later (Trades).
 - `ContinueUntilArrival` and `EndedTurn` are not in a state; this is harmless

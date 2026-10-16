@@ -71,6 +71,11 @@ type
     procedure SetDockedShipOpacity(Index: Integer; Alpha: Byte);
     procedure AnimateDockedShips(Timer: PCallbackTimerGI; UserData: PtrInt);
     procedure RefreshDockedShips;
+    // CHANGE: BUGFIX - The location's stock changed (SimEvents.NotifyShopStockChanged): another
+    // human may have bought a hull there. A docked ship's picture is loaded once, when it
+    // appears, so another human's ranger shown here is drawn again with its hull as it is now.
+    // The local player and the other ships are left alone; with one human nothing is redrawn.
+    procedure RefreshOtherHumansPortraits;
     procedure MainMouseMove(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
     procedure MainRightButtonDown(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
     procedure HideShipInfo(Timer: PCallbackTimerGI; UserData: PtrInt);
@@ -1469,6 +1474,34 @@ begin
       // Native indexes the opacity by I here, before mapping through SlotOrder.
       SetDockedShipOpacity(SlotOrder[I], ShipSlots[I].Opacity);
     end;
+end;
+
+procedure TfHangar.RefreshOtherHumansPortraits;
+var
+  I: Integer;
+  Ship: TShip;
+  Human: THuman;
+  Path: WideString;
+begin
+  if Galaxy = nil then
+    Exit;
+  for I := 0 to 8 do
+  begin
+    // Only a picture that is on screen (fading in or shown); a slot fading out keeps its own.
+    if (ShipSlots[I].AnimationState <> 1) and (ShipSlots[I].AnimationState <> 2) then
+      Continue;
+    Ship := TShip(Galaxy.IdToShip(LocalHuman.HangarShipIds[I], False));
+    if Ship = nil then
+      Continue;
+    Human := HumanOf(Ship);
+    if (Human = nil) or (Human = LocalHuman) then
+      Continue;
+    Path := Ship.GetShipPortraitImagePath;
+    if Path = WideString('') then
+      Continue;
+    LoadDockedShipImage(I, Path, False, GetShipPortraitScale(Ship));
+    SetDockedShipOpacity(I, ShipSlots[I].Opacity);
+  end;
 end;
 
 procedure TfHangar.MainMouseMove(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);

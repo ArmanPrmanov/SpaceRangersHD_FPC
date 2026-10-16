@@ -56,6 +56,10 @@ begin
   EquipmentShopScreen.ClearGoodsControls;
   EquipmentShopScreen.BuildGoodsControls;
   EquipmentShopScreen.UpdateScrollButtons;
+  // CHANGE: BUGFIX - Another human's purchase here may have changed its ranger's hull, which
+  // the open hangar shows (TfHangar.RefreshOtherHumansPortraits).
+  if (CurrentScreenId = screenHangar) and (HangarScreen <> nil) then
+    HangarScreen.RefreshOtherHumansPortraits;
 end;
 
 procedure PlayUiSound(const Name: WideString);
