@@ -170,7 +170,11 @@ Converting the script functions (`aScriptFun`):
     `Galaxy.Scripts`. Its index differs between machines (each appends the
     scripts its own commands start); the key does not: a `State` gives every
     machine the same list, and a human's scripts are started in that human's
-    command order on both. It is computed, never saved. An injected answer
+    command order on both. It also counts that human's scripts of that file:
+    when one ends or starts between a client's copy and the host's apply, the
+    count differs and the command is refused instead of reaching another
+    instance (one ending and another starting in the same window still
+    slips through; [commands.md](commands.md)). It is computed, never saved. An injected answer
     or an override is named by its entry key (`TDialogEntryKey`): its
     script's key, a hash of what it says and does (not `AnswerData`, which
     can be an address), and how many equal entries come before it in its

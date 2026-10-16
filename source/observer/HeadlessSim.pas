@@ -1721,8 +1721,10 @@ var
   S1, S2: TScript;
   SavedHuman1, SavedHuman2, Index1, Index2: Integer;
   SavedName2: WideString;
-  Command, OldCommand, OverrideCommand: TPlayerCommand;
+  Command, OldCommand, OverrideCommand, ShortCommand, FirstCommand: TPlayerCommand;
   LocalEntry, X, Y: PScriptDialogInjection;
+  Removed: TScript;
+  RemovedAt: Integer;
   Override1, Override2: PScriptDialogOverride;
   State: TScriptDialogState;
   Got: AnsiString;
@@ -1809,6 +1811,8 @@ begin
   SavedHuman2 := S2.HumanId;
   SavedName2 := S2.ScriptFileName;
   Exchanged := False;
+  Removed := nil;
+  RemovedAt := 0;
   try
     try
       // The local human has a dialogue open: its message, script and an injected answer.
@@ -1826,6 +1830,13 @@ begin
       AddScriptIndex(Command, S1);
       AddInt(Command, -1);
       AddScriptKey(Command, S1);
+      // CHANGE: BUGFIX - The key's count follows; ShortCommand is the three-integer key
+      // without it, as sent before the count.
+      ShortCommand := NewCommand(ckScriptAnswerOnly);
+      AddScriptIndex(ShortCommand, S1);
+      AddInt(ShortCommand, -1);
+      AddScriptKey(ShortCommand, S1);
+      AddScriptCount(Command, S1);
       OldCommand := NewCommand(ckScriptAnswerOnly);
       AddScriptIndex(OldCommand, S1);
       AddInt(OldCommand, -1);
@@ -1835,6 +1846,14 @@ begin
       Expect(Got = '', 'an answer by key was refused: ' + Got);
       Expect(RemoteState.Script = S1, 'an answer by key did not reach its human''s script');
       ExpectLocalDialog('a remote answer');
+      RemoteState.Script := nil;
+      Got := TryFor(R, ShortCommand);
+      Expect(Got = '', 'an answer by a key without its count was refused: ' + Got);
+      Expect(
+          RemoteState.Script = S1,
+          'an answer by a key without its count did not reach its human''s script'
+      );
+      ExpectLocalDialog('a remote answer without a count');
       // A log from before names the script by its index, which now holds the other one.
       Got := TryFor(R, OldCommand);
       Expect(Got = '', 'an answer by index was refused: ' + Got);
@@ -1866,10 +1885,12 @@ begin
         Command := NewCommand(ckRunInjectedAnswerAction);
         AddInt(Command, ScriptDialogInjections.IndexOf(Y));
         AddInjectionKey(Command, Y);
+        AddInjectionCount(Command, Y);
         Override1 := NewOverride(S1, 1);
         ScriptDialogOverrides.Add(Override1);
         OverrideCommand := NewCommand(ckTalkDialogOverride);
         AddOverrideKey(OverrideCommand, SelectedDialogOverride);
+        AddOverrideCount(OverrideCommand, SelectedDialogOverride);
       finally
         LeaveHumanDialogState;
       end;
@@ -1934,11 +1955,100 @@ begin
       Expect(Got = '', 'the remote reset was refused: ' + Got);
       ExpectLocalDialog('a remote reset');
       Emit('script routing dialog state ok');
+      // CHANGE: BUGFIX - (5) Two instances of one file for R: S2 first, S1 second. Commands
+      // built before the first ends name them with a count of two; once it has ended, the
+      // second's key would shift its ordinal and the first's would name the second. Both are
+      // refused, nothing changes, and a command built afresh reaches the second.
+      S2.HumanId := R.Id;
+      FirstCommand := NewCommand(ckScriptAnswerOnly);
+      AddScriptIndex(FirstCommand, S2);
+      AddInt(FirstCommand, -1);
+      AddScriptKey(FirstCommand, S2);
+      AddScriptCount(FirstCommand, S2);
+      Command := NewCommand(ckScriptAnswerOnly);
+      AddScriptIndex(Command, S1);
+      AddInt(Command, -1);
+      AddScriptKey(Command, S1);
+      AddScriptCount(Command, S1);
+      // Other scripts of the save may share the file and the human; the two are next to each
+      // other.
+      Expect(
+          (Command.Ints[4] = FirstCommand.Ints[4] + 1)
+              and (Command.Ints[5] = FirstCommand.Ints[5])
+              and (Command.Ints[5] >= 2),
+          'the two instances do not have neighbouring ordinals of one count'
+      );
+      RemovedAt := Galaxy.Scripts.IndexOf(S2);
+      Removed := S2;
+      Galaxy.Scripts.Delete(RemovedAt);
+      RemoteState.Script := nil;
+      Got := TryFor(R, Command);
+      Expect(
+          Got = RefusalReasonName(rrTargetGone),
+          'a key from before the first instance ended was not refused: ' + Got
+      );
+      Got := TryFor(R, FirstCommand);
+      Expect(
+          Got = RefusalReasonName(rrTargetGone),
+          'the ended instance''s key was not refused: ' + Got
+      );
+      Expect(RemoteState.Script = nil, 'a refused instance key reached a script');
+      Command := NewCommand(ckScriptAnswerOnly);
+      AddScriptIndex(Command, S1);
+      AddInt(Command, -1);
+      AddScriptKey(Command, S1);
+      AddScriptCount(Command, S1);
+      Got := TryFor(R, Command);
+      Expect(Got = '', 'a fresh key of the remaining instance was refused: ' + Got);
+      Expect(RemoteState.Script = S1, 'a fresh key did not reach the remaining instance');
+      Galaxy.Scripts.Insert(RemovedAt, Removed);
+      Removed := nil;
+      // The entry keys carry the count too: an answer of the first instance, named while both
+      // run, is refused once the second has ended, and runs while both run.
+      Got := TryFor(R, NewCommand(ckClearTalkDialogRules));
+      Expect(Got = '', 'clearing the remote rules was refused: ' + Got);
+      State := RemoteState;
+      State.Injections.Add(NewInjection(S2, 'z', 'ExtremalTakeOff();'));
+      Expect(EnterHumanDialogState(R), 'the remote dialogue state was not put in place');
+      try
+        Command := NewCommand(ckRunInjectedAnswerAction);
+        AddInt(Command, 0);
+        AddInjectionKey(Command, PScriptDialogInjection(ScriptDialogInjections[0]));
+        AddInjectionCount(Command, PScriptDialogInjection(ScriptDialogInjections[0]));
+      finally
+        LeaveHumanDialogState;
+      end;
+      Expect(
+          Command.Ints[6] = FirstCommand.Ints[5],
+          'an answer''s key does not count both instances'
+      );
+      RemovedAt := Galaxy.Scripts.IndexOf(S1);
+      Removed := S1;
+      Galaxy.Scripts.Delete(RemovedAt);
+      R.ScriptTakeoffRequested := False;
+      Got := TryFor(R, Command);
+      Expect(
+          Got = RefusalReasonName(rrTargetGone),
+          'an answer named before another instance ended was not refused: ' + Got
+      );
+      Expect(not R.ScriptTakeoffRequested, 'a refused answer ran its action');
+      Galaxy.Scripts.Insert(RemovedAt, Removed);
+      Removed := nil;
+      Got := TryFor(R, Command);
+      Expect(Got = '', 'an answer of one of two instances was refused: ' + Got);
+      Expect(R.ScriptTakeoffRequested, 'an answer of one of two instances did not run');
+      R.ScriptTakeoffRequested := False;
+      Got := TryFor(R, NewCommand(ckClearTalkDialogRules));
+      Expect(Got = '', 'clearing the remote rules was refused: ' + Got);
+      ExpectLocalDialog('instance keys');
+      Emit('script routing instance keys ok');
     except
       on E: EAbort do
         Result := False;
     end;
   finally
+    if Removed <> nil then
+      Galaxy.Scripts.Insert(RemovedAt, Removed);
     if Exchanged then
       Galaxy.Scripts.Exchange(0, 1);
     S1.HumanId := SavedHuman1;

@@ -503,10 +503,15 @@ type
   // gives every machine the same list, and both machines start a human's scripts in that
   // human's command order. It is computed, never saved. A nil script, or one not in the
   // galaxy, has Ordinal -1.
+  // CHANGE: BUGFIX - Count: how many scripts of that human and file there are in all. When a
+  // script of the same human and file ends or starts between the sender's copy and the apply,
+  // the ordinal may name another instance; the count then differs, and the key names none
+  // (docs/commands.md). -1: not known (a command from before carries no count; a nil script).
   TScriptKey = record
     HumanId: Integer;
     NameHash: Integer;
     Ordinal: Integer;
+    Count: Integer;
   end;
   // An injected answer or a dialog override, named by its script, a hash of what it says and
   // does, and how many equal entries come before it in its list (docs/commands.md).
@@ -5014,6 +5019,7 @@ begin
   Result.HumanId := 0;
   Result.NameHash := 0;
   Result.Ordinal := -1;
+  Result.Count := -1;
   // A script that is not in the galaxy names none, as its index (-1) did.
   if (Script = nil) or (Galaxy = nil) then
     Exit;
@@ -5023,11 +5029,16 @@ begin
   Result.HumanId := Script.HumanId;
   Result.NameHash := ScriptNameHash(Script);
   Result.Ordinal := 0;
-  for I := 0 to Index - 1 do
+  Result.Count := 0;
+  for I := 0 to Galaxy.Scripts.Count - 1 do
   begin
     Other := TScript(Galaxy.Scripts[I]);
     if (Other.HumanId = Script.HumanId) and (Other.ScriptFileName = Script.ScriptFileName) then
-      Inc(Result.Ordinal);
+    begin
+      if I < Index then
+        Inc(Result.Ordinal);
+      Inc(Result.Count);
+    end;
   end;
 end;
 
@@ -5047,18 +5058,24 @@ begin
     if (Script.HumanId = Key.HumanId) and (ScriptNameHash(Script) = Key.NameHash) then
     begin
       if Count = Key.Ordinal then
-      begin
-        Found := True;
-        Exit(Script);
-      end;
+        Result := Script;
       Inc(Count);
     end;
   end;
+  // CHANGE: BUGFIX - With a count, another number of instances names none: the ordinal may
+  // have shifted onto another instance.
+  if (Key.Count >= 0) and (Count <> Key.Count) then
+    Result := nil;
+  Found := Result <> nil;
 end;
 
+// CHANGE: BUGFIX - A count that is not known (-1) matches any.
 function SameScriptKey(const A, B: TScriptKey): Boolean;
 begin
-  Result := (A.HumanId = B.HumanId) and (A.NameHash = B.NameHash) and (A.Ordinal = B.Ordinal);
+  Result := (A.HumanId = B.HumanId)
+      and (A.NameHash = B.NameHash)
+      and (A.Ordinal = B.Ordinal)
+      and ((A.Count < 0) or (B.Count < 0) or (A.Count = B.Count));
 end;
 
 function DialogEntryScript(Entry: Pointer; Injection: Boolean): TScript;

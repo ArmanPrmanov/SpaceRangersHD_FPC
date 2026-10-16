@@ -434,7 +434,8 @@ var
 begin
   // CHANGE: BUGFIX - The override the sender's screen selected, by its key; a log from before
   // selects the one with the highest priority here. None (an empty list) is refused.
-  Entry := OverrideArgument(Command, 0);
+  // CHANGE: BUGFIX - Ints: the key, then its script key's count.
+  Entry := OverrideArgument(Command, 0, 5);
   Script := Entry.Script;
   Script.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Entry.AnswerData);
   Text := Entry.DialogName;
@@ -460,6 +461,7 @@ var
 begin
   Command := NewCommand(ckGovernmentDialogOverride);
   AddOverrideKey(Command, SelectedDialogOverride);
+  AddOverrideCount(Command, SelectedDialogOverride);
   SubmitCommand(Command);
   Result := GovernmentScript;
 end;
@@ -469,8 +471,8 @@ procedure ExecuteGovernmentInjectedDialog(const Command: TPlayerCommand);
 var
   Injection: PScriptDialogInjection;
 begin
-  // CHANGE: BUGFIX - Ints: the answer's index, then its key.
-  Injection := InjectionArgument(Command, 0, 1);
+  // CHANGE: BUGFIX - Ints: the answer's index, then its key, then its script key's count.
+  Injection := InjectionArgument(Command, 0, 1, 6);
   if Injection.Script = nil then
     raise ECommandRefused.CreateReason(
         rrTargetGone,
@@ -496,6 +498,7 @@ begin
   Command := NewCommand(ckGovernmentInjectedDialog);
   AddInt(Command, ScriptDialogInjections.IndexOf(Injection));
   AddInjectionKey(Command, Injection);
+  AddInjectionCount(Command, Injection);
   SubmitCommand(Command);
   Result := PlanetOutcome <> 0;
 end;

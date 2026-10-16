@@ -88,7 +88,8 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
     quoted; a higher price is refused, as is a price the money does not cover.
     Without it they pay the price as it stands, as before.
   - The script dialog commands name their script by its key
-    (`aScript.TScriptKey`, three integers, [humans.md](humans.md), Scripts)
+    (`aScript.TScriptKey`, three integers and a count at the end, below;
+    [humans.md](humans.md), Scripts)
     after the old arguments, which still hold its index in `Galaxy.Scripts`:
     `ScriptAnswer`, `ScriptAnswerOnly`, `ScriptCallDialog`,
     `ScriptCallDialogByName`, `ScriptCallDialogMessage` (300–304; Ints:
@@ -109,6 +110,22 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
     nothing, an empty override list (it was read at `[0]` unchecked) and an
     answer whose script has ended are refused (`rrTargetGone`) before
     anything changes.
+  - Each of those keys also carries its count (`TScriptKey.Count`: how many
+    scripts of that human and file there are), one integer per script key,
+    appended after everything the command carried before, so the integers
+    above stay where they were (`AddScriptCount`, `AddInjectionCount`,
+    `AddOverrideCount`; the `...Argument` helpers take its position). The
+    ordinal alone shifts when another instance of the same human's file ends
+    before the named one between the sender's copy and the apply, and then it
+    names the wrong instance; the count then differs and the command is
+    refused (`rrTargetGone`) before anything changes. A command without the
+    count (a log from before, or the three-integer key) matches as before.
+    The count also refuses a command when another instance started meanwhile,
+    though the ordinal still named the right one. **Remaining hole:** when one
+    instance before the named one ends and another starts in the same
+    window, the count is the same again and the shifted ordinal names the
+    wrong instance. Nothing saved tells instances of one file apart; closing
+    it needs a per-instance serial in the save.
 
 ## Trades
 

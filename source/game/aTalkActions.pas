@@ -220,11 +220,13 @@ uses
   aTranclucator,
   GR_Main;
 
-// CHANGE: BUGFIX - The injected answer by its index (the old argument), then its key.
+// CHANGE: BUGFIX - The injected answer by its index (the old argument), then its key, then the
+// count of its script key (InjectionArgument(Command, 0, 1, 6)).
 procedure AddInjection(var Command: TPlayerCommand; Injection: PScriptDialogInjection);
 begin
   AddInt(Command, ScriptDialogInjections.IndexOf(Injection));
   AddInjectionKey(Command, Injection);
+  AddInjectionCount(Command, Injection);
 end;
 
 procedure RefuseTalk(const Command: TPlayerCommand; const Text: AnsiString);
@@ -428,8 +430,8 @@ var
   Script: TScript;
 begin
   H := ActorHuman(Command);
-  // CHANGE: BUGFIX - Ints: the script's index, Publish, then the script's key.
-  Script := ScriptArgument(Command, 0, 2, False);
+  // CHANGE: BUGFIX - Ints: the script's index, Publish, then the script's key and its count.
+  Script := ScriptArgument(Command, 0, 2, 5, False);
   CurrentScript := Script;
   if IntArg(Command, 1) <> 0 then
     Script.PublishCurrentShip(H.TalkShip);
@@ -444,6 +446,7 @@ begin
   AddScriptIndex(Command, Script);
   AddInt(Command, Ord(Publish));
   AddScriptKey(Command, Script);
+  AddScriptCount(Command, Script);
   SubmitCommand(Command);
 end;
 
@@ -482,7 +485,8 @@ begin
   H := ActorHuman(Command);
   // CHANGE: BUGFIX - The override the sender's screen selected, by its key; a log from before
   // selects the one with the highest priority here. None (an empty list) is refused.
-  Entry := OverrideArgument(Command, 0);
+  // CHANGE: BUGFIX - Ints: the key, then its script key's count.
+  Entry := OverrideArgument(Command, 0, 5);
   Script := Entry.Script;
   Script.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Entry.AnswerData);
   Text := Entry.DialogName;
@@ -509,6 +513,7 @@ var
 begin
   Command := NewCommand(ckTalkDialogOverride);
   AddOverrideKey(Command, SelectedDialogOverride);
+  AddOverrideCount(Command, SelectedDialogOverride);
   SubmitCommand(Command);
   Result := TalkScript;
 end;
@@ -629,7 +634,7 @@ var
   SavedHuman: THuman;
 begin
   // CHANGE: BUGFIX - Ints: the answer's index, then its key.
-  Injection := InjectionArgument(Command, 0, 1);
+  Injection := InjectionArgument(Command, 0, 1, 6);
   if (Injection.ActionCode <> '') and (Injection.ActionScript = nil) then
     RefuseTalk(Command, 'names an answer whose script has ended');
   if Injection.ActionCode <> '' then
@@ -662,7 +667,7 @@ var
   Injection: PScriptDialogInjection;
 begin
   H := ActorHuman(Command);
-  Injection := InjectionArgument(Command, 0, 1);
+  Injection := InjectionArgument(Command, 0, 1, 6);
   if Injection.Script = nil then
     RefuseTalk(Command, 'names an answer whose script has ended');
   Injection.Script.PublishCurrentShip(H.TalkShip);

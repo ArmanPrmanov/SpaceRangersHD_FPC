@@ -713,7 +713,8 @@ begin
   P := Actor(Command);
   // CHANGE: BUGFIX - The override the sender's screen selected, by its key; a log from before
   // selects the one with the highest priority here. None (an empty list) is refused.
-  Entry := OverrideArgument(Command, 0);
+  // CHANGE: BUGFIX - Ints: the key, then its script key's count.
+  Entry := OverrideArgument(Command, 0, 5);
   Script := Entry.Script;
   Script.InitCode.LocalVar.GetVar('GAnswerData').SetDword(Entry.AnswerData);
   Text := Entry.DialogName;
@@ -738,6 +739,7 @@ var
 begin
   Command := NewCommand(ckStationDialogOverride);
   AddOverrideKey(Command, SelectedDialogOverride);
+  AddOverrideCount(Command, SelectedDialogOverride);
   SubmitCommand(Command);
   Result := StationScript;
 end;
@@ -751,8 +753,9 @@ var
 begin
   // CHANGE: BUGFIX - Ints: the answer's index, the script's index, the answer's key (five),
   // then the script's key (three). Both are found before anything changes.
-  Injection := InjectionArgument(Command, 0, 2);
-  Script := ScriptArgument(Command, 1, 7, True);
+  // CHANGE: BUGFIX - Then the count of the answer's script key and that of the script's key.
+  Injection := InjectionArgument(Command, 0, 2, 10);
+  Script := ScriptArgument(Command, 1, 7, 11, True);
   if Injection.Script = nil then
     raise ECommandRefused.CreateReason(
         rrTargetGone,
@@ -782,6 +785,8 @@ begin
   AddScriptIndex(Command, CurrentScript);
   AddInjectionKey(Command, Injection);
   AddScriptKey(Command, CurrentScript);
+  AddInjectionCount(Command, Injection);
+  AddScriptCount(Command, CurrentScript);
   SubmitCommand(Command);
   Result := StationOutcome <> 0;
 end;
@@ -789,8 +794,8 @@ end;
 // Moved from TfRuinsTalk.RunScriptGameEnd.
 procedure ExecuteStationScriptGameEnd(const Command: TPlayerCommand);
 begin
-  // CHANGE: BUGFIX - Ints: the script's index, the answer, then the script's key.
-  CurrentScript := ScriptArgument(Command, 0, 2, False);
+  // CHANGE: BUGFIX - Ints: the script's index, the answer, then the script's key and its count.
+  CurrentScript := ScriptArgument(Command, 0, 2, 5, False);
   CurrentScript.ExecuteDialogAnswer(IntArg(Command, 1));
   Session.GameEndReason := 0;
 end;
@@ -803,6 +808,7 @@ begin
   AddScriptIndex(Command, CurrentScript);
   AddInt(Command, Answer);
   AddScriptKey(Command, CurrentScript);
+  AddScriptCount(Command, CurrentScript);
   SubmitCommand(Command);
 end;
 

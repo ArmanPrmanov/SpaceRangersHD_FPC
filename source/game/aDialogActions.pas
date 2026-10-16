@@ -13,6 +13,10 @@ unit aDialogActions;
 // from before carries only the indices and replays by them. A key that names nothing is
 // refused (rrTargetGone) before anything changes (docs/commands.md, Changing a command's
 // arguments).
+//
+// CHANGE: BUGFIX - Each script key's count (TScriptKey.Count) is appended after all of that,
+// one integer per key, so that a command with the three-integer key from before still decodes
+// and matches as it did. A count that differs is refused (rrTargetGone).
 interface
 uses
   aCommands,
@@ -42,28 +46,40 @@ procedure RunScriptsAuxiliaryCode;
 procedure AddScriptIndex(var Command: TPlayerCommand; Script: TScript);
 // Appends the script's key (three integers; a nil script has one too).
 procedure AddScriptKey(var Command: TPlayerCommand; Script: TScript);
+// CHANGE: BUGFIX - Appends the key's count (TScriptKey.Count), after everything else the
+// command carries, so that the integers before it stay where commands from before had them.
+procedure AddScriptCount(var Command: TPlayerCommand; Script: TScript);
 // The script the command names: by the key at KeyArg when the command has it, else by the
-// index at IndexArg (a log from before). AllowNone: the command may name no script (nil).
+// index at IndexArg (a log from before). The count is at CountArg when the command has it;
+// without it the key matches as before. AllowNone: the command may name no script (nil).
 // Raises ECommandRefused (rrTargetGone) when the script is not there.
 function ScriptArgument(
     const Command: TPlayerCommand;
-    IndexArg, KeyArg: Integer;
+    IndexArg, KeyArg, CountArg: Integer;
     AllowNone: Boolean
 ): TScript;
 // Appends the key of an entry of ScriptDialogInjections or ScriptDialogOverrides (five
 // integers).
 procedure AddInjectionKey(var Command: TPlayerCommand; Injection: PScriptDialogInjection);
 procedure AddOverrideKey(var Command: TPlayerCommand; Entry: PScriptDialogOverride);
+// CHANGE: BUGFIX - Appends the count of the entry's script key, at the end, as AddScriptCount.
+procedure AddInjectionCount(var Command: TPlayerCommand; Injection: PScriptDialogInjection);
+procedure AddOverrideCount(var Command: TPlayerCommand; Entry: PScriptDialogOverride);
 // The injected answer the command names: by the key at KeyArg when the command has it, else
-// by the index at IndexArg. Raises ECommandRefused (rrTargetGone) when it is not there.
+// by the index at IndexArg; the count of its script key at CountArg when the command has it.
+// Raises ECommandRefused (rrTargetGone) when it is not there.
 function InjectionArgument(
     const Command: TPlayerCommand;
-    IndexArg, KeyArg: Integer
+    IndexArg, KeyArg, CountArg: Integer
 ): PScriptDialogInjection;
-// The override the command names by the key at KeyArg, or, in a log from before, the one the
-// screens select (SelectedDialogOverride). Raises ECommandRefused (rrTargetGone) when there is
-// none (the list was read at [0] without a check) or its script has ended.
-function OverrideArgument(const Command: TPlayerCommand; KeyArg: Integer): PScriptDialogOverride;
+// The override the command names by the key at KeyArg (the count at CountArg when the
+// command has it), or, in a log from before, the one the screens select
+// (SelectedDialogOverride). Raises ECommandRefused (rrTargetGone) when there is none (the list
+// was read at [0] without a check) or its script has ended.
+function OverrideArgument(
+    const Command: TPlayerCommand;
+    KeyArg, CountArg: Integer
+): PScriptDialogOverride;
 implementation
 uses
   SysUtils,
@@ -89,6 +105,20 @@ begin
   AddInt(Command, Key.Ordinal);
 end;
 
+procedure AddScriptCount(var Command: TPlayerCommand; Script: TScript);
+begin
+  AddInt(Command, ScriptKeyOf(Script).Count);
+end;
+
+// The count at CountArg, or -1 (any) in a command from before, which has no integer there.
+function CountArgument(const Command: TPlayerCommand; CountArg: Integer): Integer;
+begin
+  if Length(Command.Ints) > CountArg then
+    Result := IntArg(Command, CountArg)
+  else
+    Result := -1;
+end;
+
 procedure Refuse(const Command: TPlayerCommand; const Text: AnsiString);
 begin
   raise ECommandRefused.CreateReason(rrTargetGone, CommandKindName(Command.Kind) + ' ' + Text);
@@ -96,7 +126,7 @@ end;
 
 function ScriptArgument(
     const Command: TPlayerCommand;
-    IndexArg, KeyArg: Integer;
+    IndexArg, KeyArg, CountArg: Integer;
     AllowNone: Boolean
 ): TScript;
 var
@@ -109,6 +139,7 @@ begin
     Key.HumanId := IntArg(Command, KeyArg);
     Key.NameHash := IntArg(Command, KeyArg + 1);
     Key.Ordinal := IntArg(Command, KeyArg + 2);
+    Key.Count := CountArgument(Command, CountArg);
     Result := FindScriptByKey(Key, Found);
     if not Found then
       Refuse(Command, 'names a script that is not there');
@@ -136,11 +167,12 @@ begin
   AddInt(Command, Key.Ordinal);
 end;
 
-function EntryKeyArg(const Command: TPlayerCommand; KeyArg: Integer): TDialogEntryKey;
+function EntryKeyArg(const Command: TPlayerCommand; KeyArg, CountArg: Integer): TDialogEntryKey;
 begin
   Result.Script.HumanId := IntArg(Command, KeyArg);
   Result.Script.NameHash := IntArg(Command, KeyArg + 1);
   Result.Script.Ordinal := IntArg(Command, KeyArg + 2);
+  Result.Script.Count := CountArgument(Command, CountArg);
   Result.Hash := IntArg(Command, KeyArg + 3);
   Result.Ordinal := IntArg(Command, KeyArg + 4);
 end;
@@ -155,15 +187,25 @@ begin
   AddEntryKey(Command, OverrideKeyOf(Entry));
 end;
 
+procedure AddInjectionCount(var Command: TPlayerCommand; Injection: PScriptDialogInjection);
+begin
+  AddInt(Command, InjectionKeyOf(Injection).Script.Count);
+end;
+
+procedure AddOverrideCount(var Command: TPlayerCommand; Entry: PScriptDialogOverride);
+begin
+  AddInt(Command, OverrideKeyOf(Entry).Script.Count);
+end;
+
 function InjectionArgument(
     const Command: TPlayerCommand;
-    IndexArg, KeyArg: Integer
+    IndexArg, KeyArg, CountArg: Integer
 ): PScriptDialogInjection;
 var
   Index: Integer;
 begin
   if Length(Command.Ints) >= KeyArg + 5 then
-    Result := FindInjectionByKey(EntryKeyArg(Command, KeyArg))
+    Result := FindInjectionByKey(EntryKeyArg(Command, KeyArg, CountArg))
   else
   begin
     Result := nil;
@@ -177,20 +219,23 @@ begin
     Refuse(Command, 'names a missing dialog injection');
 end;
 
-function OverrideArgument(const Command: TPlayerCommand; KeyArg: Integer): PScriptDialogOverride;
+function OverrideArgument(
+    const Command: TPlayerCommand;
+    KeyArg, CountArg: Integer
+): PScriptDialogOverride;
 begin
   if Length(Command.Ints) >= KeyArg + 5 then
-    Result := FindOverrideByKey(EntryKeyArg(Command, KeyArg))
+    Result := FindOverrideByKey(EntryKeyArg(Command, KeyArg, CountArg))
   else
     Result := SelectedDialogOverride;
   if (Result = nil) or (Result.Script = nil) then
     Refuse(Command, 'names a missing dialog override');
 end;
 
-// Ints: the script's index, the value, then the script's key.
+// Ints: the script's index, the value, the script's key, then its count.
 function CommandScript(const Command: TPlayerCommand): TScript;
 begin
-  Result := ScriptArgument(Command, 0, 2, False);
+  Result := ScriptArgument(Command, 0, 2, 5, False);
   CurrentScript := Result;
 end;
 
@@ -214,6 +259,7 @@ begin
   AddScriptIndex(Command, CurrentScript);
   AddInt(Command, Value);
   AddScriptKey(Command, CurrentScript);
+  AddScriptCount(Command, CurrentScript);
   Command.Text := Text;
   SubmitCommand(Command);
 end;

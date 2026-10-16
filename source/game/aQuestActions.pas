@@ -195,9 +195,15 @@ end;
 procedure ExecuteSetQuestVariables(const Command: TPlayerCommand);
 begin
   // CHANGE: BUGFIX - The script by its key after the values; a log from before names it by
-  // its index only (aDialogActions.ScriptArgument).
+  // its index only (aDialogActions.ScriptArgument). CHANGE: BUGFIX - The key's count follows it.
   ApplyQuestVariables(
-      ScriptArgument(Command, 0, 1 + QuestVariableCount(Command), True),
+      ScriptArgument(
+          Command,
+          0,
+          1 + QuestVariableCount(Command),
+          4 + QuestVariableCount(Command),
+          True
+      ),
       Command
   );
 end;
@@ -226,7 +232,10 @@ begin
     AddInt(Command, Values[I]);
   end;
   if LocalPlayer <> nil then
+  begin
     AddScriptKey(Command, Script);
+    AddScriptCount(Command, Script);
+  end;
   // With no player, or a script the command cannot name, this runs unrecorded.
   if (LocalPlayer = nil) or ((Script <> nil) and (Command.Ints[0] < 0)) then
     ApplyQuestVariables(Script, Command)
