@@ -72,6 +72,10 @@ TRADE_KINDS = {
     "PayForModernization", "BuyPirateNodes", "BuySatellite", "Invest", "BuySpecialShip",
     "BuildPirateShip", "BuyMap",
 }  # fmt: skip
+# The ship screen's sales: a host relays their effect (RelayedSale), never the sale itself
+# (docs/network.md, Trades).
+SHIP_SCREEN_SALES = {"SellHeld", "SellHoldInventory", "SellHoldArtefact", "SellHoldGoods", "SellStoredItem"}
+RELAYED_KINDS = (TRADE_KINDS - SHIP_SCREEN_SALES) | {"RelayedSale"}
 NET_SHOP_DAYS = 3
 # A networked process that runs longer than this has hung.
 NET_TIMEOUT = 600
@@ -822,8 +826,11 @@ def check_network_shop(args, binary: Path) -> tuple[bool, list[str]]:
     longer shows X; the host's own purchase of X, from its grid as it was, is refused (item-gone)
     and the host's grid was rebuilt and its screen told. Net1 buys a good and sells it back, and
     Net2 sees the planet's stock go down and up again from the relays. Net1 sells an item from
-    the ship screen: the three hold commands before the sale apply with it, in order. Net2's
-    purchase of X is refused (item-gone) while it waits for it. Only trades are relayed. A
+    the ship screen: the three hold commands before the sale apply with it, in order; it also sells
+    an item from its storage. Both sales reach Net2 as their effects (RelayedSale) before any
+    state: the items are back in the shop, Net2's grid shows them, and Net1 no longer has them on
+    Net2's copy. Net2's purchase of X is refused (item-gone) while it waits for it. Only trades
+    are relayed, and a ship screen sale only as its effect. A
     purchase Net2 sends right after its end turn applies after that day. Every client state has
     the host's hash. Net1 goes through a government dialogue before buying X: the host applies
     it with the purchase while its own script dialogue is open, and its own dialogue state (the
@@ -875,8 +882,21 @@ def check_network_shop(args, binary: Path) -> tuple[bool, list[str]]:
     relayed = net_lines(host_output, "net relayed ")
     ran = net_lines(net2, "net relayed command ran ")
     kinds = {line["kind"] for line in relayed} | {line["kind"] for line in ran}
-    if not relayed or not kinds <= TRADE_KINDS:
-        return False, [f"{label}: the host relayed {sorted(kinds - TRADE_KINDS) or 'nothing'}, not only trades"]
+    if not relayed or not kinds <= RELAYED_KINDS:
+        return False, [f"{label}: the host relayed {sorted(kinds - RELAYED_KINDS) or 'nothing'}, not only trades and sales' effects"]
+    sales = {line.get("sale") for line in relayed if line["human"] == id1 and line["kind"] == "RelayedSale"}
+    if not {"SellHeld", "SellStoredItem"} <= sales:
+        return False, [f"{label}: Net1's sales were not relayed as their effects: {relayed}"]
+    failed = [line for line in ran if line["ok"] != "1"]
+    if failed:
+        return False, [f"{label}: a relay failed on Net2: {failed}" + output_tail(net2)]
+    stored = net_lines(net1, "net client shop sold stored item=")
+    effect = net_lines(net2, "net client shop sale relay ")
+    if not stored or stored[0]["bought"] != "":
+        return False, [f"{label}: Net1 did not sell an item from its storage: {stored}" + output_tail(net1)]
+    if not effect or any(effect[0][key] != value for key, value in
+                         {"y-grid": "1", "y-owned": "0", "z-grid": "1", "z-owned": "0"}.items()):
+        return False, [f"{label}: Net1's sales did not reach Net2's shop before the state: {effect}" + output_tail(net2)]
     if not {"BuyEquipment", "TradeGoods"} <= {line["kind"] for line in relayed if line["human"] == id1}:
         return False, [f"{label}: Net1's purchases were not relayed: {relayed}"]
     sent = net_lines(net2, "net client shop sent after end turn ")
@@ -902,6 +922,8 @@ def check_network_shop(args, binary: Path) -> tuple[bool, list[str]]:
         "purchase of it is refused and its grid rebuilt",
         f"{label}: a sale of goods is seen by the other client; a sale from the ship screen applies with the 3 hold "
         f"commands before it; only trades are relayed ({', '.join(sorted(kinds))})",
+        f"{label}: a sale from the hand and one from the storage reach the other client's shop and grid as their "
+        "effects (RelayedSale) before the next state, and leave the seller's possessions there",
         f"{label}: a purchase sent while the day runs applies after it",
         f"{label}: a client's government dialogue applies with its purchase and leaves the host's own open "
         f"dialogue as it was ({dialogue[0]['checks']} checks, {dialogue[0]['remote']} dialogue commands)",

@@ -80,6 +80,9 @@ const
   ckExchangeAwards = 251;
   ckChangeAwardVisibleCount = 252;
   ckCheckHeldUsability = 253;
+  // CHANGE: ENHANCEMENT - The self-contained form of a sale a host relays (RelayedSaleOf);
+  // relay only (aCommands.RegisterRelayCommand).
+  ckRelayedSale = 254;
 const
   // Where a held item is used or installed (UseHeldGoodsOn, UseHeldItemOn,
   // InstallHeldMicroModule, TransferHeldFuel). A and B name the target: an equipment slot's
@@ -217,6 +220,16 @@ procedure CheckHeldUsability(const SlotTypes: array of Byte; HighlightRepairable
 procedure ShowAwards(Ship: TShip);
 procedure ExchangeAwards(Ship: TShip; First: Integer; Second: Integer);
 procedure ChangeAwardVisibleCount(Ship: TShip; Delta: Integer);
+
+// CHANGE: ENHANCEMENT - A sale on the ship screen (SellHeld, SellHoldInventory,
+// SellHoldArtefact, SellHoldGoods, SellStoredItem) runs on what the actor holds, which the hold
+// commands before it put there, and a host relays only the trade (docs/network.md, Trades). So
+// a host relays the sale's effect instead: RelayedSaleOf, right after the sale ran, gives a
+// RelayedSale of the same actor at Location (its shop location), with the actor's money after
+// the sale, the ids of the items the sale put into Location's equipment shop and the goods it
+// sold to Location's market; its Kind is ckNone when the sale put nothing there.
+function IsShipScreenSale(Kind: TCommandKind): Boolean;
+function RelayedSaleOf(const Command: TPlayerCommand; Location: TObject): TPlayerCommand;
 implementation
 uses
   Classes,
@@ -241,7 +254,8 @@ uses
   aScript,
   aSession,
   aShopStock,
-  aTranclucator;
+  aTranclucator,
+  SimEvents;
 
 // Moved from TfShip2.CanUseLocalStorage.
 function CanUseLocalStorage(Human: THuman): Boolean;
@@ -2594,6 +2608,32 @@ begin
   Result := DropBlock;
 end;
 
+var
+  // CHANGE: ENHANCEMENT - What the last ship screen sale put into its location (RelayedSaleOf):
+  // the items' ids, and the goods as pairs of the good and the count. Each sale's executor
+  // starts it empty.
+  SaleShopItemIds: array of Integer;
+  SaleGoods: array of Integer;
+
+procedure BeginSaleRecord;
+begin
+  SaleShopItemIds := nil;
+  SaleGoods := nil;
+end;
+
+procedure NoteSoldIntoShop(Item: TItem);
+begin
+  Insert(Integer(Item.Id), SaleShopItemIds, Length(SaleShopItemIds));
+end;
+
+procedure NoteSoldGoods(Good: Byte; Count: Integer);
+begin
+  if Count <= 0 then
+    Exit;
+  Insert(Good, SaleGoods, Length(SaleGoods));
+  Insert(Count, SaleGoods, Length(SaleGoods));
+end;
+
 // Moved from TfShip2.SellAllItems' SellItem, with the shop grid built again the way
 // OpenShopStock builds it. The screen sounds the sale.
 function SellItem(
@@ -2629,6 +2669,7 @@ begin
     P.CargoGoods[Ord(Item.ItemType)].Count := (Item as TGoods).Quantity;
     P.CargoGoods[Ord(Item.ItemType)].TotalCost := (Item as TGoods).Cost;
     P.SellGoodsToLocation(Byte(Item.ItemType), (Item as TGoods).Quantity);
+    NoteSoldGoods(Byte(Item.ItemType), (Item as TGoods).Quantity);
     SalePlaySound := True;
     P.CargoGoods[Ord(Item.ItemType)].Count := Count;
     P.CargoGoods[Ord(Item.ItemType)].TotalCost := Cost;
@@ -2664,6 +2705,7 @@ begin
         P.CurrentPlanet.EquipmentShop.Add(Item)
       else
         (P.DockedTo as TRuins).EquipmentShop.Add(Item);
+      NoteSoldIntoShop(Item);
       // CHANGE: BUGFIX - The actor's columns, not this machine's (THuman.ShopColumnCount).
       H.ShopColumnCount := Columns;
       BuildTemporaryShopSlotGrid(H);
@@ -2694,6 +2736,7 @@ begin
   Count := IntArg(Command, 0);
   Columns := IntArg(Command, 1);
   Price := 0;
+  BeginSaleRecord;
   if (H.SelectedHoldKind = phkEquipment) or (H.SelectedHoldKind = phkArtefact) then
   begin
     if (H.SelectedHoldItem is TCountableItem)
@@ -2759,6 +2802,7 @@ begin
         P.CurrentPlanet.EquipmentShop.Add(H.SelectedHoldItem)
       else
         (P.DockedTo as TRuins).EquipmentShop.Add(H.SelectedHoldItem);
+      NoteSoldIntoShop(H.SelectedHoldItem);
       // CHANGE: BUGFIX - The actor's columns, not this machine's (THuman.ShopColumnCount).
       H.ShopColumnCount := Columns;
       BuildTemporaryShopSlotGrid(H);
@@ -2782,6 +2826,7 @@ begin
     Inc(P.CargoGoods[H.SelectedGoodsIndex].Count, H.SelectedGoodsQuantity);
     Inc(P.CargoGoods[H.SelectedGoodsIndex].TotalCost, H.SelectedGoodsCost);
     P.SellGoodsToLocation(H.SelectedGoodsIndex, Count);
+    NoteSoldGoods(H.SelectedGoodsIndex, Count);
     H.SelectedHoldKind := phkEmpty;
   end;
   SalePrice := Price;
@@ -3172,6 +3217,7 @@ var
 begin
   H := ActorHuman(Command);
   P := Actor(Command);
+  BeginSaleRecord;
   I := H.PlayerHoldShip.Inventory.Count - 1;
   while I >= 0 do
   begin
@@ -3205,6 +3251,7 @@ var
   Item: TItem;
 begin
   H := ActorHuman(Command);
+  BeginSaleRecord;
   Index := IntArg(Command, 0);
   if (Index < 0) or (Index >= H.PlayerHoldShip.Artefacts.Count) then
     raise Exception.Create('SellHoldArtefact names a missing artefact');
@@ -3233,15 +3280,20 @@ var
   H: THuman;
   P: TPlayer;
   Good: Byte;
-  SavedCount, SavedCost: Integer;
+  SavedCount, SavedCost, Sold: Integer;
 begin
   H := ActorHuman(Command);
   P := Actor(Command);
   Good := IntArg(Command, 0);
+  BeginSaleRecord;
   SaleChanged := True;
   SalePlaySound := True;
   if P = H.PlayerHoldShip then
-    P.SellGoodsToLocation(Good, P.CargoGoods[Good].Count)
+  begin
+    SavedCount := P.CargoGoods[Good].Count;
+    P.SellGoodsToLocation(Good, SavedCount);
+    NoteSoldGoods(Good, SavedCount);
+  end
   else
   begin
     SavedCount := P.CargoGoods[Good].Count;
@@ -3250,7 +3302,9 @@ begin
     P.CargoGoods[Good].TotalCost := H.PlayerHoldShip.CargoGoods[Good].TotalCost;
     H.PlayerHoldShip.CargoGoods[Good].Count := 0;
     H.PlayerHoldShip.CargoGoods[Good].TotalCost := 0;
-    P.SellGoodsToLocation(Good, P.CargoGoods[Good].Count);
+    Sold := P.CargoGoods[Good].Count;
+    P.SellGoodsToLocation(Good, Sold);
+    NoteSoldGoods(Good, Sold);
     P.CargoGoods[Good].Count := SavedCount;
     P.CargoGoods[Good].TotalCost := SavedCost;
   end;
@@ -3274,6 +3328,7 @@ var
   Item: TItem;
 begin
   P := Actor(Command);
+  BeginSaleRecord;
   Index := IntArg(Command, 0);
   if (Index < 0) or (Index >= P.StorageEntries.Count) then
     raise Exception.Create('SellStoredItem names a missing storage entry');
@@ -3296,6 +3351,168 @@ begin
   AddInt(Command, PStorageEntry(LocalPlayer.StorageEntries[StorageIndex]).Item.Id);
   AddInt(Command, ShopVisibleColumnCount);
   SubmitTrade(Command);
+end;
+
+function IsShipScreenSale(Kind: TCommandKind): Boolean;
+begin
+  Result := (Kind = ckSellHeld)
+      or (Kind = ckSellHoldInventory)
+      or (Kind = ckSellHoldArtefact)
+      or (Kind = ckSellHoldGoods)
+      or (Kind = ckSellStoredItem);
+end;
+
+// RelayedSale: the location; the actor's money, the count of items and their ids, the count of
+// goods and the goods as pairs of the good and the count.
+function RelayedSaleOf(const Command: TPlayerCommand; Location: TObject): TPlayerCommand;
+var
+  I: Integer;
+begin
+  Result := Default(TPlayerCommand);
+  if not IsShipScreenSale(Command.Kind)
+      or (Location = nil)
+      or ((Length(SaleShopItemIds) = 0) and (Length(SaleGoods) = 0)) then
+    Exit;
+  Result.Kind := ckRelayedSale;
+  Result.Actor := Command.Actor;
+  AddRef(Result, Location);
+  AddInt(Result, Actor(Command).Money);
+  AddInt(Result, Length(SaleShopItemIds));
+  for I := 0 to High(SaleShopItemIds) do
+    AddInt(Result, SaleShopItemIds[I]);
+  AddInt(Result, Length(SaleGoods) div 2);
+  for I := 0 to High(SaleGoods) do
+    AddInt(Result, SaleGoods[I]);
+end;
+
+// The item with that id on Ship, as equipment (not its hull) or an artefact. Take: it leaves
+// the ship, unequipped first, as the ship screen's Take commands take it.
+function ShipSaleItem(Ship: TShip; Id: Integer; Take: Boolean): TItem;
+var
+  I: Integer;
+  Item: TItem;
+begin
+  Result := nil;
+  if Ship = nil then
+    Exit;
+  for I := 0 to Ship.Inventory.Count - 1 do
+  begin
+    Item := TItem(Ship.Inventory[I]);
+    if (Integer(Item.Id) <> Id) or (Item.ItemType = t_Hull) then
+      Continue;
+    if Take then
+    begin
+      if (Item is TEquipment) and (TEquipment(Item).EquippedFlag <> 0) then
+        Ship.UnequipItem(TEquipment(Item));
+      Ship.Inventory.Delete(Ship.Inventory.IndexOf(Item));
+      Ship.RebuildEquipmentCache;
+      Ship.RefreshDerivedStats(True);
+    end;
+    Exit(Item);
+  end;
+  for I := 0 to Ship.Artefacts.Count - 1 do
+  begin
+    Item := TItem(Ship.Artefacts[I]);
+    if Integer(Item.Id) <> Id then
+      Continue;
+    if Take then
+    begin
+      if (Item is TEquipment) and (TEquipment(Item).EquippedFlag <> 0) then
+        TEquipment(Item).Unequip;
+      Ship.Artefacts.Delete(Ship.Artefacts.IndexOf(Item));
+      Ship.RefreshDerivedStats(True);
+    end;
+    Exit(Item);
+  end;
+end;
+
+// The item with that id among what the human has: its ranger's equipment and artefacts, the
+// ship its screen edits, its storage, and the item it holds on the ship screen. Take: it is
+// taken from there.
+function HumanSaleItem(H: THuman; P: TPlayer; Id: Integer; Take: Boolean): TItem;
+var
+  I: Integer;
+  Entry: PStorageEntry;
+begin
+  Result := ShipSaleItem(P, Id, Take);
+  if (Result = nil) and (H.PlayerHoldShip <> P) then
+    Result := ShipSaleItem(H.PlayerHoldShip, Id, Take);
+  if Result <> nil then
+    Exit;
+  for I := 0 to P.StorageEntries.Count - 1 do
+  begin
+    Entry := P.StorageEntries[I];
+    if (Entry.Item = nil) or (Integer(Entry.Item.Id) <> Id) then
+      Continue;
+    Result := Entry.Item;
+    if Take then
+    begin
+      P.StorageEntries.Delete(I);
+      Entry.LocationOwner := nil;
+      Entry.Item := nil;
+      Dispose(Entry);
+    end;
+    Exit;
+  end;
+  if (H.SelectedHoldKind in [phkEquipment, phkArtefact])
+      and (H.SelectedHoldItem <> nil)
+      and (Integer(H.SelectedHoldItem.Id) = Id) then
+  begin
+    Result := H.SelectedHoldItem;
+    if Take then
+    begin
+      H.SelectedHoldItem := nil;
+      H.SelectedHoldKind := phkEmpty;
+    end;
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - Runs a host's relay of another human's ship screen sale (RelayedSaleOf,
+// docs/network.md, Trades) on this copy: the items go from wherever the actor has them here
+// into the location's equipment shop, the goods to its market, and the actor's money is the
+// host's. A copy where the actor is not at the location, or lacks an item, changes nothing:
+// the relay raises, the client logs it and drops it, and the next state fixes the copy.
+procedure ExecuteRelayedSale(const Command: TPlayerCommand);
+var
+  H: THuman;
+  P: TPlayer;
+  Location: TObject;
+  Shop: TList;
+  I, Count, GoodsAt, GoodsCount: Integer;
+  Item: TItem;
+begin
+  H := ActorHuman(Command);
+  P := Actor(Command);
+  Location := RefObject(Command, 0);
+  Shop := ShopStockOf(Location);
+  if (Shop = nil) or (HumanShopLocation(H) <> Location) then
+    raise Exception.Create('RelayedSale: the actor is not at the location here');
+  Count := IntArg(Command, 1);
+  for I := 0 to Count - 1 do
+    if HumanSaleItem(H, P, IntArg(Command, 2 + I), False) = nil then
+      raise Exception.Create(
+          Format('RelayedSale: item %d is not the actor''s here', [IntArg(Command, 2 + I)])
+      );
+  for I := 0 to Count - 1 do
+  begin
+    Item := HumanSaleItem(H, P, IntArg(Command, 2 + I), True);
+    if Item is TWeapon then
+      TWeapon(Item).Target := nil;
+    Shop.Add(Item);
+  end;
+  GoodsAt := 2 + Count;
+  GoodsCount := IntArg(Command, GoodsAt);
+  for I := 0 to GoodsCount - 1 do
+    Inc(
+        P.GetLocationGoodsEntry(IntArg(Command, GoodsAt + 1 + 2 * I)).Count,
+        IntArg(Command, GoodsAt + 2 + 2 * I)
+    );
+  P.SetMoney(IntArg(Command, 0));
+  // Every grid there that no longer shows the list is rebuilt, the actor's too, and the local
+  // screen is told; it is told of the goods as well.
+  ShopStockChanged(Location);
+  if (GoodsCount > 0) and (LocalHuman <> nil) and (HumanShopLocation(LocalHuman) = Location) then
+    NotifyShopStockChanged;
 end;
 
 var
@@ -3956,6 +4173,7 @@ initialization
   RegisterCommand(ckSellHoldArtefact, 'SellHoldArtefact', @ExecuteSellHoldArtefact, True);
   RegisterCommand(ckSellHoldGoods, 'SellHoldGoods', @ExecuteSellHoldGoods, True);
   RegisterCommand(ckSellStoredItem, 'SellStoredItem', @ExecuteSellStoredItem, True);
+  RegisterRelayCommand(ckRelayedSale, 'RelayedSale', @ExecuteRelayedSale);
   RegisterCommand(ckTakeAllFromStorage, 'TakeAllFromStorage', @ExecuteTakeAllFromStorage);
   RegisterCommand(ckPutAllIntoStorage, 'PutAllIntoStorage', @ExecutePutAllIntoStorage);
   RegisterCommand(ckSortStorage, 'SortStorage', @ExecuteSortStorage);

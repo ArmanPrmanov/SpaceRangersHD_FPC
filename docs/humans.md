@@ -479,7 +479,9 @@ named.
   sorting it (`RefreshShopView`), and tells the local screen
   (`SimEvents.NotifyShopStockChanged`, which rebuilds the equipment shop's
   controls), also when a host applies a client's trade or a client runs a trade
-  its host relayed ([network.md](network.md), Trades). The purchase and sale commands, a grid that is built (it sorts the
+  its host relayed ([network.md](network.md), Trades; a ship screen sale comes
+  as its effect, `RelayedSale`, which moves the sold items from the seller's
+  possessions into the list). The purchase and sale commands, a grid that is built (it sorts the
   list), the scripts' `AddItemToShop`/`GetItemFromShop`, the daily restocking of
   planets and stations, a bank's deposit prize and a pirate ship built from
   shop parts call it. An NPC that buys at a shop closes and builds the grids

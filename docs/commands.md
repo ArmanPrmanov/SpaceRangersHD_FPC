@@ -129,6 +129,14 @@ the screen.
 | `aStationActions` | `PayForModernization` (520), `BuyPirateNodes` (532), `BuySatellite` (552), `Invest` (565), `BuySpecialShip` (574), `BuildPirateShip` (580) |
 | `aPlanetActions` | `BuyMap` (413) |
 
+`RelayedSale` (254, `aHoldActions`) is no player's command: a host relays a
+ship screen sale as it (the location, the actor's money, the items put into the
+shop and the goods sold; [network.md](network.md), Trades), because the sale
+runs on what the hold commands before it, which are not relayed, put in the
+actor's hand. It is registered with `RegisterRelayCommand`: only
+`ExecuteRelayedCommand` runs it, `SubmitCommand` raises for it (so the command
+log never records it), and a host refuses it from a peer.
+
 Not trades, though close:
 
 - The Dominion's orders (`RelocateDominion`, `OrderPirateAmbush`,

@@ -469,14 +469,15 @@ begin
   SubmitCommand(Command);
 end;
 
-// The first two items of the planet's shop, in its order, that the shop takes back.
-function PickShopItems(Planet: TPlanet; out X, Y: TItem): Boolean;
+// The first three items of the planet's shop, in its order, that the shop takes back.
+function PickShopItems(Planet: TPlanet; out X, Y, Z: TItem): Boolean;
 var
   I: Integer;
   Item: TItem;
 begin
   X := nil;
   Y := nil;
+  Z := nil;
   for I := 0 to Planet.EquipmentShop.Count - 1 do
   begin
     Item := TItem(Planet.EquipmentShop[I]);
@@ -484,13 +485,45 @@ begin
       Continue;
     if X = nil then
       X := Item
+    else if Y = nil then
+      Y := Item
     else
     begin
-      Y := Item;
+      Z := Item;
       Exit(True);
     end;
   end;
   Result := False;
+end;
+
+// CHANGE: ENHANCEMENT - Whether a human other than the local one has the item with that id:
+// its ranger's equipment, artefacts or storage, or the item it holds on the ship screen.
+function OwnedByOtherHuman(Id: Integer): Boolean;
+var
+  I, J: Integer;
+  H: THuman;
+  P: TPlayer;
+begin
+  Result := False;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    H := Session.Humans[I];
+    P := H.Player;
+    if (H = LocalHuman) or (P = nil) then
+      Continue;
+    if (H.SelectedHoldItem <> nil) and (Integer(H.SelectedHoldItem.Id) = Id) then
+      Exit(True);
+    for J := 0 to P.Inventory.Count - 1 do
+      if Integer(TItem(P.Inventory[J]).Id) = Id then
+        Exit(True);
+    for J := 0 to P.Artefacts.Count - 1 do
+      if Integer(TItem(P.Artefacts[J]).Id) = Id then
+        Exit(True);
+    for J := 0 to P.StorageEntries.Count - 1 do
+      if (PStorageEntry(P.StorageEntries[J]).Item <> nil)
+          and (Integer(PStorageEntry(P.StorageEntries[J]).Item.Id) = Id) then
+        Exit(True);
+  end;
 end;
 
 // The first good the planet sells.
@@ -518,17 +551,19 @@ end;
 
 // --sim-net-shop, a client's first day. Net1 buys the item X, buys a good and sells it back,
 // buys the item Y and sells it back from the ship screen (three hold commands before the sale),
-// and ends its turn. Net2 waits until the host's relays of Net1's trades have run here, one at a
-// time: its grid no longer shows X, and the planet's stock of the good went down and up again;
-// then it buys X, which the host refuses at once (item-gone), ends its turn, and right after
+// buys the item Z, puts it into its storage and sells it from there, and ends its turn. Net2
+// waits until the host's relays of Net1's trades have run here, one at a time: its grid no
+// longer shows X, the planet's stock of the good went down and up again, and Y and Z left the
+// shop and came back (the sales' relays, RelayedSale), before any state; then it buys X, which the host refuses at once (item-gone), ends its turn, and right after
 // sends a purchase of the good without waiting for it, which the host applies after the day.
 function PlayShopTurn(Client: TNetClient; const Name: AnsiString): Boolean;
 var
   H: THuman;
   P: TPlayer;
   Planet: TPlanet;
-  X, Y: TItem;
-  XId, Good, Before, Low, Count, Slot: Integer;
+  X, Y, Z: TItem;
+  XId, YId, ZId, Good, Before, Low, Count, Slot: Integer;
+  YGone, ZGone: Boolean;
   Reason: AnsiString;
   Deadline: QWord;
   Command: TPlayerCommand;
@@ -544,12 +579,14 @@ begin
   end;
   OpenShopFor(H);
   Good := PickGood(P);
-  if not PickShopItems(Planet, X, Y) or (Good < 0) then
+  if not PickShopItems(Planet, X, Y, Z) or (Good < 0) then
   begin
     Emit('net client shop failed: nothing to trade');
     Exit;
   end;
   XId := X.Id;
+  YId := Y.Id;
+  ZId := Z.Id;
   if Name = 'Net1' then
   begin
     // A government dialogue first, as the government screen runs it; the host applies it
@@ -566,7 +603,14 @@ begin
     Emit(Format('net client shop traded good=%d', [Good]));
     Reason := BuyShopItem(H, ShopSlotIndexOf(H, Y), Y);
     SellToShop(H, Y);
-    Emit(Format('net client shop sold item=%d bought=%s', [Y.Id, Reason]));
+    Emit(Format('net client shop sold item=%d bought=%s', [YId, Reason]));
+    if Reason = '' then
+    begin
+      Reason := BuyShopItem(H, ShopSlotIndexOf(H, Z), Z);
+      if Reason = '' then
+        SellFromStorage(H, Z);
+      Emit(Format('net client shop sold stored item=%d bought=%s', [ZId, Reason]));
+    end;
     EndTurnFor(H);
     Exit(Reason = '');
   end;
@@ -574,6 +618,8 @@ begin
   Low := Before;
   Count := Before;
   Slot := ShopSlotIndexOf(H, X);
+  YGone := False;
+  ZGone := False;
   Deadline := GetTickCount64 + StallTimeoutMs;
   repeat
     Client.Pump;
@@ -582,10 +628,18 @@ begin
       Count := P.GetLocationGoodsEntry(Good).Count;
       if Count < Low then
         Low := Count;
+      YGone := YGone or (FindShopStockItem(Planet, YId) = nil);
+      ZGone := ZGone or (FindShopStockItem(Planet, ZId) = nil);
     end
     else
       NetInboxEvent.WaitFor(5);
-    if (FindShopStockItem(Planet, XId) = nil) and (Low < Before) and (Count = Before) then
+    if (FindShopStockItem(Planet, XId) = nil)
+        and (Low < Before)
+        and (Count = Before)
+        and YGone
+        and ZGone
+        and (FindShopStockItem(Planet, YId) <> nil)
+        and (FindShopStockItem(Planet, ZId) <> nil) then
       Break;
     if GetTickCount64 > Deadline then
     begin
@@ -597,6 +651,15 @@ begin
       Format(
           'net client shop relay grid-shows-x=%d goods-before=%d low=%d after=%d',
           [Ord(GridShowsItem(H, XId)), Before, Low, Count]
+      )
+  );
+  // The sales came back as their effects, before any state: the items are in the shop and the
+  // grid shows them, and Net1 no longer has them here.
+  Emit(
+      Format(
+          'net client shop sale relay y-shop=1 y-grid=%d y-owned=%d z-shop=1 z-grid=%d z-owned=%d',
+          [Ord(GridShowsItem(H, YId)), Ord(OwnedByOtherHuman(YId)), Ord(GridShowsItem(H, ZId)),
+              Ord(OwnedByOtherHuman(ZId))]
       )
   );
   Reason := BuyShopItem(H, Slot, X);

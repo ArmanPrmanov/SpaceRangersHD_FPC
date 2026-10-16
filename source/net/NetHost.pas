@@ -239,6 +239,7 @@ implementation
 uses
   aEFilm,
   aGalaxy,
+  aHoldActions,
   aObjectRefs,
   aPlanet,
   aPlayerActions,
@@ -395,7 +396,8 @@ end;
 // the host's (docs/humans.md, Session flags; docs/network.md, Commands). A peer's is refused.
 function IsHostOnlyCommand(const Command: TPlayerCommand): Boolean;
 begin
-  Result := Command.Kind = ckSetSessionFlag;
+  // CHANGE: ENHANCEMENT - A relay's form (aCommands.IsRelayOnlyCommand) comes only from a host.
+  Result := (Command.Kind = ckSetSessionFlag) or IsRelayOnlyCommand(Command.Kind);
 end;
 
 procedure TNetHost.Refuse(Peer: THostPeer; const Reason: WideString);
@@ -1055,6 +1057,8 @@ var
   Payload: TBufEC;
   I: Integer;
   Peer: THostPeer;
+  Relayed: TPlayerCommand;
+  Sale: AnsiString;
 begin
   if FApplyingQueues or not IsTradeCommand(Command.Kind) then
     Exit;
@@ -1064,6 +1068,26 @@ begin
   Location := HumanShopLocation(Actor);
   if Location = nil then
     Exit;
+  // CHANGE: BUGFIX - A ship screen sale runs on what the actor holds, which the hold commands
+  // before it (not relayed) put there, so it failed on the other clients. Its effect goes
+  // instead (aHoldActions.RelayedSaleOf), or nothing when it put nothing into the location.
+  Relayed := Command;
+  Sale := '';
+  if IsShipScreenSale(Command.Kind) then
+  begin
+    Relayed := RelayedSaleOf(Command, Location);
+    Sale := ' sale=' + CommandKindName(Command.Kind);
+    if Relayed.Kind = ckNone then
+    begin
+      NetLog(
+          Format(
+              'no relay human=%d kind=%s: the sale put nothing into the location',
+              [Actor.Id, CommandKindName(Command.Kind)]
+          )
+      );
+      Exit;
+    end;
+  end;
   Payload := nil;
   try
     for I := 0 to FPeers.Count - 1 do
@@ -1077,13 +1101,13 @@ begin
       if Payload = nil then
       begin
         Payload := TBufEC.Create;
-        EncodeRelayCommand(Actor.Id, Command, Payload);
+        EncodeRelayCommand(Actor.Id, Relayed, Payload);
       end;
       FThread.Send(Peer.PeerId, nkRelayCommand, Payload);
       NetLog(
           Format(
-              'relayed human=%d kind=%s to=%d',
-              [Actor.Id, CommandKindName(Command.Kind), Peer.HumanId]
+              'relayed human=%d kind=%s to=%d%s',
+              [Actor.Id, CommandKindName(Relayed.Kind), Peer.HumanId, Sale]
           )
       );
     end;

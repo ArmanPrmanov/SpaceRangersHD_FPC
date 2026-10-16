@@ -96,6 +96,9 @@ procedure PlayHumanTurn(Human: THuman; Day, Index: Integer; var Plan: AnsiString
 function ShopSlotIndexOf(Human: THuman; Item: TItem): Integer;
 function BuyShopItem(Human: THuman; Slot: Integer; Item: TItem): AnsiString;
 procedure SellToShop(Human: THuman; Item: TItem);
+// CHANGE: ENHANCEMENT - Human puts Item from its hold into its storage and sells it from there,
+// as the ship screen does; the ship screen is open (SellToShop left it open).
+procedure SellFromStorage(Human: THuman; Item: TItem);
 function IsTradedBack(Item: TItem): Boolean;
 var
   // CHANGE: ENHANCEMENT - PlayHumanTurn buys one unit of the good with the smallest stock the
@@ -1392,6 +1395,41 @@ begin
   SubmitFor(Human, Command);
   Command := NewCommand(ckSellHeld);
   AddInt(Command, 1);
+  AddInt(Command, ShopVisibleColumnCount);
+  SubmitFor(Human, Command);
+end;
+
+procedure SellFromStorage(Human: THuman; Item: TItem);
+var
+  Command: TPlayerCommand;
+  I, Index, Slot: Integer;
+  Owner: TObject;
+begin
+  SubmitKindFor(Human, ckRefreshHoldView);
+  Index := -1;
+  for I := 0 to Human.PlayerHoldEntries.Count - 1 do
+    if TPlayerHoldUnit(Human.PlayerHoldEntries[I]).Item = Item then
+      Index := I;
+  if Index < 0 then
+    raise Exception.Create('The item to store is not in the hold');
+  Command := NewCommand(ckTakeHoldEntry);
+  AddInt(Command, Index);
+  AddInt(Command, 0);
+  SubmitFor(Human, Command);
+  Owner := GetLocalStorageOwner(Human);
+  Slot := 0;
+  while Human.Player.FindStorageIndexByLocationAndSlot(Owner, Slot) >= 0 do
+    Inc(Slot);
+  Command := NewCommand(ckStoreHeld);
+  AddInt(Command, Slot);
+  AddInt(Command, 1);
+  SubmitFor(Human, Command);
+  Index := Human.Player.FindStorageIndexByLocationAndSlot(Owner, Slot);
+  if (Index < 0) or (PStorageEntry(Human.Player.StorageEntries[Index]).Item <> Item) then
+    raise Exception.Create('The item did not go into the storage');
+  Command := NewCommand(ckSellStoredItem);
+  AddInt(Command, Index);
+  AddInt(Command, Item.Id);
   AddInt(Command, ShopVisibleColumnCount);
   SubmitFor(Human, Command);
 end;

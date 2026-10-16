@@ -133,6 +133,11 @@ procedure RegisterCommand(
     Trade: Boolean = False
 );
 function IsTradeCommand(Kind: TCommandKind): Boolean;
+// CHANGE: ENHANCEMENT - A kind only a host's relay carries (docs/network.md, Trades: a sale's
+// self-contained form): ExecuteRelayedCommand runs it, SubmitCommand refuses it, so no player
+// submits it and the command log never records it, and a host refuses it from a peer.
+procedure RegisterRelayCommand(Kind: TCommandKind; const Name: AnsiString; Executor: TCommandExecutor);
+function IsRelayOnlyCommand(Kind: TCommandKind): Boolean;
 // Runs the command and tells the hooks.
 procedure SubmitCommand(const Command: TPlayerCommand);
 // CHANGE: ENHANCEMENT - SubmitCommand for a trade the UI submits: a refusal
@@ -164,6 +169,7 @@ var
   Executors: array[0..MaximumCommandKind] of TCommandExecutor;
   KindNames: array[0..MaximumCommandKind] of AnsiString;
   TradeKinds: array[0..MaximumCommandKind] of Boolean;
+  RelayOnlyKinds: array[0..MaximumCommandKind] of Boolean;
 threadvar
   // The commands SubmitCommand is executing on this thread.
   SubmitDepth: Integer;
@@ -422,6 +428,17 @@ begin
   Result := (Kind <= MaximumCommandKind) and TradeKinds[Kind];
 end;
 
+procedure RegisterRelayCommand(Kind: TCommandKind; const Name: AnsiString; Executor: TCommandExecutor);
+begin
+  RegisterCommand(Kind, Name, Executor);
+  RelayOnlyKinds[Kind] := True;
+end;
+
+function IsRelayOnlyCommand(Kind: TCommandKind): Boolean;
+begin
+  Result := (Kind <= MaximumCommandKind) and RelayOnlyKinds[Kind];
+end;
+
 function CommandRunning: Boolean;
 begin
   Result := SubmitDepth > 0;
@@ -460,6 +477,9 @@ procedure SubmitCommand(const Command: TPlayerCommand);
 var
   Outermost, Sent: Boolean;
 begin
+  // CHANGE: ENHANCEMENT - A relay's form runs only from the relay (ExecuteRelayedCommand).
+  if IsRelayOnlyCommand(Command.Kind) then
+    raise Exception.Create(CommandKindName(Command.Kind) + ' runs only from a host''s relay');
   // On the turn thread a command is part of the job that runs it, not something a human did.
   if InTurnJob then
   begin

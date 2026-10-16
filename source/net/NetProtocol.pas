@@ -17,7 +17,8 @@ const
   // join chooses its character on the new-game screen). 5: Film carries zstd bytes.
   // 6: Command carries the client's number for it, and CommandResult. 7: a host applies a
   // trade as it arrives and answers it (CommandResult, also when applied), and RelayCommand.
-  ProtocolVersion = 7;
+  // 8: RelayCommand carries a ship screen sale as its effect (aHoldActions.ckRelayedSale).
+  ProtocolVersion = 8;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 
