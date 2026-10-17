@@ -100,6 +100,10 @@ type
     // Tests): the host's clients join at its human's planet, and on their first day play a
     // scripted shop turn instead of PlayHumanTurn.
     NetShop: Boolean;
+    // CHANGE: ENHANCEMENT - A client takes its end turn back before the host's first day and
+    // ends it again, and tries the same once the second day has begun (HeadlessNet; docs/
+    // network.md, Tests).
+    NetCancelEndTurn: Boolean;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 // Shared with the networked runner (HeadlessNet).

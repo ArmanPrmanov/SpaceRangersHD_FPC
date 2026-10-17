@@ -111,6 +111,8 @@ type
     // session (docs/network.md, Joining), by human id.
     FTokenHumans: array of Integer;
     FTokens: array of QWord;
+    // CHANGE: ENHANCEMENT - The EndTurns taken out of the queues by the peers' CancelEndTurn.
+    FCancelledEndTurns: Integer;
     function FindPeer(PeerId: Integer): THostPeer;
     // The human's token; with Issue, one is issued (NewToken) when it has none yet, at its
     // first Welcome in this session. 0: none.
@@ -150,6 +152,16 @@ type
     // The trades that wait in the queues, in Session.Humans order; with OrderedTrades, a
     // human's only once every human before it is ready.
     procedure ApplyWaitingTrades;
+    // CHANGE: ENHANCEMENT - A peer takes back its end turn (CancelEndTurn, docs/network.md,
+    // Waiting): before the day starts, its EndTurn for this day leaves its queue, so it is not
+    // ready any more, and the peer gets CommandResult (applied); the commands before and after
+    // the EndTurn stay queued. Once the day has begun (or has run) it is refused (rrTooLate).
+    // It is never queued or run here, so the command log does not record it, nor the EndTurn.
+    procedure CancelEndTurn(Peer: THostPeer; Sequence: Cardinal; const Command: TPlayerCommand);
+    // CHANGE: ENHANCEMENT - The day waits for the human: it holds the day and its peer has no
+    // EndTurn queued (the host's own: it holds the day), or it continues its travel and its peer
+    // lags behind. WaitingFor and Status (HoldsDay) say this.
+    function DayWaitsFor(Human: THuman): Boolean;
   public
     // Joins wait while this is set; the headless host sets it until every client is there,
     // so that the humans join in the same order every run (by name).
@@ -239,6 +251,8 @@ type
     property LastSerial: Integer read FSerial;
     // How long taking the last state took (checkpoint and hash).
     property LastTakeMs: Integer read FLastTakeMs;
+    // CHANGE: ENHANCEMENT - How many EndTurns the peers took back (CancelEndTurn), for the tests.
+    property CancelledEndTurns: Integer read FCancelledEndTurns;
   end;
 
 var
@@ -480,6 +494,9 @@ begin
           )
         else if IsHostOnlyCommand(Command) then
           RefuseHostOnlyCommand(Peer, Sequence, Command)
+        // CHANGE: ENHANCEMENT - Not queued: it takes the queued EndTurn back.
+        else if Command.Kind = ckCancelEndTurn then
+          CancelEndTurn(Peer, Sequence, Command)
         else
         begin
           I := Length(Peer.Queue);
@@ -967,7 +984,13 @@ begin
     else
       Status.Humans[I].Name := '';
     Status.Humans[I].Connected := Human.Connected;
-    Status.Humans[I].HoldsDay := HumanHoldsDay(Human);
+    // CHANGE: ENHANCEMENT - Whether the day waits for it: a peer whose EndTurn is queued (and
+    // not taken back) does not hold it, though its human has not ended the turn here yet. During
+    // the day (the turn thread sends the status in a remote dialogue) as the humans stand.
+    if FDayUnderWay then
+      Status.Humans[I].HoldsDay := HumanHoldsDay(Human)
+    else
+      Status.Humans[I].HoldsDay := DayWaitsFor(Human);
   end;
   Payload := TBufEC.Create;
   try
@@ -1019,23 +1042,27 @@ begin
   Result := True;
 end;
 
+function TNetHost.DayWaitsFor(Human: THuman): Boolean;
+var
+  Peer: THostPeer;
+begin
+  Peer := PeerOfHuman(FPeers, Human.Id);
+  if not HumanHoldsDay(Human) then
+    Result := (Peer <> nil) and LagsBehind(Peer, Human)
+  else
+    Result := (Peer = nil) or (Peer.EndTurnIndex < 0);
+end;
+
 function TNetHost.WaitingFor: AnsiString;
 var
   I: Integer;
   Human: THuman;
-  Peer: THostPeer;
 begin
   Result := '';
   for I := 0 to Session.Humans.Count - 1 do
   begin
     Human := Session.Humans[I];
-    Peer := PeerOfHuman(FPeers, Human.Id);
-    if not HumanHoldsDay(Human) then
-    begin
-      if (Peer = nil) or not LagsBehind(Peer, Human) then
-        Continue;
-    end
-    else if (Peer <> nil) and (Peer.EndTurnIndex >= 0) then
+    if not DayWaitsFor(Human) then
       Continue;
     if Result <> '' then
       Result := Result + ',';
@@ -1108,6 +1135,47 @@ begin
   Delete(Peer.Queue, 0, Index + 1);
   if Assigned(TradeHook) then
     TradeHook(Self, Peer.HumanId, Trade, True, Applied);
+end;
+
+procedure TNetHost.CancelEndTurn(Peer: THostPeer; Sequence: Cardinal; const Command: TPlayerCommand);
+var
+  Index: Integer;
+  Why: AnsiString;
+  Refusal: ECommandRefused;
+begin
+  // The day is checked first: in a remote dialogue the turn thread calls this.
+  Index := -1;
+  if FDayUnderWay or FApplyingQueues then
+    Why := 'the day has begun'
+  else
+  begin
+    Why := '';
+    Index := Peer.EndTurnIndex;
+    if Index < 0 then
+      Why := 'no end turn waits'
+    // The end turn of a day that has run since (the peer has not applied its state yet).
+    else if (Length(Command.Ints) > 0) and (Command.Ints[0] <> Galaxy.CurrentTurn) then
+      Why := 'that day has run';
+  end;
+  if Why <> '' then
+  begin
+    Refusal := ECommandRefused.CreateReason(rrTooLate, 'CancelEndTurn: ' + Why);
+    try
+      CommandFailed(Peer, Sequence, Command, Refusal);
+    finally
+      Refusal.Free;
+    end;
+    Exit;
+  end;
+  Delete(Peer.Queue, Index, 1);
+  Inc(FCancelledEndTurns);
+  NetLog(
+      Format(
+          'end turn cancelled human=%d seq=%d queued=%d ready=%d',
+          [Peer.HumanId, Sequence, Length(Peer.Queue), Ord(PeersReady)]
+      )
+  );
+  CommandApplied(Peer, Sequence, Command);
 end;
 
 procedure TNetHost.ApplyWaitingTrades;
@@ -1433,6 +1501,9 @@ begin
               else if Command.Kind = ckEndTurn then
                 // Not an answer: it waits for the next day with the rest of the queue.
                 Peer.Deferred.Add(TNetMessage.Create(Kind, Payload.Data, Payload.DataSize))
+              // CHANGE: ENHANCEMENT - The day has begun: refused.
+              else if Command.Kind = ckCancelEndTurn then
+                CancelEndTurn(Peer, Sequence, Command)
               else
               begin
                 Inc(Commands);

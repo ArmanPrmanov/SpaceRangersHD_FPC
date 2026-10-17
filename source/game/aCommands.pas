@@ -55,8 +55,9 @@ type
   // rrOfferGone: an offer the player accepted is no longer made (taken by another human, or
   // replaced); rrTargetGone: what the command acts on has changed since the player chose it;
   // rrNoRoom: the other side has no room for what the player sells; rrInUse: another human is
-  // using it (a shared ship's screen). A client of an older build reads a value it does not
-  // know as rrOther.
+  // using it (a shared ship's screen); rrTooLate: the day the command was for has begun (a
+  // client's CancelEndTurn, docs/network.md, Waiting). A client of an older build reads a value
+  // it does not know as rrOther.
   TRefusalReason = (
       rrOther = 0,
       rrOutOfStock = 1,
@@ -65,7 +66,8 @@ type
       rrOfferGone = 4,
       rrTargetGone = 5,
       rrNoRoom = 6,
-      rrInUse = 7
+      rrInUse = 7,
+      rrTooLate = 8
   );
   ECommandRefused = class(Exception)
     Reason: TRefusalReason;
@@ -198,6 +200,7 @@ begin
     rrTargetGone: Result := 'target-gone';
     rrNoRoom: Result := 'no-room';
     rrInUse: Result := 'in-use';
+    rrTooLate: Result := 'too-late';
   else
     Result := 'other';
   end;

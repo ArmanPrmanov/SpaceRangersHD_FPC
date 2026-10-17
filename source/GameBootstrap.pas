@@ -320,6 +320,9 @@ begin
     // CHANGE: ENHANCEMENT - Trades between humans at one planet (HeadlessNet).
     else if Argument = '--sim-net-shop' then
       Simulation.NetShop := True
+    // CHANGE: ENHANCEMENT - A client takes its end turn back (HeadlessNet).
+    else if Argument = '--sim-net-cancel-end-turn' then
+      Simulation.NetCancelEndTurn := True
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then

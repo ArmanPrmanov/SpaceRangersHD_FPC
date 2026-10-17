@@ -64,7 +64,7 @@ renumber a kind: the numbers are part of the log format.
 
 | Range | Unit |
 | --- | --- |
-| 0–99 | `aPlayerActions`: travel, orders, the day, session flags (42 `SetSessionFlag`), end turn (43 `EndTurn`, 45 `StopContinuing`), joining (44 `JoinHuman`), a disconnected human holding position (46 `HoldPosition`) |
+| 0–99 | `aPlayerActions`: travel, orders, the day, session flags (42 `SetSessionFlag`), end turn (43 `EndTurn`, 45 `StopContinuing`, 47 `CancelEndTurn`), joining (44 `JoinHuman`), a disconnected human holding position (46 `HoldPosition`) |
 | 100–199 | shops: equipment, goods, hangar |
 | 200–299 | the ship and hold screen (`fShip2`), awards (`fRewards`, 250–252) |
 | 300–399 | conversations (`fTalk`, script dialogs) |
@@ -154,6 +154,14 @@ actor's hand. It is registered with `RegisterRelayCommand`: only
 `ExecuteRelayedCommand` runs it, `SubmitCommand` raises for it (so the command
 log never records it), and a host refuses it from a peer.
 
+`CancelEndTurn` (47, `aPlayerActions`) takes an end turn back while the day
+waits for others: its executor clears the actor's `EndedTurn` and
+`ContinueUntilArrival`. The host's own runs as any command, after its
+`EndTurn`, and the log records both. A client's never runs on the host: the
+host takes the client's queued `EndTurn` out instead, so the log records
+neither, and refuses it (`rrTooLate`) once the day has begun. The client runs
+it only once the host has applied it ([network.md](network.md), Waiting).
+
 Not trades, though close:
 
 - The Dominion's orders (`RelocateDominion`, `OrderPirateAmbush`,
@@ -206,7 +214,7 @@ Not trades, though close:
 - An executor that refuses a command for a reason the player should hear
   raises `ECommandRefused` with a `TRefusalReason` (out of stock, not enough
   money, the item is gone, the offer is gone, the target has changed, no room,
-  another human is using it);
+  another human is using it, too late);
   a host tells the client why ([network.md](network.md), Commands). Where
   another human's command between days can change what a screen offered (a
   shared shop, a one-off offer, a station's order, a constellation's map), the

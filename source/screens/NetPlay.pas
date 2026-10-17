@@ -174,6 +174,9 @@ type
   // dialogue; nwJoin: a join waits for the host's state. CHANGE: ENHANCEMENT - nwReconnect: a
   // client that lost its host waits for the reconnect, outside a wait for the day.
   TNetWaitKind = (nwHostPeers, nwClientDay, nwClientState, nwHostTalk, nwJoin, nwReconnect);
+  // CHANGE: ENHANCEMENT - What a wait's Cancel does: nothing (no Cancel), end the reconnect, or
+  // take the local human's end turn back (docs/network.md, Waiting).
+  TNetWaitCancel = (nwcNone, nwcReconnect, nwcEndTurn);
 
   // A message box without buttons (a join's has Cancel) that closes by itself once what it
   // waits for has come.
@@ -456,12 +459,20 @@ begin
         if Client = nil then
           Exit(True);
         CollectFilms;
-        Result := (PendingFilm <> nil) or Client.HasState or not Client.Connected;
+        // CHANGE: ENHANCEMENT - The host took the end turn back.
+        Result :=
+            (PendingFilm <> nil)
+                or Client.HasState
+                or not Client.Connected
+                or (Client.EndTurnCancel = ncAccepted);
       end;
   else
     Result := (CurrentClient = nil) or CurrentClient.HasState or not CurrentClient.Connected;
   end;
 end;
+
+// CHANGE: ENHANCEMENT - The wait may take the local human's end turn back (below).
+function MayCancelEndTurn(Kind: TNetWaitKind): Boolean; forward;
 
 function WaitText(Kind: TNetWaitKind): WideString;
 begin
@@ -478,13 +489,68 @@ begin
   else
     Result := ClientWaitText;
   end;
+  // CHANGE: ENHANCEMENT - The Cancel takes the end turn back; a client's waits for the host's
+  // answer (docs/network.md, Waiting).
+  if MayCancelEndTurn(Kind) then
+    Result := Result + #13#10 + MultiplayerText('CancelEndTurn', 'Cancel: take your end turn back.')
+  else if (Kind = nwClientDay) and (NetRole = nrClient) and (CurrentClient.EndTurnCancel = ncPending) then
+    Result := Result + #13#10 + MultiplayerText('CancellingEndTurn', 'Taking your end turn back...');
 end;
 
-// CHANGE: ENHANCEMENT - The buttons of a client's wait: a Cancel while it reconnects.
+// CHANGE: ENHANCEMENT - Whether the wait for the day may take the local human's end turn back
+// (docs/network.md, Waiting): before the day has begun, when the end turn made the human stop
+// holding the day and taking it back makes it hold the day again. Not for a takeoff (the screen
+// that took off would stay with the ranger leaving), nor for a human whose travel continues
+// (the film's break stops that). On the host, while it waits for its peers; on a client, while
+// it waits for the day, for the EndTurn it sent since its last state, once.
+function MayCancelEndTurn(Kind: TNetWaitKind): Boolean;
+var
+  P: TPlayer;
+begin
+  Result := False;
+  P := LocalPlayer;
+  if ExitScreenLoop
+      or (Galaxy = nil)
+      or (P = nil)
+      or LocalHuman.Finished
+      or not LocalHuman.Connected
+      or P.InHyperspace
+      or (P.Order = soTakeoff) then
+    Exit;
+  case Kind of
+    nwHostPeers:
+      Result :=
+          (NetRole = nrHost)
+              and LocalHuman.EndedTurn
+              and not LocalHuman.ContinueUntilArrival
+              and not CurrentHost.DayUnderWay;
+    nwClientDay:
+      // The client's own EndTurn asks to continue its travel too; the host has not applied it.
+      Result :=
+          (NetRole = nrClient)
+              and not CurrentClient.Reconnecting
+              and not CurrentClient.Status.DayRunning
+              and CurrentClient.MayCancelEndTurn;
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - What the wait's Cancel would do now.
+function WaitCancel(Kind: TNetWaitKind): TNetWaitCancel;
+begin
+  if (Kind in [nwClientDay, nwClientState, nwReconnect]) and ClientReconnecting then
+    Result := nwcReconnect
+  else if MayCancelEndTurn(Kind) then
+    Result := nwcEndTurn
+  else
+    Result := nwcNone;
+end;
+
+// CHANGE: ENHANCEMENT - The buttons of a wait: a Cancel while a client reconnects, or while the
+// end turn may be taken back.
 function WaitOptions(Kind: TNetWaitKind): Cardinal;
 begin
   Result := 0;
-  if (Kind in [nwClientDay, nwClientState, nwReconnect]) and ClientReconnecting then
+  if WaitCancel(Kind) <> nwcNone then
     Result := mbgCancel;
 end;
 
@@ -633,6 +699,7 @@ procedure WaitModal(Kind: TNetWaitKind);
 var
   Closed: Cardinal;
   SavedPeersWait: Boolean;
+  Cancel: TNetWaitCancel;
 begin
   if Kind in [nwClientDay, nwClientState] then
     Inc(ClientTalkWaits);
@@ -648,11 +715,31 @@ begin
         Break
       else
       begin
+        Cancel := WaitCancel(Kind);
         Closed := RunWaitBox(Kind, WaitText(Kind), WaitOptions(Kind));
-        // CHANGE: ENHANCEMENT - The player gave up the reconnect: the client is gone, which
-        // the wait sees next (docs/network.md, Waiting).
-        if (Closed = mbgResultCancel) and (CurrentClient <> nil) then
-          CurrentClient.CancelReconnect
+        if Closed = mbgResultCancel then
+        begin
+          // CHANGE: ENHANCEMENT - The player gave up the reconnect: the client is gone, which
+          // the wait sees next (docs/network.md, Waiting).
+          if Cancel = nwcReconnect then
+          begin
+            if CurrentClient <> nil then
+              CurrentClient.CancelReconnect;
+          end
+          // CHANGE: ENHANCEMENT - The player takes the end turn back: the host's wait ends here,
+          // its human holds the day again (HostDayMayStart); a client's goes on until the host
+          // answers (WaitDone).
+          else if (Cancel = nwcEndTurn) and MayCancelEndTurn(Kind) then
+          begin
+            if Kind = nwHostPeers then
+            begin
+              CancelEndTurn;
+              NetLog('end turn taken back');
+              Break;
+            end;
+            CurrentClient.SendCancelEndTurn(CancelEndTurnCommand);
+          end;
+        end
         else if (Closed <> mbgResultOK) and (Closed <> WaitRetext) then
           Break;
       end;
@@ -797,7 +884,8 @@ const
       'Multiplayer.LateOfferGone',
       'Multiplayer.LateTargetGone',
       'Multiplayer.LateNoRoom',
-      'Multiplayer.LateInUse'
+      'Multiplayer.LateInUse',
+      'Multiplayer.LateTooLate'
   );
   English: array[TRefusalReason] of WideString = (
       'Your action was not done: another player acted first.',
@@ -807,7 +895,8 @@ const
       'Another player was first: the offer is no longer there.',
       'Your action was not done: things changed before it.',
       'Your sale was not done: the buyer has no room for it.',
-      'Another player is using it.'
+      'Another player is using it.',
+      'Your action was not done: the day has begun.'
   );
 begin
   Result := MultiplayerText(Copy(Keys[Reason], Length('Multiplayer.') + 1, MaxInt), English[Reason]);
@@ -1038,6 +1127,10 @@ begin
     WaitModal(nwHostPeers);
     if ExitScreenLoop then
       Exit;
+    // CHANGE: ENHANCEMENT - The player took the end turn back (WaitModal): its screen goes on in
+    // order mode, and the peers' queues wait for the next end turn.
+    if HumanHoldsDay(LocalHuman) then
+      Exit;
     Host.ApplyQueues;
     if AllHumansEndedTurn then
     begin
@@ -1067,6 +1160,13 @@ begin
   WantedFilmStar := -1;
   if ExitScreenLoop then
     Exit;
+  // CHANGE: ENHANCEMENT - The host took the end turn back: it runs here too, and the screen goes
+  // on in order mode (NetEndTurn's callers, as when the day does not start).
+  if Client.TakeCancelledEndTurn then
+  begin
+    NetLog('end turn taken back');
+    Exit;
+  end;
   if PendingFilm <> nil then
   begin
     if Screen = StarMapScreen then

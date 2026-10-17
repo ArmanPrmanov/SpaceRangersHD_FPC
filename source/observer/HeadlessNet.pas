@@ -22,6 +22,9 @@ unit HeadlessNet;
 // CHANGE: ENHANCEMENT - --sim-net-shop: Net1 goes through a government dialogue before its
 // first purchase, which the host applies with the purchase while its own dialogue is open; the
 // host's dialogue state must stay as it was (docs/network.md, Tests).
+// CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn: a client takes its end turn back before the
+// host's first day, which waits for that, and ends it again; once the second day has begun, the
+// host refuses the same (docs/network.md, Tests).
 interface
 uses
   HeadlessSim;
@@ -722,6 +725,56 @@ begin
   NestedRegistered := True;
 end;
 
+// CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn, after a client's turn: it takes the end turn
+// back (CancelEndTurn) and waits for the host's answer. First: before the host's day, which waits
+// for it; the host applies it, the human holds the day again here, and ends its turn again.
+// Otherwise once the host's day has begun (its status says so) or run: the host refuses it.
+// Whether it went as it should.
+function ProbeCancelEndTurn(Client: TNetClient; First: Boolean): Boolean;
+var
+  Deadline: QWord;
+  Sent, Accepted, Holds: Boolean;
+begin
+  Result := False;
+  Deadline := GetTickCount64 + StallTimeoutMs;
+  while not First and not Client.Status.DayRunning and not Client.HasState do
+  begin
+    if GetTickCount64 > Deadline then
+    begin
+      Emit('net client failed: the day did not begin');
+      Exit;
+    end;
+    Client.Pump;
+    NetInboxEvent.WaitFor(5);
+  end;
+  Sent := Client.SendCancelEndTurn(CancelEndTurnCommand);
+  while Sent and not (Client.EndTurnCancel in [ncAccepted, ncRefused]) do
+  begin
+    if GetTickCount64 > Deadline then
+    begin
+      Emit('net client failed: the host did not answer the cancelled end turn');
+      Exit;
+    end;
+    Client.Pump;
+    NetInboxEvent.WaitFor(5);
+  end;
+  Accepted := Client.EndTurnCancel = ncAccepted;
+  Holds := False;
+  if Accepted then
+  begin
+    Client.TakeCancelledEndTurn;
+    Holds := HumanHoldsDay(LocalHuman);
+    EndTurnFor(LocalHuman);
+  end;
+  Emit(
+      Format(
+          'net client end turn cancel day=%d first=%d sent=%d accepted=%d holds=%d human=%d',
+          [Galaxy.CurrentTurn, Ord(First), Ord(Sent), Ord(Accepted), Ord(Holds), Client.HumanId]
+      )
+  );
+  Result := Sent and (Accepted = First) and (Holds = First);
+end;
+
 function RunNetHost(const Options: TSimulationOptions): Integer;
 var
   Host: TNetHost;
@@ -832,7 +885,10 @@ begin
         repeat
           Host.Pump;
           DropFrozenPeers;
-          if Host.PeersReady then
+          // CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn: the first day waits until a client
+          // has taken its end turn back (and ended it again).
+          if Host.PeersReady
+              and (not Options.NetCancelEndTurn or (Day > 1) or (Host.CancelledEndTurns > 0)) then
             Break;
           if GetTickCount64 > Deadline then
           begin
@@ -1112,9 +1168,12 @@ var
   RefusalShown: WideString;
   // CHANGE: ENHANCEMENT - The connection has gone silent (--sim-net-silent-at), once.
   WentSilent: Boolean;
+  // CHANGE: ENHANCEMENT - The turns after which --sim-net-cancel-end-turn took the end turn back.
+  CancelProbes: Integer;
 begin
   Result := 0;
   WentSilent := False;
+  CancelProbes := 0;
   if Options.NetReconnectMs > 0 then
     NetReconnectMs := Options.NetReconnectMs;
   Colon := LastDelimiter(':', Options.NetJoin);
@@ -1195,7 +1254,9 @@ begin
         end
         else
         begin
-          RefusalShown := RefusalText(Outcome.Reason);
+          // CHANGE: ENHANCEMENT - A refused CancelEndTurn shows no bubble (NetClient).
+          if Outcome.Kind <> ckCancelEndTurn then
+            RefusalShown := RefusalText(Outcome.Reason);
           Emit(
               Format(
                   'net client refused seq=%d kind=%s reason=%s bubble=%d human=%d',
@@ -1317,6 +1378,15 @@ begin
         else
           PlayHumanTurn(LocalHuman, Galaxy.CurrentTurn, Index, Plan);
         LastPlayedDay := Galaxy.CurrentTurn;
+        if Options.NetCancelEndTurn and (CancelProbes < 2) then
+        begin
+          if not ProbeCancelEndTurn(Client, CancelProbes = 0) then
+          begin
+            Emit('net client failed: the cancelled end turn');
+            Exit(1);
+          end;
+          Inc(CancelProbes);
+        end;
       end;
       Deadline := GetTickCount64 + StallTimeoutMs;
     end;

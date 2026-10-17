@@ -56,6 +56,9 @@ const
   ckJoinHuman = 44;
   ckStopContinuing = 45;
   ckHoldPosition = 46;
+  // CHANGE: ENHANCEMENT - A human takes back its end turn before the day starts (docs/network.md,
+  // Waiting).
+  ckCancelEndTurn = 47;
 type
   TSlotList = array of Integer;
 procedure AddWeaponSlot(var Slots: TSlotList; Slot: Integer);
@@ -168,6 +171,11 @@ procedure SetSessionFlagValue(Flag: Integer; Value: Boolean);
 function EndTurn(ContinueUntilArrival: Boolean): Boolean;
 // The local human stops continuing until arrival, and holds the day again if it continued.
 procedure StopContinuing;
+// CHANGE: ENHANCEMENT - The local human takes back its end turn while the day waits for others
+// (docs/network.md, Waiting): it holds the day again. The command names the day it is for
+// (Galaxy.CurrentTurn), which a host checks for a client's; CancelEndTurnCommand builds it.
+function CancelEndTurnCommand: TPlayerCommand;
+procedure CancelEndTurn;
 // Adds a human whose ranger starts landed at Planet (aHuman.JoinHuman), as a command so that a
 // command log replays it. Returns the new human.
 function JoinHumanAt(Planet: TObject; const Name: WideString; CharacterPreset: Integer): THuman; overload;
@@ -1162,6 +1170,32 @@ begin
     SubmitCommand(NewCommand(ckStopContinuing));
 end;
 
+// CHANGE: ENHANCEMENT - The end turn is taken back: the human holds the day again, and does not
+// continue its travel (the end turn may have asked for that). A host applies a client's only
+// before its day, by taking the client's EndTurn out of its queue; then neither runs there.
+procedure ExecuteCancelEndTurn(const Command: TPlayerCommand);
+var
+  H: THuman;
+begin
+  H := ActorHuman(Command);
+  if not H.EndedTurn or H.Finished then
+    Exit;
+  H.EndedTurn := False;
+  H.ContinueUntilArrival := False;
+end;
+
+function CancelEndTurnCommand: TPlayerCommand;
+begin
+  Result := NewCommand(ckCancelEndTurn);
+  AddInt(Result, Galaxy.CurrentTurn);
+end;
+
+procedure CancelEndTurn;
+begin
+  if LocalHuman.EndedTurn then
+    SubmitCommand(CancelEndTurnCommand);
+end;
+
 // CHANGE: ENHANCEMENT - A disconnected human's ranger holds position (ROADMAP.md, Phase 5;
 // docs/network.md, Disconnects): automatic control ends as well as the order, so that it does
 // not fly on without its player. Nothing is restored when the human rejoins.
@@ -1305,4 +1339,5 @@ initialization
   RegisterCommand(ckJoinHuman, 'JoinHuman', @ExecuteJoinHuman);
   RegisterCommand(ckStopContinuing, 'StopContinuing', @ExecuteStopContinuing);
   RegisterCommand(ckHoldPosition, 'HoldPosition', @ExecuteHoldPosition);
+  RegisterCommand(ckCancelEndTurn, 'CancelEndTurn', @ExecuteCancelEndTurn);
 end.

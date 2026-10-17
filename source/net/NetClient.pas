@@ -65,6 +65,9 @@ type
     Sequence: Cardinal;
     Command: TPlayerCommand;
   end;
+  // CHANGE: ENHANCEMENT - Where this client's CancelEndTurn stands (docs/network.md, Waiting):
+  // none sent for the last EndTurn, sent and not answered, applied by the host, refused there.
+  TNetCancelState = (ncNone, ncPending, ncAccepted, ncRefused);
 
   TNetClient = class
   private
@@ -141,6 +144,12 @@ type
     // since the host's copy no longer has those before the loss. The pending state is that one.
     FResyncing: Boolean;
     FPendingRejoin: Boolean;
+    // CHANGE: ENHANCEMENT - An EndTurn went since the last state, and the CancelEndTurn sent for
+    // it: where it stands, its number, the command.
+    FEndTurnSent: Boolean;
+    FCancelState: TNetCancelState;
+    FCancelSequence: Cardinal;
+    FCancelCommand: TPlayerCommand;
     procedure HandleMessage(Kind: TNetMessageKind; Payload: TBufEC);
     procedure ShowRefusal(const Refusal: TCommandResultMessage);
     procedure TakeLateTrade(const CommandResult: TCommandResultMessage);
@@ -202,6 +211,17 @@ type
     function ApplyRelayed(Limit: Integer = MaxInt): Integer;
     // Whether relayed trades wait to run.
     function HasRelayed: Boolean;
+    // CHANGE: ENHANCEMENT - This client's human takes back its end turn while it waits for the
+    // day (docs/network.md, Waiting): sends Command (aPlayerActions.CancelEndTurnCommand) and
+    // does not wait; EndTurnCancel says where it stands. False when nothing went: no EndTurn
+    // was sent since the last state, one is already sent, or the client may not send now.
+    function SendCancelEndTurn(const Command: TPlayerCommand): Boolean;
+    // Whether SendCancelEndTurn would send now.
+    function MayCancelEndTurn: Boolean;
+    property EndTurnCancel: TNetCancelState read FCancelState;
+    // The host applied it: it runs here (the human holds the day again), and the client is
+    // ready for another end turn; True. False otherwise, and nothing changes.
+    function TakeCancelledEndTurn: Boolean;
     // Whether the last trade SendTrade refused was not answered, and its bubble says so;
     // clears it.
     function TakeNoAnswerShown: Boolean;
@@ -308,6 +328,7 @@ uses
   aConst,
   aGalaxy,
   aObjectRefs,
+  aPlayerActions,
   aSaveLoad,
   NetDelta;
 
@@ -336,7 +357,8 @@ const
       'Multiplayer.RefusedOfferGone',
       'Multiplayer.RefusedTargetGone',
       'Multiplayer.RefusedNoRoom',
-      'Multiplayer.RefusedInUse'
+      'Multiplayer.RefusedInUse',
+      'Multiplayer.RefusedTooLate'
   );
   English: array[TRefusalReason] of WideString = (
       'The host refused your last action.',
@@ -346,7 +368,8 @@ const
       'The host refused your action: the offer is no longer there.',
       'The host refused your action: things changed before it arrived.',
       'The host refused your sale: the buyer has no room for it.',
-      'The host refused your action: another player is using it.'
+      'The host refused your action: another player is using it.',
+      'The host refused your action: the day has begun.'
   );
 begin
   Result := LocalizedColorText(Keys[Reason]);
@@ -521,6 +544,10 @@ begin
   FRelayed := nil;
   FLateTrades := nil;
   FResults := nil;
+  // CHANGE: ENHANCEMENT - Its answer will not come on the new connection, whose state replaces
+  // the end turn anyway.
+  FCancelState := ncNone;
+  FEndTurnSent := False;
 end;
 
 // CHANGE: ENHANCEMENT - The connection to the host closed: a try of a reconnect failed; a
@@ -810,16 +837,31 @@ begin
         if Length(FResults) >= KeptCommandResults then
           Delete(FResults, 0, 1);
         Insert(CommandResult, FResults, Length(FResults));
+        // CHANGE: ENHANCEMENT - The answer to the end turn taken back: a refusal (the day has
+        // begun) is no bubble, the wait for the day goes on.
+        if (FCancelState = ncPending) and (CommandResult.Sequence = FCancelSequence) then
+        begin
+          if CommandResult.Ok then
+            FCancelState := ncAccepted
+          else
+            FCancelState := ncRefused;
+          NetLog(
+              Format(
+                  'end turn cancel answered seq=%d ok=%d reason=%s',
+                  [CommandResult.Sequence, Ord(CommandResult.Ok), RefusalReasonName(CommandResult.Reason)]
+              )
+          );
+        end
         // CHANGE: ENHANCEMENT - The answer to the trade SendTrade waits for, or to one it
         // stopped waiting for: applied there, it runs here at the next safe point.
-        if (FAwaitedSequence <> 0) and (CommandResult.Sequence = FAwaitedSequence) then
+        else if (FAwaitedSequence <> 0) and (CommandResult.Sequence = FAwaitedSequence) then
         begin
           FAwaitedResult := CommandResult;
           FAwaitedDone := True;
         end
         else
           TakeLateTrade(CommandResult);
-        if not CommandResult.Ok then
+        if not CommandResult.Ok and (CommandResult.Kind <> ckCancelEndTurn) then
         begin
           NetLog(
               Format(
@@ -955,6 +997,36 @@ end;
 function TNetClient.HasRelayed: Boolean;
 begin
   Result := Length(FRelayed) > 0;
+end;
+
+function TNetClient.MayCancelEndTurn: Boolean;
+begin
+  Result := (FCancelState = ncNone) and FEndTurnSent and MaySend and (FHumanId >= 0);
+end;
+
+function TNetClient.SendCancelEndTurn(const Command: TPlayerCommand): Boolean;
+begin
+  Result := False;
+  if not MayCancelEndTurn then
+    Exit;
+  SendCommand(Command);
+  FCancelSequence := FCommandSequence;
+  FCancelCommand := Command;
+  FCancelState := ncPending;
+  NetLog(Format('end turn cancel sent seq=%d', [FCancelSequence]));
+  Result := True;
+end;
+
+function TNetClient.TakeCancelledEndTurn: Boolean;
+begin
+  Result := FCancelState = ncAccepted;
+  if not Result then
+    Exit;
+  // The EndTurn is gone from the host's queue; the next one is sent again.
+  FCancelState := ncNone;
+  FEndTurnSent := False;
+  if (Galaxy <> nil) and (LocalHuman <> nil) and (LocalHuman.Id = FHumanId) then
+    ExecuteRelayedCommand(FCancelCommand);
 end;
 
 function TNetClient.ApplyRelayed(Limit: Integer): Integer;
@@ -1101,6 +1173,10 @@ begin
   FPending.Clear;
   FBaseSerial := FPendingHeader.Serial;
   FHasPending := False;
+  // CHANGE: ENHANCEMENT - The state is the day after the end turn, or holds what the host did
+  // with it: there is nothing to take back.
+  FCancelState := ncNone;
+  FEndTurnSent := False;
   // CHANGE: ENHANCEMENT - The state after a reconnect ends the resync: commands go again. A
   // state applied while reconnecting (it came before the loss) is not acknowledged on the new
   // connection.
@@ -1140,6 +1216,12 @@ begin
     FThread.Send(FPeerId, nkCommand, Payload);
   finally
     Payload.Free;
+  end;
+  // CHANGE: ENHANCEMENT - An end turn that may be taken back (SendCancelEndTurn).
+  if Command.Kind = ckEndTurn then
+  begin
+    FCancelState := ncNone;
+    FEndTurnSent := True;
   end;
 end;
 

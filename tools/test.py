@@ -445,7 +445,7 @@ def net_lines(output: str, prefix: str) -> list[dict[str, str]]:
 
 def run_network(
     args, binary: Path, save: Path | None, count: int, log: Path | None = None, leave: str = "",
-    race: bool = False, nested: bool = False, shop: bool = False,
+    race: bool = False, nested: bool = False, shop: bool = False, cancel: bool = False,
 ):
     """One networked session: a host with `count` clients (Net1..NetN) for NET_DAYS days. Without
     a save the host plays a new game (--sim-new-game).
@@ -466,8 +466,10 @@ def run_network(
     the host buys that stock first, once, so that a client's purchase is refused
     (--sim-net-buy-race). With nested, each client submits a command that submits another one
     from inside it (--sim-net-nested). With shop, the clients join at the host's human's planet and
-    trade there on their first day (--sim-net-shop), for NET_SHOP_DAYS days. Returns (problem,
-    host output, client outputs); problem is '' when every process ended cleanly.
+    trade there on their first day (--sim-net-shop), for NET_SHOP_DAYS days. With cancel, each
+    client takes its end turn back before the first day, which the host holds for that, and once
+    the second day has begun (--sim-net-cancel-end-turn). Returns (problem, host output, client
+    outputs); problem is '' when every process ended cleanly.
     """
     days = NET_SHOP_DAYS if shop else NET_DAYS
     host_options = [
@@ -490,6 +492,8 @@ def run_network(
         host_options.append("--sim-net-nested")
     if shop:
         host_options.append("--sim-net-shop")
+    if cancel:
+        host_options.append("--sim-net-cancel-end-turn")
     host = GameProcess(binary, args.game_dir, host_options)
     port_line = host.wait_line("net host port=", NET_TIMEOUT)
     if not port_line:
@@ -517,6 +521,8 @@ def run_network(
             options.append("--sim-net-nested")
         if shop:
             options.append("--sim-net-shop")
+        if cancel:
+            options.append("--sim-net-cancel-end-turn")
         clients.append(GameProcess(binary, args.game_dir, options))
     codes = []
     if leave in ("day", "talk"):
@@ -1008,10 +1014,12 @@ def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
     hidden constellation, for one). The run also has the host refuse a client's purchase
     (--sim-net-buy-race, check_refusal), and the client submit a command that submits another
     from inside it, which the host must run once (--sim-net-nested), and a session flag, which
-    only the host sets: the host refuses it, and its flag stays."""
+    only the host sets: the host refuses it, and its flag stays. The client also takes its end
+    turn back before the first day and ends it again, and tries once the second day has begun,
+    which the host refuses (check_cancel_end_turn)."""
     label = "new game, 2 humans networked"
     # A new game loads no save, so its commands are not recorded (the log starts at a load).
-    problem, host_output, outputs = run_network(args, binary, None, 1, race=True, nested=True)
+    problem, host_output, outputs = run_network(args, binary, None, 1, race=True, nested=True, cancel=True)
     if not problem:
         problem = compare_client_hashes(host_output, outputs)
     if problem:
@@ -1044,12 +1052,48 @@ def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
         return False, [f"{label}: a client's session flag changed the host's"]
     if not flag_failed or not flag_refused:
         return False, [f"{label}: the host did not refuse a client's session flag: {flag_failed} {flag_refused}"]
+    problem, cancel_note = check_cancel_end_turn(host_output, outputs)
+    if problem:
+        return False, [f"{label}: {problem}"]
     return True, [
         f"{label}: {NET_DAYS} days, client hashes match the host's",
         f"{label}: {note}",
         f"{label}: a command a client submits from inside another reaches the host once",
         f"{label}: a client's session flag is refused, and the host's stays",
+        f"{label}: {cancel_note}",
     ]
+
+
+def check_cancel_end_turn(host_output: str, outputs: list[str]) -> tuple[str, str]:
+    """A run with --sim-net-cancel-end-turn (docs/network.md, Waiting and Tests): the client took
+    its end turn back before the first day; the host took the EndTurn out of its queue, after
+    which its peer was not ready, and the client's human held the day again and ended it again,
+    after which the day ran. Once the second day had begun, the host refused the same (too-late),
+    and the client heard it. Returns what is wrong, and a note."""
+    probes = [line for output in outputs for line in net_lines(output, "net client end turn cancel ")]
+    first = [line for line in probes if line.get("first") == "1"]
+    late = [line for line in probes if line.get("first") == "0"]
+    if not first or first[0]["accepted"] != "1" or first[0]["holds"] != "1":
+        return f"the client could not take its end turn back: {first}", ""
+    human = first[0]["human"]
+    cancelled = [line for line in net_lines(host_output, "net end turn cancelled ") if line["human"] == human]
+    if len(cancelled) != 1 or cancelled[0]["ready"] != "0":
+        return f"the host did not take human {human}'s end turn back, or was still ready: {cancelled}", ""
+    if not late or late[0]["sent"] != "1" or late[0]["accepted"] != "0":
+        return f"a cancelled end turn after the day began was not refused: {late}", ""
+    failed = [
+        line for line in net_lines(host_output, "net command failed ")
+        if line["human"] == human and line["kind"] == "CancelEndTurn"
+    ]
+    if len(failed) != 1 or not failed[0]["reason"].startswith("too-late"):
+        return f"the host did not refuse the late cancel as too-late: {failed}", ""
+    answered = [line for output in outputs for line in net_lines(output, "net end turn cancel answered ")]
+    if [line["ok"] for line in answered] != ["1", "0"] or answered[1]["reason"] != "too-late":
+        return f"the client did not hear both answers: {answered}", ""
+    return "", (
+        f"a client takes its end turn back before the day (the host is no longer ready) and ends "
+        f"it again; once day {late[0]['day']} has begun it is refused (too-late)"
+    )
 
 
 def check_network_shop(args, binary: Path) -> tuple[bool, list[str]]:

@@ -332,7 +332,14 @@ begin
     Outcome.Reason := rrInUse;
     EncodeCommandResult(Outcome, Buffer);
     Buffer.SetPosition(0);
-    Check(DecodeCommandResult(Buffer).Reason = rrInUse, 'the last refusal reason round trips');
+    Check(DecodeCommandResult(Buffer).Reason = rrInUse, 'the stale-copy refusal reason round trips');
+    // CHANGE: ENHANCEMENT - And the refusal of an end turn taken back too late.
+    Buffer.Clear;
+    Outcome.Reason := rrTooLate;
+    EncodeCommandResult(Outcome, Buffer);
+    Buffer.SetPosition(0);
+    Check(DecodeCommandResult(Buffer).Reason = rrTooLate, 'the last refusal reason round trips');
+    CheckText('too-late', WideString(RefusalReasonName(rrTooLate)), 'reason names');
     CheckText('in-use', WideString(RefusalReasonName(rrInUse)), 'reason names');
     CheckText('offer-gone', WideString(RefusalReasonName(rrOfferGone)), 'reason names');
     CheckText('target-gone', WideString(RefusalReasonName(rrTargetGone)), 'reason names');
@@ -804,6 +811,110 @@ begin
   end;
 end;
 
+// The scripted host's side: the next Command of the peer, and its number.
+function TakeCommand(Host: TNetThread; Peer: Integer; out Sequence: Cardinal): TPlayerCommand;
+var
+  Kind: TNetMessageKind;
+begin
+  Result := Default(TPlayerCommand);
+  Sequence := 0;
+  if WaitMessage(Host, Peer, Kind) and (Kind = nkCommand) then
+    Result := DecodeCommandMessage(ThreadPayload, Sequence);
+end;
+
+procedure SendResult(Host: TNetThread; Peer: Integer; Sequence: Cardinal; Kind: TCommandKind; Ok: Boolean);
+var
+  Outcome: TCommandResultMessage;
+  Payload: TBufEC;
+begin
+  Outcome := Default(TCommandResultMessage);
+  Outcome.Sequence := Sequence;
+  Outcome.Kind := Kind;
+  Outcome.Ok := Ok;
+  if not Ok then
+    Outcome.Reason := rrTooLate;
+  Payload := TBufEC.Create;
+  try
+    EncodeCommandResult(Outcome, Payload);
+    Host.Send(Peer, nkCommandResult, Payload);
+  finally
+    Payload.Free;
+  end;
+end;
+
+// Pumps Client until its CancelEndTurn is answered, for 10 s at most.
+function PumpUntilAnswered(Client: TNetClient): Boolean;
+var
+  Deadline: QWord;
+begin
+  Deadline := GetTickCount64 + 10000;
+  repeat
+    Client.Pump;
+    Result := Client.EndTurnCancel in [ncAccepted, ncRefused];
+    if Result then
+      Exit;
+    NetInboxEvent.WaitFor(5);
+  until GetTickCount64 > Deadline;
+end;
+
+// CHANGE: ENHANCEMENT - An end turn taken back (docs/network.md, Waiting), against a scripted
+// host: only after an EndTurn, once; the command goes with its number, the client does not wait
+// for the answer, and an applied one is taken once; a refusal ends it until the next EndTurn
+// or state.
+procedure RunCancelEndTurnTests;
+const
+  KindEndTurn = 43;
+  KindCancelEndTurn = 47;
+var
+  Host: TNetThread;
+  Client: TNetClient;
+  Peer: Integer;
+  Sequence: Cardinal;
+  Command: TPlayerCommand;
+  Outcome: TCommandResultMessage;
+begin
+  Host := TNetThread.Create(0);
+  ThreadPayload := TBufEC.Create;
+  Client := nil;
+  try
+    Client := JoinedClient(Host, Peer);
+    Check(not Client.MayCancelEndTurn, 'no end turn to take back before an EndTurn');
+    Check(not Client.SendCancelEndTurn(NewCommand(KindCancelEndTurn)), 'and none goes');
+    Client.SendCommand(NewCommand(KindEndTurn));
+    Command := TakeCommand(Host, Peer, Sequence);
+    Check((Command.Kind = KindEndTurn) and (Sequence = 1), 'the EndTurn goes');
+    Check(Client.MayCancelEndTurn, 'it may be taken back');
+    Check(Client.SendCancelEndTurn(NewCommand(KindCancelEndTurn)), 'the cancel goes');
+    Check(Client.EndTurnCancel = ncPending, 'and waits for the host');
+    Check(not Client.MayCancelEndTurn, 'one at a time');
+    Command := TakeCommand(Host, Peer, Sequence);
+    Check((Command.Kind = KindCancelEndTurn) and (Sequence = 2), 'the host gets it with its number');
+    SendResult(Host, Peer, 2, KindCancelEndTurn, True);
+    Check(PumpUntilAnswered(Client) and (Client.EndTurnCancel = ncAccepted), 'the host applies it');
+    Check(Client.TakeCancelledEndTurn, 'it is taken');
+    Check(not Client.TakeCancelledEndTurn and (Client.EndTurnCancel = ncNone), 'once');
+    Check(not Client.MayCancelEndTurn, 'the EndTurn is gone');
+    Client.SendCommand(NewCommand(KindEndTurn));
+    Command := TakeCommand(Host, Peer, Sequence);
+    Check((Command.Kind = KindEndTurn) and (Sequence = 3), 'a new EndTurn goes');
+    Check(Client.SendCancelEndTurn(NewCommand(KindCancelEndTurn)), 'and may be taken back');
+    Command := TakeCommand(Host, Peer, Sequence);
+    SendResult(Host, Peer, Sequence, KindCancelEndTurn, False);
+    Check(PumpUntilAnswered(Client) and (Client.EndTurnCancel = ncRefused), 'the host refuses it');
+    Check(not Client.TakeCancelledEndTurn, 'a refusal is not taken');
+    Check(not Client.MayCancelEndTurn, 'nor tried again for the same EndTurn');
+    Check(Client.TakeCommandResult(Outcome) and Client.TakeCommandResult(Outcome), 'both results are kept');
+    Check(not Outcome.Ok and (Outcome.Reason = rrTooLate), 'the refusal says too late');
+    SendWholeState(Host, Peer, 2);
+    Check(PumpUntil(Client, cwJoined) and Client.HasState, 'the day''s state comes');
+    Check(Client.EndTurnCancel = ncRefused, 'the refusal stands until the state is applied');
+  finally
+    Client.Free;
+    Host.Free;
+    FreeAndNil(ThreadPayload);
+  end;
+end;
+
 // The menus' address parsing (NetPlay.ParseNetAddress) and the host's addresses.
 procedure RunAddressTests;
 var
@@ -834,6 +945,7 @@ begin
   RunThreadTests;
   RunLivenessTests;
   RunReconnectTests;
+  RunCancelEndTurnTests;
   RunAddressTests;
 end;
 
