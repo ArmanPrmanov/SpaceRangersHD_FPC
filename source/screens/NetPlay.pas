@@ -221,6 +221,10 @@ var
   // state after the reconnect has been asked to be applied (ApplyRejoinState), logged once.
   ReconnectBoxOpen: Boolean;
   RejoinApplyLogged: Boolean;
+  // CHANGE: ENHANCEMENT - A client's Cancel asked the host to stop its continuing travel
+  // (docs/network.md, Continuing travel): until the host has applied it, or the next state has
+  // been applied, where the travel stops here too (OpenClientScreen).
+  ClientStopRequested: Boolean;
   // CHANGE: ENHANCEMENT - The network is pumped from the message loop between two of its
   // messages (FramePumpHook), not from a wait inside a handler; the host's end turn waits for
   // its peers (WaitModal nwHostPeers), where it applies their queues anyway (MayChangeUnderScreen).
@@ -489,20 +493,29 @@ begin
   else
     Result := ClientWaitText;
   end;
-  // CHANGE: ENHANCEMENT - The Cancel takes the end turn back; a client's waits for the host's
-  // answer (docs/network.md, Waiting).
-  if MayCancelEndTurn(Kind) then
+  // CHANGE: ENHANCEMENT - The Cancel takes the end turn back, or stops the travel that goes on;
+  // a client's waits for the host's answer, or for the next state when the day had begun
+  // (docs/network.md, Waiting).
+  if MayCancelEndTurn(Kind) and LocalHuman.ContinueUntilArrival then
+    Result :=
+        Result + #13#10 + MultiplayerText('CancelTravel', 'Cancel: stop your travel and take your turn back.')
+  else if MayCancelEndTurn(Kind) then
     Result := Result + #13#10 + MultiplayerText('CancelEndTurn', 'Cancel: take your end turn back.')
-  else if (Kind = nwClientDay) and (NetRole = nrClient) and (CurrentClient.EndTurnCancel = ncPending) then
+  else if (Kind in [nwClientDay, nwClientState])
+      and (NetRole = nrClient)
+      and ((CurrentClient.EndTurnCancel = ncPending) or ClientStopRequested) then
     Result := Result + #13#10 + MultiplayerText('CancellingEndTurn', 'Taking your end turn back...');
 end;
 
 // CHANGE: ENHANCEMENT - Whether the wait for the day may take the local human's end turn back
 // (docs/network.md, Waiting): before the day has begun, when the end turn made the human stop
 // holding the day and taking it back makes it hold the day again. Not for a takeoff (the screen
-// that took off would stay with the ranger leaving), nor for a human whose travel continues
-// (the film's break stops that). On the host, while it waits for its peers; on a client, while
-// it waits for the day, for the EndTurn it sent since its last state, once.
+// that took off would stay with the ranger leaving), nor in hyperspace (the jump cannot stop).
+// On the host, while it waits for its peers (also at the end of a film whose travel goes on);
+// on a client, while it waits for the day, for the EndTurn it sent since its last state, once.
+// CHANGE: ENHANCEMENT - A client whose travel continues (it sent no EndTurn) may stop it in its
+// waits for the film and for the state, once per state, also while the host's day runs: then
+// the stop holds the day after it.
 function MayCancelEndTurn(Kind: TNetWaitKind): Boolean;
 var
   P: TPlayer;
@@ -521,16 +534,19 @@ begin
     nwHostPeers:
       Result :=
           (NetRole = nrHost)
-              and LocalHuman.EndedTurn
-              and not LocalHuman.ContinueUntilArrival
+              and (LocalHuman.EndedTurn or LocalHuman.ContinueUntilArrival)
               and not CurrentHost.DayUnderWay;
-    nwClientDay:
+    nwClientDay, nwClientState:
+      if (NetRole <> nrClient) or CurrentClient.Reconnecting or ClientStopRequested then
+        Result := False
       // The client's own EndTurn asks to continue its travel too; the host has not applied it.
-      Result :=
-          (NetRole = nrClient)
-              and not CurrentClient.Reconnecting
-              and not CurrentClient.Status.DayRunning
-              and CurrentClient.MayCancelEndTurn;
+      else if CurrentClient.MayCancelEndTurn then
+        Result := (Kind = nwClientDay) and not CurrentClient.Status.DayRunning
+      else
+        Result :=
+            LocalHuman.ContinueUntilArrival
+                and LocalHuman.EndedTurn
+                and CurrentClient.MayCancelEndTurn(True);
   end;
 end;
 
@@ -737,7 +753,13 @@ begin
               NetLog('end turn taken back');
               Break;
             end;
-            CurrentClient.SendCancelEndTurn(CancelEndTurnCommand);
+            if CurrentClient.MayCancelEndTurn then
+              CurrentClient.SendCancelEndTurn(CancelEndTurnCommand)
+            // CHANGE: ENHANCEMENT - The travel that goes on stops (docs/network.md, Continuing
+            // travel): before the host's next day, the wait ends as for an end turn taken back;
+            // otherwise the next state's screen stops it (OpenClientScreen).
+            else if CurrentClient.SendCancelEndTurn(CancelEndTurnCommand(True)) then
+              ClientStopRequested := True;
           end;
         end
         else if (Closed <> mbgResultOK) and (Closed <> WaitRetext) then
@@ -1070,6 +1092,7 @@ begin
   ClientInGame := False;
   HostLossLogged := False;
   RejoinApplyLogged := False;
+  ClientStopRequested := False;
 end;
 
 // The client goes back to the main menu, which says Text. The session ends between screens.
@@ -1164,6 +1187,7 @@ begin
   // on in order mode (NetEndTurn's callers, as when the day does not start).
   if Client.TakeCancelledEndTurn then
   begin
+    ClientStopRequested := False;
     NetLog('end turn taken back');
     Exit;
   end;
@@ -1418,7 +1442,12 @@ begin
     // continues until arrival), so the star map waits for the next day's film at once, as the
     // star map's automatic continue does, until the host stops it or the player breaks a film.
     // A break asks the host to stop (it may have run the next day already).
-    Continues := LocalHuman.ContinueUntilArrival and not (AppliedAfterFilm and FilmBroken);
+    // CHANGE: ENHANCEMENT - So does a Cancel the host answered too late (ClientStopRequested):
+    // the host has the stop queued for its next day, and this sends it again (harmless).
+    Continues :=
+        LocalHuman.ContinueUntilArrival
+            and not (AppliedAfterFilm and FilmBroken)
+            and not ClientStopRequested;
     if LocalHuman.ContinueUntilArrival and not Continues then
       StopContinuing;
     SpaceViewPosition := P.Position;
@@ -1436,6 +1465,7 @@ begin
       RequestedScreenId := screenStarMap;
   end;
   AppliedAfterFilm := False;
+  ClientStopRequested := False;
 end;
 
 // Applies the state that waits, between two screens: the galaxy is loaded again, the client's

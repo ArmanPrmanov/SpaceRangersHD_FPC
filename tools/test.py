@@ -468,7 +468,8 @@ def run_network(
     from inside it (--sim-net-nested). With shop, the clients join at the host's human's planet and
     trade there on their first day (--sim-net-shop), for NET_SHOP_DAYS days. With cancel, each
     client takes its end turn back before the first day, which the host holds for that, and once
-    the second day has begun (--sim-net-cancel-end-turn). Returns (problem, host output, client
+    the second day has begun; then its end turns continue the travel, and it stops a continuing
+    travel before a day the host holds for that (--sim-net-cancel-end-turn). Returns (problem, host output, client
     outputs); problem is '' when every process ended cleanly.
     """
     days = NET_SHOP_DAYS if shop else NET_DAYS
@@ -1069,7 +1070,10 @@ def check_cancel_end_turn(host_output: str, outputs: list[str]) -> tuple[str, st
     its end turn back before the first day; the host took the EndTurn out of its queue, after
     which its peer was not ready, and the client's human held the day again and ended it again,
     after which the day ran. Once the second day had begun, the host refused the same (too-late),
-    and the client heard it. Returns what is wrong, and a note."""
+    and the client heard it. Later, after a state that said its travel continued, the client
+    stopped it before the host's next day: the host queued a StopContinuing and was no longer
+    ready, the client's human held the day and played it, and the days went on. Returns what is
+    wrong, and a note."""
     probes = [line for output in outputs for line in net_lines(output, "net client end turn cancel ")]
     first = [line for line in probes if line.get("first") == "1"]
     late = [line for line in probes if line.get("first") == "0"]
@@ -1088,11 +1092,26 @@ def check_cancel_end_turn(host_output: str, outputs: list[str]) -> tuple[str, st
     if len(failed) != 1 or not failed[0]["reason"].startswith("too-late"):
         return f"the host did not refuse the late cancel as too-late: {failed}", ""
     answered = [line for output in outputs for line in net_lines(output, "net end turn cancel answered ")]
-    if [line["ok"] for line in answered] != ["1", "0"] or answered[1]["reason"] != "too-late":
+    if [line["ok"] for line in answered[:2]] != ["1", "0"] or answered[1]["reason"] != "too-late":
         return f"the client did not hear both answers: {answered}", ""
+    travel = [line for output in outputs for line in net_lines(output, "net client travel cancel day=")]
+    untried = [line for output in outputs for line in net_lines(output, "net client travel cancel untried ")]
+    if not travel and untried and untried[0].get("in-space-turns") == "0":
+        # Some new games' clients never leave their planet: no travel continues to stop.
+        return "", (
+            f"a client takes its end turn back before the day (the host is no longer ready) and "
+            f"ends it again; once day {late[0]['day']} has begun it is refused (too-late); the "
+            "client never left its planet, so no continuing travel was stopped in this new game"
+        )
+    if not travel or travel[0].get("accepted") != "1" or travel[0].get("holds") != "1":
+        return f"the client could not stop its continuing travel: {travel} {untried}", ""
+    stopped = [line for line in net_lines(host_output, "net travel stopped ") if line["human"] == human]
+    if len(stopped) != 1 or stopped[0]["ready"] != "0":
+        return f"the host did not stop human {human}'s travel, or was still ready: {stopped}", ""
     return "", (
         f"a client takes its end turn back before the day (the host is no longer ready) and ends "
-        f"it again; once day {late[0]['day']} has begun it is refused (too-late)"
+        f"it again; once day {late[0]['day']} has begun it is refused (too-late); a client whose "
+        f"travel continues stops it before day {travel[0]['day']} and plays that day"
     )
 
 

@@ -216,8 +216,10 @@ type
     // does not wait; EndTurnCancel says where it stands. False when nothing went: no EndTurn
     // was sent since the last state, one is already sent, or the client may not send now.
     function SendCancelEndTurn(const Command: TPlayerCommand): Boolean;
-    // Whether SendCancelEndTurn would send now.
-    function MayCancelEndTurn: Boolean;
+    // Whether SendCancelEndTurn would send now. CHANGE: ENHANCEMENT - With StopTravel (the
+    // command's second integer, aPlayerActions.CancelEndTurnCommand): for a human whose travel
+    // continues, which sent no EndTurn; once per state.
+    function MayCancelEndTurn(StopTravel: Boolean = False): Boolean;
     property EndTurnCancel: TNetCancelState read FCancelState;
     // The host applied it: it runs here (the human holds the day again), and the client is
     // ready for another end turn; True. False otherwise, and nothing changes.
@@ -999,15 +1001,15 @@ begin
   Result := Length(FRelayed) > 0;
 end;
 
-function TNetClient.MayCancelEndTurn: Boolean;
+function TNetClient.MayCancelEndTurn(StopTravel: Boolean): Boolean;
 begin
-  Result := (FCancelState = ncNone) and FEndTurnSent and MaySend and (FHumanId >= 0);
+  Result := (FCancelState = ncNone) and (FEndTurnSent or StopTravel) and MaySend and (FHumanId >= 0);
 end;
 
 function TNetClient.SendCancelEndTurn(const Command: TPlayerCommand): Boolean;
 begin
   Result := False;
-  if not MayCancelEndTurn then
+  if not MayCancelEndTurn((Length(Command.Ints) > 1) and (Command.Ints[1] <> 0)) then
     Exit;
   SendCommand(Command);
   FCancelSequence := FCommandSequence;

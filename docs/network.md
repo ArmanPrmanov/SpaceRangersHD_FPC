@@ -211,9 +211,10 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
 - A peer is **ready** when its queue holds an `EndTurn` (kind 43), or when its
   human does not hold the day anyway (`HumanHoldsDay` is false: continuing
   travel, in hyperspace, finished) or is disconnected. A queue without an
-  `EndTurn` is not applied; it waits for the day its `EndTurn` arrives,
-  except a `StopContinuing` (Continuing travel), and a continuing peer must have
-  applied the state before the last one. A
+  `EndTurn` is not applied; it waits for the day its `EndTurn` arrives, and a
+  continuing peer must have applied the state before the last one. A
+  continuing peer whose queue holds a `StopContinuing` is not ready either
+  until its `EndTurn` comes (`StopPending`, Continuing travel). A
   command the peer sends while its human does not hold the day can race the
   host's apply, so it waits too rather than landing in whichever day it
   happened to reach.
@@ -226,7 +227,12 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   when no `EndTurn` waits, and when the day it names (`Galaxy.CurrentTurn` on the
   client) is not the host's (that day has run). A remote dialogue refuses it
   too. Neither the `EndTurn` nor the cancel runs on the host, so the command log
-  records neither (Waiting).
+  records neither (Waiting). With its second integer set (`StopTravel`) it is
+  the Cancel of a human whose travel continues, which sent no `EndTurn`: the
+  host queues a `StopContinuing` of that human as if the peer had sent it
+  (Continuing travel) and answers applied when its next day has not begun,
+  else refused (`rrTooLate`) with the stop queued all the same; not while the
+  barrier applies the queues (refused, nothing queued).
 - A queued command that raises when the host applies it is logged and dropped.
   The command log does not record it, and records the commands after it
   (`CommandFailedHook`, [commands.md](commands.md)). The same holds for a
@@ -506,14 +512,38 @@ does not wait for it:
   `DeferredNetContinue`). When the host has stopped the travel, the human holds
   the day and the client is in order mode.
 - **The break.** A break in the client's film sends `StopContinuing` at once
-  (`TfStarMap.BreakTurnClicked`). The host applies a queued `StopContinuing` of
-  a human who continues, with what comes before it, at its next `ApplyQueues`,
-  without waiting for an `EndTurn`, so the next day holds for the client. When
-  it came after the host had begun that day, it holds the day after; the state
-  of the day it missed still says the human continues, and the client, whose
-  film was broken, sends `StopContinuing` again (harmless) and goes to order
-  mode. Its orders and end turn then wait in the host's queue for the day they
-  reach.
+  (`TfStarMap.BreakTurnClicked`). A queued `StopContinuing` of a human who
+  continues (not in hyperspace) makes its peer not ready (`StopPending`): the
+  next day that has not begun waits for the client, and its status names it.
+  The barrier applies the stop with the peer's `EndTurn` and what comes between.
+  When it came after the host had begun that day, it holds the day after; the
+  state of the day it missed still says the human continues, and the client,
+  whose film was broken, sends `StopContinuing` again (harmless) and goes to
+  order mode. Its orders and end turn then wait in the host's queue for the day
+  they reach. (Before, the stop was applied at the next barrier without an
+  `EndTurn`, which then found a human who holds the day and waited again; the
+  headless host took that for a failure.)
+- **Cancel stops it too** (Waiting). A client's waits while its travel
+  continues (for the film, `nwClientDay`, and for the state after it,
+  `nwClientState`) offer Cancel, once per state, with the line
+  `Multiplayer.CancelTravel` ("Cancel: stop your travel and take your turn
+  back."). It sends `CancelEndTurn` with `StopTravel`; the host queues the stop
+  (above). Applied (the next day had not begun): the wait ends, the cancel runs
+  here (`EndedTurn` and `ContinueUntilArrival` clear) and the star map is in
+  order mode; the player can open the ship, the hangar or a shop, and ends the
+  turn as usual (which asks to continue again). Refused (that day had begun):
+  the wait goes on, says "Taking your end turn back...", and the screen after
+  the next state stops the travel here (`ClientStopRequested`,
+  `OpenClientScreen`, as after a broken film), so the client holds the day
+  after. The host's own wait at the end of a film whose travel goes on
+  (`StartDeferredNetDay`, `nwHostPeers`) offers Cancel too: its human's
+  `CancelEndTurn` clears both flags, `HostDayMayStart` returns false, and the
+  film ends in order mode, as when the travel stops. The other humans keep
+  travelling; they wait for the human that stopped.
+- **The host's break.** The host's own break in its film works as in single
+  player: the film ends without starting the next day, and `StartOrderMode`
+  submits `StopContinuing`, so the host's human holds the day, and every
+  client's status names it.
 - **Films ahead of the state.** The host may send the next day's film before
   the client has applied the last state. Films are kept per day
   (`TNetClient.TakeFilmOfDay`): the one to play after a state of day D is the
@@ -730,15 +760,15 @@ on offline: the client's copy is a prediction the host no longer backs.
 
 **Taking the end turn back.** The wait for the day has a Cancel (also Escape)
 while the end turn can be taken back, and a line under the text says so
-(`Multiplayer.CancelEndTurn`); the message box's buttons are pictures, so the
-line names it. Only before the day has begun, and only where taking it back
-makes the human hold the day again (`NetPlay.MayCancelEndTurn`): not in
-hyperspace, not when the human has finished, not while it takes off (the
-screen that took off would stay with the ranger leaving; the takeoffs from the
-planet, hangar and station have no Cancel), and not while its travel continues
-(`ContinueUntilArrival` on the host; on a client, a wait after a state that
-says it continues sends no `EndTurn`). The break in the film stops continuing,
-as before (Continuing travel). The reconnect's Cancel comes first: while a
+(`Multiplayer.CancelEndTurn`, or `Multiplayer.CancelTravel` while the travel
+continues); the message box's buttons are pictures, so the line names it. Only
+where taking it back makes the human hold the day again
+(`NetPlay.MayCancelEndTurn`): not in hyperspace (a jump cannot stop), not when
+the human has finished, and not while it takes off (the screen that took off
+would stay with the ranger leaving; the takeoffs from the planet, hangar and
+station have no Cancel). While the travel continues, Cancel stops it
+(Continuing travel); a client may also do that while the host's day runs, and
+then it holds the day after. The reconnect's Cancel comes first: while a
 client reconnects, Cancel ends the reconnect.
 
 - **Host** (`nwHostPeers`): Cancel submits `CancelEndTurn` (kind 47) for its
@@ -1087,17 +1117,28 @@ and the client's `net client refused`) without changing its own
 (`net host session flag text-quests=` differs from what the client predicted).
 The client then takes its end turn back (`--sim-net-cancel-end-turn`,
 `check_cancel_end_turn`): after its first day's turn it sends `CancelEndTurn`
-and waits for the answer, while the host holds its first day until it has
-taken an end turn back. The host must take the `EndTurn` out of the queue and
-be no longer ready (`net end turn cancelled human= seq= queued= ready=0`), the
+and waits for the answer, while the host holds its first day until it has taken
+an end turn back. The host must take the `EndTurn` out of the queue and be no
+longer ready (`net end turn cancelled human= seq= queued= ready=0`), the
 client's human must hold the day again (`net client end turn cancel first=1
 accepted=1 holds=1`) and ends its turn again, and the day runs. After its
 second day's turn, once the host's status says the day runs (or the state has
 come), it tries again: the host must refuse it (`net command failed ...
 kind=CancelEndTurn reason=too-late`) and the client must hear it (`net end turn
-cancel answered ok=0 reason=too-late`). The unit tests check the client's side
+cancel answered ok=0 reason=too-late`). From then on its turns in normal space
+fly to the farthest planet of its star and ask to continue until arrival
+(`HeadlessNet.PlayFarTravel`); after the first state that says it continues
+(not in hyperspace) it stops the travel (`CancelEndTurn` with `StopTravel`),
+while the host holds that day until a travel has been stopped: the host must
+queue the stop and be no longer ready (`net travel stopped human= seq=
+ready=0`), the client's human must hold the day (`net client travel cancel
+accepted=1 holds=1`) and plays it, and the other days run with the host's
+hashes. Some new games' clients never leave their planet (each takeoff stays
+landed); such a run says the travel was untried (`net client travel cancel
+untried in-space-turns=0`) and passes. The unit tests check the client's side
 against a scripted host: once per `EndTurn`, sent with its number, not waited
-for, an applied one taken once, a refusal kept.
+for, an applied one taken once, a refusal kept; a continuing travel's stop
+without an `EndTurn`, once.
 
 A host that starts a new game and two clients trade at one planet
 (`--sim-net-shop`, `check_network_shop`): the host's human is landed at a
@@ -1240,10 +1281,14 @@ star's film once; every client in that star gets it.
   `TNetClient` code. The same holds for the Cancel that takes the end turn back:
   the headless runs send `CancelEndTurn` through `TNetClient` directly, and
   nothing runs the host's own Cancel.
-- A takeoff's end turn cannot be taken back, nor a continuing human's (only the
-  film's break stops it). The host refuses a client's late `CancelEndTurn` only
-  when it reads it; in the headless runs it reads it after the day, so the
-  refusal there says `no end turn waits`, not `the day has begun`.
+- A takeoff's end turn cannot be taken back, nor a jump in hyperspace. The
+  host's own Cancel at the end of a continuing film, and its break, are not
+  run by the tests (they need the star map's film).
+- A client's stop that comes while the host's barrier applies the queues is
+  refused without a stop queued; the client stops after the next state, which
+  may cost it one more day of travel.
+- In some new games the headless client's takeoff (`PlayHumanTurn`) never
+  leaves the planet: every day it is landed again. Not looked into.
 - A host whose player keeps a box open holds its clients' trades; they give up
   after 10 s and get the answer later (Trades).
 - `ContinueUntilArrival` and `EndedTurn` are not in a state; this is harmless

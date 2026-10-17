@@ -111,8 +111,10 @@ type
     // session (docs/network.md, Joining), by human id.
     FTokenHumans: array of Integer;
     FTokens: array of QWord;
-    // CHANGE: ENHANCEMENT - The EndTurns taken out of the queues by the peers' CancelEndTurn.
+    // CHANGE: ENHANCEMENT - The EndTurns taken out of the queues by the peers' CancelEndTurn, and
+    // the continuing travels it stopped before the day.
     FCancelledEndTurns: Integer;
+    FStoppedTravels: Integer;
     function FindPeer(PeerId: Integer): THostPeer;
     // The human's token; with Issue, one is issued (NewToken) when it has none yet, at its
     // first Welcome in this session. 0: none.
@@ -253,6 +255,7 @@ type
     property LastTakeMs: Integer read FLastTakeMs;
     // CHANGE: ENHANCEMENT - How many EndTurns the peers took back (CancelEndTurn), for the tests.
     property CancelledEndTurns: Integer read FCancelledEndTurns;
+    property StoppedTravels: Integer read FStoppedTravels;
   end;
 
 var
@@ -1011,6 +1014,21 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - The human continues its travel here, and the peer's queue holds a
+// StopContinuing (the film's break, or a CancelEndTurn), which the barrier applies with the
+// peer's next EndTurn: then it holds the day, which waits for that EndTurn (PeersReady). Not in
+// hyperspace, where the travel cannot stop.
+function StopPending(Peer: THostPeer; Human: THuman): Boolean;
+begin
+  Result :=
+      Human.ContinueUntilArrival
+          and Human.Connected
+          and not Human.Finished
+          and (Human.Player <> nil)
+          and not Human.Player.InHyperspace
+          and (Peer.StopIndex >= 0);
+end;
+
 function TNetHost.LagsBehind(Peer: THostPeer; Human: THuman): Boolean;
 begin
   Result :=
@@ -1036,6 +1054,9 @@ begin
     Human := FindHuman(Peer.HumanId);
     if (Human <> nil) and HumanHoldsDay(Human) and (Peer.EndTurnIndex < 0) then
       Exit(False);
+    // CHANGE: ENHANCEMENT - A continuing human whose stop is queued holds the day already.
+    if (Human <> nil) and StopPending(Peer, Human) and (Peer.EndTurnIndex < 0) then
+      Exit(False);
     if LagsBehind(Peer, Human) then
       Exit(False);
   end;
@@ -1048,7 +1069,9 @@ var
 begin
   Peer := PeerOfHuman(FPeers, Human.Id);
   if not HumanHoldsDay(Human) then
-    Result := (Peer <> nil) and LagsBehind(Peer, Human)
+    Result :=
+        (Peer <> nil)
+            and (LagsBehind(Peer, Human) or (StopPending(Peer, Human) and (Peer.EndTurnIndex < 0)))
   else
     Result := (Peer = nil) or (Peer.EndTurnIndex < 0);
 end;
@@ -1142,21 +1165,46 @@ var
   Index: Integer;
   Why: AnsiString;
   Refusal: ECommandRefused;
+  StopTravel, Begun: Boolean;
+  Stop: TQueuedCommand;
 begin
   // The day is checked first: in a remote dialogue the turn thread calls this.
   Index := -1;
-  if FDayUnderWay or FApplyingQueues then
+  StopTravel := (Length(Command.Ints) > 1) and (Command.Ints[1] <> 0);
+  Begun := FDayUnderWay or FApplyingQueues;
+  if Begun then
     Why := 'the day has begun'
+  // The end turn of a day that has run since (the peer has not applied its state yet).
+  else if (Length(Command.Ints) > 0) and (Command.Ints[0] <> Galaxy.CurrentTurn) then
+    Why := 'that day has run'
   else
-  begin
     Why := '';
+  if not Begun then
     Index := Peer.EndTurnIndex;
-    if Index < 0 then
-      Why := 'no end turn waits'
-    // The end turn of a day that has run since (the peer has not applied its state yet).
-    else if (Length(Command.Ints) > 0) and (Command.Ints[0] <> Galaxy.CurrentTurn) then
-      Why := 'that day has run';
-  end;
+  // CHANGE: ENHANCEMENT - A human whose travel continues sent no EndTurn: its travel stops with
+  // a StopContinuing queued as if the peer had sent it, which holds the peer's next day that has
+  // not begun (THostPeer.StopPending). Not while the barrier applies the queues; the client
+  // stops after the next state then.
+  if (Index < 0) and StopTravel and not FApplyingQueues then
+  begin
+    if Peer.StopIndex < 0 then
+    begin
+      Stop.Sequence := Sequence;
+      Stop.Command := NewCommand(ckStopContinuing);
+      Stop.Command.Actor := Command.Actor;
+      Insert(Stop, Peer.Queue, Length(Peer.Queue));
+    end;
+    if Why = '' then
+      Inc(FStoppedTravels);
+    NetLog(
+        Format(
+            'travel stop queued human=%d seq=%d accepted=%d day-begun=%d',
+            [Peer.HumanId, Sequence, Ord(Why = ''), Ord(Begun)]
+        )
+    );
+  end
+  else if (Why = '') and (Index < 0) then
+    Why := 'no end turn waits';
   if Why <> '' then
   begin
     Refusal := ECommandRefused.CreateReason(rrTooLate, 'CancelEndTurn: ' + Why);
@@ -1165,6 +1213,12 @@ begin
     finally
       Refusal.Free;
     end;
+    Exit;
+  end;
+  if Index < 0 then
+  begin
+    NetLog(Format('travel stopped human=%d seq=%d ready=%d', [Peer.HumanId, Sequence, Ord(PeersReady)]));
+    CommandApplied(Peer, Sequence, Command);
     Exit;
   end;
   Delete(Peer.Queue, Index, 1);

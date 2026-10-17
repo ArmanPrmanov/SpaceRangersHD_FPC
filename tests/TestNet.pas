@@ -908,6 +908,24 @@ begin
     SendWholeState(Host, Peer, 2);
     Check(PumpUntil(Client, cwJoined) and Client.HasState, 'the day''s state comes');
     Check(Client.EndTurnCancel = ncRefused, 'the refusal stands until the state is applied');
+    FreeAndNil(Client);
+
+    // CHANGE: ENHANCEMENT - A human whose travel continues sent no EndTurn: its Cancel stops the
+    // travel (the command's second integer), once.
+    Client := JoinedClient(Host, Peer);
+    Check(not Client.MayCancelEndTurn and Client.MayCancelEndTurn(True), 'a continuing travel may be stopped');
+    Command := NewCommand(KindCancelEndTurn);
+    AddInt(Command, 301);
+    AddInt(Command, 1);
+    Check(Client.SendCancelEndTurn(Command), 'the stop goes without an EndTurn');
+    Check(not Client.MayCancelEndTurn(True), 'once');
+    Command := TakeCommand(Host, Peer, Sequence);
+    Check(
+        (Command.Kind = KindCancelEndTurn) and (Length(Command.Ints) = 2) and (Command.Ints[1] = 1),
+        'the host gets the stop'
+    );
+    SendResult(Host, Peer, Sequence, KindCancelEndTurn, True);
+    Check(PumpUntilAnswered(Client) and Client.TakeCancelledEndTurn, 'the host applies it before its day');
   finally
     Client.Free;
     Host.Free;

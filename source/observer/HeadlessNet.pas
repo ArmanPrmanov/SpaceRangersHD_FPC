@@ -24,7 +24,9 @@ unit HeadlessNet;
 // host's dialogue state must stay as it was (docs/network.md, Tests).
 // CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn: a client takes its end turn back before the
 // host's first day, which waits for that, and ends it again; once the second day has begun, the
-// host refuses the same (docs/network.md, Tests).
+// host refuses the same (docs/network.md, Tests). Then its end turns ask to continue the travel,
+// and once a state says that it continues, it stops the travel before the host's next day,
+// which waits for that, and plays that day.
 interface
 uses
   HeadlessSim;
@@ -47,6 +49,7 @@ uses
   Globals,
   aCommands,
   aDialogActions,
+  aMyFunction,
   aPlanetActions,
   aScript,
   aShopActions,
@@ -775,6 +778,112 @@ begin
   Result := Sent and (Accepted = First) and (Holds = First);
 end;
 
+// CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn, after a state that says the client's human
+// continues its travel: Cancel stops it (CancelEndTurn with StopTravel) before the host's next
+// day, which waits for that; the human holds that day here then. Whether it did. A host that
+// ended meanwhile (the last state) leaves it untried.
+function ProbeStopTravel(Client: TNetClient): Boolean;
+var
+  Deadline: QWord;
+  Sent, Accepted, Holds: Boolean;
+begin
+  Result := False;
+  Deadline := GetTickCount64 + StallTimeoutMs;
+  Sent := Client.SendCancelEndTurn(CancelEndTurnCommand(True));
+  while Sent and not (Client.EndTurnCancel in [ncAccepted, ncRefused]) do
+  begin
+    if Client.HostLeft then
+    begin
+      Emit('net client travel cancel untried: the host left');
+      Exit(True);
+    end;
+    if GetTickCount64 > Deadline then
+    begin
+      Emit('net client failed: the host did not answer the stopped travel');
+      Exit;
+    end;
+    Client.Pump;
+    NetInboxEvent.WaitFor(5);
+  end;
+  Accepted := Client.EndTurnCancel = ncAccepted;
+  if Accepted then
+    Client.TakeCancelledEndTurn;
+  Holds := HumanHoldsDay(LocalHuman);
+  Emit(
+      Format(
+          'net client travel cancel day=%d sent=%d accepted=%d holds=%d continues=%d human=%d',
+          [Galaxy.CurrentTurn, Ord(Sent), Ord(Accepted), Ord(Holds), Ord(LocalHuman.ContinueUntilArrival),
+              Client.HumanId]
+      )
+  );
+  Result := Sent and Accepted and Holds;
+end;
+
+// CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn: a turn whose travel lasts: the human, in
+// normal space, flies to the planet of its star farthest from it, and its end turn asks to
+// continue until arrival, so the host runs the next days without it. False
+// when there is no planet to fly to.
+function PlayFarTravel(Human: THuman; var Plan: AnsiString): Boolean;
+var
+  P: TPlayer;
+  I: Integer;
+  Planet, Far: TPlanet;
+  Distance, Best: Single;
+  Command: TPlayerCommand;
+begin
+  Result := False;
+  P := Human.Player;
+  if (P = nil) or not P.InNormalSpace or (P.CurrentStar = nil) then
+    Exit;
+  Far := nil;
+  Best := 0;
+  for I := 0 to P.CurrentStar.Planets.Count - 1 do
+  begin
+    Planet := TPlanet(P.CurrentStar.Planets[I]);
+    Distance := PointDistanceSquared(P.Position, Planet.GetPosition);
+    if Distance > Best then
+    begin
+      Best := Distance;
+      Far := Planet;
+    end;
+  end;
+  if Far = nil then
+    Exit;
+  Command := NewCommand(ckOrderMove);
+  AddPoint(Command, Far.GetPosition);
+  AddInt(Command, mfClearPending);
+  SubmitCommand(Command);
+  SubmitCommand(NewCommand(ckApplyPendingOrders));
+  SubmitCommand(NewCommand(ckBeginSpaceDay));
+  Command := NewCommand(ckEndTurn);
+  AddInt(Command, 1);
+  SubmitCommand(Command);
+  Plan := Plan + 'F';
+  Emit(Format('net client far travel day=%d planet=%d distance=%d', [Galaxy.CurrentTurn, Far.Id, Round(Sqrt(Best))]));
+  Result := True;
+end;
+
+var
+  // CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn: the client's turns in normal space fly far
+  // and continue (PlayFarTravel), until a continuing travel has been stopped.
+  EndTurnContinues: Boolean;
+
+// Whether a remote human continues its travel and does not hold the day.
+function RemoteHumanContinues: Boolean;
+var
+  I: Integer;
+  Human: THuman;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if (Human <> LocalHuman) and Human.Connected and Human.ContinueUntilArrival and not HumanHoldsDay(Human)
+        and (Human.Player <> nil) and not Human.Player.InHyperspace then
+      Exit(True);
+  end;
+  Result := False;
+end;
+
 function RunNetHost(const Options: TSimulationOptions): Integer;
 var
   Host: TNetHost;
@@ -886,9 +995,12 @@ begin
           Host.Pump;
           DropFrozenPeers;
           // CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn: the first day waits until a client
-          // has taken its end turn back (and ended it again).
+          // has taken its end turn back (and ended it again); a day after a state that says a
+          // client continues its travel, until it has stopped it (once in the run).
           if Host.PeersReady
-              and (not Options.NetCancelEndTurn or (Day > 1) or (Host.CancelledEndTurns > 0)) then
+              and (not Options.NetCancelEndTurn
+                  or ((Day > 1) or (Host.CancelledEndTurns > 0))
+                      and ((Host.StoppedTravels > 0) or not RemoteHumanContinues)) then
             Break;
           if GetTickCount64 > Deadline then
           begin
@@ -1168,12 +1280,18 @@ var
   RefusalShown: WideString;
   // CHANGE: ENHANCEMENT - The connection has gone silent (--sim-net-silent-at), once.
   WentSilent: Boolean;
-  // CHANGE: ENHANCEMENT - The turns after which --sim-net-cancel-end-turn took the end turn back.
+  // CHANGE: ENHANCEMENT - The turns after which --sim-net-cancel-end-turn took the end turn back,
+  // and whether it has stopped a continuing travel.
   CancelProbes: Integer;
+  TravelProbed: Boolean;
+  // Whether a turn it played began in normal space (else it could not travel).
+  InSpaceTurns: Integer;
 begin
   Result := 0;
   WentSilent := False;
   CancelProbes := 0;
+  TravelProbed := False;
+  InSpaceTurns := 0;
   if Options.NetReconnectMs > 0 then
     NetReconnectMs := Options.NetReconnectMs;
   Colon := LastDelimiter(':', Options.NetJoin);
@@ -1351,6 +1469,20 @@ begin
         Deadline := GetTickCount64 + StallTimeoutMs;
         Continue;
       end;
+      // CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn: the travel continues; it stops here,
+      // and the human plays this day.
+      if Options.NetCancelEndTurn and (CancelProbes >= 2) and not TravelProbed
+          and LocalHuman.ContinueUntilArrival and not HumanHoldsDay(LocalHuman)
+          and (LocalPlayer <> nil) and not LocalPlayer.InHyperspace then
+      begin
+        TravelProbed := True;
+        EndTurnContinues := False;
+        if not ProbeStopTravel(Client) then
+        begin
+          Emit('net client failed: the stopped travel');
+          Exit(1);
+        end;
+      end;
       // One turn a day: a state that comes again for the same day (another join) is only
       // applied.
       if HumanHoldsDay(LocalHuman) and (Galaxy.CurrentTurn <> LastPlayedDay) then
@@ -1375,8 +1507,17 @@ begin
             Exit(1);
           end;
         end
-        else
+        else if not (EndTurnContinues and PlayFarTravel(LocalHuman, Plan)) then
           PlayHumanTurn(LocalHuman, Galaxy.CurrentTurn, Index, Plan);
+        if Options.NetCancelEndTurn and LocalPlayer.InNormalSpace then
+          Inc(InSpaceTurns);
+        if Options.NetCancelEndTurn then
+          Emit(
+              Format(
+                  'net client turn day=%d plan=%s space=%d hyperspace=%d',
+                  [Galaxy.CurrentTurn, Plan, Ord(LocalPlayer.InNormalSpace), Ord(LocalPlayer.InHyperspace)]
+              )
+          );
         LastPlayedDay := Galaxy.CurrentTurn;
         if Options.NetCancelEndTurn and (CancelProbes < 2) then
         begin
@@ -1386,6 +1527,8 @@ begin
             Exit(1);
           end;
           Inc(CancelProbes);
+          // Then the end turns ask to continue, until a travel has been stopped.
+          EndTurnContinues := (CancelProbes >= 2) and not TravelProbed;
         end;
       end;
       Deadline := GetTickCount64 + StallTimeoutMs;
@@ -1401,6 +1544,10 @@ begin
       Emit(Format('net client host left bye=1 tick=%d', [GetTickCount64]));
     if Mismatches > 0 then
       Result := 1;
+    // CHANGE: ENHANCEMENT - Some new games' clients never leave their planet (each takeoff stays
+    // landed); then no travel continued to stop.
+    if Options.NetCancelEndTurn and not TravelProbed then
+      Emit(Format('net client travel cancel untried in-space-turns=%d', [InSpaceTurns]));
     if Galaxy <> nil then
       Day := Galaxy.CurrentTurn
     else
@@ -1413,6 +1560,7 @@ begin
     );
   finally
     BuyWholeStockGood := False;
+    EndTurnContinues := False;
     StopNetwork;
     NetLogHook := nil;
   end;

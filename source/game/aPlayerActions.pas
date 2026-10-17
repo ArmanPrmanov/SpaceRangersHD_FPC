@@ -174,7 +174,10 @@ procedure StopContinuing;
 // CHANGE: ENHANCEMENT - The local human takes back its end turn while the day waits for others
 // (docs/network.md, Waiting): it holds the day again. The command names the day it is for
 // (Galaxy.CurrentTurn), which a host checks for a client's; CancelEndTurnCommand builds it.
-function CancelEndTurnCommand: TPlayerCommand;
+// CHANGE: ENHANCEMENT - With StopTravel, a client's human whose travel continues (it sent no
+// EndTurn) asks the host to stop it (docs/network.md, Continuing travel); the executor is the
+// same.
+function CancelEndTurnCommand(StopTravel: Boolean = False): TPlayerCommand;
 procedure CancelEndTurn;
 // Adds a human whose ranger starts landed at Planet (aHuman.JoinHuman), as a command so that a
 // command log replays it. Returns the new human.
@@ -1171,28 +1174,30 @@ begin
 end;
 
 // CHANGE: ENHANCEMENT - The end turn is taken back: the human holds the day again, and does not
-// continue its travel (the end turn may have asked for that). A host applies a client's only
-// before its day, by taking the client's EndTurn out of its queue; then neither runs there.
+// continue its travel (the end turn may have asked for that, or the travel went on by itself).
+// A host applies a client's only before its day, by taking the client's EndTurn out of its
+// queue, or for a continuing one by queueing a StopContinuing; the cancel never runs there.
 procedure ExecuteCancelEndTurn(const Command: TPlayerCommand);
 var
   H: THuman;
 begin
   H := ActorHuman(Command);
-  if not H.EndedTurn or H.Finished then
+  if (not H.EndedTurn and not H.ContinueUntilArrival) or H.Finished then
     Exit;
   H.EndedTurn := False;
   H.ContinueUntilArrival := False;
 end;
 
-function CancelEndTurnCommand: TPlayerCommand;
+function CancelEndTurnCommand(StopTravel: Boolean): TPlayerCommand;
 begin
   Result := NewCommand(ckCancelEndTurn);
   AddInt(Result, Galaxy.CurrentTurn);
+  AddInt(Result, Ord(StopTravel));
 end;
 
 procedure CancelEndTurn;
 begin
-  if LocalHuman.EndedTurn then
+  if LocalHuman.EndedTurn or LocalHuman.ContinueUntilArrival then
     SubmitCommand(CancelEndTurnCommand);
 end;
 

@@ -156,11 +156,15 @@ log never records it), and a host refuses it from a peer.
 
 `CancelEndTurn` (47, `aPlayerActions`) takes an end turn back while the day
 waits for others: its executor clears the actor's `EndedTurn` and
-`ContinueUntilArrival`. The host's own runs as any command, after its
+`ContinueUntilArrival` (also for a human whose travel continues and so holds
+no end turn of its own). The host's own runs as any command, after its
 `EndTurn`, and the log records both. A client's never runs on the host: the
 host takes the client's queued `EndTurn` out instead, so the log records
-neither, and refuses it (`rrTooLate`) once the day has begun. The client runs
-it only once the host has applied it ([network.md](network.md), Waiting).
+neither, and refuses it (`rrTooLate`) once the day has begun. With its second
+integer (`StopTravel`, a continuing client's), the host queues a
+`StopContinuing` of that human instead, which the log records when the barrier
+applies it. The client runs it only once the host has applied it
+([network.md](network.md), Waiting and Continuing travel).
 
 Not trades, though close:
 
