@@ -131,7 +131,10 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
     (absent: none); `DieInQuest` (606) carries whether a government quest
     fails with the death (absent: none, which only matters in multiplayer,
     where the ranger respawns); `FinishQueuedTextQuest` (607) finishes its
-    actor's queued quest (a command of no human, the first one).
+    actor's queued quest (a command of no human, the first one). Watching
+    another human's quest is no command: its pages travel as the `QuestPage`
+    message, and the watch window submits nothing ([network.md](network.md),
+    Watching a text quest).
 
 ## Trades
 

@@ -302,7 +302,7 @@ Decided with the project owner. Later versions may revisit any row.
 | Player count. | Unlimited. |
 | When does a day pass? | When every connected human has pressed end turn (the play button), including docked humans. No turn timer. |
 | A human is in a shop or dialogue. | No time passes. The day waits for their end turn like everyone else's. |
-| Text quests. | On in multiplayer, always (the session flag is gone). One human at a time plays a planet's quest; it runs no galaxy day, so the human owes the quest's days afterwards while the others play on; a death in a quest is a ship loss and respawns. The others will be able to watch it ([text-quests plan](docs/progress/2026-10-19-text-quests-plan.md)). |
+| Text quests. | On in multiplayer, always (the session flag is gone). One human at a time plays a planet's quest; it runs no galaxy day, so the human owes the quest's days afterwards while the others play on; a death in a quest is a ship loss and respawns. In a network session the others can watch it, read-only, from a wait for the day (W) or the in-game menu (done, [text-quests plan](docs/progress/2026-10-19-text-quests-plan.md)). |
 | Hyperspace arcade and black holes. | Solo instance, local to the human who entered. Because the day waits for everyone, the others wait until that human finishes and presses end turn. Shared instances are a future version. |
 | Robot battles. | Already automatic victories, so nothing to sync. |
 | PvP. | Allowed. A friendly-fire switch in the settings menu turns it off and on at any time during the game; the host owns the switch. |

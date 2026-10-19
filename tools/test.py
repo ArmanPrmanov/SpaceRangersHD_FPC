@@ -986,13 +986,18 @@ def check_pages_kept(output: str, side: str, human: str, last: tuple) -> str:
     return ""
 
 
+# The line of a wait for the day that offers the watch window (NetPlay.QuestWatchLine; Phase E).
+WATCH_HINT = "W: watch "
+
+
 def check_net_quest_lock(args, binary: Path, save: Path) -> tuple[str, str]:
     """Two clients at one planet, each with a quest to it (--sim-net-quest): Net1 plays the
     planet's text quest headless before its end turn; the host ran its BeginTextQuest as it came
     and its status said so (activity=1), and the host's barrier applied the quest's commands
     (none before it); the host's wait for its peers named Net1's text quest, and so did Net2's
-    wait from the status; the relay of Net1's BeginTextQuest told Net2 who plays the planet's
-    quest, and the host refused Net2's own (in-use). Every state's hash is the host's, and the
+    wait from the status, and both offered to watch it (W, Phase E); the relay of Net1's
+    BeginTextQuest told Net2 who plays the planet's quest, and the host refused Net2's own
+    (in-use). Every state's hash is the host's, and the
     host's log replays. Every page of Net1's quest reaches the host and Net2 as Net1 sent it, in
     order, with the end page (Phase D), and both keep its last page. Returns what is wrong, and
     a note."""
@@ -1030,6 +1035,8 @@ def check_net_quest_lock(args, binary: Path, save: Path) -> tuple[str, str]:
     waits = [line for line in host_output.splitlines() if line.startswith("net host wait ")]
     if not any("(text quest)" in line for line in waits):
         return f"the host's wait did not name Net1's text quest: {waits}", ""
+    if not any(WATCH_HINT in line for line in waits):
+        return f"the host's wait did not offer to watch Net1's text quest: {waits}", ""
     holder = net_lines(net2, "net client quest holder ")
     if not holder or holder[0]["human"] != human1 or holder[0]["status"] != human1:
         return f"Net2 did not see that Net1 plays the planet's quest: {holder}", ""
@@ -1042,6 +1049,8 @@ def check_net_quest_lock(args, binary: Path, save: Path) -> tuple[str, str]:
     waited = [line for line in net2.splitlines() if line.startswith("net client wait ")]
     if not any("(text quest)" in line for line in waited):
         return f"Net2's wait did not name Net1's text quest: {waited}", ""
+    if not any(WATCH_HINT in line for line in waited):
+        return f"Net2's wait did not offer to watch Net1's text quest: {waited}", ""
     sent = quest_pages(net1, "sent", human1)
     problem = check_page_relay(
         sent,
@@ -1057,7 +1066,7 @@ def check_net_quest_lock(args, binary: Path, save: Path) -> tuple[str, str]:
     return "", (
         f"a client plays a text quest headless ({done[0]['outcome']} in {done[0]['steps']} choices); "
         f"the host's barrier applies its {quest['barrier']} quest commands with the client's hashes, "
-        "its wait and the other client's name it, and the other client's BeginTextQuest for the "
+        "its wait and the other client's name it and offer to watch it, and the other client's BeginTextQuest for the "
         f"planet is refused {NET_QUEST_REFUSAL}; the host's log replays; its {len(sent)} pages "
         f"(end {sent[-1][3]}) reach the host and the other client in order with the same hashes"
     )

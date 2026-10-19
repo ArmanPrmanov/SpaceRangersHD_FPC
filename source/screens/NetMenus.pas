@@ -13,6 +13,9 @@ unit NetMenus;
 // and stops hosting. The last address, name and port are kept in the user settings. The
 // dialogs are built in code with the message box's window, fonts and buttons; they change no
 // game state themselves.
+// CHANGE: ENHANCEMENT - The in-game menu's "Watch text quest" button (and W) under the host's
+// state, while another human of the session plays a text quest: the watch window
+// (docs/progress/2026-10-19-text-quests-plan.md, Watching; NetPlay.WatchTextQuestFromMenu).
 interface
 uses
   GI_MessageLoop,
@@ -31,8 +34,11 @@ procedure GameMenuHostOpened(Screen: TMessageLoopGI);
 procedure GameMenuHostClosed(Screen: TMessageLoopGI);
 // The host button's action (the N key and the button): hosts, or offers to stop hosting.
 procedure GameMenuHostClicked(Screen: TMessageLoopGI);
-// Whether Point (the menu's coordinates) is on the host button, which a click on the
-// background must not take for a click beside the menu.
+// CHANGE: ENHANCEMENT - The watch button's action (the W key and the button): the watch window
+// while another human plays a text quest; nothing otherwise.
+procedure GameMenuWatchClicked(Screen: TMessageLoopGI);
+// Whether Point (the menu's coordinates) is on the host or the watch button, which a click on
+// the background must not take for a click beside the menu.
 function GameMenuHostContains(Screen: TMessageLoopGI; Point: TPoint): Boolean;
 implementation
 uses
@@ -57,6 +63,7 @@ const
   JoinLabelName = 'LNetJoin';
   HostButtonName = 'NetHost';
   HostLabelName = 'LNetHost';
+  WatchButtonName = 'NetWatch';
   // How often the in-game menu shows the host's state again.
   HostRefreshMs = 1000;
   MaximumFields = 2;
@@ -92,6 +99,7 @@ type
     HostTimer: PCallbackTimerGI;
     procedure JoinClicked(Sender: TObjectGI);
     procedure HostClicked(Sender: TObjectGI);
+    procedure WatchClicked(Sender: TObjectGI);
     procedure RefreshHost(Timer: PCallbackTimerGI; UserData: PtrInt);
   end;
 
@@ -449,7 +457,7 @@ end;
 
 procedure UpdateHostControls(Screen: TMessageLoopGI);
 var
-  Button: TGraphButtonGI;
+  Button, Watch: TGraphButtonGI;
   Status: TLabelGI;
   Names: WideString;
 begin
@@ -457,6 +465,10 @@ begin
   Status := TLabelGI(Screen.FindControlByPath(HostLabelName));
   if (Button = nil) or (Status = nil) then
     Exit;
+  // CHANGE: ENHANCEMENT - Shown while another human plays a text quest.
+  Watch := TGraphButtonGI(Screen.FindControlByPath(WatchButtonName));
+  if Watch <> nil then
+    Watch.SetActive(Length(WatchableQuestHumans) > 0);
   // A client plays in another's game: it has nothing to host.
   Button.SetActive(NetRole <> nrClient);
   Status.SetActive(NetRole = nrHost);
@@ -482,10 +494,40 @@ begin
     Button.SetCaption(MultiplayerText('MenuHost', 'Host this game'));
 end;
 
+// The look of the new-game screen's caption buttons (ButExtended).
+function CreateMenuButton(Owner: TObjectGI; const Name, Caption: WideString): TGraphButtonGI;
+begin
+  Result := TGraphButtonGI.Create(Owner);
+  Result.SetName(Name);
+  Result.EnterSound := 'Sound.ButtonEnter';
+  Result.LeaveSound := 'Sound.ButtonLeave';
+  Result.ClickSound := 'Sound.ButtonClick';
+  Result.UpOnlyDown := True;
+  Result.SetDepth(-3);
+  Result.SetImageNormalPath('GI,Bm.FormGameSet2.ButExtN');
+  Result.SetImageNormalActivePath('GI,Bm.FormGameSet2.ButExtN');
+  Result.SetImageDownPath('GI,Bm.FormGameSet2.ButExtD');
+  Result.SetSize(Result.GetMaxStateImageSize);
+  Result.HitKind := gbhRect;
+  Result.CaptionAlignX := taxCenter;
+  Result.CaptionAlignY := tayCenterEx;
+  Result.SetCaptionFontName('Font.2Ranger');
+  Result.CaptionColors[0] := CurrentPixelFormat.PackRgbBytes(88, 229, 255);
+  Result.CaptionColors[1] := CurrentPixelFormat.PackRgbBytes(248, 236, 96);
+  Result.CaptionColors[2] := CurrentPixelFormat.PackRgbBytes(248, 164, 0);
+  Result.CaptionColors[3] := CurrentPixelFormat.PackRgbBytes(248, 164, 0);
+  Result.CaptionColors[4] := Result.CaptionColors[0];
+  Result.CaptionColors[5] := Result.CaptionColors[0];
+  Result.CaptionOffsets := Classes.Rect(0, -5, 0, -5);
+  Result.SetCaption(Caption);
+  Result.UpdateStateImagePlacement;
+  Result.UpdateStateVisuals;
+end;
+
 procedure AddGameMenuHost(Screen: TMessageLoopGI);
 var
   Menu, MainPanel: TObjectGI;
-  Button: TGraphButtonGI;
+  Button, Watch: TGraphButtonGI;
   Status: TLabelGI;
   Top: Integer;
 begin
@@ -499,32 +541,7 @@ begin
   Button := TGraphButtonGI(Screen.FindControlByPath(HostButtonName));
   if Button = nil then
   begin
-    // The look of the new-game screen's caption buttons (ButExtended).
-    Button := TGraphButtonGI.Create(MainPanel);
-    Button.SetName(HostButtonName);
-    Button.EnterSound := 'Sound.ButtonEnter';
-    Button.LeaveSound := 'Sound.ButtonLeave';
-    Button.ClickSound := 'Sound.ButtonClick';
-    Button.UpOnlyDown := True;
-    Button.SetDepth(-3);
-    Button.SetImageNormalPath('GI,Bm.FormGameSet2.ButExtN');
-    Button.SetImageNormalActivePath('GI,Bm.FormGameSet2.ButExtN');
-    Button.SetImageDownPath('GI,Bm.FormGameSet2.ButExtD');
-    Button.SetSize(Button.GetMaxStateImageSize);
-    Button.HitKind := gbhRect;
-    Button.CaptionAlignX := taxCenter;
-    Button.CaptionAlignY := tayCenterEx;
-    Button.SetCaptionFontName('Font.2Ranger');
-    Button.CaptionColors[0] := CurrentPixelFormat.PackRgbBytes(88, 229, 255);
-    Button.CaptionColors[1] := CurrentPixelFormat.PackRgbBytes(248, 236, 96);
-    Button.CaptionColors[2] := CurrentPixelFormat.PackRgbBytes(248, 164, 0);
-    Button.CaptionColors[3] := CurrentPixelFormat.PackRgbBytes(248, 164, 0);
-    Button.CaptionColors[4] := Button.CaptionColors[0];
-    Button.CaptionColors[5] := Button.CaptionColors[0];
-    Button.CaptionOffsets := Classes.Rect(0, -5, 0, -5);
-    Button.SetCaption(MultiplayerText('MenuHost', 'Host this game'));
-    Button.UpdateStateImagePlacement;
-    Button.UpdateStateVisuals;
+    Button := CreateMenuButton(MainPanel, HostButtonName, MultiplayerText('MenuHost', 'Host this game'));
     Status := TLabelGI.Create(MainPanel);
     Status.SetName(HostLabelName);
     Status.SetDepth(-3);
@@ -539,7 +556,18 @@ begin
   end
   else
     Status := TLabelGI(Screen.FindControlByPath(HostLabelName));
+  Watch := TGraphButtonGI(Screen.FindControlByPath(WatchButtonName));
+  if Watch = nil then
+  begin
+    Watch := CreateMenuButton(
+        MainPanel,
+        WatchButtonName,
+        MultiplayerText('MenuWatch', 'Watch text quest')
+    );
+    Watch.SetActive(False);
+  end;
   Button.UpCallback := Actions.HostClicked;
+  Watch.UpCallback := Actions.WatchClicked;
   // Under the round menu, centred.
   Top := Menu.LocalPosition.Y + Menu.ClientSize.Y + GiScalePixels(6);
   Button.SetPosition(
@@ -552,6 +580,16 @@ begin
             Top + Button.ClientSize.Y + GiScalePixels(2)
         )
     );
+  // Under the host's state.
+  Inc(Top, Button.ClientSize.Y + GiScalePixels(2));
+  if Status <> nil then
+    Inc(Top, Status.ClientSize.Y);
+  Watch.SetPosition(
+      Classes.Point(
+          Menu.LocalPosition.X + (Menu.ClientSize.X - Watch.ClientSize.X) div 2,
+          Top + GiScalePixels(4)
+      )
+  );
   Screen.RootUiObject.UpdateAbsolutePosition;
   Screen.RootUiObject.UpdateSubtreeHitBounds;
 end;
@@ -586,10 +624,13 @@ end;
 
 function GameMenuHostContains(Screen: TMessageLoopGI; Point: TPoint): Boolean;
 var
-  Button: TObjectGI;
+  Button, Watch: TObjectGI;
 begin
   Button := Screen.FindControlByPath(HostButtonName);
-  Result := (Button <> nil) and Button.Active and Button.ContainsPoint(Point);
+  Watch := Screen.FindControlByPath(WatchButtonName);
+  Result :=
+      ((Button <> nil) and Button.Active and Button.ContainsPoint(Point))
+          or ((Watch <> nil) and Watch.Active and Watch.ContainsPoint(Point));
 end;
 
 // Asks for the port and hosts the running game; says where it listens.
@@ -678,6 +719,17 @@ end;
 procedure TNetMenuActions.HostClicked(Sender: TObjectGI);
 begin
   GameMenuHostClicked(Sender.MessageLoop);
+end;
+
+procedure GameMenuWatchClicked(Screen: TMessageLoopGI);
+begin
+  WatchTextQuestFromMenu;
+  UpdateHostControls(Screen);
+end;
+
+procedure TNetMenuActions.WatchClicked(Sender: TObjectGI);
+begin
+  GameMenuWatchClicked(Sender.MessageLoop);
 end;
 
 finalization

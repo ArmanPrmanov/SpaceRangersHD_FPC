@@ -450,11 +450,15 @@ quest starts, `TQuestRun.OwesDays`):
   no "load the autosave?" box; a quest ends by its own choices. A networked client writes no
   autosave before a quest (the host, and hot-seat, still do).
 
-In a networked session (Phase C of [the plan](progress/2026-10-19-text-quests-plan.md);
-[network.md](network.md), Waiting and Disconnects) the waits name a human in a quest and
-one busy with a quest's days, the planet screen of a human who owes days ends its turns by
-itself, and a client that reconnects in the middle of a quest abandons it. Watching
-another human's quest is a later phase. The film-end steps of a day (landing wear, the black-hole scripts) run
+In a networked session ([the plan](progress/2026-10-19-text-quests-plan.md), Phases C to E;
+[network.md](network.md), Waiting, Text quests and Disconnects) the waits name a human in
+a quest and one busy with a quest's days, the planet screen of a human who owes days ends
+its turns by itself, and a client that reconnects in the middle of a quest abandons it. The
+other players can watch a quest, read-only (W in a wait for the day, or the in-game menu's
+button): the player's machine sends each page it shows, and watching changes nothing. A
+prisoner released by a lost prison quest takes off at once as in single player, also when
+it owes the quest's days (the planet is hostile to it then); in space the star map ends its
+owed days only when the player does. Hot-seat has no watching. The film-end steps of a day (landing wear, the black-hole scripts) run
 for the human whose film it was. A human who is not local while its ship lands or docks does
 not see the landing; the next turn opens the planet or station screen.
 

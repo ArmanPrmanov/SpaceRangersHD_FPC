@@ -211,7 +211,8 @@ begin
               if not (GetByName('Exit') as TGraphButtonGI).ContainsPoint(Point) then
                 if not (GetByName('Close') as TGraphButtonGI).ContainsPoint(Point) then
                   if not (GetByName('Achievements') as TGraphButtonGI).ContainsPoint(Point) then
-                    // CHANGE: ENHANCEMENT - The host button lies beside the menu (NetMenus).
+                    // CHANGE: ENHANCEMENT - The host and watch buttons lie beside the menu
+                    // (NetMenus).
                     if not GameMenuHostContains(Self, Point) then
                       ResumeClicked(nil);
 end;
@@ -235,7 +236,10 @@ begin
       HelpClicked(nil)
     // CHANGE: ENHANCEMENT - N hosts the game, or stops hosting it (NetMenus).
     else if Key = Ord('N') then
-      GameMenuHostClicked(Self);
+      GameMenuHostClicked(Self)
+    // CHANGE: ENHANCEMENT - W watches another human's text quest (NetMenus).
+    else if Key = Ord('W') then
+      GameMenuWatchClicked(Self);
 end;
 
 procedure TfGameMenu.ExecuteUiCode(Block: TBlockParEC; Key: Cardinal);

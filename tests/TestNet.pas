@@ -17,6 +17,7 @@ uses
   NetClient,
   NetPlay,
   QuestPage,
+  QuestWatch,
   TestSupport;
 
 // A state-like buffer: repetitive records with varying fields.
@@ -1139,6 +1140,110 @@ begin
   Check(Pos('127.', Addresses) = 0, 'the host''s addresses leave out loopback');
 end;
 
+// CHANGE: ENHANCEMENT - What the watch window decides and shows (QuestWatch; docs/progress/
+// 2026-10-19-text-quests-plan.md, Phase E): the quest text's paragraphs, whom it shows next,
+// when it closes, its header.
+function ParagraphsText(const Paragraphs: TQuestTextParagraphs): WideString;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to High(Paragraphs) do
+    if Paragraphs[I].Fixed then
+      Result := Result + '[fix:' + Paragraphs[I].Text + ']'
+    else
+      Result := Result + '[' + Paragraphs[I].Text + ']';
+end;
+
+procedure RunQuestWatchTests;
+var
+  Playing: TQuestHumanIds;
+  Store: TQuestPageStore;
+  Page: TWatchedQuestPage;
+  State: TQuestWatchState;
+  Texts: TQuestWatchTexts;
+begin
+  CheckText(
+      '[     Hello'#13#10'][- dash'#10'][fix:A B'#10'][     End]',
+      ParagraphsText(QuestTextParagraphs('Hello'#13#10'- dash'#10'<fix>  '#13#10'A B'#10'</fix>'#10'End')),
+      'a quest text''s paragraphs: indented but a dash line, <fix> parts after their tags'' line feed'
+  );
+  CheckText('', ParagraphsText(QuestTextParagraphs('')), 'an empty text has no paragraph');
+  CheckText(
+      '[  -x'#10'][     a][fix:b]',
+      ParagraphsText(QuestTextParagraphs('  -x'#10'a<fix>b')),
+      'blanks before a dash are not indented; an unclosed <fix> runs to the end'
+  );
+  Playing := nil;
+  CheckInt(0, NextWatchedHuman(Playing, 0), 'nobody plays: nobody to open');
+  CheckInt(5, NextWatchedHuman(Playing, 5), 'nobody plays: the window keeps its end page');
+  SetLength(Playing, 2);
+  Playing[0] := 3;
+  Playing[1] := 7;
+  CheckInt(3, NextWatchedHuman(Playing, 0), 'the window opens on the first who plays');
+  CheckInt(7, NextWatchedHuman(Playing, 3), 'W shows the next');
+  CheckInt(3, NextWatchedHuman(Playing, 7), 'and the first after the last');
+  CheckInt(3, NextWatchedHuman(Playing, 9), 'one whose quest ended goes to the first who plays');
+  Store := TQuestPageStore.Create;
+  try
+    Store.Put(SampleQuestPage(2, 1));
+    Store.Put(SampleQuestPage(3, 1));
+    Store.Put(SampleQuestPage(4, 1));
+    Page := SampleQuestPage(3, 2);
+    Page.Page.Outcome := qroSuccess;
+    Store.Put(Page);
+    // Human 2 watches: 3 has ended, so W goes from 4 back to 4.
+    Playing := Store.PlayingHumans(2);
+    CheckInt(1, Length(Playing), 'the watchable humans leave out the own and the ended');
+    CheckInt(4, NextWatchedHuman(Playing, 3), 'from an ended quest W goes to one that plays');
+    CheckInt(4, NextWatchedHuman(Playing, 4), 'with one player W stays');
+  finally
+    Store.Free;
+  end;
+  State := Default(TQuestWatchState);
+  State.Session := True;
+  Check(not QuestWatchMustClose(State), 'the window stays open in a session');
+  State.WaitDone := True;
+  Check(QuestWatchMustClose(State), 'it closes when its wait is done');
+  State.WaitDone := False;
+  State.Reconnecting := True;
+  Check(QuestWatchMustClose(State), 'and when the client reconnects');
+  State.Reconnecting := False;
+  State.ParentClosing := True;
+  Check(QuestWatchMustClose(State), 'and when the screen under it closes');
+  State.ParentClosing := False;
+  State.Session := False;
+  Check(QuestWatchMustClose(State), 'and without a session');
+  Texts := Default(TQuestWatchTexts);
+  Texts.Title := '<Players>''s text quest';
+  Texts.Ended := '<Players> finished the quest: <Outcome>.';
+  Texts.Outcomes[qroFailure] := 'failure';
+  Texts.NoPage := 'Nothing yet.';
+  Texts.Keys := 'Escape: close.';
+  Page := SampleQuestPage(3, 4);
+  CheckText(
+      'Net1''s text quest'#13#10'Escape: close.',
+      QuestWatchHeader(Page, True, 'Net1', Texts),
+      'the header of a page'
+  );
+  Page.Page.Outcome := qroFailure;
+  CheckText(
+      'Net1''s text quest'#13#10'Net1 finished the quest: failure.'#13#10'Escape: close.',
+      QuestWatchHeader(Page, True, 'Net1', Texts),
+      'the end page says the outcome'
+  );
+  CheckText(
+      'Net1''s text quest'#13#10'Nothing yet.'#13#10'Escape: close.',
+      QuestWatchHeader(Default(TWatchedQuestPage), False, 'Net1', Texts),
+      'no page yet'
+  );
+  CheckText(
+      'a<color=0,50,200>b</color>',
+      RecolourQuestText('a<color=255,240,100>b</color>', ['<color=255,240,100>', ''], '<color=0,50,200>'),
+      'the player''s highlight becomes the box''s'
+  );
+end;
+
 procedure RunNetTests;
 begin
   RunDeltaTests;
@@ -1149,6 +1254,7 @@ begin
   RunReconnectTests;
   RunCancelEndTurnTests;
   RunQuestPageTests;
+  RunQuestWatchTests;
   RunAddressTests;
 end;
 

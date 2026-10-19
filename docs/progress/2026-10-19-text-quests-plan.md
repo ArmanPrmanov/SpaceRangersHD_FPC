@@ -1,11 +1,12 @@
 # 2026-10-19 — Text quests in multiplayer: plan
 
-- Done: the plan; Phase A (the quest run out of the screen, the headless
-  quest player); Phase B (the multiplayer rules in the game layer); Phase C
-  (the network flow, waits and disconnects); Phase D (the pages to the
-  watchers). See their notes below.
+- Done (the plan is done): the plan; Phase A (the quest run out of the
+  screen, the headless quest player); Phase B (the multiplayer rules in the
+  game layer); Phase C (the network flow, waits and disconnects); Phase D (the
+  pages to the watchers); Phase E (the watch window); Phase F (docs, status).
+  See their notes below.
 - In progress: nothing.
-- Next: Phase E, then F, one subagent at a time.
+- Next: the hand checks in Phase F's notes, in the real game.
 - Notes: the owner asked for text quests in multiplayer, with the other
   players able to watch a quest but not act in it. This entry is the plan.
   The decisions marked **Owner** have the owner's answers (2026-10-19), in
@@ -746,6 +747,97 @@ its own progress entry.
 - Tests: keep the decisions (which page, when to close) in a pure function
   and unit-test it. The window itself is a hand check, listed in the status
   with the other hand checks. No window is opened by any test.
+
+#### Phase E notes (done)
+
+- **`source/quests/QuestWatch.pas`** (no UI, unit-tested in `TestNet.RunQuestWatchTests`):
+  `QuestTextParagraphs` cuts a quest text as the quest screen does (the `<fix>` parts, a
+  paragraph per line, the five-space indent but for a dash line); `TfPlanetQuest.SetQuestText`
+  now uses it too (it was the nested `AddQuestTextLines` and the parsing half of
+  `AddQuestTextParagraph`; the labels are laid out as before). `NextWatchedHuman` (whom the
+  window opens on and W shows next), `QuestWatchMustClose`, `QuestWatchHeader` (title, the
+  outcome line of an end page, the keys) and `RecolourQuestText`.
+- **`source/screens/NetQuestWatch.pas`**: `RunQuestWatch(HumanId, Poll)`, a box over the
+  innermost screen built in code with the message box's window, fonts and OK button (as
+  `NetMenus` and `fListBox`): the header, the quest's picture at the right (from the watcher's
+  data, scaled to 220 px wide at most, left out when it is missing), and a scrolled panel
+  (the quest screen's `PQS2` scroll bar, the wheel) with the text, the parameters and the
+  choices (enabled ones black, the rest grey, none clickable). The quest styles' highlight
+  tags become the box's blue. A 100 ms timer asks the caller's poll (which pumps the network)
+  and redraws on another page (`ChangeCount`, then the page's run and number); W shows the
+  next human who plays, Escape, Enter and the button close it. The end page shows "Guest
+  finished the quest: success." (failure, death, abandoned) and stays until closed: a
+  deviation from the plan's "closes on the end page", so that the watcher sees how it ended.
+- **`NetPlay`**: `WatchableQuestHumans` (the humans whose latest page is no end page, then
+  those the status, or the host's lock, still says are in a quest and whose pages this
+  machine has: a quest's end page comes before the barrier, and the wait still names its
+  human), `NetHumanName`, the waits' line `Multiplayer.WatchKey` / `WatchKeyMany` (in
+  `HostWaitText` and `ClientWaitText`, so the headless runs print it), the wait box's W
+  (`TNetWaitBoxGI.WaitKeyDown`, `WaitWatch` = 4) in the day's waits (`nwHostPeers`,
+  `nwClientDay`, `nwClientState`; not while reconnecting), `WatchFromWait` in `WaitModal`
+  (the human watched last while it still plays, else the first), and
+  `WatchTextQuestFromMenu`.
+- **The safe option for the day**: opened from a wait, the window closes as soon as the wait
+  is done (`WatchWaitPoll` asks `WaitDone` of the same kind: the film, the state, a
+  dialogue the host asks, the end turn taken back), and the wait's loop goes on as without
+  it, so the window never stays over the next screen and the waits close by themselves as
+  before. It also closes when the client starts to reconnect (the reconnect's text and
+  Cancel come back in the wait), when the host is lost, when the session ends and when the
+  screen under it closes. From the in-game menu no day starts under it (the local human has
+  not ended its turn); it closes for the same other reasons.
+- **`NetMenus`**: a Watch text quest button (the host button's look, `CreateMenuButton`) under
+  the host's line, shown while `WatchableQuestHumans` is not empty (the menu's 1 s refresh),
+  on the host and on clients; W in the in-game menu (`fGameMenu`) does the same; a click on
+  it is not taken for a click beside the menu (`GameMenuHostContains`).
+- **Tests**: the unit tests above; `check_net_quest_lock` also checks that the host's wait and
+  Net2's offer to watch Net1's quest ("W: watch"). No test opens a window.
+
+#### Phase F notes (done)
+
+- Docs: `docs/network.md` (Units, Hosting and joining: the watch button; Waiting: the texts;
+  Watching a text quest: the window; a short "Text quests" section that says where each part
+  is; Tests; Not done yet), `docs/humans.md` (Text quests: watching, the released prisoner),
+  `docs/commands.md` (watching is no command), `ROADMAP.md` (Phase 6's text quests row),
+  `docs/progress/README.md` (status). The flag table, the save block version 4, "Not
+  covered" and the scripts' per-human text quests were already right after Phases B and C.
+- **Known leftover, documented, not fixed**: a prisoner released by a lost prison quest who
+  owes quest days still takes off at once (`TfPlanetQuest.EndQuest`, `HangarScreen.TryTakeOff`),
+  and the star map then ends its owed days only when the player presses end turn. Keeping it
+  on the planet screen (which ends owed days by itself) would leave it landed on a planet
+  that has just turned hostile to it, which the planet screen was never meant for; not small
+  and safe, so left as it is.
+- **Hand checks** (no test can run them; in the real game, host and client on one machine or
+  a LAN):
+  1. The watch window from a wait: a client plays a planet quest; the host ends its turn; its
+     wait says "Waiting for Guest (text quest)." and "W: watch Guest's text quest."; W opens
+     the window with the page, the picture, the parameters and greyed choices; each choice
+     the client makes redraws it; the end page says "Guest finished the quest: ..."; Escape
+     and the OK button close it and the wait comes back; when the client ends its turn the
+     window closes by itself and the day runs.
+  2. The same on a second client (its wait for the day, and its wait for the state after its
+     film), and with two humans in quests: W in the window switches between them, and the
+     wait's line names both.
+  3. The in-game menu: the Watch text quest button appears only while another human plays
+     (refreshed every second), W in the menu opens the window, a click on the button does
+     not close the menu; the window stays until closed; nothing in the game changes.
+  4. The client reconnects while its player watches (pull the cable or stop the host's
+     process briefly): the window closes and the reconnect box (or the wait's reconnect text
+     with Cancel) shows.
+  5. The planet screens' grey-out: another human at the same planet sees "Guest is playing
+     this quest." and no start button while Guest plays, and the start again after the
+     next state.
+  6. The abandon bubble: a client that reconnects in the middle of its quest leaves the
+     quest screen, gets the state and sees "The connection to the host was lost: your text
+     quest was abandoned..."; the quest can be started again.
+  7. Owed days: after a quest that passes days (the prison), the planet screen ends the
+     turns by itself, on the host (each day once the peers are ready) and on a client (each
+     state); the waits of the others say "Guest is busy with a text quest for N more days."
+  8. The host's Cancel at its end turn (take the end turn back) and its absence while the
+     local human owes quest days.
+  9. The released prisoner who owes days (the known leftover above): it takes off, and
+     each owed day needs an end turn on the star map.
+  10. The quest screen in a session: no Escape, no exit button, no R, no load box after a
+      failure or a death; a death respawns the ranger at a planet.
 
 ### Phase F — Docs and status
 

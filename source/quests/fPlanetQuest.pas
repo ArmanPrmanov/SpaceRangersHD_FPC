@@ -12,6 +12,7 @@ uses
   GI_MessageLoop,
   QuestPage,
   QuestRun,
+  QuestWatch,
   Types;
 type
   TPlanetQuestView = class;
@@ -640,46 +641,28 @@ begin
     );
 end;
 
+// CHANGE: ENHANCEMENT - The text's cut into paragraphs (the <fix> parts, the lines, the indent)
+// is QuestWatch.QuestTextParagraphs, which the watch window shares (docs/progress/
+// 2026-10-19-text-quests-plan.md, Phase E); was the nested AddQuestTextLines (native 0x5DF03C)
+// and the parsing of AddQuestTextParagraph (0x5DED88). The labels are laid out as before.
 procedure TfPlanetQuest.SetQuestText(const Text: WideString);
 var
   Panel: TPanelScrollBarGI;
   NextTop: Integer;
-  Lines: TStringsEC;
-  LowerText: WideString;
-  StartIndex, TagIndex, TextLength: Integer;
-  procedure AddQuestTextParagraph(
-      const Text: WideString;
-      FontMode: Integer
-  ); // @addr 0x5DED88 @ida "void __usercall $name(unsigned __int16 *Text@<eax>, int FontMode@<edx>, void *ParentFrame@<^0>);"
-  var
-    Indent: Boolean;
-    I: Integer;
-    TextLabel: TLabelGI;
+  Paragraphs: TQuestTextParagraphs;
+  I: Integer;
+  TextLabel: TLabelGI;
+begin
+  Panel := GetByName('MessageWindow') as TPanelScrollBarGI;
+  Panel.FreeOwnedChildren;
+  if Text <> '' then
   begin
-    if Text <> '' then
+    NextTop := 0;
+    Paragraphs := QuestTextParagraphs(Text);
+    for I := 0 to High(Paragraphs) do
     begin
-      Indent := False;
-      if FontMode = 0 then
-      begin
-        Indent := True;
-        I := 0;
-        while I < Length(Text) do
-        begin
-          if PWideChar(Pointer(Text))[I] = '-' then
-          begin
-            Indent := False;
-            Break;
-          end
-          else
-          begin
-            if (PWideChar(Pointer(Text))[I] <> ' ') and (PWideChar(Pointer(Text))[I] <> #9) then
-              Break;
-            Inc(I);
-          end;
-        end;
-      end;
       TextLabel := TLabelGI.Create(Panel);
-      if FontMode = 0 then
+      if not Paragraphs[I].Fixed then
       begin
         if FontQuest = 0 then
           TextLabel.SetFontName(NormalFontName)
@@ -697,10 +680,7 @@ var
       TextLabel.SetWordWrapEnabled(True);
       TextLabel.SetTextAlignX(taxAuto);
       TextLabel.SetTextAlignY(tayAuto);
-      if Indent then
-        TextLabel.SetText('     ' + Text)
-      else
-        TextLabel.SetText(Text);
+      TextLabel.SetText(Paragraphs[I].Text);
       TextLabel.SetPositionModeW(True);
       TextLabel.SetTextColor(GetTextColor(QuestStyleIndex));
       TextLabel.SetTextAlignY(tayTop);
@@ -713,85 +693,6 @@ var
       );
       NextTop := TextLabel.LocalPosition.Y + TextLabel.ClientSize.Y - 2;
     end;
-  end;
-  procedure AddQuestTextLines(
-      const Text: WideString;
-      FontMode: Integer
-  ); // @addr 0x5DF03C @ida "void __usercall $name(unsigned __int16 *Text@<eax>, int FontMode@<edx>, void *ParentFrame@<^0>);"
-  var
-    N, StartIndex, EndIndex: Integer;
-  begin
-    N := Length(Text);
-    StartIndex := 0;
-    while StartIndex < N do
-    begin
-      EndIndex := FindTextOffsetW(Text, #10, StartIndex);
-      if EndIndex < 0 then
-      begin
-        AddQuestTextParagraph(Copy(Text, StartIndex + 1, N - StartIndex), FontMode);
-        Break;
-      end;
-      AddQuestTextParagraph(Copy(Text, StartIndex + 1, EndIndex - StartIndex + 1), FontMode);
-      StartIndex := EndIndex + 1;
-    end;
-  end;
-begin
-  Panel := GetByName('MessageWindow') as TPanelScrollBarGI;
-  Panel.FreeOwnedChildren;
-  if Text <> '' then
-  begin
-    NextTop := 0;
-    // The native routine retains this allocation although the nested helpers do not use it.
-    Lines := TStringsEC.Create;
-    TextLength := Length(Text);
-    LowerText := LowerCaseWideString(Text);
-    StartIndex := 0;
-    while StartIndex < TextLength do
-    begin
-      TagIndex := FindTextOffsetW(LowerText, '<fix>', StartIndex);
-      if StartIndex < TagIndex then
-        AddQuestTextLines(Copy(Text, StartIndex + 1, TagIndex - StartIndex), 0);
-      if TagIndex >= 0 then
-      begin
-        Inc(TagIndex, 5);
-        while (TagIndex < TextLength)
-            and ((Text[TagIndex + 1] = ' ')
-                or (Text[TagIndex + 1] = #9)
-                or (Text[TagIndex + 1] = #13)) do
-          Inc(TagIndex);
-        if TagIndex < TextLength then
-          if Text[TagIndex + 1] = #10 then
-            Inc(TagIndex);
-        StartIndex := TagIndex;
-        TagIndex := FindTextOffsetW(LowerText, '</fix>', StartIndex);
-        if StartIndex < TagIndex then
-          AddQuestTextLines(Copy(Text, StartIndex + 1, TagIndex - StartIndex), 1);
-        if TagIndex >= 0 then
-        begin
-          Inc(TagIndex, 6);
-          while (TagIndex < TextLength)
-              and ((Text[TagIndex + 1] = ' ')
-                  or (Text[TagIndex + 1] = #9)
-                  or (Text[TagIndex + 1] = #13)) do
-            Inc(TagIndex);
-          if TagIndex < TextLength then
-            if Text[TagIndex + 1] = #10 then
-              Inc(TagIndex);
-          StartIndex := TagIndex;
-        end
-        else
-        begin
-          AddQuestTextLines(Copy(Text, StartIndex + 1, TextLength - StartIndex), 1);
-          Break;
-        end;
-      end
-      else
-      begin
-        AddQuestTextLines(Copy(Text, StartIndex + 1, TextLength - StartIndex), 0);
-        Break;
-      end;
-    end;
-    Lines.Free;
     Panel.SetScrollOffset(Point(0, 0));
     Panel.SetVerticalScrollbarEnabled(Panel.ClientSize.Y < NextTop);
     if Panel.FirstChild <> nil then

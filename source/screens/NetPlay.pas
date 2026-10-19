@@ -19,9 +19,15 @@ unit NetPlay;
 // Phase C): a game's quest screen is a game screen, the waits name a human in a quest or busy
 // with its days, the quest's own day ends with an EndTurn the host waits for, the planet screens
 // end owed days by themselves, and a reconnect abandons the quest that plays.
+// CHANGE: ENHANCEMENT - Watching another human's text quest (Phase E; NetQuestWatch): the waits
+// for the day say "W: watch <Player>'s text quest." while one plays, and W opens the watch window
+// over the screen; it closes by itself when the wait is done (the day's film or state came, a
+// dialogue was asked, the end turn was taken back) or the client starts to reconnect, and the
+// wait goes on. The in-game menu opens it too (NetMenus).
 interface
 uses
   GI_MessageLoop,
+  QuestPage,
   aEFilm,
   aGalaxy,
   aHuman;
@@ -118,6 +124,15 @@ function ClientWaitText: WideString;
 // CHANGE: ENHANCEMENT - What the planet screens say about a planet's text quest that another
 // human plays (aQuestActions.TextQuestHolder): '<Player> is playing this quest.'
 function TextQuestTakenText(Holder: THuman): WideString;
+// CHANGE: ENHANCEMENT - Watching text quests (docs/progress/2026-10-19-text-quests-plan.md,
+// Watching): the other humans whose text quest is open, as this machine's pages say
+// (NetSession.QuestPages); none without a session.
+function WatchableQuestHumans: TQuestHumanIds;
+// A human's name as the waits give it ('?' when this machine does not know it).
+function NetHumanName(Id: Integer): WideString;
+// The in-game menu's watch button and W key (NetMenus): the watch window over the menu, on the
+// first human who plays a quest, until it is closed (or the session ends or reconnects).
+procedure WatchTextQuestFromMenu;
 implementation
 uses
   SysUtils,
@@ -152,6 +167,8 @@ uses
   NetClient,
   NetSession,
   HotSeat,
+  NetQuestWatch,
+  QuestWatch,
   fPlanetQuest,
   fStarMap;
 
@@ -174,6 +191,9 @@ const
       screenJump];
   // The wait box closes with this when its text has changed, and opens again with the new one.
   WaitRetext = 3;
+  // CHANGE: ENHANCEMENT - The wait box closes with this for W: the watch window opens, and the
+  // wait opens again after it.
+  WaitWatch = 4;
   // The screens during which the host does not take joins, leaves or commands: no game, or one
   // being loaded, generated or saved in memory. CHANGE: ENHANCEMENT - Not the quest screen of a
   // game (NoGameScreen; docs/progress/2026-10-19-text-quests-plan.md, The day): the quest is
@@ -209,6 +229,7 @@ type
     procedure OnOpen; override;
     procedure OnClose; override;
     procedure Poll(Timer: PCallbackTimerGI; UserData: PtrInt);
+    procedure WaitKeyDown(Sender: TObjectGI; Key: Cardinal);
   end;
 
 var
@@ -259,6 +280,10 @@ var
   JoinProgressAt: QWord;
   JoinProgressMark: Int64;
   JoinAddressText: WideString;
+  // CHANGE: ENHANCEMENT - The wait the watch window was opened from (WatchFromWait), and the
+  // human it showed last.
+  WatchWaitKind: TNetWaitKind;
+  WatchedHuman: Integer;
 
 function MultiplayerText(const Key, English: WideString): WideString;
 begin
@@ -321,6 +346,109 @@ begin
   Result := NamedLine('QuestTaken', '<Players> is playing this quest.', HumanName(Holder));
 end;
 
+function NetHumanName(Id: Integer): WideString;
+var
+  Human: THuman;
+  Status: TStatusMessage;
+  I: Integer;
+begin
+  Human := FindHuman(Id);
+  if (Human <> nil) and (Human.Player <> nil) then
+    Exit(Human.Player.Name);
+  // A client knows every human by the host's status.
+  if NetRole = nrClient then
+  begin
+    Status := CurrentClient.Status;
+    for I := 0 to High(Status.Humans) do
+      if Status.Humans[I].Id = Id then
+        Exit(Status.Humans[I].Name);
+  end;
+  Result := '?';
+end;
+
+// The humans whose open quest this machine has pages of: those whose latest page is no end
+// page, then those the day's status still says are in one (its end page came before the
+// barrier: the wait still names them, and the window shows how the quest ended).
+function WatchableQuestHumans: TQuestHumanIds;
+var
+  Store: TQuestPageStore;
+  Own, I: Integer;
+  Status: TStatusMessage;
+  Page: TWatchedQuestPage;
+  Known: Boolean;
+  Ids: TQuestHumanIds;
+
+  procedure AddInQuest(Candidate: Integer);
+  var
+    J: Integer;
+  begin
+    if (Candidate = Own) or not Store.Latest(Candidate, Page) then
+      Exit;
+    Known := False;
+    for J := 0 to High(Ids) do
+      if Ids[J] = Candidate then
+        Known := True;
+    if not Known then
+    begin
+      SetLength(Ids, Length(Ids) + 1);
+      Ids[High(Ids)] := Candidate;
+    end;
+  end;
+
+begin
+  Result := nil;
+  Store := QuestPages;
+  if Store = nil then
+    Exit;
+  if NetRole = nrClient then
+    Own := CurrentClient.HumanId
+  else if LocalHuman <> nil then
+    Own := LocalHuman.Id
+  else
+    Own := 0;
+  Ids := Store.PlayingHumans(Own);
+  if NetRole = nrClient then
+  begin
+    Status := CurrentClient.Status;
+    for I := 0 to High(Status.Humans) do
+      if Status.Humans[I].Activity = saInTextQuest then
+        AddInQuest(Status.Humans[I].Id);
+  end
+  else
+    for I := 0 to Session.Humans.Count - 1 do
+      if HumanQuestActivity(Session.Humans[I]) = saInTextQuest then
+        AddInQuest(Session.Humans[I].Id);
+  Result := Ids;
+end;
+
+// CHANGE: ENHANCEMENT - The line of a wait for the day that offers the watch window (W) while
+// other humans play a text quest; '' when none does.
+function QuestWatchLine: WideString;
+var
+  Humans: TQuestHumanIds;
+  Names: WideString;
+  I: Integer;
+begin
+  Humans := WatchableQuestHumans;
+  if Length(Humans) = 0 then
+    Exit('');
+  if Length(Humans) = 1 then
+    Exit(NamedLine('WatchKey', 'W: watch <Players>''s text quest.', NetHumanName(Humans[0])));
+  Names := '';
+  for I := 0 to High(Humans) do
+    AddName(Names, NetHumanName(Humans[I]));
+  Result := NamedLine('WatchKeyMany', 'W: watch the text quests of <Players>.', Names);
+end;
+
+procedure AddWatchLine(var Text: WideString);
+var
+  Line: WideString;
+begin
+  Line := QuestWatchLine;
+  if Line <> '' then
+    Text := Text + #13#10 + Line;
+end;
+
 // The humans the host's day waits for, and who is away.
 function HostWaitText: WideString;
 var
@@ -362,6 +490,8 @@ begin
   Result := Result + Busy;
   if Away <> '' then
     Result := Result + #13#10 + NamedLine('Away', 'Away: <Players>.', Away);
+  // CHANGE: ENHANCEMENT - W watches another human's text quest.
+  AddWatchLine(Result);
 end;
 
 // Who the day waits for, as the host's status says.
@@ -404,6 +534,8 @@ begin
   Result := Result + Busy;
   if Away <> '' then
     Result := Result + #13#10 + NamedLine('Away', 'Away: <Players>.', Away);
+  // CHANGE: ENHANCEMENT - W watches another human's text quest.
+  AddWatchLine(Result);
 end;
 
 // CHANGE: ENHANCEMENT - Whose answer to a dialogue the host's day waits for.
@@ -654,9 +786,22 @@ procedure LeaveLostGame; forward;
 // CHANGE: ENHANCEMENT - The state after a reconnect is applied at a safe screen.
 procedure ApplyRejoinState; forward;
 
+// CHANGE: ENHANCEMENT - Whether W in the wait Kind opens the watch window: a wait for the day,
+// not a reconnect, and another human plays a text quest (the wait's text says so).
+function WaitMayWatch(Kind: TNetWaitKind): Boolean;
+begin
+  Result :=
+      (Kind in [nwHostPeers, nwClientDay, nwClientState])
+          and not ExitScreenLoop
+          and not ClientReconnecting
+          and (Length(WatchableQuestHumans) > 0);
+end;
+
 procedure TNetWaitBoxGI.OnOpen;
 begin
   inherited OnOpen;
+  // CHANGE: ENHANCEMENT - The W key (the box's own keys otherwise).
+  ContentPanel.KeyDownCallback := WaitKeyDown;
   OpenedAt := GetTickCount64;
   PollTimer := ScheduleCallbackTimer(NetWaitMs * 2, NetWaitMs * 2, Poll);
 end;
@@ -669,6 +814,14 @@ begin
     PollTimer := nil;
   end;
   inherited OnClose;
+end;
+
+procedure TNetWaitBoxGI.WaitKeyDown(Sender: TObjectGI; Key: Cardinal);
+begin
+  if (Key = Ord('W')) and (ExitCode = 0) and WaitMayWatch(Kind) then
+    RequestClose(WaitWatch)
+  else
+    DialogKeyDown(Sender, Key);
 end;
 
 procedure TNetWaitBoxGI.Poll(Timer: PCallbackTimerGI; UserData: PtrInt);
@@ -785,6 +938,72 @@ begin
   );
 end;
 
+// CHANGE: ENHANCEMENT - The watch window's poll from a wait for the day (WatchFromWait): the
+// network is pumped as the wait box pumps it, and the window closes as soon as the wait is done,
+// so that the wait's own steps (the film, the state, a dialogue, the end turn taken back) run
+// as without it: the window never stays over the next screen.
+function WatchWaitPoll: Boolean;
+var
+  State: TQuestWatchState;
+begin
+  NetFrame;
+  State := Default(TQuestWatchState);
+  State.Session :=
+      (QuestPages <> nil) and not ((NetRole = nrClient) and not CurrentClient.Connected);
+  State.Reconnecting := ClientReconnecting;
+  State.WaitDone := WaitDone(WatchWaitKind);
+  State.ParentClosing := ScreenClosing or ExitScreenLoop;
+  Result := QuestWatchMustClose(State);
+end;
+
+// The watch window's poll from the in-game menu: no wait ends it.
+function WatchMenuPoll: Boolean;
+var
+  State: TQuestWatchState;
+begin
+  NetFrame;
+  State := Default(TQuestWatchState);
+  State.Session :=
+      (QuestPages <> nil) and not ((NetRole = nrClient) and not CurrentClient.Connected);
+  State.Reconnecting := ClientReconnecting;
+  State.ParentClosing := ScreenClosing or ExitScreenLoop;
+  Result := QuestWatchMustClose(State);
+end;
+
+// CHANGE: ENHANCEMENT - W in a wait for the day: the watch window, on the human watched last
+// while it still plays, else on the first who plays.
+procedure WatchFromWait(Kind: TNetWaitKind);
+var
+  Humans: TQuestHumanIds;
+  I: Integer;
+  Known: Boolean;
+begin
+  Humans := WatchableQuestHumans;
+  if Length(Humans) = 0 then
+    Exit;
+  Known := False;
+  for I := 0 to High(Humans) do
+    if Humans[I] = WatchedHuman then
+      Known := True;
+  if not Known then
+    WatchedHuman := NextWatchedHuman(Humans, 0);
+  WatchWaitKind := Kind;
+  NetLog(Format('watching the text quest of human %d', [WatchedHuman]));
+  RunQuestWatch(WatchedHuman, @WatchWaitPoll);
+end;
+
+procedure WatchTextQuestFromMenu;
+var
+  Humans: TQuestHumanIds;
+begin
+  Humans := WatchableQuestHumans;
+  if Length(Humans) = 0 then
+    Exit;
+  WatchedHuman := NextWatchedHuman(Humans, 0);
+  NetLog(Format('watching the text quest of human %d', [WatchedHuman]));
+  RunQuestWatch(WatchedHuman, @WatchMenuPoll);
+end;
+
 // Waits, modal over the open screen, until what Kind waits for has come or the window closes.
 // A client answers the dialogues the host's day asks meanwhile.
 procedure WaitModal(Kind: TNetWaitKind);
@@ -838,6 +1057,9 @@ begin
               ClientStopRequested := True;
           end;
         end
+        // CHANGE: ENHANCEMENT - W: the watch window, then the wait again.
+        else if Closed = WaitWatch then
+          WatchFromWait(Kind)
         else if (Closed <> mbgResultOK) and (Closed <> WaitRetext) then
           Break;
       end;

@@ -34,7 +34,10 @@ has got.
   on a disconnect, a reconnect abandons the quest; `--sim-net-quest`); Phase D
   done (the pages to the watchers: protocol 11, `QuestPage` relayed by the
   host, the latest page per human on every machine, an abandoned end page on a
-  disconnect). Next: Phase E (the watch window).
+  disconnect); Phase E done (the watch window: W in the waits for the day and a
+  button in the in-game menu, read-only, live, closes with its wait); Phase F
+  done (docs). The plan is done. Next: its hand checks (the plan's Phase F
+  notes); a released prisoner who owes quest days still takes off (documented).
 - Latest entry: [2026-10-19-text-quests-plan.md](2026-10-19-text-quests-plan.md)
 
 ## Session entry format

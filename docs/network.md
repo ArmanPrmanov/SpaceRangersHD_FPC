@@ -23,7 +23,8 @@ Read [humans.md](humans.md) (the barrier, hot-seat, `ActingHuman`) and
 | `source/net/NetSession.pas` | what the rest of the game calls: role, pump, hooks |
 | `source/observer/HeadlessNet.pas` | the headless host and client for tests (Tests) |
 | `source/screens/NetPlay.pas` | the game's screens in a session: `--host`/`--join`, the waits, the client's film and state (The day, Films, Applying state, Waiting) |
-| `source/screens/NetMenus.pas` | the main menu's join and the in-game menu's host and stop (Hosting and joining) |
+| `source/screens/NetMenus.pas` | the main menu's join and the in-game menu's host, stop and watch (Hosting and joining) |
+| `source/screens/NetQuestWatch.pas` | the watch window of another human's text quest (Watching a text quest); its decisions and texts are `source/quests/QuestWatch.pas` |
 
 `source/game`, `source/core` and `source/script` do not use `source/net`. The
 game layer exposes hooks (procedure variables, as `BeforeCommandHook`); the net
@@ -761,8 +762,13 @@ an English fallback, as `Multiplayer.Turn` does: `Multiplayer.Waiting`
 quests' `Multiplayer.InTextQuest` ("(text quest)" after the name of a human the
 day waits for who plays one), `Multiplayer.QuestBusy` ("<Players> is busy with a
 text quest for <Days> more days."), `Multiplayer.QuestTaken` ("<Players> is
-playing this quest.", the planet screens) and `Multiplayer.QuestAbandoned` (a
-bubble, Disconnects), the join's `Multiplayer.JoinConnecting`, `JoinWaiting`, `JoinReceivingStart`,
+playing this quest.", the planet screens), `Multiplayer.QuestAbandoned` (a
+bubble, Disconnects), `Multiplayer.WatchKey` ("W: watch <Players>'s text
+quest.") and `Multiplayer.WatchKeyMany` ("W: watch the text quests of
+<Players>.") under a wait for the day, and the watch window's
+`Multiplayer.WatchTitle`, `WatchEnded`, `WatchSuccess`, `WatchFailure`,
+`WatchDeath`, `WatchAbandoned`, `WatchNoPage`, `WatchKeys`, `WatchKeysOne` and
+the menu's `MenuWatch`, the join's `Multiplayer.JoinConnecting`, `JoinWaiting`, `JoinReceivingStart`,
 `JoinReceiving`, the reconnect's `Multiplayer.Reconnecting` ("The connection to
 the host is lost. Reconnecting... (<Seconds> s)"), and for the main menu
 `Multiplayer.Refused`, `Multiplayer.Lost`, `Multiplayer.HostLeft`,
@@ -808,13 +814,40 @@ joined client but the player's (`TNetHost.PublishQuestPage`, the `QuestPage`
 message); the host names the peer's human in a page whatever it says. Every
 machine keeps the latest page of each human (`TQuestPageStore`: `Latest`,
 `Playing`, `PlayingHumans`, `ChangeCount`; `NetSession.QuestPages` is the host's
-or the client's), the watch window's source (the plan's Phase E). A client
+or the client's), the watch window's source. A client
 forgets them when it loses its host; the host sends a joining or returning
 client the latest page of each open quest after its `Welcome`. Pages are a few
 KB at a click's pace, so a broadcast costs nothing and needs no subscription.
 They are presentation only: no command, nothing in the command log, a state or
 its hash, and nothing a page does changes the game. Each is a log line (`quest
 page sent|relayed|received|caught-up|abandoned human= run= page= hash= end=`).
+
+**The watch window** (`NetQuestWatch`; the plan's Phase E). A wait for the day
+(the host's for its peers, a client's for the day and for the state after its
+film) has a line "W: watch Guest's text quest." while another human plays one
+(`NetPlay.WatchableQuestHumans`: whose latest page is no end page, and whom the
+status, or on the host the lock, still says is in one), and W closes the box
+(`WaitWatch`) and opens the window over the innermost screen; the in-game menu
+opens it too. It shows that human's latest page as the player's machine shows
+it, read-only: the title ("Guest's text quest"), the picture (from this
+machine's data, at most 220 px wide; left out when it is missing), the text cut
+into paragraphs as the quest screen cuts it (`QuestWatch.QuestTextParagraphs`,
+which `TfPlanetQuest.SetQuestText` uses too), the parameters, and the choices,
+the enabled ones in black and the others grey, none clickable. The quest
+styles' highlight becomes the message box's blue. It redraws when the store's
+`ChangeCount` brings another page; on the end page it says "Guest finished the
+quest: success." (failure, death, abandoned) and stays until it is closed. W
+in the window shows the next human who plays one (`NextWatchedHuman`), Escape,
+Enter and its button close it. It is a box like the reconnect's: it opens no
+game screen and closes none, runs no `OnOpen`/`OnClose` command and submits
+nothing. It pumps the network every 100 ms and closes by itself
+(`QuestWatchMustClose`) when the session ends, the client's host is lost or
+the client starts to reconnect (the reconnect's box comes next), the screen
+under it closes, and, opened from a wait, as soon as that wait is done (the
+day's film or state came, the host's dialogue was asked, the end turn was taken
+back): the wait then does what it would have done, so the window never stays
+over the next screen, and a wait that is not done opens again. Opened from the
+menu, no day can start under it (the local human has not ended its turn).
 
 A client that loses its host, or is refused, shows why on the main menu and
 the session ends there. A client that loses its host while it plays its turn
@@ -889,6 +922,27 @@ cancelled ends as above. While it reconnects:
   wait or the jump screen's tick applies it. Until it is applied, the commands
   the client submits are dropped (logged `command dropped while reconnecting`)
   and a trade is refused as unanswered (`Multiplayer.TradeNoAnswer`).
+
+## Text quests
+
+Text quests are on in every session ([progress/2026-10-19-text-quests-plan.md](progress/2026-10-19-text-quests-plan.md),
+done; the rules in the game layer are in [humans.md](humans.md), Text quests). In
+short, and where each part is described:
+
+- The human who plays a quest runs it on its own machine; only its effects go to
+  the host, as the quest's commands (600–610, [commands.md](commands.md)), which
+  the host applies at its barrier. The quest's start is `BeginTextQuest` (609), a
+  trade that locks a planet's quest to one human and is relayed as
+  `RelayedTextQuest` (610) (Trades).
+- The quest runs no galaxy day: the human owes the days and holds no day while
+  it does; its planet screen ends those days by itself (Waiting, Text quests).
+- The waits name a human in a quest and one busy with its days (`Status`,
+  protocol 10), and offer W to watch it (Waiting).
+- Every page goes to the other machines (`QuestPage`, protocol 11), which show
+  it in the watch window, from a wait or the in-game menu (Waiting, Watching a
+  text quest; Hosting and joining).
+- A disconnect drops the quest's commands with the peer and releases the lock;
+  a client that reconnects mid-quest abandons it (Disconnects).
 
 ## Remote dialogue
 
@@ -1105,6 +1159,10 @@ of the executing command, or the script's human), not the host's.
   not connected, `HoldPosition`, queued commands dropped), says `Bye` to every
   peer (`StopNetwork`) and goes on without a session; those humans can rejoin
   by name once the game is hosted again. A client has no host button.
+- **The in-game menu watches** (`NetMenus`): while another human of the session
+  plays a text quest, a Watch text quest button (the same look; the W key too)
+  under the host's line opens the watch window (Watching a text quest), on the
+  host and on a client alike. It is hidden otherwise, refreshed every second.
 - The in-game menu refuses to host (a message says why, `NetPlay.HostingRefusal`)
   on a client, while hot-seat is on (`--hotseat=N`, a turn pass pending, or the
   screen held by another human than the first: hosting would turn the other
@@ -1328,7 +1386,7 @@ The headless runner (`HeadlessNet`):
   quest pages human= run= count= last= end= playing= changes=`); a client counts
   each page it gets as progress, so another human's long quest does not time it
   out. `tools/test.py` runs four of these per save: two clients (the lock, the
-  barrier, the waits, the replay; Net1's pages reach the host and Net2 as Net1
+  barrier, the waits and their "W: watch" line, the replay; Net1's pages reach the host and Net2 as Net1
   sent them, in order, with the end page, and both keep its last one), one with
   the prison quest by name (the days owed count down while the host runs the
   days, the replay), one silent (the host relays a start of what Net1 sent and
@@ -1413,9 +1471,11 @@ star's film once; every client in that star gets it.
   after 10 s and get the answer later (Trades).
 - `ContinueUntilArrival` and `EndedTurn` are not in a state; this is harmless
   (The day).
-- Text quests: every machine has the pages of the others' quests (Watching a
-  text quest), but no window shows them yet (the plan's Phase E); the planet
-  screens' "is playing this quest" and the automatic owed
-  days are not run by the tests (they need the screens). A released prisoner who
-  owes days takes off as in single player, and the star map then ends its turns
-  only when the player does.
+- Text quests: the watch window, the W key of the waits, the in-game menu's
+  watch button, the planet screens' "is playing this quest" and the automatic
+  owed days are not run by the tests (they need the screens); the window's
+  decisions and texts are unit-tested (`QuestWatch`), and the waits' "W: watch"
+  line is checked headless. A released prisoner who owes days takes off as in
+  single player (the prison's planet is hostile to it then, so keeping it
+  landed there for its days is not obviously safe), and the star map then ends
+  its turns only when the player does.
