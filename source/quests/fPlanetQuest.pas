@@ -10,6 +10,7 @@ uses
   EC_CacheFont,
   GI_Label,
   GI_MessageLoop,
+  QuestPage,
   QuestRun,
   Types;
 type

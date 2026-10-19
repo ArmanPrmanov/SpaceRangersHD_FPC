@@ -8,6 +8,9 @@ unit NetClient;
 // of their day. Everything here runs on the UI thread. CHANGE: ENHANCEMENT - A joined client
 // that loses its host reconnects by itself, in place, with its token (docs/network.md,
 // Disconnects).
+// CHANGE: ENHANCEMENT - The text quests' pages (docs/progress/2026-10-19-text-quests-plan.md,
+// Phase D): the client sends each page of its human's quest to the host and keeps the latest
+// page of every human the host sends (QuestPages), until the connection is lost.
 interface
 uses
   Classes,
@@ -16,7 +19,8 @@ uses
   aHuman,
   NetTransport,
   NetThread,
-  NetProtocol;
+  NetProtocol,
+  QuestPage;
 type
   // A film the host sent: its header and the bytes TEFilm.LoadFromBuffer reads (expanded), and
   // how many bytes they were on the wire.
@@ -154,6 +158,8 @@ type
     // state applied (THuman.QuestDaysOwed): the host's day waits for the human's end turn only
     // when it was 0.
     FStateQuestDays: Integer;
+    // CHANGE: ENHANCEMENT - The latest text-quest page of each human.
+    FQuestPages: TQuestPageStore;
     procedure HandleMessage(Kind: TNetMessageKind; Payload: TBufEC);
     procedure ShowRefusal(const Refusal: TCommandResultMessage);
     procedure TakeLateTrade(const CommandResult: TCommandResultMessage);
@@ -298,8 +304,9 @@ type
     property Name: WideString read FName;
     // CHANGE: ENHANCEMENT - For the tests (docs/network.md, Tests): the network thread stops
     // reading, writing and pinging the connection but keeps it open (TNetThread.FreezePeer), so
-    // the host sees only silence.
-    procedure FreezeConnection;
+    // the host sees only silence. CHANGE: ENHANCEMENT - With Flush, what is queued to send leaves
+    // first (for a second at most): a text quest's pages reach the host before the silence.
+    procedure FreezeConnection(Flush: Boolean = False);
     // CHANGE: ENHANCEMENT - The host said Bye: it quit or stopped hosting; otherwise the
     // connection was lost (Error).
     property HostSaidBye: Boolean read FHostSaidBye;
@@ -310,6 +317,13 @@ type
     // then owes more here already, but the host's copy has its days only once its barrier has
     // applied the quest's CloseQuest: until then the host's day waits for the human's EndTurn.
     property StateQuestDays: Integer read FStateQuestDays;
+    // CHANGE: ENHANCEMENT - A page of this client's human's text quest (QuestPage.QuestPageHook):
+    // kept, and sent to the host, which passes it on to the other clients. Not between a loss and
+    // the state after the reconnect: the host has ended the quest for its watchers then.
+    procedure SendQuestPage(Page: TWatchedQuestPage);
+    // The latest text-quest page of each human the host sent, and this client's own; emptied
+    // when the connection is lost (the host sends the open ones again after the reconnect).
+    property QuestPages: TQuestPageStore read FQuestPages;
   end;
 
 var
@@ -416,6 +430,7 @@ begin
   FPreviousBase := TBufEC.Create;
   FPending := TBufEC.Create;
   FFilms := TList.Create;
+  FQuestPages := TQuestPageStore.Create;
   FThread := TNetThread.Create(-1);
   ActiveClient := Self;
   if not Wait then
@@ -489,6 +504,7 @@ begin
   FBase.Free;
   FPreviousBase.Free;
   FPending.Free;
+  FQuestPages.Free;
   inherited;
 end;
 
@@ -562,6 +578,9 @@ begin
   // the end turn anyway.
   FCancelState := ncNone;
   FEndTurnSent := False;
+  // CHANGE: ENHANCEMENT - The host may have ended a quest meanwhile; it sends the open ones again
+  // after the Welcome.
+  FQuestPages.Clear;
 end;
 
 // CHANGE: ENHANCEMENT - The connection to the host closed: a try of a reconnect failed; a
@@ -714,6 +733,7 @@ var
   Previous: TStatusMessage;
   I, J: Integer;
   Changed: Boolean;
+  Page: TWatchedQuestPage;
 begin
   case Kind of
     nkWelcome:
@@ -842,6 +862,13 @@ begin
     nkChat:
       with DecodeChat(Payload) do
         NetLog(Format('chat from human %d: %s', [SenderId, UTF8Encode(Text)]));
+    // CHANGE: ENHANCEMENT - Another human's text-quest page: kept for the watch window.
+    nkQuestPage:
+      begin
+        Page := DecodeWatchedQuestPage(Payload);
+        FQuestPages.Put(Page);
+        NetLogQuestPage('received', Page, -1);
+      end;
     nkRelayCommand:
       begin
         Relayed.Own := False;
@@ -1266,6 +1293,24 @@ begin
   end;
 end;
 
+procedure TNetClient.SendQuestPage(Page: TWatchedQuestPage);
+var
+  Payload: TBufEC;
+begin
+  if not MaySend or (FHumanId < 0) then
+    Exit;
+  Page.HumanId := FHumanId;
+  FQuestPages.Put(Page);
+  Payload := TBufEC.Create;
+  try
+    EncodeWatchedQuestPage(Page, Payload);
+    FThread.Send(FPeerId, nkQuestPage, Payload);
+  finally
+    Payload.Free;
+  end;
+  NetLogQuestPage('sent', Page, -1);
+end;
+
 procedure TNetClient.SendCharacter(const Name: WideString; const Character: TJoinCharacter);
 var
   Message: TCharacterMessage;
@@ -1304,10 +1349,13 @@ begin
   end;
 end;
 
-procedure TNetClient.FreezeConnection;
+procedure TNetClient.FreezeConnection(Flush: Boolean);
 begin
-  if FPeerId >= 0 then
-    FThread.FreezePeer(FPeerId);
+  if FPeerId < 0 then
+    Exit;
+  if Flush then
+    FThread.WaitIdle(1000);
+  FThread.FreezePeer(FPeerId);
 end;
 
 procedure TNetClient.Leave(TimeoutMs: Integer);

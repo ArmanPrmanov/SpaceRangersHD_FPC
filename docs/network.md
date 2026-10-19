@@ -38,6 +38,7 @@ units set them. `tools/check_layers.py` keeps that direction.
 | `aHuman.NewHumansConnected` | host | humans a load or a join adds start disconnected |
 | `aCalc.TurnWaitPumpHook` | `NetPlay` | the UI thread pumps while it waits for a job (`WaitForTurnCalculationUI`, `Calculate*AndWait`) |
 | `ThreadCalc.TurnJobsForbidden` | `NetPlay`, client | starting a job raises: a client never runs one |
+| `QuestPage.QuestPageHook` (quests, not the game layer) | `NetSession`, host and client | each page of the local human's text quest goes to the watchers (Waiting, Watching a text quest) |
 
 `GR_Main.FramePumpHook` (a root unit, not the game layer) is how `NetPlay` pumps
 once per message-loop iteration.
@@ -111,7 +112,7 @@ protocol; never renumber one, add new ones at the end and bump
 
 The host numbers its states from 1. A day number cannot name a base: a join
 between two days sends a state of the same day as the one before it.
-`ProtocolVersion` is 9 (2: `TalkRequest` has its payload; 3: `Status` names
+`ProtocolVersion` is 11 (2: `TalkRequest` has its payload; 3: `Status` names
 the human whose answer to a dialogue the day waits for; 4: `NewHuman` and
 `Character`; 5: `Film` is compressed; 6: `Command` carries the client's number
 for it, and `CommandResult`; 7: the host applies a trade as it arrives and
@@ -119,9 +120,8 @@ answers it, also when it applied it, and `RelayCommand`, Trades; 8:
 `RelayCommand` carries a ship screen sale as its effect, `RelayedSale`, Trades;
 9: `Hello` and `Welcome` carry the reconnection token, and `Ping`, Disconnects;
 10: `Status` carries each human's text-quest activity and the days it owes for a
-quest, Waiting). The text quests plan
-([progress/2026-10-19-text-quests-plan.md](progress/2026-10-19-text-quests-plan.md))
-adds `QuestPage` (18) in its Phase D.
+quest, Waiting; 11: `QuestPage`, Watching a text quest, so that a peer without
+the watchers' pages does not join).
 | `Status` | host → client | per human: id, name, connected, holds the day, its text-quest activity (a byte: 0 none, 1 plays one, 2 owes days for one) and the days it owes; whether a day is running; the human whose answer to a dialogue the day waits for (0: none) |
 | `TalkRequest` | host → client | human id, ship id, planet id (0: none), scripted, talk kind, amount, text: the human's talk fields (Remote dialogue) |
 | `TalkDone` | client → host | nothing: the client's answer is complete, or it cannot show the talk |
@@ -132,6 +132,7 @@ adds `QuestPage` (18) in its Phase D.
 | `CommandResult` | host → client | the command's number (as in `Command`), its kind, applied (1) or refused (0), the reason (a byte, `aCommands.TRefusalReason`), the exception's text; sent for a refused command (Commands) and for every trade the host applied (Trades) |
 | `RelayCommand` | host → client | a human id, then an encoded `TPlayerCommand`: a trade the host applied, of another human at the client's human's planet or station, or for a ship screen sale its effect (`RelayedSale`) (Trades) |
 | `Ping` | both | nothing: the connection is alive; sent and swallowed by the network thread (Threads) |
+| `QuestPage` | both | a text quest's page for its watchers (`QuestPage.TWatchedQuestPage`): human id, run number, page number, the quest's name, the text, picture name and parameters as shown, the choices (enabled, text), the outcome (a byte: 0 while it plays, then success, failure, death, abandoned). Client → host: its own human's; host → client: any other human's (Waiting, Watching a text quest) |
 
 ## Joining
 
@@ -792,6 +793,29 @@ days (`NetQuestDayDue`), as the star map's automatic continue does: on the host
 each ends the day once the peers are ready, on a client each waits for the next
 state and sends nothing (the host does not wait for it).
 
+**Watching a text quest** ([progress/2026-10-19-text-quests-plan.md](progress/2026-10-19-text-quests-plan.md),
+Watching). The machine of the human who plays a quest runs it; the others get
+its pages to watch. After each page (the start, each choice) and when the quest
+closes, the run (`TQuestRun.PublishPage`) tells `QuestPage.QuestPageHook` the
+page as shown: the text, picture and parameters, the choices' text and whether
+each is enabled (not what they do: the watchers never run the engine, and may
+have another language), and the outcome; a page with an outcome is the run's
+end page, its last. A run is numbered on its machine, its pages from 1. The
+hook (`NetSession.SessionQuestPage`) sends a client's page to the host
+(`TNetClient.SendQuestPage`; not between a loss and the state after the
+reconnect), and the host sends its own human's and each client's to every
+joined client but the player's (`TNetHost.PublishQuestPage`, the `QuestPage`
+message); the host names the peer's human in a page whatever it says. Every
+machine keeps the latest page of each human (`TQuestPageStore`: `Latest`,
+`Playing`, `PlayingHumans`, `ChangeCount`; `NetSession.QuestPages` is the host's
+or the client's), the watch window's source (the plan's Phase E). A client
+forgets them when it loses its host; the host sends a joining or returning
+client the latest page of each open quest after its `Welcome`. Pages are a few
+KB at a click's pace, so a broadcast costs nothing and needs no subscription.
+They are presentation only: no command, nothing in the command log, a state or
+its hash, and nothing a page does changes the game. Each is a log line (`quest
+page sent|relayed|received|caught-up|abandoned human= run= page= hash= end=`).
+
 A client that loses its host, or is refused, shows why on the main menu and
 the session ends there. A client that loses its host while it plays its turn
 notices it in the per-frame pump (`NetFrame`) and goes to the main menu, which
@@ -1034,7 +1058,11 @@ of the executing command, or the script's human), not the host's.
   abandoned and can be started again (`Multiplayer.QuestAbandoned`); the
   planet's quest is still in the state. A client that cannot reconnect leaves
   the quest for the main menu the same way. The reconnect box opens over the
-  quest screen as over any game screen.
+  quest screen as over any game screen. The host also ends the quest for its
+  watchers: when it disconnects a human whose latest page has no outcome, it
+  sends every client an end page after it, abandoned (`AbandonedQuestPage`).
+  The client's own end page of the abandoned quest is not sent (it is still
+  resyncing then).
 - Humans in a save that the host loads start disconnected, except the host's.
 - `Connected` is not saved; it is session state, not game state.
 
@@ -1290,10 +1318,23 @@ The headless runner (`HeadlessNet`):
   With `--sim-net-silent-at` the client goes silent after one choice of its
   quest instead of before a turn, reconnects, abandons the quest (`net client
   quest abandoned`) and checks the quest is still there after the state (`net
-  client quest after rejoin`). `tools/test.py` runs three of these per save: two
-  clients (the lock, the barrier, the waits, the replay), one with the prison
-  quest by name (the days owed count down while the host runs the days, the
-  replay), one silent.
+  client quest after rejoin`); it flushes what it has sent before it goes silent
+  (`FreezeConnection(True)`), so its pages so far reach the host. With
+  `--sim-text-quest=NAME` on the host too, the host's own human plays that quest
+  by name on its DAY-th day (`HeadlessSim.PlayQuestTurn`) and its clients play
+  none. Every page is a line on each side (`net quest page sent|relayed|received|
+  abandoned ...`, with its hash), and at the end the host (with the flag) and
+  every client print the latest page they keep of each human (`net host|client
+  quest pages human= run= count= last= end= playing= changes=`); a client counts
+  each page it gets as progress, so another human's long quest does not time it
+  out. `tools/test.py` runs four of these per save: two clients (the lock, the
+  barrier, the waits, the replay; Net1's pages reach the host and Net2 as Net1
+  sent them, in order, with the end page, and both keep its last one), one with
+  the prison quest by name (the days owed count down while the host runs the
+  days, the replay), one silent (the host relays a start of what Net1 sent and
+  then its abandoned end page; Net1 sends no end page), and the host playing the
+  prison quest with two clients (every page reaches both clients as the host
+  sent it, in order; hashes and the replay are unaffected).
 - **The talk probe** (`--sim-net-talk=DAY`, `HeadlessNet.InstallNetTalkProbe`):
   from the DAY-th day the player-star job runs, right after the day of the first
   filmed star that holds remote humans who can be asked, the first ship of that
@@ -1372,8 +1413,9 @@ star's film once; every client in that star gets it.
   after 10 s and get the answer later (Trades).
 - `ContinueUntilArrival` and `EndedTurn` are not in a state; this is harmless
   (The day).
-- Text quests: no one can watch another human's quest yet (the plan's Phases D
-  and E); the planet screens' "is playing this quest" and the automatic owed
+- Text quests: every machine has the pages of the others' quests (Watching a
+  text quest), but no window shows them yet (the plan's Phase E); the planet
+  screens' "is playing this quest" and the automatic owed
   days are not run by the tests (they need the screens). A released prisoner who
   owes days takes off as in single player, and the star map then ends its turns
   only when the player does.

@@ -31,8 +31,10 @@ has got.
   `BeginTextQuest` lock, script quests per human); Phase C done (the network
   flow: protocol 10, `Status` with each human's quest activity and owed days,
   the waits, the quest screen as a game screen, the lock relayed and released
-  on a disconnect, a reconnect abandons the quest; `--sim-net-quest`). Next:
-  Phase D (pages to the watchers).
+  on a disconnect, a reconnect abandons the quest; `--sim-net-quest`); Phase D
+  done (the pages to the watchers: protocol 11, `QuestPage` relayed by the
+  host, the latest page per human on every machine, an abandoned end page on a
+  disconnect). Next: Phase E (the watch window).
 - Latest entry: [2026-10-19-text-quests-plan.md](2026-10-19-text-quests-plan.md)
 
 ## Session entry format

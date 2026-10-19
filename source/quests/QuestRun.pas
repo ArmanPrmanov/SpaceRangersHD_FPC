@@ -22,45 +22,21 @@ unit QuestRun;
 // CHANGE: ENHANCEMENT - The network (Phase C of the plan): a run a networked client lost its
 // host in is abandoned (Abandon): it closes without CloseQuest, since the host dropped its
 // commands with the connection.
+//
+// CHANGE: ENHANCEMENT - The watchers (Phase D of the plan): the page and its choices are
+// QuestPage's; each page a run shows its local human, and the end page, go to
+// QuestPage.QuestPageHook (PublishPage), which a session sends to the other machines.
 interface
 uses
   TextQuest,
   TextQuestInterface,
+  QuestPage,
   aRanger,
   aScript;
 type
   // Where the quest comes from. qrkNamed is a quest given by its name or number with no
   // visit that offered it (the headless quest player); it ends as a planet quest does.
   TQuestRunKind = (qrkStandalone, qrkPrison, qrkQueued, qrkPlanet, qrkNamed);
-  // How the run ended; qroNone while it plays. qroAbandoned: it was left without an outcome.
-  TQuestRunOutcome = (qroNone, qroSuccess, qroFailure, qroDeath, qroAbandoned);
-  // What a choice does when it is played: go to a location or along a path (Value is its
-  // id), show the outcome of a critical parameter, or end the quest.
-  TQuestChoiceAction = (
-      qcaNone,
-      qcaLocation,
-      qcaPath,
-      qcaOutcome,
-      qcaSuccess,
-      qcaFailure,
-      qcaDeath
-  );
-  TQuestChoice = record
-    // As shown: without the leading dashes, and a disabled one without its colours.
-    Text: WideString;
-    Enabled: Boolean;
-    Action: TQuestChoiceAction;
-    Value: Integer;
-  end;
-  // The page as shown: the text and the parameters with their colour tags, the picture's
-  // name, the choices in their order, and the outcome once the quest has ended.
-  TQuestPage = record
-    Text: WideString;
-    Picture: WideString;
-    Parameters: WideString;
-    Choices: array of TQuestChoice;
-    Outcome: TQuestRunOutcome;
-  end;
   TQuestRun = class;
   // What shows a run. Each call follows the change in TQuestRun.Page; the base class shows
   // nothing.
@@ -122,6 +98,12 @@ type
     // leaves it running, so the rest of the page can read the galaxy while it changes; a test
     // that must repeat sets this (HeadlessQuest).
     WaitForQuestDays: Boolean;
+    // CHANGE: ENHANCEMENT - The pages told QuestPageHook (PublishPage): this run's number on
+    // this machine (0 until its first page), the last page's number, and whether the end page
+    // has gone.
+    PageRun: Integer;
+    PageNumber: Integer;
+    EndPagePublished: Boolean;
     constructor Create(AView: TQuestView);
     destructor Destroy; override;
     // Picks and starts the quest the screen opens for, as the visit gives it: the prison's,
@@ -175,6 +157,9 @@ type
         Value: Integer
     );
     procedure FinishPage;
+    // CHANGE: ENHANCEMENT - Tells QuestPageHook the page, for the watchers: a game's quest
+    // (a local human plays it) only, nothing after the end page.
+    procedure PublishPage;
     procedure Succeed;
     procedure Fail;
     procedure Die;
@@ -686,6 +671,33 @@ end;
 procedure TQuestRun.FinishPage;
 begin
   View.FinishPage;
+  PublishPage;
+end;
+
+var
+  // The runs that told QuestPageHook a page in this process.
+  PublishedRuns: Integer;
+
+procedure TQuestRun.PublishPage;
+var
+  Watched: TWatchedQuestPage;
+begin
+  if not Assigned(QuestPageHook) or EndPagePublished or (LocalHuman = nil) or (LocalPlayer = nil)
+      or (Kind = qrkStandalone) then
+    Exit;
+  if PageRun = 0 then
+  begin
+    Inc(PublishedRuns);
+    PageRun := PublishedRuns;
+  end;
+  Inc(PageNumber);
+  EndPagePublished := Page.Outcome <> qroNone;
+  Watched.HumanId := LocalHuman.Id;
+  Watched.Run := PageRun;
+  Watched.Number := PageNumber;
+  Watched.QuestName := QuestName;
+  Watched.Page := Page;
+  QuestPageHook(Watched);
 end;
 
 // Moved from TfPlanetQuest.ChoiceMouseUp and the choices' callbacks.
@@ -793,6 +805,10 @@ begin
   end;
   if Page.Outcome = qroNone then
     Page.Outcome := qroAbandoned;
+  // CHANGE: ENHANCEMENT - The end page, unless the outcome's page was it; none for a run that
+  // showed no page (refused).
+  if PageNumber > 0 then
+    PublishPage;
   // The money cap and the quest timers, in that order; in multiplayer, the days owed. CHANGE:
   // ENHANCEMENT - Not for a quest that never started here (refused) or that was abandoned.
   if (LocalPlayer <> nil) and not Abandoned and not Refused then

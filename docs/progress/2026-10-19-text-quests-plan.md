@@ -2,9 +2,10 @@
 
 - Done: the plan; Phase A (the quest run out of the screen, the headless
   quest player); Phase B (the multiplayer rules in the game layer); Phase C
-  (the network flow, waits and disconnects). See their notes below.
+  (the network flow, waits and disconnects); Phase D (the pages to the
+  watchers). See their notes below.
 - In progress: nothing.
-- Next: Phase D, then E and F in order, one subagent at a time.
+- Next: Phase E, then F, one subagent at a time.
 - Notes: the owner asked for text quests in multiplayer, with the other
   players able to watch a quest but not act in it. This entry is the plan.
   The decisions marked **Owner** have the owner's answers (2026-10-19), in
@@ -340,7 +341,7 @@ reconnecting.
 | `CloseQuest` | 608, a new last integer: the days owed (absent: 0) |
 | `DieInQuest`, `FinishQueuedTextQuest` | 606, 607: same arguments, new behaviour in multiplayer |
 | `QuestPage` | message 18 |
-| `ProtocolVersion` | 10 (`Status` carries activity and days; `QuestPage`) |
+| `ProtocolVersion` | 10 (`Status` carries activity and days); 11 (`QuestPage`, Phase D) |
 | Per-human save block | version 4: `THuman.QuestDaysOwed` |
 
 ## 3. Phases
@@ -660,6 +661,78 @@ its own progress entry.
   (`net quest pages human= count= last= end=`); they must equal Net1's own.
   A silent Net1 gives `end=abandoned` on Net2. Unit tests: page codec round
   trip; the client's cache against the scripted host (`TestNet`).
+
+#### Phase D notes (done)
+
+- **`source/quests/QuestPage.pas`.** `TQuestRunOutcome`, `TQuestChoiceAction`,
+  `TQuestChoice` and `TQuestPage` moved here from `QuestRun` (units that name
+  them use `QuestPage`; `QuestOutcomeName` moved here from `HeadlessQuest`).
+  `TWatchedQuestPage` is what travels: the human id, the run's number on the
+  player's machine (from 1, per process), the page's number in the run (from
+  1), the quest's name (its number or file name) and the `TQuestPage`; a
+  choice travels as its text and enabled flag only (its action and value stay
+  with the player). A page with an outcome is the end page. The codec
+  (`EncodeWatchedQuestPage`, `DecodeWatchedQuestPage`, which refuses a bad
+  outcome byte or choice count) and `WatchedQuestPageHash` (the hash of the
+  encoding, so it is the same on every machine); `AbandonedQuestPage`.
+  `QuestPageHook` is the seam.
+- **The run** (`TQuestRun.PublishPage`): after `View.FinishPage` (the start and
+  each choice) and in `Close` (the end page, unless the outcome's page was it;
+  abandoned when closed without one, `Abandon` too), when the hook is set and
+  the run is a game's (a local human, not the main menu's quest). Nothing is
+  published after the end page; a refused run publishes nothing.
+- **Protocol 11.** `QuestPage` (18, both ways). A v10 peer would ignore the
+  kind and silently have no pages, so the version went up instead of keeping
+  10: a peer either watches or does not join.
+- **The store** (`TQuestPageStore`): the latest page per human; `Latest(Id)`,
+  `Playing(Id)` (its latest page has no outcome), `PlayingHumans(ExceptId)`,
+  `ChangeCount` (one more per page, for the window to redraw), `Clear`. The
+  host's (`TNetHost.QuestPages`) and the client's (`TNetClient.QuestPages`)
+  both keep their own human's too; `NetSession.QuestPages` is whichever this
+  machine has (nil without a session). That is Phase E's API: who plays is
+  `PlayingHumans(LocalHuman.Id)` (or the status's activity), the page is
+  `Latest`, and a change is `ChangeCount`.
+- **The flow.** `NetSession` sets the hook (`SessionQuestPage`) in
+  `StartHosting` and `JoinGame` and clears it in `StopNetwork`. A client sends
+  its page (`TNetClient.SendQuestPage`, as its own human's, only when it may
+  send: not between a loss and the state after the reconnect). The host takes
+  a peer's page at any time (also while a job runs: it touches no game state),
+  names the peer's human in it, keeps it and sends it to every joined peer but
+  the player's; its own human's page goes the same way
+  (`TNetHost.PublishQuestPage`). On a disconnect of a human whose latest page
+  has no outcome the host keeps and sends an abandoned end page after it. A
+  join or rejoin gets the latest page of each other human's open quest right
+  after its `Welcome`. A client empties its store when it loses its host
+  (`DropConnectionState`, also at the reconnect's `Welcome`, before those
+  pages). Every page is a `NetLog` line (`quest page sent|relayed|received|
+  caught-up|abandoned human= run= page= hash= end= choices= [to=]`), in the
+  game's log too, as the trades are.
+- **Spectating changes nothing.** A page is no command (not submitted, not
+  logged, not relayed as one), is not in a state and not hashed; the runs of
+  the existing checks keep their hashes and replays, and the goldens are
+  unchanged.
+- **Tests.** `TestNet.RunQuestPageTests`: the codec round trip (a choice's
+  action is not carried; equal hashes; an unknown outcome and a negative count
+  are refused), the store, and a client against the scripted host (keeps the
+  host's pages, sends its own as its human's, drops them on a lost connection,
+  sends none while it reconnects). `tools/test.py`: `check_net_quest_lock`
+  checks that Net1's pages reach the host (`relayed`) and Net2 (`received`) as
+  sent, in order, ending with the end page, that both keep the last one (`net
+  host|client quest pages`), and that Net2's refused quest sent none;
+  `check_net_quest_abandon` that the host relayed a start of Net1's pages and
+  then its abandoned end page (numbered one after the last it got), and that
+  Net1 sent no end page; the new `check_net_quest_host` has the host's own human
+  play `Prison` by name (`--sim-net-quest` with `--sim-text-quest` on the host,
+  `HeadlessSim.PlayQuestTurn`, now exported) with two clients: all its 207–323
+  pages reach both clients in order, every state's hash is the host's, and the
+  host's log replays. Two fixes the new check needed: a silent client flushes
+  what it sent before it freezes (`TNetClient.FreezeConnection(True)`;
+  otherwise the host could have none of its pages), and a headless client
+  counts each page it gets as progress (the host's prison quest of 300 choices
+  took over the 120 s stall timeout under the parallel test load).
+- Plan deviations: the abandoned end page is checked on the host, not on a
+  second client (the silent run has one client); the host also sends the open
+  quests' latest pages to a joining client, which the plan left open.
 
 ### Phase E — The watch window
 

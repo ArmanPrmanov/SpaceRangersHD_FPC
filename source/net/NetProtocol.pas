@@ -10,7 +10,8 @@ uses
   EC_Buf,
   aCommands,
   aHuman,
-  NetTransport;
+  NetTransport,
+  QuestPage;
 const
   // CHANGE: ENHANCEMENT - 2: TalkRequest has a payload (remote dialogue). 3: Status names the
   // human whose answer to a dialogue the day waits for. 4: NewHuman and Character (a first
@@ -20,8 +21,9 @@ const
   // 8: RelayCommand carries a ship screen sale as its effect (aHoldActions.ckRelayedSale).
   // 9: Hello and Welcome carry the reconnection token, and Ping. 10: Status carries each
   // human's text-quest activity and the game days it owes for a quest (docs/progress/
-  // 2026-10-19-text-quests-plan.md, Phase C).
-  ProtocolVersion = 10;
+  // 2026-10-19-text-quests-plan.md, Phase C). 11: QuestPage (Phase D), so that a peer without
+  // the watchers' pages does not join.
+  ProtocolVersion = 11;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 
@@ -52,6 +54,10 @@ const
   // Disconnects). The network thread sends it when it has sent nothing for a while and swallows
   // it on arrival; no inbox sees it.
   nkPing = 17;
+  // CHANGE: ENHANCEMENT - both ways: a page of a text quest for the watchers (QuestPage.
+  // TWatchedQuestPage, docs/network.md, Text quests). client -> host: its own human's page;
+  // host -> client: any other human's. Presentation only: no command, never logged or hashed.
+  nkQuestPage = 18;
 type
   // CHANGE: ENHANCEMENT - host -> client: a command the client sent, named by the number the
   // client gave it (Command), was applied (Ok) or refused, and why (docs/network.md,
@@ -155,6 +161,11 @@ var
   NetLogHook: procedure(const Text: AnsiString);
 // Writes a network event (a join, a refusal, a disconnect) to the game's log.
 procedure NetLog(const Text: AnsiString);
+// CHANGE: ENHANCEMENT - A text quest's page in the log (NetLog): what happened to it (sent,
+// relayed, received, caught-up, abandoned), whose, its run and number, its hash and outcome,
+// and how many peers got it (-1: not counted). The tests compare the hashes in order
+// (docs/network.md, Tests).
+procedure NetLogQuestPage(const What: AnsiString; const Page: TWatchedQuestPage; Sent: Integer);
 
 procedure EncodeHello(const Message: THelloMessage; Buffer: TBufEC);
 function DecodeHello(Buffer: TBufEC): THelloMessage;
@@ -239,6 +250,7 @@ begin
     nkCommandResult: Result := 'CommandResult';
     nkRelayCommand: Result := 'RelayCommand';
     nkPing: Result := 'Ping';
+    nkQuestPage: Result := 'QuestPage';
   else
     Result := 'Kind' + IntToStr(Kind);
   end;
@@ -249,6 +261,22 @@ begin
   AppendLogLineThreadSafe('Network: ' + Text);
   if Assigned(NetLogHook) then
     NetLogHook(Text);
+end;
+
+procedure NetLogQuestPage(const What: AnsiString; const Page: TWatchedQuestPage; Sent: Integer);
+var
+  Peers: AnsiString;
+begin
+  Peers := '';
+  if Sent >= 0 then
+    Peers := Format(' to=%d', [Sent]);
+  NetLog(
+      Format(
+          'quest page %s human=%d run=%d page=%d hash=%s end=%s choices=%d%s',
+          [What, Page.HumanId, Page.Run, Page.Number, IntToHex(WatchedQuestPageHash(Page), 16),
+              QuestOutcomeName(Page.Page.Outcome), Length(Page.Page.Choices), Peers]
+      )
+  );
 end;
 
 procedure AddQWord(Buffer: TBufEC; Value: QWord);

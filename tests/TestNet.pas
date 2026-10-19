@@ -16,6 +16,7 @@ uses
   NetThread,
   NetClient,
   NetPlay,
+  QuestPage,
   TestSupport;
 
 // A state-like buffer: repetitive records with varying fields.
@@ -939,6 +940,183 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - A page of a text quest with two choices, one of them disabled.
+function SampleQuestPage(HumanId, Number: Integer): TWatchedQuestPage;
+begin
+  Result := Default(TWatchedQuestPage);
+  Result.HumanId := HumanId;
+  Result.Run := 2;
+  Result.Number := Number;
+  Result.QuestName := 'Prison';
+  Result.Page.Text := '<color=255,240,100>Day ' + IntToStr(Number) + '</color>'#13#10'Text';
+  Result.Page.Picture := 'Prison_01';
+  Result.Page.Parameters := 'Money: 100';
+  SetLength(Result.Page.Choices, 2);
+  Result.Page.Choices[0].Text := 'Go on';
+  Result.Page.Choices[0].Enabled := True;
+  Result.Page.Choices[0].Action := qcaPath;
+  Result.Page.Choices[0].Value := 12;
+  Result.Page.Choices[1].Text := 'Run away';
+  Result.Page.Choices[1].Enabled := False;
+end;
+
+function SameQuestPage(const Left, Right: TWatchedQuestPage): Boolean;
+var
+  I: Integer;
+begin
+  Result :=
+      (Left.HumanId = Right.HumanId) and (Left.Run = Right.Run) and (Left.Number = Right.Number)
+          and (Left.QuestName = Right.QuestName) and (Left.Page.Text = Right.Page.Text)
+          and (Left.Page.Picture = Right.Page.Picture) and (Left.Page.Parameters = Right.Page.Parameters)
+          and (Left.Page.Outcome = Right.Page.Outcome)
+          and (Length(Left.Page.Choices) = Length(Right.Page.Choices));
+  if Result then
+    for I := 0 to High(Left.Page.Choices) do
+      Result :=
+          Result and (Left.Page.Choices[I].Text = Right.Page.Choices[I].Text)
+              and (Left.Page.Choices[I].Enabled = Right.Page.Choices[I].Enabled);
+end;
+
+// Pumps Client until it has a page of HumanId numbered Number, for 10 s at most.
+function PumpUntilPage(Client: TNetClient; HumanId, Number: Integer): Boolean;
+var
+  Deadline: QWord;
+  Page: TWatchedQuestPage;
+begin
+  Deadline := GetTickCount64 + 10000;
+  repeat
+    Client.Pump;
+    Result := Client.QuestPages.Latest(HumanId, Page) and (Page.Number = Number);
+    if Result then
+      Exit;
+    NetInboxEvent.WaitFor(5);
+  until GetTickCount64 > Deadline;
+end;
+
+// CHANGE: ENHANCEMENT - The text quests' pages (docs/progress/2026-10-19-text-quests-plan.md,
+// Phase D): the codec keeps what a watcher shows and refuses a broken page; the store keeps
+// the latest page of each human and says whose quest is open; a client keeps the pages the
+// scripted host sends, sends its own human's as its own, and forgets them when the connection
+// is lost.
+procedure RunQuestPageTests;
+var
+  Page, Back, Latest: TWatchedQuestPage;
+  Buffer: TBufEC;
+  Store: TQuestPageStore;
+  Changes: Cardinal;
+  Host: TNetThread;
+  Client: TNetClient;
+  Peer: Integer;
+  Kind: TNetMessageKind;
+begin
+  Buffer := TBufEC.Create;
+  Store := TQuestPageStore.Create;
+  try
+    Page := SampleQuestPage(3, 4);
+    EncodeWatchedQuestPage(Page, Buffer);
+    Buffer.SetPosition(0);
+    Back := DecodeWatchedQuestPage(Buffer);
+    Check(SameQuestPage(Page, Back), 'a quest page decodes to itself');
+    CheckInt(Buffer.DataSize, Buffer.Position, 'and to its end');
+    Check(
+        (Back.Page.Choices[0].Action = qcaNone) and (Back.Page.Choices[0].Value = 0),
+        'a choice''s action stays with the player'
+    );
+    Check(WatchedQuestPageHash(Page) = WatchedQuestPageHash(Back), 'its hash is the same on both sides');
+    Back.Page.Choices[1].Enabled := True;
+    Check(WatchedQuestPageHash(Page) <> WatchedQuestPageHash(Back), 'a choice enabled changes the hash');
+    Page.Page.Outcome := qroDeath;
+    Buffer.Clear;
+    EncodeWatchedQuestPage(Page, Buffer);
+    Buffer.SetPosition(0);
+    Check(DecodeWatchedQuestPage(Buffer).Page.Outcome = qroDeath, 'an end page keeps its outcome');
+    PByte(Buffer.Data)[Buffer.DataSize - 1] := Ord(High(TQuestRunOutcome)) + 1;
+    Buffer.SetPosition(0);
+    try
+      DecodeWatchedQuestPage(Buffer);
+      Check(False, 'an unknown outcome is refused');
+    except
+      on E: Exception do
+        Check(True, 'an unknown outcome is refused');
+    end;
+    Buffer.Clear;
+    Buffer.AddInt32(1);
+    Buffer.AddInt32(1);
+    Buffer.AddInt32(1);
+    Buffer.AddWideStringZ('');
+    Buffer.AddWideStringZ('');
+    Buffer.AddWideStringZ('');
+    Buffer.AddWideStringZ('');
+    Buffer.AddInt32(-1);
+    Buffer.SetPosition(0);
+    try
+      DecodeWatchedQuestPage(Buffer);
+      Check(False, 'a negative choice count is refused');
+    except
+      on E: Exception do
+        Check(True, 'a negative choice count is refused');
+    end;
+
+    Changes := Store.ChangeCount;
+    Check(not Store.Latest(3, Latest) and not Store.Playing(3), 'an empty store has no page');
+    Store.Put(SampleQuestPage(3, 1));
+    Store.Put(SampleQuestPage(5, 1));
+    Store.Put(SampleQuestPage(3, 2));
+    Check(Store.Latest(3, Latest) and (Latest.Number = 2), 'the store keeps the latest page');
+    CheckInt(Changes + 3, Store.ChangeCount, 'each page counts as a change');
+    Check(Store.Playing(3) and Store.Playing(5), 'a page without an outcome is an open quest');
+    CheckInt(2, Length(Store.PlayingHumans), 'two quests are open');
+    Check(
+        (Length(Store.PlayingHumans(3)) = 1) and (Store.PlayingHumans(3)[0] = 5),
+        'one besides human 3''s'
+    );
+    Page := AbandonedQuestPage(Latest);
+    Check(
+        (Page.Number = 3) and (Page.Page.Outcome = qroAbandoned) and (Length(Page.Page.Choices) = 0),
+        'an abandoned end page follows the last'
+    );
+    Store.Put(Page);
+    Check(not Store.Playing(3) and Store.Playing(5), 'an end page closes its quest');
+    Store.Clear;
+    Check(not Store.Latest(5, Latest), 'a cleared store has no page');
+  finally
+    Buffer.Free;
+    Store.Free;
+  end;
+
+  Host := TNetThread.Create(0);
+  ThreadPayload := TBufEC.Create;
+  Client := nil;
+  Buffer := TBufEC.Create;
+  try
+    Client := JoinedClient(Host, Peer);
+    Page := SampleQuestPage(3, 1);
+    EncodeWatchedQuestPage(Page, Buffer);
+    Host.Send(Peer, nkQuestPage, Buffer);
+    Page := SampleQuestPage(3, 2);
+    Buffer.Clear;
+    EncodeWatchedQuestPage(Page, Buffer);
+    Host.Send(Peer, nkQuestPage, Buffer);
+    Check(PumpUntilPage(Client, 3, 2), 'the client keeps the host''s latest page');
+    Check(Client.QuestPages.Latest(3, Latest) and SameQuestPage(Page, Latest), 'as the host sent it');
+    Client.SendQuestPage(SampleQuestPage(99, 1));
+    Check(WaitMessage(Host, Peer, Kind) and (Kind = nkQuestPage), 'the client sends its own page');
+    Back := DecodeWatchedQuestPage(ThreadPayload);
+    Check((Back.HumanId = 7) and (Back.Number = 1), 'as its own human''s');
+    Check(Client.QuestPages.Playing(7), 'and keeps it');
+    Host.RemovePeer(Peer);
+    Check(PumpUntil(Client, cwReconnecting), 'a lost connection');
+    Check(not Client.QuestPages.Latest(3, Latest) and not Client.QuestPages.Playing(7), 'drops the pages');
+    Client.SendQuestPage(SampleQuestPage(7, 2));
+    Check(not Client.QuestPages.Playing(7), 'and no page goes while it reconnects');
+  finally
+    Buffer.Free;
+    Client.Free;
+    Host.Free;
+    FreeAndNil(ThreadPayload);
+  end;
+end;
+
 // The menus' address parsing (NetPlay.ParseNetAddress) and the host's addresses.
 procedure RunAddressTests;
 var
@@ -970,6 +1148,7 @@ begin
   RunLivenessTests;
   RunReconnectTests;
   RunCancelEndTurnTests;
+  RunQuestPageTests;
   RunAddressTests;
 end;
 

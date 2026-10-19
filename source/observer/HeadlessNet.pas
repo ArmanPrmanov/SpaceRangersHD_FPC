@@ -35,6 +35,10 @@ unit HeadlessNet;
 // client goes silent in the middle of its quest and abandons it after the reconnect. Both sides
 // print the quest's lines, the host what its barrier applied and its wait text, a client the
 // waits its host's status gives.
+// CHANGE: ENHANCEMENT - The quests' pages (Phase D of the plan): every page sent, relayed and
+// received is a line with its hash (NetLogQuestPage), and each side ends with the latest page of
+// each human it has (net quest pages). With --sim-net-quest and --sim-text-quest the host plays
+// that quest by name on its DAY-th day, and its clients play none.
 interface
 uses
   HeadlessSim;
@@ -87,6 +91,7 @@ uses
   NetClient,
   NetSession,
   NetPlay,
+  QuestPage,
   QuestRun,
   HeadlessQuest,
   aQuestActions,
@@ -1086,6 +1091,27 @@ begin
   Emit(Format('net client wait human=%d text=%s', [Client.HumanId, OneLine(Text)]));
 end;
 
+// The latest text-quest page of each human of the session that this machine has, one line
+// each: its run, number (the run's page count), hash and outcome.
+procedure EmitQuestPages(const Side: AnsiString; Pages: TQuestPageStore);
+var
+  I: Integer;
+  Page: TWatchedQuestPage;
+begin
+  if Pages = nil then
+    Exit;
+  for I := 0 to Session.Humans.Count - 1 do
+    if Pages.Latest(Session.Humans[I].Id, Page) then
+      Emit(
+          Format(
+              'net %s quest pages human=%d run=%d count=%d last=%s end=%s playing=%d changes=%d',
+              [Side, Page.HumanId, Page.Run, Page.Number, HashText(WatchedQuestPageHash(Page)),
+                  QuestOutcomeName(Page.Page.Outcome), Ord(Pages.Playing(Page.HumanId)),
+                  Pages.ChangeCount]
+          )
+      );
+end;
+
 // A client's quest turn (--sim-net-quest). With a quest by name (TextQuest) the client plays it;
 // otherwise it sends the probe and plays the planet quest its visit gives (TQuestRun.Open),
 // Net1 at once, another client once the host's status says another human plays one: the relay
@@ -1180,7 +1206,9 @@ begin
     if Options.NetSilentAt > 0 then
     begin
       Player.Step;
-      Client.FreezeConnection;
+      // CHANGE: ENHANCEMENT - The pages so far reach the host, which ends them for its watchers
+      // when it times the client out (Phase D).
+      Client.FreezeConnection(True);
       Emit(
           Format(
               'net client silent day=%d human=%d takeover=0 quest=1 steps=%d tick=%d',
@@ -1351,6 +1379,10 @@ begin
         OpenHostDialogue;
         Plan := 'o';
       end
+      // CHANGE: ENHANCEMENT - --sim-net-quest with --sim-text-quest: the host's own human plays
+      // the quest; its pages go to every client (TNetHost.PublishQuestPage).
+      else if (Options.NetQuestDay > 0) and (Options.TextQuest <> '') and (Day = Options.NetQuestDay) then
+        PlayQuestTurn(LocalHuman, Options.TextQuest, Options.Seed, Plan)
       else
         PlayHumanTurn(LocalHuman, Galaxy.CurrentTurn, 1, Plan);
       Deadline := GetTickCount64 + StallTimeoutMs;
@@ -1515,12 +1547,15 @@ begin
     if Options.NetShop then
       Emit(Format('net host shop notified=%d host=%d', [ShopNotifications, LocalHuman.Id]));
     if Options.NetQuestDay > 0 then
+    begin
       Emit(
           Format(
               'net host quest begun=%d barrier=%d closed=%d early=%d host=%d',
               [QuestBegun, QuestBarrierCommands, QuestClosed, QuestEarly, LocalHuman.Id]
           )
       );
+      EmitQuestPages('host', Host.QuestPages);
+    end;
     if Options.NetNested then
     begin
       Emit(Format('net host nested outer=%d inner=%d', [NestedOuterRuns, NestedInnerRuns]));
@@ -1672,6 +1707,9 @@ var
   InSpaceTurns: Integer;
   // CHANGE: ENHANCEMENT - --sim-net-quest: the quest turn has come; the planet of a quest it
   // abandoned, checked after the state that follows (-1: none); the trade timeout it replaced.
+  // The text-quest pages it had when it last made progress: another human's long quest holds
+  // the day, and each of its pages counts as progress.
+  QuestPageChanges: Cardinal;
   QuestPlayed: Boolean;
   QuestPlanetId, AbandonedPlanetId: Integer;
   SavedTradeTimeoutMs: Integer;
@@ -1683,6 +1721,7 @@ begin
   TravelProbed := False;
   InSpaceTurns := 0;
   QuestPlayed := False;
+  QuestPageChanges := 0;
   AbandonedPlanetId := -1;
   SavedTradeTimeoutMs := ClientTradeTimeoutMs;
   if Options.NetReconnectMs > 0 then
@@ -1799,6 +1838,11 @@ begin
         if AnswerTalk(Client, Options.NetTalkLeave, TalkHeld) then
           Break;
         TalkHeld := False;
+      end;
+      if Client.QuestPages.ChangeCount <> QuestPageChanges then
+      begin
+        QuestPageChanges := Client.QuestPages.ChangeCount;
+        Deadline := GetTickCount64 + StallTimeoutMs;
       end;
       if not Client.HasState or FilmPlaying then
       begin
@@ -1996,6 +2040,9 @@ begin
       Day := Galaxy.CurrentTurn
     else
       Day := 0;
+    // CHANGE: ENHANCEMENT - The text quests' pages it has, once the host has gone on past them.
+    if Galaxy <> nil then
+      EmitQuestPages('client', Client.QuestPages);
     Emit(
         Format(
             'done net client days=%d human=%d mismatches=%d day=%d',

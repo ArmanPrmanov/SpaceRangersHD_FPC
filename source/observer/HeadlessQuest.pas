@@ -12,6 +12,7 @@ unit HeadlessQuest;
 // never a box.
 interface
 uses
+  QuestPage,
   QuestRun;
 const
   MaxQuestSteps = 1000;
@@ -45,7 +46,6 @@ type
   end;
 // A hash of everything the page shows: its text, picture, parameters, choices and outcome.
 function QuestPageHash(const Page: TQuestPage): QWord;
-function QuestOutcomeName(Outcome: TQuestRunOutcome): AnsiString;
 implementation
 uses
   SysUtils,
@@ -63,19 +63,6 @@ begin
   for I := 0 to High(Page.Choices) do
     Text := Text + #1 + IntToStr(Ord(Page.Choices[I].Enabled)) + Page.Choices[I].Text;
   Result := HashBytes(PByte(PWideChar(Text)), Length(Text) * SizeOf(WideChar));
-end;
-
-function QuestOutcomeName(Outcome: TQuestRunOutcome): AnsiString;
-const
-  Names: array[TQuestRunOutcome] of AnsiString = (
-      'none',
-      'success',
-      'failure',
-      'death',
-      'abandoned'
-  );
-begin
-  Result := Names[Outcome];
 end;
 
 function EnabledChoiceCount(const Page: TQuestPage): Integer;

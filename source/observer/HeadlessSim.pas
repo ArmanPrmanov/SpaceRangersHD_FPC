@@ -134,6 +134,10 @@ function IsTradedBack(Item: TItem): Boolean;
 // CHANGE: ENHANCEMENT - Gives Human a government planet quest to Planet (a TPlanet whose
 // TextQuestId is set), as AcceptQuest gives the offer; shared with HeadlessNet's quest probe.
 procedure GiveProbePlanetQuest(Human: THuman; Planet: TObject);
+// CHANGE: ENHANCEMENT - Human, the local one, plays the text quest Name headless and ends its
+// turn unless it owes the quest's days; shared with HeadlessNet's host quest (Phase D of the
+// text quests plan).
+procedure PlayQuestTurn(Human: THuman; const Name: AnsiString; Seed: Cardinal; var Plan: AnsiString);
 var
   // CHANGE: ENHANCEMENT - PlayHumanTurn buys one unit of the good with the smallest stock the
   // human could buy whole, when there is one (NetBuyRace).
@@ -184,6 +188,7 @@ uses
   fGameSettings,
   fIntroduction,
   HeadlessQuest,
+  QuestPage,
   QuestRun,
   aQuestActions;
 

@@ -7,6 +7,10 @@ unit NetHost;
 // sends the film of each star to the clients in it, and after the day a state to every
 // client, as a delta against the state that client acknowledged. Everything here runs on the
 // UI thread, except StarDay and RemoteTalk, which the turn thread calls.
+// CHANGE: ENHANCEMENT - The text quests' pages (docs/progress/2026-10-19-text-quests-plan.md,
+// Phase D): the host keeps the latest page of every human (QuestPages) and sends each page to
+// every joined client but the player's, its own human's too; a new or returning client gets the
+// open quests' latest pages, and a player that leaves mid-quest gets an abandoned end page.
 interface
 uses
   Classes,
@@ -17,7 +21,8 @@ uses
   aHuman,
   NetTransport,
   NetThread,
-  NetProtocol;
+  NetProtocol,
+  QuestPage;
 type
   THostPeerState = (hpHello, hpPendingJoin, hpJoined);
 
@@ -115,6 +120,10 @@ type
     // the continuing travels it stopped before the day.
     FCancelledEndTurns: Integer;
     FStoppedTravels: Integer;
+    // CHANGE: ENHANCEMENT - The latest text-quest page of each human.
+    FQuestPages: TQuestPageStore;
+    // Sends Page to every joined peer but the one of its human (and Skip); how many got it.
+    function SendQuestPage(const Page: TWatchedQuestPage; Skip: THostPeer): Integer;
     function FindPeer(PeerId: Integer): THostPeer;
     // The human's token; with Issue, one is issued (NewToken) when it has none yet, at its
     // first Welcome in this session. 0: none.
@@ -256,6 +265,11 @@ type
     // CHANGE: ENHANCEMENT - How many EndTurns the peers took back (CancelEndTurn), for the tests.
     property CancelledEndTurns: Integer read FCancelledEndTurns;
     property StoppedTravels: Integer read FStoppedTravels;
+    // CHANGE: ENHANCEMENT - A page of the host's own human's text quest (QuestPage.QuestPageHook):
+    // kept and sent to every joined client. Pages are presentation: nothing here is a command.
+    procedure PublishQuestPage(const Page: TWatchedQuestPage);
+    // The latest text-quest page of each human, the host's own included (the watch window's).
+    property QuestPages: TQuestPageStore read FQuestPages;
   end;
 
 var
@@ -368,6 +382,7 @@ begin
   FLastStatus := TBufEC.Create;
   FJoinJobs := TList.Create;
   FTalkLock := TCriticalSection.Create;
+  FQuestPages := TQuestPageStore.Create;
   FThread := TNetThread.Create(Port);
   NewHumansConnected := False;
   for I := 0 to Session.Humans.Count - 1 do
@@ -399,6 +414,7 @@ begin
   FFilmLock.Free;
   FTalkLock.Free;
   FLastStatus.Free;
+  FQuestPages.Free;
   NewHumansConnected := True;
   for I := 0 to Session.Humans.Count - 1 do
     Session.Humans[I].Connected := True;
@@ -463,6 +479,7 @@ var
   Serial, I: Integer;
   Other: THostPeer;
   Character: TCharacterMessage;
+  Page: TWatchedQuestPage;
 begin
   if Peer.Leaving then
     Exit;
@@ -552,9 +569,52 @@ begin
           Peer.HasCharacter := True;
         end;
       end;
+    // CHANGE: ENHANCEMENT - A page of the peer's human's text quest: kept and passed on, as it
+    // is, to everyone else; it names the peer's human whatever it says.
+    nkQuestPage:
+      if Peer.State = hpJoined then
+      begin
+        Page := DecodeWatchedQuestPage(Payload);
+        Page.HumanId := Peer.HumanId;
+        FQuestPages.Put(Page);
+        NetLogQuestPage('relayed', Page, SendQuestPage(Page, Peer));
+      end;
     nkBye:
       Peer.Leaving := True;
   end;
+end;
+
+function TNetHost.SendQuestPage(const Page: TWatchedQuestPage; Skip: THostPeer): Integer;
+var
+  I: Integer;
+  Peer: THostPeer;
+  Payload: TBufEC;
+begin
+  Result := 0;
+  Payload := nil;
+  try
+    for I := 0 to FPeers.Count - 1 do
+    begin
+      Peer := THostPeer(FPeers[I]);
+      if (Peer = Skip) or (Peer.State <> hpJoined) or Peer.Leaving or (Peer.HumanId = Page.HumanId) then
+        Continue;
+      if Payload = nil then
+      begin
+        Payload := TBufEC.Create;
+        EncodeWatchedQuestPage(Page, Payload);
+      end;
+      FThread.Send(Peer.PeerId, nkQuestPage, Payload);
+      Inc(Result);
+    end;
+  finally
+    Payload.Free;
+  end;
+end;
+
+procedure TNetHost.PublishQuestPage(const Page: TWatchedQuestPage);
+begin
+  FQuestPages.Put(Page);
+  NetLogQuestPage('sent', Page, SendQuestPage(Page, nil));
 end;
 
 procedure TNetHost.Pump;
@@ -808,6 +868,7 @@ end;
 procedure TNetHost.DisconnectHuman(Human: THuman; Peer: THostPeer);
 var
   Command: TPlayerCommand;
+  Page: TWatchedQuestPage;
 begin
   Peer.State := hpHello;
   Human.Connected := False;
@@ -824,6 +885,13 @@ begin
         )
     );
     Human.ReleaseTextQuest;
+  end;
+  // CHANGE: ENHANCEMENT - The watchers of a quest it left open get its end page (Phase D).
+  if FQuestPages.Playing(Human.Id) and FQuestPages.Latest(Human.Id, Page) then
+  begin
+    Page := AbandonedQuestPage(Page);
+    FQuestPages.Put(Page);
+    NetLogQuestPage('abandoned', Page, SendQuestPage(Page, Peer));
   end;
   if (Human.Player <> nil) and not Human.Player.InHyperspace and not Human.Finished then
   begin
@@ -888,6 +956,9 @@ var
   Payload: TBufEC;
   State: TNetState;
   Job: TNetStateJob;
+  Playing: TQuestHumanIds;
+  Page: TWatchedQuestPage;
+  J: Integer;
 begin
   Pending := TList.Create;
   Payload := TBufEC.Create;
@@ -954,6 +1025,17 @@ begin
       Welcome.Token := HumanToken(Human.Id, True);
       EncodeWelcome(Welcome, Payload);
       FThread.Send(Peer.PeerId, nkWelcome, Payload);
+      // CHANGE: ENHANCEMENT - The latest page of each other human's open text quest, so that it
+      // can be watched before its next page.
+      Playing := FQuestPages.PlayingHumans(Human.Id);
+      for J := 0 to High(Playing) do
+        if FQuestPages.Latest(Playing[J], Page) then
+        begin
+          Payload.Clear;
+          EncodeWatchedQuestPage(Page, Payload);
+          FThread.Send(Peer.PeerId, nkQuestPage, Payload);
+          NetLogQuestPage('caught-up', Page, 1);
+        end;
       Inc(Joined);
     end;
     if Joined = 0 then

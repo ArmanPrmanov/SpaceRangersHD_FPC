@@ -7,7 +7,8 @@ unit NetSession;
 interface
 uses
   NetHost,
-  NetClient;
+  NetClient,
+  QuestPage;
 type
   TNetRole = (nrNone, nrHost, nrClient);
 
@@ -33,6 +34,10 @@ procedure StopNetwork;
 // Takes what arrived. The UI calls it every frame and at safe points; the headless runner
 // while it waits.
 procedure NetPump;
+// CHANGE: ENHANCEMENT - The latest text-quest page of each human, as this machine has it (the
+// host's or the client's TQuestPageStore): for the watch window (docs/progress/
+// 2026-10-19-text-quests-plan.md, Watching). nil without a session.
+function QuestPages: TQuestPageStore;
 implementation
 uses
   aCommands,
@@ -63,6 +68,25 @@ begin
   Result := Client;
 end;
 
+// QuestPageHook of a session: the local human's page goes to the host's clients, or to the host.
+procedure SessionQuestPage(const Page: TWatchedQuestPage);
+begin
+  if Host <> nil then
+    Host.PublishQuestPage(Page)
+  else if Client <> nil then
+    Client.SendQuestPage(Page);
+end;
+
+function QuestPages: TQuestPageStore;
+begin
+  if Host <> nil then
+    Result := Host.QuestPages
+  else if Client <> nil then
+    Result := Client.QuestPages
+  else
+    Result := nil;
+end;
+
 function StartHosting(Port: Integer; const HostName: WideString): TNetHost;
 begin
   StopNetwork;
@@ -72,6 +96,8 @@ begin
   RemoteTalkHook := @HostRemoteTalk;
   // CHANGE: ENHANCEMENT - The host relays the trades it applies (docs/network.md, Trades).
   NetworkCommandHook := @HostCommandSubmitted;
+  // CHANGE: ENHANCEMENT - Its own human's text-quest pages go to the clients.
+  QuestPageHook := @SessionQuestPage;
   Result := Host;
 end;
 
@@ -87,6 +113,8 @@ begin
   NetworkCommandHook := @ClientCommandSubmitted;
   // CHANGE: ENHANCEMENT - A trade waits for the host's answer instead of being predicted.
   TradeSubmitHook := @ClientTradeSubmitted;
+  // CHANGE: ENHANCEMENT - Its human's text-quest pages go to the host.
+  QuestPageHook := @SessionQuestPage;
   Result := Client;
 end;
 
@@ -99,6 +127,7 @@ begin
   RemoteTalkHook := nil;
   NetworkCommandHook := nil;
   TradeSubmitHook := nil;
+  QuestPageHook := nil;
   if Host <> nil then
   begin
     Host.Shutdown(ByeTimeoutMs);

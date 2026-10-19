@@ -601,7 +601,7 @@ def net_lines(output: str, prefix: str) -> list[dict[str, str]]:
 def run_network(
     args, binary: Path, save: Path | None, count: int, log: Path | None = None, leave: str = "",
     race: bool = False, nested: bool = False, shop: bool = False, cancel: bool = False,
-    quest: str = "",
+    quest: str = "", host_quest: str = "",
 ):
     """One networked session: a host with `count` clients (Net1..NetN) for NET_DAYS days. Without
     a save the host plays a new game (--sim-new-game).
@@ -628,8 +628,9 @@ def run_network(
     travel before a day the host holds for that (--sim-net-cancel-end-turn). With quest, each
     client plays a text quest on its NET_QUEST_DAY-th turn (--sim-net-quest): "planet" for the
     planet quest the probe gives it, else the quest of that name (--sim-text-quest); the host
-    lands every client at the first one's planet. Returns (problem, host output, client
-    outputs); problem is '' when every process ended cleanly.
+    lands every client at the first one's planet. With host_quest the host's own human plays the
+    quest of that name on its NET_QUEST_DAY-th day instead, and the clients play none. Returns
+    (problem, host output, client outputs); problem is '' when every process ended cleanly.
     """
     days = NET_SHOP_DAYS if shop else NET_DAYS
     host_options = [
@@ -660,6 +661,8 @@ def run_network(
         if quest != "planet":
             quest_options.append(f"--sim-text-quest={quest}")
     host_options.extend(quest_options[:1])
+    if host_quest:
+        host_options.extend([f"--sim-net-quest={NET_QUEST_DAY}", f"--sim-text-quest={host_quest}"])
     host = GameProcess(binary, args.game_dir, host_options)
     port_line = host.wait_line("net host port=", NET_TIMEOUT)
     if not port_line:
@@ -952,6 +955,37 @@ def replay_host_log(args, binary: Path, log: Path, expected: str, extra: list[st
     return ""
 
 
+def quest_pages(output: str, what: str, human: str) -> list[tuple[str, str, str, str]]:
+    """The text-quest pages of human that a process logged as what (sent, relayed, received,
+    abandoned; NetLogQuestPage), in order: (run, page, hash, end)."""
+    return [
+        (line["run"], line["page"], line["hash"], line["end"])
+        for line in net_lines(output, f"net quest page {what} ")
+        if line.get("human") == human
+    ]  # fmt: skip
+
+
+def check_page_relay(sent: list, others: list[tuple[str, list]], name: str) -> str:
+    """The pages a player sent (sent) reached every other machine (others: label and the pages
+    it logged) the same, in the same order, and the run has its end page. Returns what is wrong."""
+    if not sent:
+        return f"{name} sent no text-quest page"
+    if sent[-1][3] == "none":
+        return f"{name} sent no end page: {sent[-1]}"
+    for label, pages in others:
+        if pages != sent:
+            return f"{label} got {name}'s pages {pages[:3]}..., not as sent {sent[:3]}... ({len(pages)} of {len(sent)})"
+    return ""
+
+
+def check_pages_kept(output: str, side: str, human: str, last: tuple) -> str:
+    """The process kept last as human's latest page (net SIDE quest pages)."""
+    kept = [line for line in net_lines(output, f"net {side} quest pages ") if line.get("human") == human]
+    if not kept or (kept[0]["run"], kept[0]["count"], kept[0]["last"], kept[0]["end"]) != last:
+        return f"the {side} kept {kept}, not the page {last}"
+    return ""
+
+
 def check_net_quest_lock(args, binary: Path, save: Path) -> tuple[str, str]:
     """Two clients at one planet, each with a quest to it (--sim-net-quest): Net1 plays the
     planet's text quest headless before its end turn; the host ran its BeginTextQuest as it came
@@ -959,7 +993,9 @@ def check_net_quest_lock(args, binary: Path, save: Path) -> tuple[str, str]:
     (none before it); the host's wait for its peers named Net1's text quest, and so did Net2's
     wait from the status; the relay of Net1's BeginTextQuest told Net2 who plays the planet's
     quest, and the host refused Net2's own (in-use). Every state's hash is the host's, and the
-    host's log replays. Returns what is wrong, and a note."""
+    host's log replays. Every page of Net1's quest reaches the host and Net2 as Net1 sent it, in
+    order, with the end page (Phase D), and both keep its last page. Returns what is wrong, and
+    a note."""
     with tempfile.TemporaryDirectory(prefix="rangers-net-quest-") as directory:
         log = Path(directory) / "host.srcl"
         problem, host_output, outputs = run_network(args, binary, save, 2, log, quest="planet")
@@ -1006,11 +1042,24 @@ def check_net_quest_lock(args, binary: Path, save: Path) -> tuple[str, str]:
     waited = [line for line in net2.splitlines() if line.startswith("net client wait ")]
     if not any("(text quest)" in line for line in waited):
         return f"Net2's wait did not name Net1's text quest: {waited}", ""
+    sent = quest_pages(net1, "sent", human1)
+    problem = check_page_relay(
+        sent,
+        [("the host", quest_pages(host_output, "relayed", human1)), ("Net2", quest_pages(net2, "received", human1))],
+        "Net1",
+    )
+    if not problem and net_lines(net2, "net quest page sent "):
+        problem = "Net2 sent pages of a quest that was refused"
+    for output, side in ((host_output, "host"), (net2, "client")):
+        problem = problem or check_pages_kept(output, side, human1, sent[-1])
+    if problem:
+        return problem, ""
     return "", (
         f"a client plays a text quest headless ({done[0]['outcome']} in {done[0]['steps']} choices); "
         f"the host's barrier applies its {quest['barrier']} quest commands with the client's hashes, "
         "its wait and the other client's name it, and the other client's BeginTextQuest for the "
-        f"planet is refused {NET_QUEST_REFUSAL}; the host's log replays"
+        f"planet is refused {NET_QUEST_REFUSAL}; the host's log replays; its {len(sent)} pages "
+        f"(end {sent[-1][3]}) reach the host and the other client in order with the same hashes"
     )
 
 
@@ -1085,6 +1134,22 @@ def check_net_quest_abandon(args, binary: Path, save: Path) -> tuple[str, str]:
         return "the client did not abandon its quest:" + output_tail(net1), ""
     if "(Net1) abandoned its text quest" not in host_output:
         return "the host did not release the client's lock:" + output_tail(host_output), ""
+    # The pages: the host got some of what Net1 sent before it went silent, and ended the quest
+    # for its watchers; Net1 sent no end page of its own (the reconnect drops it).
+    human = abandoned[0]["human"]
+    sent = quest_pages(net1, "sent", human)
+    relayed = quest_pages(host_output, "relayed", human)
+    ended = quest_pages(host_output, "abandoned", human)
+    if not relayed or relayed != sent[: len(relayed)]:
+        return f"the host got Net1's pages {relayed}, not a start of {sent}", ""
+    if any(page[3] != "none" for page in sent):
+        return f"Net1 sent an end page of the quest it abandoned: {sent}", ""
+    last = relayed[-1]
+    if len(ended) != 1 or ended[0][:2] != (last[0], str(int(last[1]) + 1)) or ended[0][3] != "abandoned":
+        return f"the host's abandoned end page {ended} does not follow {last}", ""
+    problem = check_pages_kept(host_output, "host", human, ended[0])
+    if problem:
+        return problem, ""
     quest = fields(last_line(host_output, "net host quest begun="))
     if quest.get("begun") != "1" or quest.get("barrier") != "0" or quest.get("early") != "0":
         return f"the host applied the abandoned quest's commands: {quest}", ""
@@ -1099,18 +1164,60 @@ def check_net_quest_abandon(args, binary: Path, save: Path) -> tuple[str, str]:
     return "", (
         f"a client that goes silent in its text quest (after {abandoned[0]['steps']} choice) is timed "
         "out, the host releases its lock and drops the quest's commands; it reconnects, abandons "
-        f"the quest and gets its human back with the planet's quest {after[0]['quest']} still there"
+        f"the quest and gets its human back with the planet's quest {after[0]['quest']} still there; "
+        f"the host ends the quest's pages with an abandoned one after the {len(relayed)} it got"
+    )
+
+
+def check_net_quest_host(args, binary: Path, save: Path) -> tuple[str, str]:
+    """The host's own human plays QUEST_HOTSEAT_QUEST by name on its first day, two clients
+    watching (--sim-net-quest with --sim-text-quest on the host): every page reaches both clients
+    as the host sent it, in order, with the end page, and both keep its last page. The pages
+    change nothing: every state's hash is the host's and the host's log replays. Returns what is
+    wrong, and a note (docs/progress/2026-10-19-text-quests-plan.md, Phase D)."""
+    with tempfile.TemporaryDirectory(prefix="rangers-net-quest-host-") as directory:
+        log = Path(directory) / "host.srcl"
+        problem, host_output, outputs = run_network(args, binary, save, 2, log, host_quest=QUEST_HOTSEAT_QUEST)
+        if not problem:
+            problem = compare_client_hashes(host_output, outputs)
+        if problem:
+            return problem, ""
+        if len(net_lines(host_output, "net host day=")) != NET_DAYS:
+            return "the host did not run its days", ""
+        expected = fields(last_line(host_output, "done net host "))["hash"]
+        problem = replay_host_log(args, binary, log, expected, [f"--sim-net-quest={NET_QUEST_DAY}"])
+        if problem:
+            return problem, ""
+    done = fields(last_line(host_output, "quest done "))
+    human = fields(last_line(host_output, "net host quest begun=")).get("host", "")
+    if not done or not human:
+        return "the host did not play its quest:" + output_tail(host_output), ""
+    sent = quest_pages(host_output, "sent", human)
+    problem = check_page_relay(
+        sent,
+        [(f"Net{index + 1}", quest_pages(output, "received", human)) for index, output in enumerate(outputs)],
+        "the host",
+    )
+    for output in outputs:
+        problem = problem or check_pages_kept(output, "client", human, sent[-1])
+    if problem:
+        return problem, ""
+    return "", (
+        f"the host plays {QUEST_HOTSEAT_QUEST} ({done['outcome']} in {done['steps']} choices): its "
+        f"{len(sent)} pages reach both clients in order with the same hashes; hashes match, the log replays"
     )
 
 
 def check_network_quests(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
-    """Text quests in a networked session (docs/progress/2026-10-19-text-quests-plan.md, Phase C):
-    check_net_quest_lock, check_net_quest_days, check_net_quest_abandon."""
+    """Text quests in a networked session (docs/progress/2026-10-19-text-quests-plan.md, Phases C
+    and D): check_net_quest_lock, check_net_quest_days, check_net_quest_abandon,
+    check_net_quest_host."""
     notes = []
     for label, check in (
         ("text quest, 3 humans networked", check_net_quest_lock),
         ("text quest days, 2 humans networked", check_net_quest_days),
         ("abandoned text quest, 2 humans networked", check_net_quest_abandon),
+        ("host's text quest watched, 3 humans networked", check_net_quest_host),
     ):
         problem, note = check(args, binary, save)
         if problem:
