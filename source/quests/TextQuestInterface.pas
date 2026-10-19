@@ -26,11 +26,14 @@ type
     procedure AddPathContinueAction(PathId: Integer); virtual;
     procedure AddLocationContinueAction(LocationId: Integer); virtual;
     procedure AdvanceDays(Days: Integer); virtual;
+    // CHANGE: ENHANCEMENT - The quest is broken (TTextQuest.ReportError): a message box.
+    procedure ShowError(const Text: AnsiString); virtual;
     constructor Create;
     destructor Destroy; override;
   end;
 implementation
 uses
+  Dialogs,
   Math;
 
 constructor TTextQuestInterface.Create;
@@ -95,6 +98,11 @@ end;
 
 procedure TTextQuestInterface.AdvanceDays(Days: Integer);
 begin
+end;
+
+procedure TTextQuestInterface.ShowError(const Text: AnsiString);
+begin
+  Dialogs.ShowMessage(Text);
 end;
 
 end.

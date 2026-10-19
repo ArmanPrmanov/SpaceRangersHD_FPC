@@ -323,6 +323,9 @@ begin
     // CHANGE: ENHANCEMENT - A client takes its end turn back (HeadlessNet).
     else if Argument = '--sim-net-cancel-end-turn' then
       Simulation.NetCancelEndTurn := True
+    // CHANGE: ENHANCEMENT - A text quest played headlessly (HeadlessSim.RunTextQuest).
+    else if Pos('--sim-text-quest=', Argument) = 1 then
+      Simulation.TextQuest := Copy(Argument, 18, MaxInt)
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then

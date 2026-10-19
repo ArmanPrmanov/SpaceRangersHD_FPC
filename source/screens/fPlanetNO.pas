@@ -112,7 +112,7 @@ uses
   Windows,
   aTranclucator,
   aRanger,
-  fPlanetQuest,
+  QuestRun,
   fShip2,
   fStarMap,
   fSaveManager,
@@ -492,7 +492,7 @@ begin
                         .GetBlock('PlanetQuest')
                         .GetBlock('PlanetQuestLic')
                         .GetParamOrMarker(IntToStr(Quest.QuestNumber))
-                    = PlanetQuestScreen.GetQuestContentHash(Quest.QuestNumber))) then
+                    = QuestContentHash(Quest.QuestNumber))) then
           Window.FindByNameRecursive('QuestInfo_Run').UserValue := 0
         else
           Window.FindByNameRecursive('QuestInfo_Run').UserValue := 1;

@@ -4,13 +4,13 @@ unit aQuestActions;
 {$Q-}
 {$B-}
 
-// CHANGE: ENHANCEMENT - What a text quest (fPlanetQuest) does to the game, as commands
+// CHANGE: ENHANCEMENT - What a text quest (QuestRun) does to the game, as commands
 // (docs/commands.md).
 //
 // Granularity: the quest interpreter (TTextQuest, its location, parameters and its own random
-// stream) stays in the screen and outside the galaxy save; it only reads the game. Each point
-// where the quest writes to the galaxy is one command whose arguments are the values the
-// interpreter computed:
+// stream) stays in the quest run (QuestRun, which the screen or a headless player shows) and
+// outside the galaxy save; it only reads the game. Each point where the quest writes to the
+// galaxy is one command whose arguments are the values the interpreter computed:
 // - the draw that seeds the quest's random stream from the galaxy's (QuestRandomSeed);
 // - the quest's money parameter copied to the player (SetQuestMoney);
 // - the quest's ext_ parameters copied to script variables (SetQuestVariables);

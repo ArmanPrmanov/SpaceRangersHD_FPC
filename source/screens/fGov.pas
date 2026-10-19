@@ -166,7 +166,7 @@ uses
   aPirate,
   aNormalShip,
   Robot,
-  fPlanetQuest;
+  QuestRun;
 // What the robot battle reported, as a command carries it.
 function BattleStatistics: TPlanetBattleStatistics;
 var
@@ -1562,7 +1562,7 @@ begin
                     .GetBlock('PlanetQuest')
                     .GetBlock('PlanetQuestLic')
                     .GetParamOrMarker(WideString(IntToStr(LocalHuman.GovernmentQuestOffer.QuestNumber)))
-                <> PlanetQuestScreen.GetQuestContentHash(LocalHuman.GovernmentQuestOffer.QuestNumber)) then
+                <> QuestContentHash(LocalHuman.GovernmentQuestOffer.QuestNumber)) then
           DialogText :=
               DialogText
                   + #13#10

@@ -621,6 +621,13 @@ note in the progress entry.
   override list must be refused (`target-gone`), and the index form a log
   from before carries must still run by index; the local human's dialogue
   message, script and injected answers must stay as they were.
+- Each save also runs `--sim-text-quest=Prison` and `--sim-text-quest=ID` with
+  the save's first planet quest (single player; `HeadlessSim.RunTextQuest`).
+  The parked human plays the quest without its screen (`TQuestRun` with the
+  headless quest player, `HeadlessQuest`), which picks among each page's
+  enabled choices with a generator of its own, at most 1000 choices. It prints
+  each page's hash, the outcome and the state hash after it; two runs must
+  print the same. A ranger who dies in a quest leaves no state to hash.
 - The same counts run `--sim-pvp` on each save: a second human joins in the
   local human's star and the local one attacks it. With friendly fire on its
   hits must do damage; after the `SetSessionFlag` command turns it off, the

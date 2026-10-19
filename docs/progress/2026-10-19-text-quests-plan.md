@@ -1,0 +1,554 @@
+# 2026-10-19 — Text quests in multiplayer: plan
+
+- Done: the plan; Phase A (the quest run out of the screen, the headless
+  quest player), see its notes below.
+- In progress: nothing.
+- Next: Phase B, then C to F in order, one subagent at a time.
+- Notes: the owner asked for text quests in multiplayer, with the other
+  players able to watch a quest but not act in it. This entry is the plan.
+  Decisions marked **Owner** need the owner's answer; each has a default.
+
+## 1. How text quests work today
+
+### Where a quest starts
+
+There are three kinds, all shown by one screen, `TfPlanetQuest`
+(`source/quests/fPlanetQuest.pas`, `screenPlanetQuest = 7`). `OnOpen`
+picks the kind:
+
+1. **Prison.** `LocalPlayer.InPrison` at a planet. The quest is
+   `Prison` or `PirateClanPrison`, by name. Entered from the government
+   (`TfGov.EnterPrison`: autosave, the `EnterPrison` command 410, then the
+   screen).
+2. **Queued by a script.** `SF_StartTextQuest` (`aScriptFun.pas` ~8061)
+   adds a `TScriptTQRequest` to the global `QueuedTextQuests`
+   (`aScript.pas`). `TryShowQueuedTextQuest` opens the screen. The outcome
+   resumes the script (`CompleteQueuedTextQuest`: sets `GQuestStatus`, runs
+   its turn code). The request has **no human id** and is not checked with
+   `MayQueueScriptRequest`, unlike arcade battles, planet battles and videos
+   (`TScriptABRequest.HumanId`, `SF_StartAB`).
+3. **Government planet quest.** `GenerateQuestOffer` (`aRanger.pas`
+   ~6103) runs in the `RequestQuest` executor (`aPlanetActions`, 420) and
+   offers a `qtPlanetQuest` whose `ObjectiveTarget` is another planet with
+   `Planet.TextQuestId <> -1` (set at generation by
+   `TGalaxy.AssignTextQuestsToPlanets`). `AcceptQuest` (422) adds it to
+   `P.Quests`. When the ranger lands on the target, the planet screen
+   (`TfPlanet.RefreshTextQuestPrompt`, `StartTextQuest`; also `fPlanetNO`)
+   offers it: autosave, then the screen. The offer does not check whether
+   another human already holds a quest to the same planet.
+
+A fourth path, the standalone quest from the main menu (`fLoadQuest`,
+`StandaloneQuestMode`, `LocalPlayer = nil`), has no galaxy and is out of
+scope.
+
+### The engine
+
+- `TTextQuest` (`TextQuest.pas`) with locations, paths, parameters and
+  formulas (`LocationClass`, `PathClass`, `ParameterClass`,
+  `CalcParseClass`, ...). It talks to the screen only through
+  `TTextQuestInterface` (`TextQuestInterface.pas`): `ShowText`,
+  `ShowPicture`, `PlayMusic`, `PlaySound`, `ShowParameters`, the `Add*Action`
+  calls that build the choices, and `AdvanceDays`. The base class does
+  nothing, so a headless player can subclass it.
+- The engine reads no galaxy state. Grep finds no `Galaxy`, `LocalPlayer`
+  or `Session` in the engine units.
+- **Randomness.** One stream of its own: `TextQuestRandomState`, an LCG in
+  `CPDiapClass.pas` (`TextQuestRandom`), a global. `StartLoadedQuest` seeds it
+  with `QuestRandomSeed` (command 600), whose executor draws once from the
+  galaxy stream (`GameRandomIntRange`). So a quest is deterministic given the
+  seed and the choices. The draw itself is a recorded command, so the
+  galaxy stream stays deterministic in replays.
+- **Parameters in and out.** At start, `ImportExternalParameters` reads
+  `GQuestVarExt_*` script variables (the queued script's own, else
+  `Session.SharedScriptVariables`) and the player's money. On every page,
+  `ShowParameters` calls `ExportMoneyToPlayer` (`SetQuestMoney`, 601: sets
+  the money absolutely) and `ExportExternalParameters` (`SetQuestVariables`,
+  602).
+- **Days.** A location or path with `Days > 0` calls `AdvanceDays`
+  (`TextQuest.pas` 959, 1164). The screen then runs full game days itself:
+  `CalculatePlayerStarTurnAndWait` and `QueueGalaxyTurnCalculation`, with no
+  end turn and no barrier, and imports money and variables again after each
+  day. `DaysElapsed` only feeds the date text. So yes: in the original, some
+  quests pass days in the galaxy (the prison sentence is the obvious case).
+
+### The screen
+
+`TfPlanetQuest` lays out the text (`SetQuestText`), the picture, the
+parameter panel and the choices (`AddChoice`, `AddDisabledChoice`,
+`ChoiceMouseUp`, digit keys). Single-player-only behaviour:
+
+- Escape asks and then destroys the galaxy and goes to the main menu
+  (`RequestLoadGame`).
+- `R` reloads the autosave; failure and death offer to load it too.
+- Entering a quest writes an autosave (`fPlanet`, `fGov`).
+
+### What comes back to the game
+
+All as commands (`aQuestActions`, 600–608, docs/commands.md):
+
+| Kind | Command | When |
+| --- | --- | --- |
+| 600 | `QuestRandomSeed` | start |
+| 601 | `SetQuestMoney` | each page |
+| 602 | `SetQuestVariables` | start and each page |
+| 603 | `CompleteGovernmentQuest` | success of a planet quest (`TextQuestId := -1`, item, relation) |
+| 604 | `ReleaseFromPrison` | prison quest lost |
+| 605 | `FailGovernmentQuest` | planet quest lost (`TextQuestId := -1`, archived) |
+| 606 | `DieInQuest` | death: `Actor.Free`, `Session.GameEndReason := 1` |
+| 607 | `FinishQueuedTextQuest` | a queued quest ends (resumes `QueuedTextQuests[0]`'s script) |
+| 608 | `CloseQuest` | leaving: money cap, `ProcessQuestTimersAndOutcomes` |
+
+`OnOpen`/`OnClose` also run `RunScriptItemsAct` (a command). Kinds 609–624
+are free.
+
+### What is saved
+
+Nothing of a running quest. The interpreter is outside the galaxy save, as
+in the original (you cannot save inside a quest; the autosave is before it).
+`QueuedTextQuests` is not saved either. `Planet.TextQuestId` and the
+government quest in `P.Quests` are.
+
+### What the session flag blocks, every site
+
+`Session.TextQuestsDisabled` (`aSession`, flag 0, `SetSessionFlag` 42,
+host only):
+
+- `aRanger.pas:6108`: no government planet quest is offered. **That is the
+  only gameplay site.**
+- `aHumanSave.pas:364/437`: saved in the per-human block.
+- Tests: `TestCommands.pas` 27–32, `HeadlessSim.ProbeSession` (sets it),
+  `HeadlessSim` 410 (`state session textquests-off=`), `HeadlessNet` 1147
+  and 1498 (a client's flag change is refused), `tools/test.py` 219, 1052.
+
+Findings that matter:
+
+- **Nothing sets the flag in a real hosted game.** Only the headless probes
+  do. So in a real session government quests are offered now.
+- The prison and script-queued quests were never gated.
+- In a session, a client that reaches a page with `Days > 0` starts a turn
+  job, which raises (`ThreadCalc.TurnJobsForbidden`). On the host it would
+  run a day past the barrier.
+- `NetPlay.NoGameScreens` holds `screenPlanetQuest`: while the host's own
+  human plays a quest the host takes no joins, leaves, commands or trades
+  (clients' trades time out after 10 s), and a client in a quest gets no
+  reconnect box.
+- A script quest queued by another human's script code on the host shows on
+  the host's screen (one global queue).
+- `DieInQuest` frees the ranger and ends the game, against Phase 6 (a
+  destroyed human respawns). `ArcadeDefeat` (628) has the same gap.
+- Three game-layer sites read the local screen: `CountsTowardStarControl`
+  (`aGalaxy` ~11151), the deadline check in `aRanger` ~4657 and
+  `ConsecutiveDockedDays` in `aShip` ~2562 (`HumanScreen =
+  screenPlanetQuest`). They matter only while days run inside a quest.
+
+## 2. Design
+
+### Who runs the engine: the player's own machine
+
+**Decision: the human who plays the quest runs the engine on its own
+machine. Only the effects go to the host, as the commands it already
+sends. The other machines get rendered pages to watch.**
+
+Why:
+
+- It is the model the code already has. Phase 3 made every write a command
+  and kept the interpreter in the screen. Arcade battles do the same (Phase
+  6: "solo instance, local to the human").
+- No latency per click. A host-run engine needs a round trip per choice and
+  a new remote screen protocol, like the remote dialogue but longer.
+- Replays need no engine. The host's command log has the effects; the
+  merged per-human replay applies them in queue order.
+- The client's prediction already works: each command runs at once on the
+  client and is queued on the host until the barrier. The queue is also the
+  quest's atomicity: if the client drops before its end turn, the host drops
+  the whole queue and the quest never happened there.
+- Cheating does not matter (co-op).
+
+Randomness: keep `QuestRandomSeed` as it is. On a client it draws from its
+copy's stream (the prediction), and the host draws again at the barrier in
+queue order. The two values differ, which does not matter: the host never
+runs the engine. The host's log replays the same draw. The quest's own
+stream (`TextQuestRandomState`) never touches the galaxy streams. Do not
+make the seed a trade: a trade runs on arrival, and arrival order must not
+move the galaxy stream.
+
+Absolute money: `SetQuestMoney` sets the money. Between days only the
+actor's own commands change its money, and they reach the host in order, so
+the absolute value is right. Keep it.
+
+### Rules in multiplayer (`IsMultiplayer`: hot-seat and network alike)
+
+1. **Days in a quest.** **Owner.** Default: the quest runs no game days. The
+   days it would pass are counted (`DaysElapsed`) and sent with `CloseQuest`
+   (a new last integer). Its executor stores them as
+   `THuman.QuestDaysOwed`. While that is above 0 the human does not hold the
+   day (`HumanHoldsDay`), as in hyperspace, and `StartDayRound` takes one
+   off after each day. The ranger stays landed meanwhile. So the quest still
+   costs its time, and the others do not wait for it. The date text shows
+   `CurrentTurn + DaysElapsed`. Alternative: ignore the days (simpler,
+   free time). Single player keeps running the days in the quest.
+2. **Death.** **Owner.** Default: in multiplayer a death in a quest is a
+   failure: `DieInQuest` with `IsMultiplayer` fails the government quest (as
+   `FailGovernmentQuest`) and leaves the ranger as it is (Phase 6: a
+   destroyed human loses nothing). It does not free the ranger or end the
+   game. Alternative: respawn at `FindRespawnPlanet`.
+3. **No reload, no exit.** In multiplayer: no autosave before a quest on a
+   client, no `R`, no "load the autosave?" box, and Escape does nothing (a
+   quest always ends by its own choices). The host may keep its autosave.
+4. **One quest per planet offer.** `GenerateQuestOffer` with `IsMultiplayer`
+   skips a planet that another human's open `qtPlanetQuest` targets. It runs
+   in the `RequestQuest` executor, so the host decides at the barrier. Single
+   player is unchanged.
+5. **Script quests are per human.** `TScriptTQRequest` gets `HumanId`;
+   `SF_StartTextQuest` checks `MayQueueScriptRequest` (declines otherwise, as
+   `SF_StartAB`); `TryShowQueuedTextQuest` shows `LocalScriptRequest
+   (srqTextQuest)`; `FinishQueuedTextQuest` finishes its actor's request
+   (`CompleteQueuedTextQuest(Status, HumanId)`; `HumanId` 0 matches any, so
+   old logs replay).
+6. **The flag stays** as the host's switch. **Owner.** Default: text quests
+   on (the flag's default), and the flag also declines script-queued quests.
+   The prison quest is never gated. No settings UI exists for the flags yet
+   (friendly fire has none either); that is separate work.
+
+### The lock: one human per quest
+
+"Others cannot interact while one plays" is mostly given by the rules: a
+government planet quest is in one human's `P.Quests`, and the planet screen
+offers it only to that human; prison and script quests are per human. The
+remaining race is two humans who hold a quest to the same planet (a save from
+before rule 4, or two offers predicted on the same day). Both could play it
+before the barrier and both be paid.
+
+New command **`BeginTextQuest` (609), a trade**, submitted by
+`TfPlanetQuest.OnOpen` before `StartLoadedQuest`, through a wrapper that
+catches the refusal (as `aShopActions.TradeGoods` does). Arguments: the kind
+(planet, prison, script) and, for a planet quest, the planet by `AddRef`.
+
+- The executor refuses before any change: `rrOfferGone` when the planet's
+  `TextQuestId` is -1 or the actor holds no `qtPlanetQuest` to it; `rrInUse`
+  when another human's lock names the planet. Then it sets
+  `THuman.TextQuestPlanetId` (session state like `Connected`: not saved, not
+  hashed).
+- The lock goes when the barrier applies the human's `CloseQuest` (which is
+  then also when `TextQuestId` becomes -1), when the human disconnects, and
+  on the client with every state (a fresh `THuman`).
+- As a trade it runs on the host on arrival and is relayed to the clients at
+  that planet, so their planet screens can show "<Player> is playing this
+  quest" and grey out the start. A refusal shows the usual bubble
+  (`Multiplayer.RefusedInUse`, `RefusedOfferGone`) and the screen goes back.
+- Prison and script quests send it too, with no planet: it always applies.
+  This keeps one start point. Single player and hot-seat run it at once.
+
+### The day
+
+A human in a quest has not ended its turn, so it holds the day. Nothing new
+is needed for that. What changes:
+
+- `NoGameScreens` loses `screenPlanetQuest` when a galaxy and a local player
+  exist (not the standalone quest). The quest screen is a `TMessageLoopGI`,
+  so the frame pump and `MayChangeUnderScreen` work there: the host takes
+  joins, leaves and trades while its own human plays, and a client in a
+  quest runs relayed trades and sees the reconnect box. A join's checkpoint
+  is safe: the quest is not in the galaxy.
+- `Status` gets, per human, an activity byte (0 none, 1 in a text quest, 2
+  busy with quest days) and the days owed. The waits say "Waiting for Guest
+  (text quest)" and "Guest is busy with a text quest for 3 more days"
+  (`Multiplayer.InTextQuest`, `Multiplayer.QuestBusy`, English fallbacks).
+  The host knows "in a quest" from the pages (below) for clients and from its
+  own screen for its human; days owed come from the state.
+- Owed days: a client whose state says its human owes days opens the planet
+  screen and waits for the next state, as a continuing traveller waits
+  (`DeferredNetContinue`). The host's own human's planet screen starts the
+  next day by itself while it owes days, as the star map's automatic continue
+  does. `MayCancelEndTurn` is false then.
+
+### Watching
+
+What a watcher sees: the same page the player sees, read-only, updated live:
+the text, the picture, the parameter panel and the choices, greyed and not
+clickable, plus a line "<Player>'s text quest" and a Close button (also
+Escape). Closing never changes game state.
+
+**The page, not the choices.** The player's machine sends what it rendered
+(`TQuestPage`): the human id, a run number, a page number, the quest's name,
+the text as shown (with its colour tags), the picture name, the parameter
+text, each choice's text and whether it is enabled, and an end marker with
+the outcome (success, failure, death, abandoned). Not the choice indices:
+the watchers would have to run the engine on the player's money and
+variables, and players may have different languages (the data hash leaves
+language files out), so the quest files can differ. A watcher therefore
+sees the player's language. Pictures go by name; a missing one is left out.
+
+**Messages (protocol 10).** One new kind, `QuestPage` (18), both ways:
+
+- client → host: its own human's page, after each page is laid out, and the
+  end page from `OnClose`;
+- host → client: any other human's page, sent to every joined client but
+  the player's. Pages are a few KB and come at a click's pace, so a
+  broadcast costs nothing, needs no subscription state, and lets a watcher
+  open the window late.
+- The host keeps the latest page per human (its own human's from a hook,
+  `QuestPageHook`, set by `NetPlay`). On a peer's disconnect it broadcasts an
+  end page (abandoned) for that human. A client keeps the latest page per
+  human (`TNetClient.QuestPage(HumanId)`), dropped on reconnect.
+- `Status` changes (activity, days owed), so the version goes to 10 anyway.
+- Pages are presentation: not commands, not logged, not hashed.
+
+**Where to open it.** **Owner.** Default: (a) every wait box for the day that
+names a human in a quest gets a line "W: watch <Player>'s text quest." and
+the `W` key (the box's buttons are pictures, as with Cancel); (b) the in-game
+round menu gets a "Watch text quest" button while some other human plays one
+(as the host button). The watch window is a box over the innermost screen,
+like the reconnect box: it opens no game screen and closes none, so no
+`OnOpen`/`OnClose` command runs. From a wait it runs inside the wait loop: the
+wait returns "watch", the loop opens the watch box, which polls the same
+"wait done" condition and closes when the day's film or state comes, then the
+loop goes on. It also closes on the end page, and when its own client starts
+reconnecting.
+
+### Disconnects
+
+- **The player's client loses the host mid-quest.** The reconnect box now
+  opens over the quest screen. On reconnect the quest is abandoned: the
+  screen closes without sending an outcome (the host dropped the queue with
+  the old connection, so the quest never happened there; `TextQuestId` is
+  still set), the rejoin state is applied at the next safe screen, and a
+  bubble says the quest was abandoned and can be started again. If the
+  reconnect fails, the client leaves as it does today. This matches the
+  documented loss of one day's commands on a reconnect.
+- **The host sees the player leave.** It drops the queue (as now), clears
+  the lock and broadcasts the abandoned end page.
+- **The host's own quest.** Nothing new: the host does not disconnect from
+  itself. Stop hosting mid-quest leaves a single-player quest.
+- **A watcher drops.** Its watch box closes; nothing on the host.
+- Hot-seat: the rules apply (`IsMultiplayer`); no watching, no network.
+
+### Command and protocol numbers
+
+| What | Number |
+| --- | --- |
+| `BeginTextQuest` (trade) | command 609 |
+| `CloseQuest` | 608, a new last integer: the days owed (absent: 0) |
+| `DieInQuest`, `FinishQueuedTextQuest` | 606, 607: same arguments, new behaviour in multiplayer |
+| `QuestPage` | message 18 |
+| `ProtocolVersion` | 10 (`Status` carries activity and days; `QuestPage`) |
+| Per-human save block | version 4: `THuman.QuestDaysOwed` |
+
+## 3. Phases
+
+Each phase leaves the tree building and the tests green. Every phase runs:
+
+- `python tools/build.py`
+- `python tools/unit_tests.py`
+- `python tools/check_layers.py`
+- `python tools/test.py --game-dir="D:/Games/by Decepticon/Space Rangers HD A War Apart"`
+  (goldens must not change unless the phase says so)
+
+No visible windows: only headless runs. Each phase updates the docs it
+changes (docs/network.md says the design changes the page first) and writes
+its own progress entry.
+
+### Phase A — Extract the quest run (no behaviour change)
+
+- Goal: the engine can run without the screen, so tests can play a quest.
+- Files: new `source/quests/QuestRun.pas`; `fPlanetQuest.pas`; new
+  `source/observer/HeadlessQuest.pas`; `HeadlessSim.pas`; `tools/test.py`.
+- Steps:
+  1. Move out of `TfPlanetQuest` into `TQuestRun` everything that is not
+     layout: the choice of kind and quest in `OnOpen`, the texts set before
+     start, `StartLoadedQuest`, the parameter export/import, `AdvanceDays`,
+     the outcome handlers' commands (`CompleteQuestSuccess/Failure/Death`
+     minus the boxes and screen requests), `CloseQuest`. The run holds the
+     current page as a `TQuestPage` record (text, picture, parameters,
+     choices with enabled flags and callbacks by index) and calls a view
+     interface to show it. `Choose(Index)` runs a choice.
+  2. `TfPlanetQuest` becomes the view: it lays out the page and maps clicks
+     and keys to `Choose`. The message boxes and screen changes stay there.
+  3. `THeadlessQuestPlayer` runs a `TQuestRun` with a deterministic chooser:
+     a test-local LCG over the enabled choices (never the game streams),
+     capped at 1000 steps (then it reports `abandoned`).
+  4. `--sim-text-quest=ID|NAME` (single player): run that quest on the
+     loaded save's human, print each page's hash and the outcome, then the
+     state hash.
+- Verify: goldens unchanged; `tools/test.py` runs `--sim-text-quest=Prison`
+  twice on one save and checks equal output and hash; a planet quest id
+  from the save too.
+
+#### Phase A notes (done)
+
+- `source/quests/QuestRun.pas`: `TQuestRun` is the engine's
+  `TTextQuestInterface` (it replaces `TTextQuestPlayerInterface`) and holds
+  everything that was not layout: `Open` (the kind and the quest, the texts,
+  the money limit, stages 4–22 of the old error label), `StartLoadedQuest`,
+  the template and `ext_` text expansion, the money and variable
+  export/import, `AdvanceDays` (one day is `RunQuestDay`, the seam for Phase
+  B's owed days), the outcomes' commands and `Close` (`CloseQuest`). Kinds:
+  `qrkStandalone`, `qrkPrison`, `qrkQueued`, `qrkPlanet`, and `qrkNamed` for a
+  quest given by name or number (`OpenNamed`, the headless player; it ends as
+  a planet quest does). `ActiveGovernmentQuest` and `ActiveQueuedTextQuest`
+  became the run's `GovernmentQuest` and `QueuedQuest`.
+- The page is `TQuestPage` (text and parameters as shown, with colour tags;
+  the picture's name; the choices with their text as shown, enabled flag,
+  action and value; the outcome, `qroAbandoned` when closed without one). It
+  lives in `QuestRun` for now; Phase D moves it to `QuestPage.pas` with its
+  codec. `Choose(Index)` plays a choice; a disabled one does nothing.
+- `TQuestView` gets each change in the order the screen drew it (`ShowText`,
+  `ShowPicture`, `ShowParameters`, `ClearChoices`, `AddChoice`, `FinishPage`
+  after the start and after each choice: the place for Phase D's
+  `QuestPageHook`), plus `ConfirmDeath` (before `DieInQuest`; the screen's
+  autosave box and score) and `EndQuest` (after the outcome's commands and
+  before a queued quest's script resumes: the screen's boxes, achievements,
+  completion records, `TryTakeOff` and next screen). Command order is the
+  old one.
+- `TfPlanetQuest` is the view (`TPlanetQuestView` forwards to it). A choice's
+  panel holds its index plus one in `UserValue` (the `TfQuestA` object is
+  gone); clicks and digit keys reach `Run.Choose`. `GetQuestContentHash`
+  became `QuestRun.QuestContentHash` (`fGov`, `fPlanet`, `fPlanetNO` use it),
+  `GetTextColorTag` is `QuestTextColorTag`.
+- `TTextQuest.ReportError`: the engine's four message boxes (no start, no
+  answers, a missing location or path) go to `TTextQuestInterface.ShowError`,
+  a box by default; the headless player prints them, so no test can open one.
+- `source/observer/HeadlessQuest.pas`: `THeadlessQuestPlayer` plays a run with
+  an LCG of its own over the enabled choices (seeded by `--sim-seed`), at most
+  `MaxQuestSteps` (1000) choices, and prints `quest page=N hash= choices=
+  enabled=` per page. `--sim-text-quest=ID|NAME` (`HeadlessSim.RunTextQuest`,
+  single player): prints `quest save planet-quests= first=`, parks the human,
+  sets `CurrentScreenId` to the quest screen for the quest's days, plays,
+  prints `quest done name= outcome= pages= steps= days= errors=` and the
+  state hash (`turn 0 ...`), or `quest state none: the ranger died` after a
+  death (the ranger is freed and the galaxy cannot be saved).
+- `tools/test.py` (`check_text_quest`): each save plays `Prison` and its
+  first planet quest twice each; the lines must match. On the three local
+  saves with seed 0: Prison dies after 36 and 23 quest days on two saves (so
+  the galaxy days in a quest run headless), fails at once on the third;
+  planet quests 38 and 21 fail in 4–8 choices.
+- A race found on the way: after a quest day the screen queues the galaxy
+  job and goes on with the page (money import, text, parameters) while the
+  job runs, so a page after a day can read the galaxy mid-change. Under load
+  two headless runs of one save differed there. The screen keeps the old
+  behaviour; the headless player sets `TQuestRun.WaitForQuestDays`, which
+  waits for the job before the quest goes on. Phase B's owed days remove
+  the race in multiplayer (no galaxy day inside a quest); single player
+  could adopt the wait as a bugfix later.
+- `tools/player_sites.txt` was already stale before this phase; left as it
+  was.
+
+### Phase B — Multiplayer rules in the game layer
+
+- Goal: the rules of section 2 hold in hot-seat; no network yet.
+- Files: `aQuestActions.pas`, `aHuman.pas`, `aHumanSave.pas`, `aRanger.pas`,
+  `aGalaxy.pas`, `aShip.pas`, `aScript.pas`, `aScriptFun.pas`, `QuestRun.pas`,
+  `fPlanetQuest.pas`, `fPlanet.pas`, `fPlanetNO.pas`, `fGov.pas`.
+- Steps:
+  1. `TScriptTQRequest.HumanId`; `SF_StartTextQuest` with
+     `MayQueueScriptRequest` and the flag; `TryShowQueuedTextQuest`,
+     `HasPendingScriptRequests` and the resuming lookup by human;
+     `CompleteQueuedTextQuest(Status, HumanId)` from the actor.
+  2. Days: in `IsMultiplayer`, `AdvanceDays` counts only. `CloseQuest`
+     gets the days; `THuman.QuestDaysOwed` (save block version 4, read only
+     from 4); `HumanHoldsDay` false while it is above 0; `StartDayRound`
+     takes one off. The three `HumanScreen = screenPlanetQuest` sites also
+     treat a human who owes quest days as in the quest.
+  3. `DieInQuest` in multiplayer: the default of rule 2.
+  4. `GenerateQuestOffer`: rule 4.
+  5. Screens: rule 3 when `IsMultiplayer` (no `R`, no load boxes, Escape
+     ignored, no client autosave).
+  6. `BeginTextQuest` (609) as a trade, with the lock in
+     `THuman.TextQuestPlanetId` (not saved), cleared by `CloseQuest`.
+     Register it in commands.md's trades table.
+- Headless tests: a hot-seat run (2 humans) where human 2 plays a quest
+  with days (`--sim-text-quest` with `--hotseat=2`): the next days run
+  without its end turn, `QuestDaysOwed` counts down, two runs give the same
+  hashes, and the merged per-human replay reaches the recording's hash. A
+  probe gives both humans a quest to one planet: the second
+  `BeginTextQuest` is refused `in-use` while the first plays, `offer-gone`
+  after. A save round trip keeps `QuestDaysOwed`. Single-player goldens
+  unchanged (all of this is behind `IsMultiplayer`).
+
+### Phase C — Network flow
+
+- Goal: a client and the host can play quests in a session.
+- Files: `NetPlay.pas`, `NetHost.pas`, `NetClient.pas`, `NetProtocol.pas`,
+  `HeadlessNet.pas`, `tools/test.py`.
+- Steps:
+  1. `NoGameScreens`: the quest screen is a game screen when a galaxy and a
+     local player exist.
+  2. `Status`: activity and days owed; protocol 10; the wait texts.
+  3. Owed days: the client's wait after a state (as `DeferredNetContinue`),
+     the host's own automatic day start, `MayCancelEndTurn`.
+  4. Disconnect: the host clears the lock; the client abandons the quest
+     after a reconnect (closes the screen, sends nothing, bubble).
+- Headless tests: `--sim-net-quest=DAY` on a client: on that day it plays a
+  quest with `THeadlessQuestPlayer` before its end turn (a test-only probe,
+  registered only with the flag as `--sim-net-nested` does, gives it a
+  planet quest at its planet). Check: every state's hash equals the
+  host's; the host's log replays to its final hash; the host applied the
+  quest's commands at the barrier (`net host quest commands=`); the status
+  said `activity=1` for that human while it played. With two clients and
+  the shared-planet probe: the second client's `BeginTextQuest` is refused
+  `in-use`. With `--sim-net-silent-at` on the quest day: the client
+  abandons, gets its human back, and the quest is still there
+  (`TextQuestId` set).
+
+### Phase D — Pages to the watchers
+
+- Goal: every machine has the latest page of every other human in a quest.
+- Files: new `source/quests/QuestPage.pas` (record, encode/decode, hook);
+  `NetProtocol.pas` (kind 18), `NetHost.pas`, `NetClient.pas`, `NetPlay.pas`,
+  `QuestRun.pas`, `HeadlessNet.pas`, `tests/TestNet.pas`.
+- Steps: the run calls `QuestPageHook` after each page and at the end; the
+  client sends; the host stores and broadcasts, and sends the abandoned end
+  page on a disconnect; the client caches per human and drops the cache on
+  reconnect.
+- Headless tests: in the `--sim-net-quest` run with two clients, Net2 and
+  the host print the page count and the last page's hash for Net1
+  (`net quest pages human= count= last= end=`); they must equal Net1's own.
+  A silent Net1 gives `end=abandoned` on Net2. Unit tests: page codec round
+  trip; the client's cache against the scripted host (`TestNet`).
+
+### Phase E — The watch window
+
+- Goal: the UI of section 2, Watching.
+- Files: new `source/screens/NetQuestWatch.pas`; `NetPlay.pas` (wait loop,
+  the `W` line), `NetMenus.pas` (the round-menu button).
+- Steps: the box, built in code like the join dialogs, renders a
+  `TQuestPage` (reuse the quest screen's text formatting by moving
+  `SetQuestText`'s paragraph builder into a shared routine); the wait loop's
+  "watch" result; the menu button; closing rules.
+- Tests: keep the decisions (which page, when to close) in a pure function
+  and unit-test it. The window itself is a hand check, listed in the status
+  with the other hand checks. No window is opened by any test.
+
+### Phase F — Docs and status
+
+- `docs/network.md`: Messages (18, version 10, `Status`), Trades
+  (`BeginTextQuest`), Waiting (texts, watch), Disconnects (abandon), a
+  "Text quests" section, Tests, Not done yet.
+- `docs/commands.md`: 609, `CloseQuest`'s new integer, 606/607 behaviour.
+- `docs/humans.md`: the flag table, the save block version 4, "Not covered"
+  (text quests no longer off), Scripts (text quests per human).
+- `ROADMAP.md` Phase 6: the text quests row.
+- `docs/progress/README.md`: status.
+
+## 4. Risks and open questions
+
+- **Owner decisions** (defaults in bold): days in a quest (**owed days,
+  human does not hold them**; or ignored); death (**failure**; or respawn);
+  where to watch from (**waits and the round menu**); the flag (**kept,
+  quests on**).
+- Two humans predicted an offer to the same planet on the same day: the
+  host's barrier gives the second a different planet or none, and that
+  client sees it only in the next state.
+- `SetQuestVariables` with no script writes shared variables. Two humans in
+  quests with `ext_` parameters at the same time overwrite each other at the
+  barrier, last in `Session.Humans` order. Rare; accepted.
+- The watcher sees the player's language.
+- A player who leaves the keyboard inside a quest holds the day, as on any
+  screen. No timer (Phase 6).
+- `ArcadeDefeat` frees a human in multiplayer, like `DieInQuest`. Out of
+  scope here; worth its own fix.
+- The engine's stream `TextQuestRandomState` is a global. Only one quest
+  runs per process, which holds as long as the watchers do not run the
+  engine.
+- Quests whose pages depend on days passing in the galaxy (money or
+  variables changing between quest days) see no change under owed days.

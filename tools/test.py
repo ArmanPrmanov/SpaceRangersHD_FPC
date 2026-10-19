@@ -286,6 +286,44 @@ def check_stale_commands(args, binary: Path, save: Path) -> tuple[bool, str]:
     return True, note
 
 
+def play_text_quest(args, binary: Path, save: Path, quest: str) -> tuple[bool, list[str], str]:
+    """Plays one text quest headlessly twice (--sim-text-quest); returns whether both runs gave
+    the same pages, outcome and state hash, the first run's lines, and a note."""
+    runs = []
+    for _ in range(2):
+        code, output = simulate(
+            binary, args.game_dir, save, [f"--sim-text-quest={quest}", f"--sim-seed={args.seed}"]
+        )
+        lines = [line for line in output.splitlines() if line.startswith(("quest ", "turn "))]
+        if code != 0 or not any(line.startswith("quest done ") for line in lines):
+            return False, lines, f"text quest {quest} failed:" + output_tail(output)
+        runs.append(lines)
+    if runs[0] != runs[1]:
+        return False, runs[0], f"text quest {quest} nondeterministic: " + first_divergence(runs[0], runs[1])
+    done = [line for line in runs[0] if line.startswith("quest done ")][-1]
+    return True, runs[0], f"text quest {quest} repeats ({done.removeprefix('quest done ')})"
+
+
+def check_text_quest(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """A text quest played without its screen (--sim-text-quest; docs/progress/
+    2026-10-19-text-quests-plan.md, Phase A).
+
+    The save's human plays the prison quest, and the save's first planet quest by its number,
+    with the headless quest player, twice each: the page hashes, the outcome and the state hash
+    after it must be the same both times. A ranger who dies in a quest leaves no state to hash.
+    """
+    passed, lines, note = play_text_quest(args, binary, save, "Prison")
+    if not passed:
+        return False, note
+    notes = [note]
+    planets = [line for line in lines if line.startswith("quest save planet-quests=")]
+    first = int(planets[-1].split("first=")[-1]) if planets else -1
+    if first >= 0:
+        passed, _, note = play_text_quest(args, binary, save, str(first))
+        notes.append(note)
+    return passed, "; ".join(notes)
+
+
 def drop_end_turns(log: Path) -> None:
     """Removes the EndTurn commands from one human's log, so its human never ends a turn."""
     header, records = split_commands.read_records(log)
@@ -1361,6 +1399,10 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     passed_stale, note = check_stale_commands(args, binary, save)
     notes.append(note)
     passed = passed and passed_stale
+
+    passed_quest, note = check_text_quest(args, binary, save)
+    notes.append(note)
+    passed = passed and passed_quest
 
     for count in HUMAN_COUNTS:
         passed_humans, note = check_humans(args, binary, save, count)

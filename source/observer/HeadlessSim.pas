@@ -104,6 +104,9 @@ type
     // ends it again, and tries the same once the second day has begun (HeadlessNet; docs/
     // network.md, Tests).
     NetCancelEndTurn: Boolean;
+    // CHANGE: ENHANCEMENT - --sim-text-quest=ID|NAME: the save's one human plays this text quest
+    // with the headless quest player (RunTextQuest; HeadlessQuest).
+    TextQuest: AnsiString;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 // Shared with the networked runner (HeadlessNet).
@@ -166,7 +169,9 @@ uses
   ObserverHooks,
   ObserverSimulation,
   fGameSettings,
-  fIntroduction;
+  fIntroduction,
+  HeadlessQuest,
+  QuestRun;
 
 var
   // Where each object starts in the state being dumped (SaveTrace).
@@ -3304,6 +3309,62 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - --sim-text-quest=ID|NAME (docs/progress/2026-10-19-text-quests-plan.md,
+// Phase A): the save's planet quests (the planets whose TextQuestId is set, in the galaxy's
+// order), then the player parked as the turn runner parks it plays the quest on the quest
+// screen's terms with the headless quest player: one line per page, the outcome, and the state
+// hash after it. Single player only.
+function RunTextQuest(const Options: TSimulationOptions): Integer;
+var
+  I, Count, First: Integer;
+  Planet: TPlanet;
+  Player: THeadlessQuestPlayer;
+  Outcome: TQuestRunOutcome;
+  Died: Boolean;
+begin
+  Result := 0;
+  if Session.Humans.Count > 1 then
+    raise Exception.Create('--sim-text-quest takes a single-player save');
+  Count := 0;
+  First := -1;
+  for I := 0 to Galaxy.Planets.Count - 1 do
+  begin
+    Planet := TPlanet(Galaxy.Planets[I]);
+    if Planet.TextQuestId <> -1 then
+    begin
+      Inc(Count);
+      if First < 0 then
+        First := Planet.TextQuestId;
+    end;
+  end;
+  Emit(Format('quest save planet-quests=%d first=%d', [Count, First]));
+  ParkObserverPlayer;
+  // The galaxy's days in the quest see the human on the quest screen, as in the game.
+  CurrentScreenId := screenPlanetQuest;
+  RequestedScreenId := screenNone;
+  Player := THeadlessQuestPlayer.Create(Options.Seed);
+  try
+    Outcome := Player.Play(UTF8Decode(Options.TextQuest));
+    Emit(
+        Format(
+            'quest done name=%s outcome=%s pages=%d steps=%d days=%d errors=%d',
+            [Options.TextQuest, QuestOutcomeName(Outcome), Player.Pages, Player.Steps,
+                Player.Run.DaysElapsed, Player.Errors]
+        )
+    );
+    Died := Player.Run.Died;
+  finally
+    Player.Free;
+  end;
+  CurrentScreenId := screenPlanet;
+  // A ranger who died in the quest is gone and the game over: there is no state to save.
+  if Died then
+    Emit('quest state none: the ranger died')
+  else
+    EmitHash(0, Options.DumpDirectory);
+  Emit(Format('done text-quest day=%d', [Galaxy.CurrentTurn]));
+end;
+
 procedure EmitHumans(const Options: TSimulationOptions);
 var
   Lines: TStringList;
@@ -3341,6 +3402,11 @@ begin
   if Options.StaleCommands then
   begin
     Result := RunStaleCommands(Options);
+    Exit;
+  end;
+  if Options.TextQuest <> '' then
+  begin
+    Result := RunTextQuest(Options);
     Exit;
   end;
   if Options.Pvp then

@@ -79,6 +79,9 @@ type
     procedure ShowEvent(Event: TEvent);
     procedure ShowOutcome;
     procedure ShowParameters;
+    // CHANGE: ENHANCEMENT - A broken quest goes to the player interface, which a headless run
+    // replaces (QuestRun); with none, or by default, it is a message box as before.
+    procedure ReportError(const Text: AnsiString);
   end;
 implementation
 
@@ -90,6 +93,14 @@ uses
   EC_Str,
   MessageText,
   SequenceClass;
+
+procedure TTextQuest.ReportError(const Text: AnsiString);
+begin
+  if PlayerInterface <> nil then
+    PlayerInterface.ShowError(Text)
+  else
+    Dialogs.ShowMessage(Text);
+end;
 
 constructor TTextQuest.Create;
 begin
@@ -521,7 +532,7 @@ begin
     if GetLocation(i).Id = LocationId then
       Result := i;
   if Result = 0 then
-    Dialogs.ShowMessage(
+    ReportError(
         AnsiString('Cannot find Location with Location Number ' + IntToWideString(LocationId))
     );
 end;
@@ -534,7 +545,7 @@ begin
     if GetPath(i).Id = PathId then
       Result := i;
   if Result = 0 then
-    Dialogs.ShowMessage('Cannot find Path by Path Number - error');
+    ReportError('Cannot find Path by Path Number - error');
 end;
 procedure TTextQuest.BuildLegacySequences;
 var
@@ -907,7 +918,7 @@ begin
       end;
     if StartId < 0 then
     begin
-      Dialogs.ShowMessage('Cant find starting location');
+      ReportError('Cant find starting location');
       Exit;
     end;
     for i := 1 to GetParameterCount do
@@ -1086,7 +1097,7 @@ begin
           Chosen.Free;
           Group.Free;
           Pending.Free;
-          Dialogs.ShowMessage(
+          ReportError(
               AnsiString('No available answers from location ' + IntToWideString(Location.Id))
           );
           Exit;

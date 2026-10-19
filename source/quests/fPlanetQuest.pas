@@ -10,31 +10,20 @@ uses
   EC_CacheFont,
   GI_Label,
   GI_MessageLoop,
-  TextQuest,
-  TextQuestInterface,
-  Types,
-  aRanger,
-  aScript;
+  QuestRun,
+  Types;
 type
-  TTextQuestPlayerInterface = class;
+  TPlanetQuestView = class;
   TfPlanetQuest = class;
-  TfQuestA = class;
-  TQuestChoiceEvent = procedure(Value: Integer) of object;
-  TfQuestA = class(TObject)
-    Gap4: array[0..3] of Byte;
-    Callback: TQuestChoiceEvent;
-    Value: Integer;
-    constructor Create;
-    destructor Destroy; override;
-  end;
+  // CHANGE: ENHANCEMENT - The screen is the view of a TQuestRun (QuestRun; docs/progress/
+  // 2026-10-19-text-quests-plan.md, Phase A): the run plays the quest and does what it does to
+  // the game; the screen lays out its page, maps the clicks and keys to TQuestRun.Choose, and
+  // keeps the boxes and the screen changes. A choice's panel holds its index plus one in
+  // UserValue (0: played).
   TfPlanetQuest = class(TMessageLoopGI)
-    QuestName: WideString;
-    Quest: TTextQuest;
-    CurrentDate: WideString;
-    DaysElapsed: Integer;
+    Run: TQuestRun;
+    QuestView: TPlanetQuestView;
     CurrentPicture: WideString;
-    MoneyLimit: Cardinal;
-    CurrentText: WideString;
     NextChoiceTop: Integer;
     ParameterPanelWidth: Integer;
     ParameterPanelHeight: Integer;
@@ -44,22 +33,15 @@ type
     Gap104: array[0..1] of Byte;
     ParameterPanelOrigin: TPoint;
     Gap10E: array[0..1] of Byte;
-    QuestId: Integer;
     procedure OnOpen; override;
     procedure OnClose; override;
     procedure SelectMusic; override;
     procedure ProcessMouseWheel(KeyState: Cardinal; Point: TPoint; Delta: Integer); override;
     procedure InitializeLayout; override;
     procedure ExecuteUiCode(Block: TBlockParEC; Key: Cardinal); override;
-    function GetTextBeforeDelimiter(const Text: WideString; Delimiter: WideChar): WideString;
-    function GetTextAfterComma(const Text: WideString; IgnoredDelimiter: WideChar): WideString;
-    function GetQuestContentHash(QuestId: Integer): WideString;
-    procedure LoadQuestById(QuestId: Integer);
-    procedure LoadQuestByName(const Name: WideString);
-    procedure StartLoadedQuest;
     procedure ClearChoices;
-    procedure AddChoice(Text: WideString; Value: Integer; Callback: TQuestChoiceEvent);
-    procedure AddDisabledChoice(Text: WideString; Value: Integer; Callback: TQuestChoiceEvent);
+    procedure AddChoice(Index: Integer; const Text: WideString);
+    procedure AddDisabledChoice(Index: Integer; const Text: WideString);
     function CreateChoiceInlineObject(Sender: TLabelGI; Item: PFontObjectEC): TObjectGI;
     procedure ChoiceMouseEnter(Sender: TObjectGI);
     procedure ChoiceMouseLeave(Sender: TObjectGI);
@@ -84,42 +66,26 @@ type
     procedure SetQuestPicture(Name: WideString);
     procedure RequestLoadGame(Sender: TObjectGI);
     procedure QuestKeyDown(Sender: TObjectGI; VirtualKey: Cardinal);
-    function ExpandTemplateText(Text: WideString): WideString;
-    procedure IgnoreChoice(Value: Integer);
-    procedure ContinueToLocation(LocationId: Integer);
-    procedure ContinueAlongPath(PathId: Integer);
-    procedure ContinueToOutcome(Value: Integer);
-    procedure CompleteQuestSuccess(Value: Integer);
-    procedure CompleteQuestFailure(Value: Integer);
-    procedure CompleteQuestDeath(Value: Integer);
-    procedure ApplyLegacyPictureOverrides;
-    procedure ExportMoneyToPlayer;
-    procedure ImportMoneyFromPlayer;
-    procedure ExportExternalParameters;
-    procedure ImportExternalParameters;
-    function ExpandExternalText(Text: WideString): WideString;
+    function ConfirmQuestDeath: Boolean;
+    procedure EndQuest(Outcome: TQuestRunOutcome);
   end;
-  TTextQuestPlayerInterface = class(TTextQuestInterface)
-    procedure ShowText(Text: WideString); override;
-    procedure ShowPicture(Name: WideString); override;
-    procedure PlayMusic(Name: WideString); override;
-    procedure PlaySound(Name: WideString); override;
-    procedure ShowParameters(Text: WideString); override;
-    procedure AddContinueAction; override;
-    procedure AddSuccessAction; override;
-    procedure AddDeathAction; override;
-    procedure AddFailureAction; override;
-    procedure AddPathAction(Text: WideString; PathId: Integer); override;
-    procedure AddDisabledPath(Text: WideString); override;
-    procedure AddPathContinueAction(PathId: Integer); override;
-    procedure AddLocationContinueAction(LocationId: Integer); override;
-    procedure AdvanceDays(Days: Integer); override;
+  // CHANGE: ENHANCEMENT - What the run shows goes to the screen (was TTextQuestPlayerInterface).
+  TPlanetQuestView = class(TQuestView)
+    Screen: TfPlanetQuest;
+    constructor Create(AScreen: TfPlanetQuest);
+    procedure ShowText(const Text: WideString); override;
+    procedure ShowPicture(const Name: WideString); override;
+    procedure PlayMusic(const Name: WideString); override;
+    procedure PlaySound(const Name: WideString); override;
+    procedure ShowParameters(const Text: WideString); override;
+    procedure ClearChoices; override;
+    procedure AddChoice(Index: Integer; const Choice: TQuestChoice); override;
+    procedure FinishPage; override;
+    function ConfirmDeath: Boolean; override;
+    procedure EndQuest(Outcome: TQuestRunOutcome); override;
   end;
 var
   QuestStyleCount: Integer = 0;
-  ActiveGovernmentQuest: PQuest = nil;
-  QuestPlayerInterface: TTextQuestPlayerInterface = nil;
-  ActiveQueuedTextQuest: PQueuedTextQuest = nil;
 procedure LinkRecoveredTypes;
 implementation
 uses
@@ -149,7 +115,6 @@ uses
   SysUtils,
   ThreadCalc,
   aCalc,
-  ParameterClass,
   aConst,
   aGalaxy,
   aPlayer,
@@ -163,152 +128,8 @@ uses
   aItem,
   Achievements,
   aGalaxyStruct,
-  ValueListClass,
-  EventClass,
   aMyFunction,
-  CPDiapClass;
-
-constructor TfQuestA.Create;
-begin
-  inherited Create;
-end;
-
-destructor TfQuestA.Destroy;
-begin
-  inherited Destroy;
-end;
-
-function TfPlanetQuest.GetTextBeforeDelimiter(
-    const Text: WideString;
-    Delimiter: WideChar
-): WideString;
-var
-  I, N: Integer;
-  S: WideString;
-begin
-  S := '';
-  N := Length(Text);
-  for I := 1 to N do
-  begin
-    if Text[I] = Delimiter then
-      Break;
-    S := S + Text[I];
-  end;
-  Result := S;
-end;
-
-function TfPlanetQuest.GetTextAfterComma(
-    const Text: WideString;
-    IgnoredDelimiter: WideChar
-): WideString;
-var
-  I, N: Integer;
-  S: WideString;
-begin
-  S := '';
-  N := Length(Text);
-  if N <> 0 then
-  begin
-    I := 1;
-    while Text[I] <> ',' do
-      Inc(I);
-    Inc(I);
-    while I <= N do
-    begin
-      S := S + Text[I];
-      Inc(I);
-    end;
-  end;
-  Result := S;
-end;
-
-function TfPlanetQuest.GetQuestContentHash(QuestId: Integer): WideString;
-var
-  Control: TCBufControlEC;
-  Data: TCBufEC;
-begin
-  Control := nil;
-  try
-    Control := TCBufControlEC.Create;
-    GlobalCache.ResetControl(Control);
-    Control.SetCacheKey('PlanetQuest.' + IntToStr(QuestId));
-    Data := AcquireOrCreateBuffer(Control);
-    Result := ScriptDwordToHex(Data.Buffer.ComputeCrc32 xor $FFFFFFFF);
-  finally
-    if Control <> nil then
-    begin
-      Control.Release;
-      Control.Free;
-    end;
-  end;
-end;
-
-procedure TfPlanetQuest.LoadQuestById(QuestId: Integer);
-var
-  Control: TCBufControlEC;
-  Data: TCBufEC;
-begin
-  Self.QuestId := QuestId;
-  Control := nil;
-  QuestName := IntToStr(QuestId);
-  try
-    Control := TCBufControlEC.Create;
-    GlobalCache.ResetControl(Control);
-    Control.SetCacheKey('PlanetQuest.' + IntToStr(QuestId));
-    Data := AcquireOrCreateBuffer(Control);
-    Quest.LoadFromReader(Data.Buffer, False);
-  finally
-    if Control <> nil then
-    begin
-      Control.Release;
-      Control.Free;
-    end;
-  end;
-end;
-
-procedure TfPlanetQuest.LoadQuestByName(const Name: WideString);
-var
-  Control: TCBufControlEC;
-  Data: TCBufEC;
-begin
-  QuestId := -1;
-  Control := nil;
-  QuestName := Name;
-  try
-    Control := TCBufControlEC.Create;
-    GlobalCache.ResetControl(Control);
-    Control.SetCacheKey('PlanetQuest.' + Name);
-    Data := AcquireOrCreateBuffer(Control);
-    Quest.LoadFromReader(Data.Buffer, False);
-  finally
-    if Control <> nil then
-    begin
-      Control.Release;
-      Control.Free;
-    end;
-  end;
-end;
-
-procedure TfPlanetQuest.StartLoadedQuest;
-begin
-  ClearChoices;
-  DaysElapsed := 0;
-  if Quest.FormatVersion <= 1111111124 then
-    ApplyLegacyPictureOverrides;
-  if LocalPlayer = nil then
-    CurrentDate := TrimWideString(Galaxy.FormatTurnDate(300))
-  else
-    CurrentDate := TrimWideString(Galaxy.FormatTurnDate(Galaxy.CurrentTurn));
-  Quest.PlayerInterface := QuestPlayerInterface;
-  ImportExternalParameters;
-  // CHANGE: BUGFIX - Seed the quest's own stream from the simulation stream.
-  TextQuestRandomState := QuestRandomSeed;
-  if LocalPlayer = nil then
-    Quest.Start(-1, False)
-  else
-    Quest.Start(LocalPlayer.Money, True);
-  FinishChoiceLayout;
-end;
+  aScript;
 
 procedure TfPlanetQuest.ClearChoices;
 var
@@ -328,31 +149,17 @@ begin
   Spacer.SetPositionModeW(True);
 end;
 
-procedure TfPlanetQuest.AddChoice(Text: WideString; Value: Integer; Callback: TQuestChoiceEvent);
+procedure TfPlanetQuest.AddChoice(Index: Integer; const Text: WideString);
 var
   Owner: TPanelScrollBarGI;
-  Skip: Integer;
   Panel: TPanelGI;
   Highlight: TImageGI;
-  Choice: TfQuestA;
   Path: WideString;
   TextLabel: TLabelGI;
 begin
-  Skip := 0;
-  while Skip < Length(Text) do
-  begin
-    if (Text[Skip + 1] <> '-') and (Text[Skip + 1] <> ' ') then
-      Break;
-    Inc(Skip);
-  end;
-  if Skip > 0 then
-    Text := Copy(Text, Skip + 1, Length(Text) - Skip);
   Owner := GetByName('ActionListWindow') as TPanelScrollBarGI;
-  Choice := TfQuestA.Create;
-  Choice.Callback := Callback;
-  Choice.Value := Value;
   Panel := TPanelGI.Create(Owner);
-  Panel.UserValue := PtrInt(Choice);
+  Panel.UserValue := Index + 1;
   Panel.SetName(IntToStr(ChoiceCount));
   Panel.SetPosition(Classes.Point(0, NextChoiceTop));
   Panel.SetSize(Classes.Point(Owner.ClientSize.X, 20));
@@ -407,30 +214,14 @@ begin
   Inc(ChoiceCount);
 end;
 
-procedure TfPlanetQuest.AddDisabledChoice(
-    Text: WideString;
-    Value: Integer;
-    Callback: TQuestChoiceEvent
-);
+procedure TfPlanetQuest.AddDisabledChoice(Index: Integer; const Text: WideString);
 var
   Owner: TPanelScrollBarGI;
-  Skip: Integer;
   Panel: TPanelGI;
   Highlight: TImageGI;
   Path: WideString;
   TextLabel: TLabelGI;
 begin
-  Skip := 0;
-  while Skip < Length(Text) do
-  begin
-    if (Text[Skip + 1] <> '-') and (Text[Skip + 1] <> ' ') then
-      Break;
-    Inc(Skip);
-  end;
-  if Skip > 0 then
-    Text := Copy(Text, Skip + 1, Length(Text) - Skip);
-  Text := RemoveMatchingTextTagsW(Text, 'color', 'COLOR');
-  Text := RemoveMatchingTextTagsW(Text, '/color', '/COLOR');
   Owner := GetByName('ActionListWindow') as TPanelScrollBarGI;
   Panel := TPanelGI.Create(Owner);
   Panel.SetName(IntToStr(ChoiceCount));
@@ -535,20 +326,20 @@ end;
 
 procedure TfPlanetQuest.ChoiceMouseUp(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
 var
-  Choice: TfQuestA;
+  Index: Integer;
 begin
   if Galaxy <> nil then
     aCalc.WaitForTurnCalculationUI;
-  Choice := TfQuestA(Sender.UserValue);
+  Index := Integer(Sender.UserValue) - 1;
   Sender.UserValue := 0;
-  ClearChoices;
-  if Choice <> nil then
+  // The run clears the choices, plays the choice and lays out the next page.
+  if Index >= 0 then
+    Run.Choose(Index)
+  else
   begin
-    if Assigned(Choice.Callback) then
-      Choice.Callback(Choice.Value);
-    Choice.Free;
+    ClearChoices;
+    FinishChoiceLayout;
   end;
-  FinishChoiceLayout;
   if Galaxy <> nil then
     aCalc.WaitForTurnCalculationUI;
   PostMouseMoveMessage;
@@ -933,7 +724,6 @@ var
     end;
   end;
 begin
-  CurrentText := Text;
   Panel := GetByName('MessageWindow') as TPanelScrollBarGI;
   Panel.FreeOwnedChildren;
   if Text <> '' then
@@ -1122,20 +912,19 @@ begin
   QuestStyleCount := I - 1;
   GetByName('MainPanel').KeyDownCallback := QuestKeyDown;
   (GetByName('ButtonExit') as TGraphButtonGI).UpCallback := RequestLoadGame;
-  QuestPlayerInterface := TTextQuestPlayerInterface.Create;
+  if QuestView = nil then
+    QuestView := TPlanetQuestView.Create(Self);
 end;
 
 procedure TfPlanetQuest.OnOpen;
 var
-  I, J: Integer;
-  GovernmentQuest: PQuest;
-  Found: Boolean;
   Stage: Integer;
 begin
   Stage := 0;
   try
     SelectMusic;
-    ActiveQueuedTextQuest := nil;
+    FreeAndNil(Run);
+    Run := TQuestRun.Create(QuestView);
     if Galaxy <> nil then
       EvictMainMenuShipCachesWhenAddressSpaceHigh;
     Stage := 1;
@@ -1153,143 +942,11 @@ begin
     ClearParameterPanel;
     LayoutParameterPanel;
     Stage := 4;
-    if (QueuedTextQuests.Count = 0)
-        and (LocalPlayer <> nil)
-        and (LocalPlayer.CurrentPlanet <> nil)
-        and (LocalPlayer.CurrentPlanet.TextQuestId >= 10000)
-        and ((LanguageDataConfig.GetBlock('PlanetQuest').CountBlocks('PlanetQuestLic') <= 0)
-            or (LanguageDataConfig
-                    .GetBlock('PlanetQuest')
-                    .GetBlock('PlanetQuestLic')
-                    .GetParamOrMarker(IntToStr(LocalPlayer.CurrentPlanet.TextQuestId))
-                = PlanetQuestScreen.GetQuestContentHash(LocalPlayer.CurrentPlanet.TextQuestId))) then
-      MoneyLimit := (Galaxy.ComputeScaledBigMoney(2) + LocalPlayer.Money)
-    else if (LocalPlayer <> nil) and (QueuedTextQuests.Count = 0) then
-      MoneyLimit := (LocalPlayer.Money + 50000)
-    else
-      MoneyLimit := 1000000000;
-    Stage := 5;
-    if (LocalPlayer <> nil) and (LocalPlayer.CurrentPlanet <> nil) and LocalPlayer.InPrison then
+    // The run picks the quest and starts it (stages 4 to 22).
+    if not Run.Open then
     begin
-      Stage := 6;
-      Quest := TTextQuest.Create;
-      if LocalPlayer.CurrentPlanet.OwnerId <> Byte(oiPirate) then
-        LoadQuestByName('Prison')
-      else
-        LoadQuestByName('PirateClanPrison');
-      Stage := 7;
-      Quest.ToStarText.Text := LocalPlayer.CurrentStar.Name;
-      Quest.ToPlanetText.Text := LocalPlayer.CurrentPlanet.Name;
-      Quest.DateText.Text := '';
-      Quest.MoneyText.Text := '';
-      Quest.FromPlanetText.Text := LocalPlayer.CurrentPlanet.Name;
-      Quest.FromStarText.Text := LocalPlayer.CurrentStar.Name;
-      Quest.RangerText.Text := LocalPlayer.Name;
-      Stage := 8;
-      StartLoadedQuest;
-      Stage := 9;
-    end
-    else if QueuedTextQuests.Count > 0 then
-    begin
-      Stage := 10;
-      ActiveQueuedTextQuest := QueuedTextQuests[0];
-      Quest := TTextQuest.Create;
-      if IsIntegerTextW(ActiveQueuedTextQuest.Name) then
-        LoadQuestById(StrToInt(ActiveQueuedTextQuest.Name))
-      else
-        LoadQuestByName(ActiveQueuedTextQuest.Name);
-      Stage := 11;
-      if LocalPlayer.CurrentStar <> nil then
-      begin
-        Quest.ToStarText.Text := LocalPlayer.CurrentStar.Name;
-        Quest.FromStarText.Text := LocalPlayer.CurrentStar.Name;
-      end
-      else
-      begin
-        Quest.ToStarText.Text := '';
-        Quest.FromStarText.Text := '';
-      end;
-      if LocalPlayer.CurrentPlanet <> nil then
-      begin
-        Quest.ToPlanetText.Text := LocalPlayer.CurrentPlanet.Name;
-        Quest.FromPlanetText.Text := LocalPlayer.CurrentPlanet.Name;
-      end
-      else
-      begin
-        Quest.ToPlanetText.Text := '';
-        Quest.FromPlanetText.Text := '';
-      end;
-      Quest.DateText.Text := '';
-      Quest.MoneyText.Text := '';
-      Quest.RangerText.Text := LocalPlayer.Name;
-      Stage := 12;
-      StartLoadedQuest;
-      Stage := 13;
-    end
-    else if (LocalPlayer <> nil) and not StandaloneQuestMode then
-    begin
-      Stage := 14;
-      Found := False;
-      if LocalPlayer.CurrentPlanet.TextQuestId > -1 then
-        if LocalPlayer.Quests.Count > 0 then
-          for I := 0 to LocalPlayer.Quests.Count - 1 do
-          begin
-            GovernmentQuest := LocalPlayer.Quests[I];
-            if (GovernmentQuest.QuestType = qtPlanetQuest)
-                and (GovernmentQuest.ObjectiveTarget is TPlanet)
-                and ((GovernmentQuest.ObjectiveTarget as TPlanet) = LocalPlayer.CurrentPlanet) then
-            begin
-              Stage := 15;
-              ActiveGovernmentQuest := GovernmentQuest;
-              Quest := TTextQuest.Create;
-              LoadQuestById(LocalPlayer.CurrentPlanet.TextQuestId);
-              Stage := 16;
-              Quest.ToStarText.Text := LocalPlayer.CurrentStar.Name;
-              Quest.ToPlanetText.Text := LocalPlayer.CurrentPlanet.Name;
-              Quest.DateText.Text := Galaxy.FormatTurnDate(GovernmentQuest.DeadlineTurn);
-              Quest.MoneyText.Text := IntToStr(GovernmentQuest.RewardMoney);
-              Quest.FromPlanetText.Text := GovernmentQuest.Planet.Name;
-              Quest.FromStarText.Text := GovernmentQuest.Planet.CurrentStar.Name;
-              Quest.RangerText.Text := LocalPlayer.Name;
-              for J := 1 to Quest.GetParameterCount do
-                if Quest.GetParameter(J).Enabled
-                    and (Quest.GetParameter(J).NameText.Text = 'GRewardMoney') then
-                begin
-                  Quest.GetParameter(J).Value := GovernmentQuest.RewardMoney;
-                  Break;
-                end;
-              Stage := 17;
-              StartLoadedQuest;
-              Stage := 18;
-              Found := True;
-              Break;
-            end;
-          end;
-      if not Found then
-      begin
-        RequestedScreenId := QuestReturnScreenId;
-        RequestClose(1);
-      end;
-    end
-    else
-    begin
-      Stage := 19;
-      Quest := TTextQuest.Create;
-      if IsIntegerTextW(PendingQuestName) then
-        LoadQuestById(StrToInt(PendingQuestName))
-      else
-        LoadQuestByName(PendingQuestName);
-      Stage := 20;
-      Quest.ToStarText.Text := LocalizedText('FormLoadQuest.PToStar');
-      Quest.ToPlanetText.Text := LocalizedText('FormLoadQuest.PToPlanet');
-      Quest.DateText.Text := FormatGameTurnDate(1500);
-      Quest.MoneyText.Text := '10000';
-      Quest.FromPlanetText.Text := LocalizedText('FormLoadQuest.PFromPlanet');
-      Quest.FromStarText.Text := LocalizedText('FormLoadQuest.PFromStar');
-      Quest.RangerText.Text := LocalizedText('FormLoadQuest.PRanger');
-      Stage := 21;
-      StartLoadedQuest;
-      Stage := 22;
+      RequestedScreenId := QuestReturnScreenId;
+      RequestClose(1);
     end;
     Stage := 23;
     ApplyStyle;
@@ -1301,6 +958,8 @@ begin
   except
     on E: Exception do
     begin
+      if (Stage = 4) and (Run <> nil) then
+        Stage := Run.Stage;
       AppendLogLineThreadSafe(E.ClassName + ' ' + E.Message);
       raise Exception.Create(
           'Error in procedure TfPlanetQuest.BeforeRun, label = ' + IntToStr(Stage));
@@ -1314,7 +973,6 @@ begin
     aCalc.WaitForTurnCalculationUI;
   if LocalPlayer <> nil then
     RunScriptItemsAct(LocalPlayer, satOnLeavingForm, nil, nil, 0);
-  QuestId := -1;
   if PageAnimationTimer <> nil then
   begin
     CancelCallbackTimer(PageAnimationTimer);
@@ -1322,42 +980,19 @@ begin
   end;
   ClearParameterPanel;
   ClearChoices;
-  if Quest <> nil then
+  // The money cap and the quest timers (TQuestRun.Close).
+  if Run <> nil then
   begin
-    Quest.Free;
-    Quest := nil;
+    Run.Close;
+    FreeAndNil(Run);
   end;
-  // The money cap and the quest timers, in that order.
-  if LocalPlayer <> nil then
-    CloseQuest(MoneyLimit);
   if (RequestedScreenId = screenMainMenu) or (RequestedScreenId = screenLoad) then
     ClearPendingScriptRequests;
 end;
 
 function TfPlanetQuest.GetTextColorTag(StyleIndex: Integer): WideString;
-var
-  Block: TBlockParEC;
 begin
-  Block := UiStyleConfig.GetBlockByPath('Style');
-  if Block.CountBlocks('QTextColor') > 0 then
-  begin
-    Block := Block.GetBlock('QTextColor');
-    if Block.CountParams('Sel' + IntToWideString(StyleIndex + 1)) > 0 then
-    begin
-      Result := '<color=' + Block.GetParam('Sel' + IntToWideString(StyleIndex + 1)) + '>';
-      Exit;
-    end;
-  end;
-  if StyleIndex = 0 then
-    Result := '<color=' + IntToStr(255) + ',' + IntToStr(240) + ',' + IntToStr(100) + '>'
-  else if StyleIndex = 1 then
-    Result := '<color=' + IntToStr(255) + ',' + IntToStr(240) + ',' + IntToStr(100) + '>'
-  else if StyleIndex = 2 then
-    Result := '<color=' + IntToStr(0) + ',' + IntToStr(4) + ',' + IntToStr(173) + '>'
-  else if StyleIndex = 3 then
-    Result := '<color=' + IntToStr(0) + ',' + IntToStr(4) + ',' + IntToStr(173) + '>'
-  else
-    Result := GetTextColorTag(0);
+  Result := QuestTextColorTag(StyleIndex);
 end;
 
 function TfPlanetQuest.GetTextColor(StyleIndex: Integer): Cardinal;
@@ -1562,7 +1197,7 @@ begin
   if Sender.HelpText = '' then
     Visible := False;
   TextLabel.SetActive(Visible);
-  if (Sender.ControlName = 'ButtonExit') and (ActiveQueuedTextQuest <> nil) then
+  if (Sender.ControlName = 'ButtonExit') and (Run <> nil) and (Run.QueuedQuest <> nil) then
     TextLabel.SetText(LocalizedText('FormPQuest.HelpExitAlt'))
   else
     TextLabel.SetText(Sender.HelpText);
@@ -1663,7 +1298,7 @@ begin
       end;
     end;
     if VirtualKey = Ord('R') then
-      if ActiveQueuedTextQuest = nil then
+      if (Run = nil) or (Run.QueuedQuest = nil) then
         if SaveManagerScreen.AutoSaveExists then
           if ShowMessageBoxGI(
                   Self,
@@ -1694,540 +1329,150 @@ begin
     MusicManager.PlayCategory('Quest');
 end;
 
-function TfPlanetQuest.ExpandTemplateText(Text: WideString): WideString;
-var
-  Expanded, SourceLineBreak, ReplacementLineBreak, IndentedLineBreak: WideString;
+// Moved from TfPlanetQuest.CompleteQuestDeath: the box before the run's DieInQuest.
+function TfPlanetQuest.ConfirmQuestDeath: Boolean;
 begin
-  if LocalPlayer = nil then
-    CurrentDate := TrimWideString(Galaxy.FormatTurnDate(DaysElapsed + 300))
-  else
-    CurrentDate := TrimWideString(Galaxy.FormatTurnDate(Galaxy.CurrentTurn));
-  Expanded := ExpandExternalText(Text);
-  SourceLineBreak := #13#10;
-  ReplacementLineBreak := #13#10;
-  IndentedLineBreak := #13#10'          ';
-  Expanded :=
-      ReplaceAllWideString(
-          Expanded,
-          '<ToStar>',
-          WrapTextInColor(TrimWideString(Quest.ToStarText.Text), GetTextColorTag(QuestStyleIndex))
-      );
-  Expanded :=
-      ReplaceAllWideString(
-          Expanded,
-          '<ToPlanet>',
-          WrapTextInColor(TrimWideString(Quest.ToPlanetText.Text), GetTextColorTag(QuestStyleIndex))
-      );
-  Expanded :=
-      ReplaceAllWideString(
-          Expanded,
-          '<Date>',
-          WrapTextInColor(Quest.DateText.Text, GetTextColorTag(QuestStyleIndex))
-      );
-  Expanded :=
-      ReplaceAllWideString(
-          Expanded,
-          '<Money>',
-          WrapTextInColor(Quest.MoneyText.Text, GetTextColorTag(QuestStyleIndex))
-      );
-  Expanded :=
-      ReplaceAllWideString(
-          Expanded,
-          '<FromPlanet>',
-          WrapTextInColor(
-              TrimWideString(Quest.FromPlanetText.Text),
-              GetTextColorTag(QuestStyleIndex)
-          )
-      );
-  Expanded :=
-      ReplaceAllWideString(
-          Expanded,
-          '<FromStar>',
-          WrapTextInColor(TrimWideString(Quest.FromStarText.Text), GetTextColorTag(QuestStyleIndex))
-      );
-  Expanded :=
-      ReplaceAllWideString(
-          Expanded,
-          '<Ranger>',
-          WrapTextInColor(TrimWideString(Quest.RangerText.Text), GetTextColorTag(QuestStyleIndex))
-      );
-  Expanded :=
-      ReplaceAllWideString(
-          Expanded,
-          '<CurDate>',
-          WrapTextInColor(CurrentDate, GetTextColorTag(QuestStyleIndex))
-      );
-  Expanded := ReplaceAllWideString(Expanded, SourceLineBreak, ReplacementLineBreak);
-  Expanded := ReplaceAllWideString(Expanded, IndentedLineBreak, ReplacementLineBreak);
-  if Pos('<', Expanded) > 0 then
+  if SaveManagerScreen.AutoSaveExists
+      and (ShowMessageBoxGI(
+              Self,
+              LocalizedText('Planet.NotCivil.QuestPlay.MsgLoad'),
+              mbgOK or mbgCancel)
+          = mbgResultOK) then
   begin
-    Expanded := ReplaceAllWideString(Expanded, '<br>', #13#10);
-    Expanded := ReplaceAllWideString(Expanded, '<ll>', #13#10' '#13#10);
-    // Native quirk: <Player> is expanded into Result, then overwritten below.
-    if LocalPlayer <> nil then
-      Result :=
-          ReplaceAllWideString(
-              Result,
-              '<Player>',
-              WrapTextInColor(LocalPlayer.Name, GetTextColorTag(QuestStyleIndex))
-          );
-    Expanded := ReplaceAllWideString(Expanded, '<clr>', GetTextColorTag(QuestStyleIndex));
-    Expanded := ReplaceAllWideString(Expanded, '<clrEnd>', '</color>');
-  end;
-  Result := Expanded;
-end;
-
-procedure TfPlanetQuest.IgnoreChoice(Value: Integer);
-begin
-end;
-
-procedure TfPlanetQuest.ContinueToLocation(LocationId: Integer);
-begin
-  ClearChoices;
-  Quest.EnterLocation(LocationId);
-end;
-
-procedure TfPlanetQuest.ContinueAlongPath(PathId: Integer);
-begin
-  ClearChoices;
-  Quest.FollowPath(PathId);
-end;
-
-procedure TfPlanetQuest.ContinueToOutcome(Value: Integer);
-begin
-  ClearChoices;
-  Quest.ShowOutcome;
-end;
-
-procedure TfPlanetQuest.CompleteQuestSuccess(Value: Integer);
-begin
-  ClearChoices;
-  if ActiveQueuedTextQuest = nil then
-    if LocalPlayer <> nil then
-      if CompleteGovernmentQuest(Quest.CompleteOnFinish, Quest.SuccessRelationDelta) then
-        (GetByName('QuestPanel') as TPanelGI).SetActive(False);
-  if QuestId >= 0 then
-    if (ActiveQueuedTextQuest = nil)
-        or (LocalPlayer = nil)
-        or not (LocalPlayer.PirateRank in [4, 6]) then
-    begin
-      if LocalPlayer <> nil then
-        TryAddAchievementProgress('QUEST', 1);
-      LoadQuestScreen.LoadCompletionData;
-      LoadQuestScreen.RecordCompletion(QuestId, 0, 1);
-      LoadQuestScreen.SaveCompletionData;
-    end;
-  RequestedScreenId := QuestReturnScreenId;
-  RequestClose(1);
-  if ActiveQueuedTextQuest <> nil then
-  begin
-    ActiveQueuedTextQuest := nil;
-    FinishQueuedTextQuest(sqsSuccess);
-  end;
-end;
-
-procedure TfPlanetQuest.CompleteQuestFailure(Value: Integer);
-begin
-  if LocalPlayer = nil then
-    RequestedScreenId := QuestReturnScreenId
-  else if LocalPlayer.InPrison then
-  begin
-    ReleaseFromPrison;
-    if not HangarScreen.TryTakeOff then
-      RequestedScreenId := screenHangar;
+    PendingLoadFileName := SaveManagerScreen.GetAutoSavePath;
+    RequestedScreenId := screenGameLoad;
+    Result := False;
   end
   else
   begin
-    if ActiveQueuedTextQuest = nil then
-      if LocalPlayer <> nil then
-        FailGovernmentQuest;
-    if (ActiveQueuedTextQuest = nil)
-        and SaveManagerScreen.AutoSaveExists
-        and (ShowMessageBoxGI(
-                Self,
-                LocalizedText('Planet.NotCivil.QuestPlay.MsgLoad'),
-                mbgOK or mbgCancel)
-            = mbgResultOK) then
-    begin
-      PendingLoadFileName := SaveManagerScreen.GetAutoSavePath;
-      RequestedScreenId := screenGameLoad;
-    end
-    else
-      RequestedScreenId := QuestReturnScreenId;
-  end;
-  RequestClose(1);
-  if ActiveQueuedTextQuest <> nil then
-  begin
-    ActiveQueuedTextQuest := nil;
-    FinishQueuedTextQuest(sqsFailure);
+    ScoreScreen.RecordPlayerResult(False);
+    Result := True;
   end;
 end;
 
-procedure TfPlanetQuest.CompleteQuestDeath(Value: Integer);
+// Moved from TfPlanetQuest.CompleteQuestSuccess, CompleteQuestFailure and CompleteQuestDeath:
+// what follows the run's commands for the outcome.
+procedure TfPlanetQuest.EndQuest(Outcome: TQuestRunOutcome);
 begin
-  if LocalPlayer = nil then
-    RequestedScreenId := QuestReturnScreenId
-  else
-  begin
-    if SaveManagerScreen.AutoSaveExists
-        and (ShowMessageBoxGI(
-                Self,
-                LocalizedText('Planet.NotCivil.QuestPlay.MsgLoad'),
-                mbgOK or mbgCancel)
-            = mbgResultOK) then
-    begin
-      PendingLoadFileName := SaveManagerScreen.GetAutoSavePath;
-      RequestedScreenId := screenGameLoad;
-    end
-    else
-    begin
-      ScoreScreen.RecordPlayerResult(False);
-      DieInQuest;
-      RequestedScreenId := screenGameEnd;
-    end;
+  case Outcome of
+    qroSuccess:
+      begin
+        if Run.GovernmentQuestDone then
+          (GetByName('QuestPanel') as TPanelGI).SetActive(False);
+        if Run.QuestId >= 0 then
+          if (Run.QueuedQuest = nil)
+              or (LocalPlayer = nil)
+              or not (LocalPlayer.PirateRank in [4, 6]) then
+          begin
+            if LocalPlayer <> nil then
+              TryAddAchievementProgress('QUEST', 1);
+            LoadQuestScreen.LoadCompletionData;
+            LoadQuestScreen.RecordCompletion(Run.QuestId, 0, 1);
+            LoadQuestScreen.SaveCompletionData;
+          end;
+        RequestedScreenId := QuestReturnScreenId;
+        RequestClose(1);
+      end;
+    qroFailure:
+      begin
+        if LocalPlayer = nil then
+          RequestedScreenId := QuestReturnScreenId
+        else if Run.ReleasedFromPrison then
+        begin
+          if not HangarScreen.TryTakeOff then
+            RequestedScreenId := screenHangar;
+        end
+        else if (Run.QueuedQuest = nil)
+            and SaveManagerScreen.AutoSaveExists
+            and (ShowMessageBoxGI(
+                    Self,
+                    LocalizedText('Planet.NotCivil.QuestPlay.MsgLoad'),
+                    mbgOK or mbgCancel)
+                = mbgResultOK) then
+        begin
+          PendingLoadFileName := SaveManagerScreen.GetAutoSavePath;
+          RequestedScreenId := screenGameLoad;
+        end
+        else
+          RequestedScreenId := QuestReturnScreenId;
+        RequestClose(1);
+      end;
+    qroDeath:
+      begin
+        // A death declined for the autosave has asked for it already (ConfirmQuestDeath).
+        if Run.Died then
+          RequestedScreenId := screenGameEnd
+        else if LocalPlayer = nil then
+          RequestedScreenId := QuestReturnScreenId;
+        ClearPendingScriptRequests;
+        RequestClose(1);
+      end;
   end;
-  ClearPendingScriptRequests;
-  RequestClose(1);
 end;
 
-procedure TfPlanetQuest.ApplyLegacyPictureOverrides;
-var
-  Found, Count, I, J, K: Integer;
-  Kind, Indices, Name, Picture: WideString;
-  Values: TValuesList;
-  Config: TBlockParEC;
+constructor TPlanetQuestView.Create(AScreen: TfPlanetQuest);
 begin
-  Values := TValuesList.Create;
-  Config := GameDataConfig.GetBlock('PQI');
-  Count := Config.GetParamCount;
-  for I := 0 to Count - 1 do
-  begin
-    Name := Config.GetParamName(I);
-    if GetTextBeforeDelimiter(Name, ',') = QuestName then
-    begin
-      Kind := GetTextAfterComma(Name, ',');
-      Indices := GetTextAfterComma(Kind, ',');
-      Kind := GetTextBeforeDelimiter(Kind, ',');
-      Values.LoadFromSemicolonText(Indices);
-      Picture := Config.GetParamValue(I);
-      Picture := ReplaceAllWideString(Picture, 'Bm.PQI.', '');
-      if Kind = 'L' then
-        for J := 1 to Values.Count do
-        begin
-          Found := -1;
-          for K := 1 to Quest.GetLocationCount do
-            if Quest.GetLocation(K).Id = Values.Values[J] then
-            begin
-              Found := K;
-              Break;
-            end;
-          if Found > 0 then
-            for K := 1 to Quest.GetLocation(Found).EventCount do
-              Quest.GetLocation(Found).Events[K].Picture.Text := Picture;
-        end;
-      if Kind = 'P' then
-        for J := 1 to Values.Count do
-        begin
-          Found := -1;
-          for K := 1 to Quest.GetPathCount do
-            if Quest.GetPath(K).Id = Values.Values[J] then
-            begin
-              Found := K;
-              Break;
-            end;
-          if Found > 0 then
-            Quest.GetPath(Found).Event.Picture.Text := Picture;
-        end;
-      if Kind = 'PAR' then
-        for J := 1 to Values.Count do
-          if Quest.GetParameterCount >= Values.Values[J] then
-            if Quest.GetParameter(Values.Values[J]).Enabled then
-              if Quest.GetParameter(Values.Values[J]).CriticalOutcome <> qoNone then
-                Quest.GetParameter(Values.Values[J]).CriticalEvent.Picture.Text := Picture;
-    end;
-  end;
-  Values.Destroy;
+  inherited Create;
+  Screen := AScreen;
 end;
 
-procedure TfPlanetQuest.ExportMoneyToPlayer;
-var
-  I: Integer;
+procedure TPlanetQuestView.ShowText(const Text: WideString);
 begin
-  if LocalPlayer <> nil then
-    for I := 1 to Quest.GetParameterCount do
-      if Quest.GetParameter(I).Enabled then
-        if Quest.GetParameter(I).IsMoney then
-        begin
-          SetQuestMoney(Quest.GetParameter(I).Value);
-          Quest.GetParameter(I).Value := LocalPlayer.Money;
-          Break;
-        end;
+  Screen.SetQuestText(Text);
 end;
 
-procedure TfPlanetQuest.ImportMoneyFromPlayer;
-var
-  I: Integer;
+procedure TPlanetQuestView.ShowPicture(const Name: WideString);
 begin
-  if LocalPlayer <> nil then
-    for I := 1 to Quest.GetParameterCount do
-      if Quest.GetParameter(I).Enabled then
-        if Quest.GetParameter(I).IsMoney then
-        begin
-          Quest.GetParameter(I).Value := LocalPlayer.Money;
-          Break;
-        end;
+  Screen.SetQuestPicture(Name);
 end;
 
-// The script the queued quest came from, whose variables come before the shared ones.
-function QueuedQuestScript: TScript;
-begin
-  Result := nil;
-  if ActiveQueuedTextQuest <> nil then
-    Result := ActiveQueuedTextQuest.Script;
-end;
-
-procedure TfPlanetQuest.ExportExternalParameters;
-var
-  I: Integer;
-  Name: WideString;
-  Names: array of WideString;
-  Values: array of Integer;
-begin
-  Names := nil;
-  Values := nil;
-  for I := 1 to Quest.GetParameterCount do
-    if FindTextPosW('ext_', Quest.GetParameter(I).NameText.Text) = 1 then
-    begin
-      Name := Quest.GetParameter(I).NameText.Text;
-      Name[1] := 'E';
-      Name := 'GQuestVar' + Name;
-      SetLength(Names, Length(Names) + 1);
-      Names[High(Names)] := Name;
-      SetLength(Values, Length(Values) + 1);
-      Values[High(Values)] := Quest.GetParameter(I).Value;
-    end;
-  SetQuestVariables(QueuedQuestScript, Names, Values);
-end;
-
-// The quest takes the variables' values, within its parameters' limits, and the variables
-// then take the quest's values back.
-procedure TfPlanetQuest.ImportExternalParameters;
-var
-  I: Integer;
-  Name: WideString;
-  Variable: TVarEC;
-  Names: array of WideString;
-  Values: array of Integer;
-begin
-  Names := nil;
-  Values := nil;
-  for I := 1 to Quest.GetParameterCount do
-    if FindTextPosW('ext_', Quest.GetParameter(I).NameText.Text) = 1 then
-    begin
-      Name := Quest.GetParameter(I).NameText.Text;
-      Name[1] := 'E';
-      Name := 'GQuestVar' + Name;
-      Variable := FindQuestVariable(QueuedQuestScript, Name);
-      if Variable <> nil then
-        if Variable.RealVType = vkInt then
-        begin
-          Quest.GetParameter(I).SetValue(Variable.GetInt);
-          SetLength(Names, Length(Names) + 1);
-          Names[High(Names)] := Name;
-          SetLength(Values, Length(Values) + 1);
-          Values[High(Values)] := Quest.GetParameter(I).Value;
-        end;
-    end;
-  SetQuestVariables(QueuedQuestScript, Names, Values);
-end;
-
-function TfPlanetQuest.ExpandExternalText(Text: WideString): WideString;
-var
-  I: Integer;
-  Name, Token, Expanded: WideString;
-  Variable: TVarEC;
-begin
-  Expanded := Text;
-  // +0 preserves the native argument-load order.
-  for I := 1 to Quest.GetParameterCount do
-    if FindTextPosW('ext_', Quest.GetParameter(I + 0).NameText.Text) = 1 then
-    begin
-      Name := Quest.GetParameter(I + 0).NameText.Text;
-      Token := Name;
-      Name[1] := 'E';
-      Token[1] := 't';
-      Token := '<' + Token + '>';
-      Name := 'GQuestVar' + Name;
-      Variable := Session.SharedScriptVariables.GetVarNE(Name);
-      if Variable <> nil then
-        Expanded :=
-            ReplaceAllWideString(
-                Expanded,
-                Token,
-                WrapTextInColor(
-                    TrimWideString(Variable.GetString),
-                    GetTextColorTag(QuestStyleIndex)
-                )
-            );
-    end;
-  Result := Expanded;
-end;
-
-procedure TTextQuestPlayerInterface.ShowText(Text: WideString);
-var
-  ExpandedText: WideString;
-begin
-  ExpandedText := PlanetQuestScreen.ExpandTemplateText(Text);
-  if ExpandedText <> TrimWideString(PlanetQuestScreen.CurrentText) then
-    PlanetQuestScreen.SetQuestText(PlanetQuestScreen.ExpandTemplateText(Text));
-end;
-
-procedure TTextQuestPlayerInterface.ShowPicture(Name: WideString);
-begin
-  PlanetQuestScreen.SetQuestPicture(Name);
-end;
-
-procedure TTextQuestPlayerInterface.PlayMusic(Name: WideString);
+procedure TPlanetQuestView.PlayMusic(const Name: WideString);
 begin
   MusicManager.RequestFadeOut;
   if MusicInPlanetEnabled then
     MusicManager.PlayCategory(Name);
 end;
 
-procedure TTextQuestPlayerInterface.PlaySound(Name: WideString);
+procedure TPlanetQuestView.PlaySound(const Name: WideString);
 begin
   SoundManager.PlaySound('Sound.' + Name);
 end;
 
-procedure TTextQuestPlayerInterface.ShowParameters(Text: WideString);
+procedure TPlanetQuestView.ShowParameters(const Text: WideString);
 begin
-  PlanetQuestScreen.ClearParameterPanel;
-  PlanetQuestScreen.AppendParameterText(TrimWideString(PlanetQuestScreen.ExpandTemplateText(Text)));
-  PlanetQuestScreen.LayoutParameterPanel;
-  PlanetQuestScreen.ExportMoneyToPlayer;
-  PlanetQuestScreen.ExportExternalParameters;
+  Screen.ClearParameterPanel;
+  Screen.AppendParameterText(Text);
+  Screen.LayoutParameterPanel;
 end;
 
-procedure TTextQuestPlayerInterface.AddContinueAction;
+procedure TPlanetQuestView.ClearChoices;
 begin
-  PlanetQuestScreen.AddChoice(
-      '  - ' + LocalizedText('Planet.NotCivil.QuestPlay.MsgContinue'),
-      0,
-      PlanetQuestScreen.ContinueToOutcome
-  );
+  Screen.ClearChoices;
 end;
 
-procedure TTextQuestPlayerInterface.AddSuccessAction;
+procedure TPlanetQuestView.AddChoice(Index: Integer; const Choice: TQuestChoice);
 begin
-  if (LocalPlayer <> nil) and LocalPlayer.InPrison then
-    PlanetQuestScreen.AddChoice(
-        '  - ' + LocalizedText('Planet.NotCivil.QuestPlay.MsgSuccessPrison'),
-        0,
-        PlanetQuestScreen.CompleteQuestSuccess
-    )
-  else if (ActiveQueuedTextQuest <> nil) and (ActiveQueuedTextQuest.SuccessCaption <> '') then
-    PlanetQuestScreen.AddChoice(
-        ' - ' + ActiveQueuedTextQuest.SuccessCaption,
-        0,
-        PlanetQuestScreen.CompleteQuestSuccess
-    )
+  if Choice.Enabled then
+    Screen.AddChoice(Index, Choice.Text)
   else
-    PlanetQuestScreen.AddChoice(
-        ' - ' + LocalizedColorText('Planet.NotCivil.QuestPlay.MsgSuccess'),
-        0,
-        PlanetQuestScreen.CompleteQuestSuccess
-    );
+    Screen.AddDisabledChoice(Index, Choice.Text);
 end;
 
-procedure TTextQuestPlayerInterface.AddDeathAction;
+procedure TPlanetQuestView.FinishPage;
 begin
-  PlanetQuestScreen.AddChoice(
-      '  - ' + LocalizedText('Planet.NotCivil.QuestPlay.MsgDeath'),
-      0,
-      PlanetQuestScreen.CompleteQuestDeath
-  );
+  Screen.FinishChoiceLayout;
 end;
 
-procedure TTextQuestPlayerInterface.AddFailureAction;
+function TPlanetQuestView.ConfirmDeath: Boolean;
 begin
-  if (LocalPlayer <> nil) and LocalPlayer.InPrison then
-    PlanetQuestScreen.AddChoice(
-        '  - ' + LocalizedText('Planet.NotCivil.QuestPlay.MsgFailPrison'),
-        0,
-        PlanetQuestScreen.CompleteQuestFailure
-    )
-  else if (ActiveQueuedTextQuest <> nil) and (ActiveQueuedTextQuest.FailureCaption <> '') then
-    PlanetQuestScreen.AddChoice(
-        ' - ' + ActiveQueuedTextQuest.FailureCaption,
-        0,
-        PlanetQuestScreen.CompleteQuestFailure
-    )
-  else
-    PlanetQuestScreen.AddChoice(
-        '  - ' + LocalizedText('Planet.NotCivil.QuestPlay.MsgFail'),
-        0,
-        PlanetQuestScreen.CompleteQuestFailure
-    );
+  Result := Screen.ConfirmQuestDeath;
 end;
 
-procedure TTextQuestPlayerInterface.AddPathAction(Text: WideString; PathId: Integer);
+procedure TPlanetQuestView.EndQuest(Outcome: TQuestRunOutcome);
 begin
-  PlanetQuestScreen.AddChoice(
-      '  - ' + PlanetQuestScreen.ExpandTemplateText(Text),
-      PathId,
-      PlanetQuestScreen.ContinueAlongPath
-  );
+  Screen.EndQuest(Outcome);
 end;
 
-procedure TTextQuestPlayerInterface.AddDisabledPath(Text: WideString);
-begin
-  PlanetQuestScreen.AddDisabledChoice(
-      '  - ' + PlanetQuestScreen.ExpandTemplateText(Text),
-      0,
-      PlanetQuestScreen.IgnoreChoice
-  );
-end;
-
-procedure TTextQuestPlayerInterface.AddPathContinueAction(PathId: Integer);
-begin
-  PlanetQuestScreen.AddChoice(
-      '  - ' + LocalizedText('Planet.NotCivil.QuestPlay.MsgContinue'),
-      PathId,
-      PlanetQuestScreen.ContinueAlongPath
-  );
-end;
-
-procedure TTextQuestPlayerInterface.AddLocationContinueAction(LocationId: Integer);
-begin
-  PlanetQuestScreen.AddChoice(
-      '  - ' + LocalizedText('Planet.NotCivil.QuestPlay.MsgContinue'),
-      LocationId,
-      PlanetQuestScreen.ContinueToLocation
-  );
-end;
-
-procedure TTextQuestPlayerInterface.AdvanceDays(Days: Integer);
-var
-  I: Integer;
-begin
-  PlanetQuestScreen.ExportMoneyToPlayer;
-  PlanetQuestScreen.ExportExternalParameters;
-  for I := 1 to Days do
-  begin
-    Inc(PlanetQuestScreen.DaysElapsed);
-    // The native standalone path stops after one increment, even when Days is greater than one.
-    if StandaloneQuestMode then
-      Break;
-    WaitForTurnCalculation;
-    PruneMessages;
-    CalculatePlayerStarTurnAndWait;
-    if ExitScreenLoop then
-      Break;
-    QueueGalaxyTurnCalculation;
-    PlanetQuestScreen.ImportMoneyFromPlayer;
-    PlanetQuestScreen.ImportExternalParameters;
-  end;
-end;
 
 procedure TfPlanetQuest.ExecuteUiCode(Block: TBlockParEC; Key: Cardinal);
 begin
