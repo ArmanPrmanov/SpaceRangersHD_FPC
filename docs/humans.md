@@ -439,16 +439,22 @@ quest starts, `TQuestRun.OwesDays`):
   planet quest is refused when the planet's quest is gone or the human holds none to it
   (`offer-gone`), or another human plays it (`in-use`); the run then does not start. The
   lock is `THuman.TextQuestOpen` and `TextQuestPlanetId`, session state that is not saved;
-  `CloseQuest` releases it. A government offers no planet quest whose planet another human's
-  quest targets (`GenerateQuestOffer`, in the `RequestQuest` executor).
+  `CloseQuest` releases it, and so do a host's disconnect of the human and a load (a
+  client's every state). A government offers no planet quest whose planet another human's
+  quest targets (`GenerateQuestOffer`, in the `RequestQuest` executor). The planet screens
+  say who plays the planet's quest and offer no start (`TextQuestHolder`; on a networked
+  client from the host's relay, [network.md](network.md), Trades).
 - **Script quests are per human** (Scripts, above).
 - **A death respawns** (Respawn and game end, above).
 - **No reload or exit.** The quest screen ignores Escape, its exit button and `R`, and shows
   no "load the autosave?" box; a quest ends by its own choices. A networked client writes no
   autosave before a quest (the host, and hot-seat, still do).
 
-The network flow, the status and the watchers are later phases of
-[the plan](progress/2026-10-19-text-quests-plan.md). The film-end steps of a day (landing wear, the black-hole scripts) run
+In a networked session (Phase C of [the plan](progress/2026-10-19-text-quests-plan.md);
+[network.md](network.md), Waiting and Disconnects) the waits name a human in a quest and
+one busy with a quest's days, the planet screen of a human who owes days ends its turns by
+itself, and a client that reconnects in the middle of a quest abandons it. Watching
+another human's quest is a later phase. The film-end steps of a day (landing wear, the black-hole scripts) run
 for the human whose film it was. A human who is not local while its ship lands or docks does
 not see the landing; the next turn opens the planet or station screen.
 

@@ -28,7 +28,11 @@ has got.
 - Text quests in multiplayer (2026-10-19): the plan; Phase A done (the
   quest run out of the screen, `--sim-text-quest`); Phase B done (the rules
   in the game layer: always on, owed quest days, respawn on a death, the
-  `BeginTextQuest` lock, script quests per human). Next: Phase C.
+  `BeginTextQuest` lock, script quests per human); Phase C done (the network
+  flow: protocol 10, `Status` with each human's quest activity and owed days,
+  the waits, the quest screen as a game screen, the lock relayed and released
+  on a disconnect, a reconnect abandons the quest; `--sim-net-quest`). Next:
+  Phase D (pages to the watchers).
 - Latest entry: [2026-10-19-text-quests-plan.md](2026-10-19-text-quests-plan.md)
 
 ## Session entry format

@@ -329,6 +329,10 @@ begin
     // CHANGE: ENHANCEMENT - One human at a time plays a planet's quest (HeadlessSim.RunQuestLock).
     else if Argument = '--sim-quest-lock' then
       Simulation.QuestLock := True
+    // CHANGE: ENHANCEMENT - A client plays a text quest in a networked session (HeadlessNet); a
+    // replay of the host's log with the same flag knows the quest probe.
+    else if Pos('--sim-net-quest=', Argument) = 1 then
+      Simulation.NetQuestDay := StrToInt(Copy(Argument, 17, MaxInt))
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then
@@ -740,6 +744,8 @@ begin
         Stage('command replay');
         if Simulation.NetTalkDay > 0 then
           InstallNetTalkProbe(Simulation.NetTalkDay);
+        if Simulation.NetQuestDay > 0 then
+          RegisterNetQuestProbe;
         System.ExitCode := RunCommandReplay(Replay);
       end
       else if SimulationMode then

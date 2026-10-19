@@ -69,7 +69,11 @@ once per message-loop iteration.
   waits on `NetInboxEvent`: the star map waits on the platform shim's handles
   (`platform/Windows.pas`), which a `TEvent` handle is not. The host takes no
   join, leave or state while a screen that has no game (the menus, a load, a
-  new game, a text quest, an arcade battle) or a memory snapshot is up.
+  new game, the main menu's text quest, an arcade battle) or a memory snapshot
+  is up. A game's text quest is a game screen (`NetPlay.NoGameScreen`; the quest
+  is not in the galaxy): the host takes joins, leaves and trades while its own
+  human plays one, and a client in one runs the relays and shows the reconnect
+  box.
 - **The host's pump while a job runs** only moves messages into the queues:
   new peers wait for the job (the turn thread reads the peer list in
   `HostStarDay`), and so does `Status` (a job may free a ranger whose name it
@@ -113,8 +117,12 @@ the human whose answer to a dialogue the day waits for; 4: `NewHuman` and
 for it, and `CommandResult`; 7: the host applies a trade as it arrives and
 answers it, also when it applied it, and `RelayCommand`, Trades; 8:
 `RelayCommand` carries a ship screen sale as its effect, `RelayedSale`, Trades;
-9: `Hello` and `Welcome` carry the reconnection token, and `Ping`, Disconnects).
-| `Status` | host → client | per human: id, name, connected, holds the day; whether a day is running; the human whose answer to a dialogue the day waits for (0: none) |
+9: `Hello` and `Welcome` carry the reconnection token, and `Ping`, Disconnects;
+10: `Status` carries each human's text-quest activity and the days it owes for a
+quest, Waiting). The text quests plan
+([progress/2026-10-19-text-quests-plan.md](progress/2026-10-19-text-quests-plan.md))
+adds `QuestPage` (18) in its Phase D.
+| `Status` | host → client | per human: id, name, connected, holds the day, its text-quest activity (a byte: 0 none, 1 plays one, 2 owes days for one) and the days it owes; whether a day is running; the human whose answer to a dialogue the day waits for (0: none) |
 | `TalkRequest` | host → client | human id, ship id, planet id (0: none), scripted, talk kind, amount, text: the human's talk fields (Remote dialogue) |
 | `TalkDone` | client → host | nothing: the client's answer is complete, or it cannot show the talk |
 | `Chat` | both | sender human id, text; the host relays it to every client |
@@ -398,6 +406,18 @@ humans at the same planet or station see it before the next state.
   a peer (`IsHostOnlyCommand`). The purchases and `TradeGoods` (counts on the
   goods screen's own cargo) are relayed as themselves; they run on the
   client's copy as on the host's.
+- **A text quest's start goes as its lock.** `BeginTextQuest` (609, a trade:
+  one human at a time plays a planet's quest, [commands.md](commands.md)) is
+  relayed as a `RelayedTextQuest` (610, relay only;
+  `aQuestActions.RelayedTextQuestOf`) with the same arguments, which sets the
+  actor's lock (`THuman.TextQuestOpen`, `TextQuestPlanetId`) without the
+  checks: the host made them, and a client's copy need not have the actor's
+  quest (an offer of the same day, or a probe). So the planet screens of the
+  other humans there say who plays the planet's quest and offer no start
+  (`aQuestActions.TextQuestHolder`, `NetPlay.TextQuestTakenText`), until the next
+  state. A client's own `BeginTextQuest`, which runs there only once the host
+  applied it, does not check another human's lock: one it knows of is a relay
+  the host may have released since.
 - **A client runs a relayed trade** as its human, through the executor
   (`aCommands.ExecuteRelayedCommand`: no hook, and what it submits from inside
   goes nowhere), only at a safe point: the frame pump with
@@ -736,7 +756,12 @@ an English fallback, as `Multiplayer.Turn` does: `Multiplayer.Waiting`
 `Multiplayer.DayRuns`, `Multiplayer.WaitingHost`, `Multiplayer.WaitingPlayers`,
 `Multiplayer.WaitingTalk` ("Waiting for <Players> to answer a hail."),
 `Multiplayer.CancelEndTurn` ("Cancel: take your end turn back."),
-`Multiplayer.CancellingEndTurn` ("Taking your end turn back..."), the join's `Multiplayer.JoinConnecting`, `JoinWaiting`, `JoinReceivingStart`,
+`Multiplayer.CancellingEndTurn` ("Taking your end turn back..."), the text
+quests' `Multiplayer.InTextQuest` ("(text quest)" after the name of a human the
+day waits for who plays one), `Multiplayer.QuestBusy` ("<Players> is busy with a
+text quest for <Days> more days."), `Multiplayer.QuestTaken` ("<Players> is
+playing this quest.", the planet screens) and `Multiplayer.QuestAbandoned` (a
+bubble, Disconnects), the join's `Multiplayer.JoinConnecting`, `JoinWaiting`, `JoinReceivingStart`,
 `JoinReceiving`, the reconnect's `Multiplayer.Reconnecting` ("The connection to
 the host is lost. Reconnecting... (<Seconds> s)"), and for the main menu
 `Multiplayer.Refused`, `Multiplayer.Lost`, `Multiplayer.HostLeft`,
@@ -747,6 +772,25 @@ mod's `Mods\<mod>\CFG\<language>\Lang.dat` is merged into it
 ships no data files of its own (the build places the executable and its
 libraries only), and a mod the players must select is not a fit for a few
 texts, so the English fallbacks stay.
+
+**Text quests** ([progress/2026-10-19-text-quests-plan.md](progress/2026-10-19-text-quests-plan.md),
+The day). A human who plays a text quest has not ended its turn, so the day
+waits for it, and the waits say so ("Waiting for Guest (text quest)."): the
+host knows it from the lock its `BeginTextQuest` left there, which runs on the
+host as it arrives, until its barrier applies the quest's `CloseQuest`. In a
+session a quest runs no galaxy day; the human owes its days
+(`THuman.QuestDaysOwed`) and holds no day while it does, and the waits name it
+on a line of its own ("Guest is busy with a text quest for 3 more days."). Its
+`EndTurn` for the quest's own day still goes: the quest's `CloseQuest` ran on
+the client, so its copy owes the days already, but the host's has them only
+once its barrier applies that `CloseQuest`, and its day waits for the `EndTurn`
+until then (`NetPlay.ClientQuestDayEnds`: the last state said the human owes
+none, `TNetClient.StateQuestDays`). A human who owes days cannot take an end
+turn back (`MayCancelEndTurn`). Its planet screen (`TfPlanet`, `TfPlanetNO`, a
+poll every 250 ms, `NetScreenPollMs`) ends its turns by itself while it owes
+days (`NetQuestDayDue`), as the star map's automatic continue does: on the host
+each ends the day once the peers are ready, on a client each waits for the next
+state and sends nothing (the host does not wait for it).
 
 A client that loses its host, or is refused, shows why on the main menu and
 the session ends there. A client that loses its host while it plays its turn
@@ -978,6 +1022,19 @@ of the executing command, or the script's human), not the host's.
   ends ("could not reconnect within 60 s: <the last try's error>", logged
   `client reconnect failed after= ms tries=`), and when the player cancels. It
   says `Bye` on a connection that is up.
+- **A text quest** ([progress/2026-10-19-text-quests-plan.md](progress/2026-10-19-text-quests-plan.md),
+  Disconnects). The host drops a peer's queue with the peer, so a quest the
+  peer's human was playing never happened there: only its `BeginTextQuest`,
+  which applied as it came, did, and the host releases that lock when it
+  disconnects the human (`net human N (name) abandoned its text quest
+  planet=`). A client that reconnects in the middle of a quest abandons it
+  once the state after the reconnect has come: the quest screen
+  (`NetPlay.ClientQuestScreen`) closes without `CloseQuest`
+  (`TQuestRun.Abandon`), the state is applied, and a bubble says the quest was
+  abandoned and can be started again (`Multiplayer.QuestAbandoned`); the
+  planet's quest is still in the state. A client that cannot reconnect leaves
+  the quest for the main menu the same way. The reconnect box opens over the
+  quest screen as over any game screen.
 - Humans in a save that the host loads start disconnected, except the host's.
 - `Connected` is not saved; it is session state, not game state.
 
@@ -1215,6 +1272,28 @@ The headless runner (`HeadlessNet`):
   client has the state, it stops hosting as the in-game menu does
   (`DisconnectHumans`, then `Bye`) and prints `net host stopped hosting day=
   tick=`.
+- **Text quests** (`--sim-net-quest=DAY`, host and clients; docs/progress/
+  2026-10-19-text-quests-plan.md, Phase C): on its DAY-th turn a client plays a
+  text quest with the headless quest player (`HeadlessQuest`) instead of its
+  turn and ends the turn: the planet quest a probe command gives it at its
+  planet (`NetQuestProbe`, 1003, registered with the flag, also by the replay),
+  or with `--sim-text-quest=NAME` that quest by name. The host lands every client
+  at the first one's planet and prints `net host wait day= text=` when its wait
+  names a quest and `net host quest begun= barrier= closed= early=` at the end
+  (the remote humans' `BeginTextQuest`s, the quest commands its barrier applied,
+  the `CloseQuest`s among them, and those applied anywhere else); a client
+  prints `net client quest open|status|done|owed ...`, the wait its host's status
+  gives (`net client wait human= text=`, through `NetClient.ClientStatusHook`),
+  and its day lines say `quest-days=`. A client but Net1 tries once the status
+  says another human plays a quest: `net client quest holder` names who holds
+  the planet's (the relay), and its `BeginTextQuest` must be refused `in-use`.
+  With `--sim-net-silent-at` the client goes silent after one choice of its
+  quest instead of before a turn, reconnects, abandons the quest (`net client
+  quest abandoned`) and checks the quest is still there after the state (`net
+  client quest after rejoin`). `tools/test.py` runs three of these per save: two
+  clients (the lock, the barrier, the waits, the replay), one with the prison
+  quest by name (the days owed count down while the host runs the days, the
+  replay), one silent.
 - **The talk probe** (`--sim-net-talk=DAY`, `HeadlessNet.InstallNetTalkProbe`):
   from the DAY-th day the player-star job runs, right after the day of the first
   filmed star that holds remote humans who can be asked, the first ship of that
@@ -1293,3 +1372,8 @@ star's film once; every client in that star gets it.
   after 10 s and get the answer later (Trades).
 - `ContinueUntilArrival` and `EndedTurn` are not in a state; this is harmless
   (The day).
+- Text quests: no one can watch another human's quest yet (the plan's Phases D
+  and E); the planet screens' "is playing this quest" and the automatic owed
+  days are not run by the tests (they need the screens). A released prisoner who
+  owes days takes off as in single player, and the star map then ends its turns
+  only when the player does.

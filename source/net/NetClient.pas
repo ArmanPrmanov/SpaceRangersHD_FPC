@@ -150,6 +150,10 @@ type
     FCancelState: TNetCancelState;
     FCancelSequence: Cardinal;
     FCancelCommand: TPlayerCommand;
+    // CHANGE: ENHANCEMENT - The game days this client's human owed for a text quest in the last
+    // state applied (THuman.QuestDaysOwed): the host's day waits for the human's end turn only
+    // when it was 0.
+    FStateQuestDays: Integer;
     procedure HandleMessage(Kind: TNetMessageKind; Payload: TBufEC);
     procedure ShowRefusal(const Refusal: TCommandResultMessage);
     procedure TakeLateTrade(const CommandResult: TCommandResultMessage);
@@ -301,6 +305,11 @@ type
     property HostSaidBye: Boolean read FHostSaidBye;
     property Status: TStatusMessage read FStatus;
     property Error: AnsiString read FError;
+    // CHANGE: ENHANCEMENT - The days this client's human owed for a text quest in the last state
+    // applied (docs/progress/2026-10-19-text-quests-plan.md, The day). A quest played since
+    // then owes more here already, but the host's copy has its days only once its barrier has
+    // applied the quest's CloseQuest: until then the host's day waits for the human's EndTurn.
+    property StateQuestDays: Integer read FStateQuestDays;
   end;
 
 var
@@ -317,6 +326,9 @@ var
   // CHANGE: ENHANCEMENT - How long a client that lost its host tries to connect again
   // (docs/network.md, Disconnects); a variable, so that the tests can shorten it.
   NetReconnectMs: Integer = 60000;
+  // CHANGE: ENHANCEMENT - For the tests: told after each Status the host sent (TNetClient.Status
+  // has it), wherever the client pumps (docs/network.md, Tests).
+  ClientStatusHook: procedure;
 // NetworkCommandHook of a client: sends the command to the host.
 procedure ClientCommandSubmitted(const Command: TPlayerCommand);
 // CHANGE: ENHANCEMENT - aCommands.TradeSubmitHook of a client (TNetClient.SendTrade).
@@ -699,6 +711,9 @@ var
   Reference: TBufEC;
   CommandResult: TCommandResultMessage;
   Relayed: TNetRelayedCommand;
+  Previous: TStatusMessage;
+  I, J: Integer;
+  Changed: Boolean;
 begin
   case Kind of
     nkWelcome:
@@ -796,10 +811,33 @@ begin
       end;
     nkStatus:
       begin
+        Previous := FStatus;
         FStatus := DecodeStatus(Payload);
+        // CHANGE: ENHANCEMENT - The log says when a human starts or ends a text quest, or the
+        // days it owes for one change (docs/progress/2026-10-19-text-quests-plan.md, The day).
+        for I := 0 to High(FStatus.Humans) do
+        begin
+          // A human not in the last status is new here: said only when it is in a quest.
+          Changed := FStatus.Humans[I].Activity <> saNone;
+          for J := 0 to High(Previous.Humans) do
+            if Previous.Humans[J].Id = FStatus.Humans[I].Id then
+              Changed :=
+                  (Previous.Humans[J].Activity <> FStatus.Humans[I].Activity)
+                      or (Previous.Humans[J].QuestDays <> FStatus.Humans[I].QuestDays);
+          if Changed then
+            NetLog(
+                Format(
+                    'status human=%d activity=%d quest-days=%d holds=%d',
+                    [FStatus.Humans[I].Id, Ord(FStatus.Humans[I].Activity), FStatus.Humans[I].QuestDays,
+                        Ord(FStatus.Humans[I].HoldsDay)]
+                )
+            );
+        end;
         // CHANGE: ENHANCEMENT - The waits say whose answer the day waits for; the log too.
         if FStatus.TalkHumanId <> 0 then
           NetLog(Format('the day waits for human %d to answer a hail', [FStatus.TalkHumanId]));
+        if Assigned(ClientStatusHook) then
+          ClientStatusHook;
       end;
     nkChat:
       with DecodeChat(Payload) do
@@ -1156,6 +1194,7 @@ begin
   if (Human = nil) or (Human.Player = nil) then
     raise Exception.CreateFmt('The host''s state has no human %d', [FHumanId]);
   SetLocalHuman(Human);
+  FStateQuestDays := Human.QuestDaysOwed;
   // CHANGE: ENHANCEMENT - The state came after the refusals of the day's commands.
   for I := 0 to High(FShownRefusals) do
     ShowRefusal(FShownRefusals[I]);

@@ -29,15 +29,26 @@ type
     procedure RefreshTextQuestPrompt;
     procedure EndTurnClicked(Sender: TObjectGI);
     procedure MainPanelKeyDown(Sender: TObjectGI; Key: Cardinal);
+  public
+    // CHANGE: ENHANCEMENT - In a networked game (NetPlay; docs/progress/
+    // 2026-10-19-text-quests-plan.md, Phase C) a poll: the quest prompt follows another human's
+    // lock on the planet's quest (QuestHolderShown: the holder it shows), and a human who owes
+    // days for a text quest ends its turns by itself (NetQuestDayDue).
+    NetPollTimer: PCallbackTimerGI;
+    QuestHolderShown: TObject;
+    procedure ScheduleNetPoll;
+    procedure NetPoll(Timer: PCallbackTimerGI; UserData: PtrInt);
   end;
 procedure LinkRecoveredTypes;
 implementation
 uses
   NetSession,
+  NetPlay,
+  aHuman,
+  aQuestActions,
   aPlayerActions,
   aPlanetActions,
   aSession,
-  aHuman,
   Math,
   aCalc,
   Classes,
@@ -190,10 +201,45 @@ begin
   if LocalPlayer <> nil then
     RunScriptItemsAct(LocalPlayer, satOnEnteringForm, nil, nil, 0);
   aCalc.WaitForTurnCalculationUI;
+  ScheduleNetPoll;
+end;
+
+procedure TfPlanet.ScheduleNetPoll;
+begin
+  if (NetPollTimer = nil) and (NetRole <> nrNone) and (ExitCode = 0) then
+    NetPollTimer := ScheduleCallbackTimer(NetScreenPollMs, NetScreenPollMs, NetPoll);
+end;
+
+procedure TfPlanet.NetPoll(Timer: PCallbackTimerGI; UserData: PtrInt);
+begin
+  if NetPollTimer <> nil then
+  begin
+    CancelCallbackTimer(NetPollTimer);
+    NetPollTimer := nil;
+  end;
+  if (ExitCode <> 0)
+      or (NetRole = nrNone)
+      or (LocalPlayer = nil)
+      or (LocalPlayer.CurrentPlanet = nil) then
+    Exit;
+  // Only with nothing above the screen: no box, no dialogue.
+  if ChildLoop = nil then
+  begin
+    if TextQuestHolder(LocalPlayer.CurrentPlanet, LocalHuman) <> QuestHolderShown then
+      RefreshTextQuestPrompt;
+    if NetQuestDayDue and GetByName('PM_EndTurn').Active then
+      EndTurnClicked(nil);
+  end;
+  ScheduleNetPoll;
 end;
 
 procedure TfPlanet.OnClose;
 begin
+  if NetPollTimer <> nil then
+  begin
+    CancelCallbackTimer(NetPollTimer);
+    NetPollTimer := nil;
+  end;
   aCalc.WaitForTurnCalculationUI;
   if LocalPlayer <> nil then
     RunScriptItemsAct(LocalPlayer, satOnLeavingForm, nil, nil, 0);
@@ -306,7 +352,12 @@ var
   QuestNumber, I: Integer;
   Quest: PQuest;
   Text: WideString;
+  Holder: THuman;
 begin
+  // CHANGE: ENHANCEMENT - Another human plays the planet's quest (docs/progress/
+  // 2026-10-19-text-quests-plan.md, The lock): the prompt says so and offers no start.
+  Holder := TextQuestHolder(LocalPlayer.CurrentPlanet, LocalHuman);
+  QuestHolderShown := Holder;
   QuestNumber := -1;
   Window := GetByName('QuestInfo') as TWindowGI;
   Quest := nil;
@@ -364,6 +415,8 @@ begin
       ReplaceTextToken(Text, '<FromPlanet>', Quest.Planet.Name, '<color=255,240,100>');
       ReplaceTextToken(Text, '<FromStar>', Quest.Planet.CurrentStar.Name, '<color=255,240,100>');
     end;
+    if Holder <> nil then
+      Text := Text + #13#10 + TextQuestTakenText(Holder);
     SetText(Text);
     Window.SetSize(
         Classes.Point(
@@ -386,6 +439,7 @@ begin
   with GetByName('QuestInfo_Run') as TGraphButtonGI do
   begin
     UpCallback := StartTextQuest;
+    SetActive(Holder = nil);
     Window.SetSize(
         Classes.Point(Window.ClientSize.X, ClientSize.Y + Window.ClientSize.Y + GiScalePixels(5))
     );

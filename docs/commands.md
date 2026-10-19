@@ -151,7 +151,7 @@ the screen.
 | `aHoldActions` (the ship screen) | `SellHeld` (225), `RepairHeld`, `RefuelHeld`, `ReloadHeld`, `RepairAll`, `BuyRockets`, `SellHoldInventory`, `SellHoldArtefact`, `SellHoldGoods`, `SellStoredItem` |
 | `aStationActions` | `PayForModernization` (520), `BuyPirateNodes` (532), `BuySatellite` (552), `Invest` (565), `BuySpecialShip` (574), `BuildPirateShip` (580) |
 | `aPlanetActions` | `BuyMap` (413) |
-| `aQuestActions` | `BeginTextQuest` (609): the start of a text quest, which one human at a time may play per planet ([humans.md](humans.md), Text quests); its wrapper catches the refusal itself, and the quest does not start |
+| `aQuestActions` | `BeginTextQuest` (609): the start of a text quest, which one human at a time may play per planet ([humans.md](humans.md), Text quests); its wrapper catches the refusal itself, and the quest does not start. Only a planet quest is refused by the game: a prison, queued or named quest that a networked client's host did not answer starts all the same (`TQuestRun.BeginRun`) |
 
 `RelayedSale` (254, `aHoldActions`) is no player's command: a host relays a
 ship screen sale as it (the location, the actor's money, the items put into the
@@ -159,7 +159,10 @@ shop and the goods sold; [network.md](network.md), Trades), because the sale
 runs on what the hold commands before it, which are not relayed, put in the
 actor's hand. It is registered with `RegisterRelayCommand`: only
 `ExecuteRelayedCommand` runs it, `SubmitCommand` raises for it (so the command
-log never records it), and a host refuses it from a peer.
+log never records it), and a host refuses it from a peer. So is
+`RelayedTextQuest` (610, `aQuestActions`): the relay of a `BeginTextQuest`, with
+its arguments, which only sets the actor's lock (the host made the checks;
+[network.md](network.md), Trades).
 
 `CancelEndTurn` (47, `aPlayerActions`) takes an end turn back while the day
 waits for others: its executor clears the actor's `EndedTurn` and

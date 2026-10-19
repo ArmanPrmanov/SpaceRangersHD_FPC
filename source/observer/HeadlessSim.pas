@@ -111,6 +111,12 @@ type
     // CHANGE: ENHANCEMENT - --sim-quest-lock: two humans hold the quest of one planet; one at a
     // time plays it (RunQuestLock).
     QuestLock: Boolean;
+    // CHANGE: ENHANCEMENT - --sim-net-quest=DAY (HeadlessNet; docs/progress/
+    // 2026-10-19-text-quests-plan.md, Phase C): on its DAY-th turn a client plays a text quest
+    // with the headless quest player before its end turn: the planet quest a probe command gives
+    // it at its planet, or with TextQuest that quest by name. The host lands every client at the
+    // first one's planet, and a replay of its log registers the probe.
+    NetQuestDay: Integer;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 // Shared with the networked runner (HeadlessNet).
@@ -125,6 +131,9 @@ procedure SellToShop(Human: THuman; Item: TItem);
 // as the ship screen does; the ship screen is open (SellToShop left it open).
 procedure SellFromStorage(Human: THuman; Item: TItem);
 function IsTradedBack(Item: TItem): Boolean;
+// CHANGE: ENHANCEMENT - Gives Human a government planet quest to Planet (a TPlanet whose
+// TextQuestId is set), as AcceptQuest gives the offer; shared with HeadlessNet's quest probe.
+procedure GiveProbePlanetQuest(Human: THuman; Planet: TObject);
 var
   // CHANGE: ENHANCEMENT - PlayHumanTurn buys one unit of the good with the smallest stock the
   // human could buy whole, when there is one (NetBuyRace).
@@ -3439,18 +3448,19 @@ begin
   Emit(Format('done text-quest day=%d', [Galaxy.CurrentTurn]));
 end;
 
-// Gives Human a government planet quest to Planet, as AcceptQuest gives the offer.
-procedure GiveProbePlanetQuest(Human: THuman; Planet: TPlanet);
+procedure GiveProbePlanetQuest(Human: THuman; Planet: TObject);
 var
   Quest: PQuest;
+  Target: TPlanet;
 begin
+  Target := Planet as TPlanet;
   New(Quest);
   Quest.QuestType := qtPlanetQuest;
-  Quest.QuestNumber := Word(Planet.TextQuestId);
-  Quest.Planet := Planet;
+  Quest.QuestNumber := Word(Target.TextQuestId);
+  Quest.Planet := Target;
   Quest.DeadlineTurn := Galaxy.CurrentTurn + 100;
   Quest.RewardMoney := 1000;
-  Quest.ObjectiveTarget := Planet;
+  Quest.ObjectiveTarget := Target;
   Quest.Successful := False;
   Quest.Description := 'Probe';
   Quest.CompletionText := '';

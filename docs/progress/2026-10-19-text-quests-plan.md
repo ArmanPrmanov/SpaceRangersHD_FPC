@@ -1,10 +1,10 @@
 # 2026-10-19 — Text quests in multiplayer: plan
 
 - Done: the plan; Phase A (the quest run out of the screen, the headless
-  quest player); Phase B (the multiplayer rules in the game layer). See their
-  notes below.
+  quest player); Phase B (the multiplayer rules in the game layer); Phase C
+  (the network flow, waits and disconnects). See their notes below.
 - In progress: nothing.
-- Next: Phase C, then D to F in order, one subagent at a time.
+- Next: Phase D, then E and F in order, one subagent at a time.
 - Notes: the owner asked for text quests in multiplayer, with the other
   players able to watch a quest but not act in it. This entry is the plan.
   The decisions marked **Owner** have the owner's answers (2026-10-19), in
@@ -572,6 +572,78 @@ its own progress entry.
   `in-use`. With `--sim-net-silent-at` on the quest day: the client
   abandons, gets its human back, and the quest is still there
   (`TextQuestId` set).
+
+#### Phase C notes (done)
+
+- **The quest screen is a game screen** (`NetPlay.NoGameScreen`): `NoGameScreens`
+  lost `screenPlanetQuest`, which counts as no game only for the main menu's quest
+  (no galaxy or player, or `StandaloneQuestMode`). So the host takes joins, leaves and
+  trades while its own human plays one, a client in one runs the relays, and the
+  reconnect box opens over it.
+- **Protocol 10.** `TStatusHuman` has `Activity` (`TStatusActivity`: `saNone`,
+  `saInTextQuest`, `saQuestDays`; a byte) and `QuestDays` (`THuman.QuestDaysOwed`), after
+  `HoldsDay`. The host takes "in a quest" from the lock (`THuman.TextQuestOpen`), which
+  its `BeginTextQuest` sets on the host as it arrives (the host's own human's at once)
+  and the barrier's `CloseQuest` clears: so between a client's quest end and the
+  barrier the status still says 1, but the human's `EndTurn` is queued then and the
+  day does not wait for it, so no wait names it. Phase D's `QuestPage` (kind 18) can go
+  under 10 or bump to 11; nothing reads the version but `Hello`.
+- **Waits** (`NetPlay.HostWaitText`, `ClientWaitText`, both now exported for the
+  tests): a human the day waits for who plays a quest is named "Name (text quest)"
+  (`Multiplayer.InTextQuest`); a human who owes days gets a line "Name is busy with a
+  text quest for N more days." (`Multiplayer.QuestBusy`); English fallbacks as the
+  other texts. The client logs each change of a human's activity in the status (`net
+  status human= activity= quest-days= holds=`).
+- **The quest's own day.** Found on the way: a client's `CloseQuest` runs there at once
+  (the prediction), so its copy owes the days and `EndTurn` sent nothing, while the
+  host's copy has the days only after its barrier and waits for that `EndTurn`: a
+  deadlock. `NetEndTurn` now sends the `EndTurn` itself in that case
+  (`ClientQuestDayEnds`: the human owes days here, the last state said it owed none,
+  `TNetClient.StateQuestDays`, and it has not ended this turn). On later owed days it
+  sends nothing: a stale `EndTurn` in the host's queue would end the human's first
+  turn after the days.
+- **Owed days** (`NetPlay.NetQuestDayDue`, `MayCancelEndTurn` false while the human
+  owes days): `TfPlanet` and `TfPlanetNO` poll every 250 ms (`NetScreenPollMs`) in a
+  session, with nothing above them, and end the turn by themselves while the local
+  human owes days, through their own `EndTurnClicked`: the host's then waits for its
+  peers and runs the day, a client's waits for the next state, which reopens the
+  screen. The same poll refreshes the quest prompt when the planet's lock changes.
+- **The planet screens' grey-out.** A `BeginTextQuest` is relayed as
+  `RelayedTextQuest` (610, relay only, `aQuestActions.RelayedTextQuestOf`), which sets
+  the actor's lock without the checks: relayed as itself it failed on the other
+  clients, whose copies do not have the actor's quest (`offer-gone`). The prompt shows
+  "Name is playing this quest." (`Multiplayer.QuestTaken`, `TextQuestTakenText`) and
+  hides its start button (`aQuestActions.TextQuestHolder`). A client's own
+  `BeginTextQuest`, which runs there only after the host applied it, no longer checks
+  other humans' locks (a relayed one may be stale after a disconnect).
+- **Disconnects.** `TNetHost.DisconnectHuman` releases a human's lock (`net human N
+  (name) abandoned its text quest planet=`); its queue goes with the peer as before, so
+  the quest's commands after `BeginTextQuest` never apply. A client whose rejoin state
+  comes while its quest screen runs (`ClientQuestScreen`) abandons the quest
+  (`TfPlanetQuest.AbandonQuest`, `TQuestRun.Abandon`: no `CloseQuest`), applies the
+  state and shows `Multiplayer.QuestAbandoned` as a bubble after it; a client whose
+  reconnect fails leaves the quest for the main menu the same way.
+- **Phase B's edge case.** A prison, queued or named quest whose `BeginTextQuest` is
+  refused (only a networked client's unanswered trade can refuse it) now starts all
+  the same (`TQuestRun.BeginRun`), instead of returning to a screen that would open the
+  quest again. `TQuestRun.Close` sends no `CloseQuest` for a refused run.
+- **Tests.** `--sim-net-quest=DAY` (host, clients, and the replay, which registers the
+  probe `NetQuestProbe`, 1003): see docs/network.md, Tests. `tools/test.py`
+  (`check_network_quests`) runs per save: two clients at one planet (Net1 plays the
+  planet quest; the host's status says `activity=1`; its barrier applies the quest's
+  commands, `net host quest begun=1 barrier= closed=1 early=0`; the host's and Net2's
+  waits say "(text quest)"; Net2 sees the relayed lock and is refused `in-use`; hashes
+  and the host's log replay), one client playing `Prison` by name (owes 23 days on
+  AutoSave: each state owes one less, the host runs its days without it and its wait
+  says it is busy; hashes, replay), and one client silent after one choice (the host
+  times it out and releases the lock, its barrier applies none of the quest; the
+  client abandons the quest after the reconnect and the planet's quest is still there).
+  `HeadlessQuest` gained `Step`; `GiveProbePlanetQuest` is shared from `HeadlessSim`;
+  the client's day line has `quest-days=`; `NetClient.ClientStatusHook` is for the
+  tests.
+- Left: the watchers (Phases D and E). A released prisoner who owes days still takes
+  off (`HangarScreen.TryTakeOff`), and the star map ends its turns only when the player
+  does; the screens' poll, grey-out and abandon box are hand checks.
 
 ### Phase D — Pages to the watchers
 

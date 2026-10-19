@@ -36,6 +36,10 @@ type
     procedure Start(const Name: WideString);
     function OpenVisit: Boolean;
     function Finish: TQuestRunOutcome;
+    // CHANGE: ENHANCEMENT - Plays one choice, as Finish does; False when the quest has ended,
+    // the page has no enabled choice or MaxQuestSteps choices have been played. For a probe
+    // that leaves the quest in the middle (HeadlessNet, a client that loses its host).
+    function Step: Boolean;
     procedure FinishPage; override;
     procedure ShowError(const Text: AnsiString); override;
   end;
@@ -141,31 +145,38 @@ begin
   RaisePendingWorkerError;
 end;
 
-function THeadlessQuestPlayer.Finish: TQuestRunOutcome;
+function THeadlessQuestPlayer.Step: Boolean;
 var
   Enabled, Pick, I: Integer;
 begin
-  while Run.Page.Outcome = qroNone do
-  begin
-    Enabled := EnabledChoiceCount(Run.Page);
-    if (Enabled = 0) or (Steps >= MaxQuestSteps) then
-      Break;
-    ChooserState := ChooserState * 1664525 + 1013904223;
-    Pick := (ChooserState shr 8) mod Cardinal(Enabled);
-    for I := 0 to High(Run.Page.Choices) do
-      if Run.Page.Choices[I].Enabled then
+  Result := False;
+  if Run.Page.Outcome <> qroNone then
+    Exit;
+  Enabled := EnabledChoiceCount(Run.Page);
+  if (Enabled = 0) or (Steps >= MaxQuestSteps) then
+    Exit;
+  ChooserState := ChooserState * 1664525 + 1013904223;
+  Pick := (ChooserState shr 8) mod Cardinal(Enabled);
+  for I := 0 to High(Run.Page.Choices) do
+    if Run.Page.Choices[I].Enabled then
+    begin
+      if Pick = 0 then
       begin
-        if Pick = 0 then
-        begin
-          Inc(Steps);
-          Run.Choose(I);
-          Break;
-        end;
-        Dec(Pick);
+        Inc(Steps);
+        Run.Choose(I);
+        Break;
       end;
-    WaitForTurnCalculation;
-    RaisePendingWorkerError;
-  end;
+      Dec(Pick);
+    end;
+  WaitForTurnCalculation;
+  RaisePendingWorkerError;
+  Result := True;
+end;
+
+function THeadlessQuestPlayer.Finish: TQuestRunOutcome;
+begin
+  while Step do
+    ;
   Run.Close;
   WaitForTurnCalculation;
   RaisePendingWorkerError;

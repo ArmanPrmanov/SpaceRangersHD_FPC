@@ -95,8 +95,15 @@ TRADE_KINDS = {
 # The ship screen's sales: a host relays their effect (RelayedSale), never the sale itself
 # (docs/network.md, Trades).
 SHIP_SCREEN_SALES = {"SellHeld", "SellHoldInventory", "SellHoldArtefact", "SellHoldGoods", "SellStoredItem"}
-RELAYED_KINDS = (TRADE_KINDS - SHIP_SCREEN_SALES) | {"RelayedSale"}
+RELAYED_KINDS = (TRADE_KINDS - SHIP_SCREEN_SALES) | {"RelayedSale", "RelayedTextQuest"}
 NET_SHOP_DAYS = 3
+# Text quests in a session (docs/progress/2026-10-19-text-quests-plan.md, Phase C): a client plays
+# a text quest on its NET_QUEST_DAY-th turn (--sim-net-quest). With two clients, both at one
+# planet with a quest to it, the first plays it and the second's BeginTextQuest is refused
+# (NET_QUEST_REFUSAL); with one client it plays QUEST_HOTSEAT_QUEST by name and owes its days;
+# with one client that goes silent in the middle of its planet quest, it abandons the quest.
+NET_QUEST_DAY = 1
+NET_QUEST_REFUSAL = "in-use"
 # A networked process that runs longer than this has hung.
 NET_TIMEOUT = 600
 # Any other game run that takes longer than this has hung (the longest, 100 turns of a save,
@@ -594,6 +601,7 @@ def net_lines(output: str, prefix: str) -> list[dict[str, str]]:
 def run_network(
     args, binary: Path, save: Path | None, count: int, log: Path | None = None, leave: str = "",
     race: bool = False, nested: bool = False, shop: bool = False, cancel: bool = False,
+    quest: str = "",
 ):
     """One networked session: a host with `count` clients (Net1..NetN) for NET_DAYS days. Without
     a save the host plays a new game (--sim-new-game).
@@ -617,7 +625,10 @@ def run_network(
     trade there on their first day (--sim-net-shop), for NET_SHOP_DAYS days. With cancel, each
     client takes its end turn back before the first day, which the host holds for that, and once
     the second day has begun; then its end turns continue the travel, and it stops a continuing
-    travel before a day the host holds for that (--sim-net-cancel-end-turn). Returns (problem, host output, client
+    travel before a day the host holds for that (--sim-net-cancel-end-turn). With quest, each
+    client plays a text quest on its NET_QUEST_DAY-th turn (--sim-net-quest): "planet" for the
+    planet quest the probe gives it, else the quest of that name (--sim-text-quest); the host
+    lands every client at the first one's planet. Returns (problem, host output, client
     outputs); problem is '' when every process ended cleanly.
     """
     days = NET_SHOP_DAYS if shop else NET_DAYS
@@ -643,6 +654,12 @@ def run_network(
         host_options.append("--sim-net-shop")
     if cancel:
         host_options.append("--sim-net-cancel-end-turn")
+    quest_options = []
+    if quest:
+        quest_options.append(f"--sim-net-quest={NET_QUEST_DAY}")
+        if quest != "planet":
+            quest_options.append(f"--sim-text-quest={quest}")
+    host_options.extend(quest_options[:1])
     host = GameProcess(binary, args.game_dir, host_options)
     port_line = host.wait_line("net host port=", NET_TIMEOUT)
     if not port_line:
@@ -672,6 +689,7 @@ def run_network(
             options.append("--sim-net-shop")
         if cancel:
             options.append("--sim-net-cancel-end-turn")
+        options.extend(quest_options)
         clients.append(GameProcess(binary, args.game_dir, options))
     codes = []
     if leave in ("day", "talk"):
@@ -921,6 +939,184 @@ def states_after(output: str, prefix: str) -> list[dict[str, str]]:
     lines = output.splitlines()
     went = next((i for i, line in enumerate(lines) if line.startswith(prefix)), len(lines))
     return [fields(line) for line in lines[went:] if line.startswith("net client day=")]
+
+
+def replay_host_log(args, binary: Path, log: Path, expected: str, extra: list[str]) -> str:
+    """Replays the host's command log, with its talk probe (--sim-net-talk) and the extra options;
+    returns what is wrong ('' when it reaches expected)."""
+    options = [f"--replay-commands={log}", f"--sim-seed={args.seed}", f"--sim-net-talk={NET_TALK_DAY}", *extra]
+    code, output = run_game(binary, args.game_dir, options)
+    summary = last_line(output, "done ")
+    if code != 0 or f"hash={expected}" not in summary or " diverged=0 " not in summary:
+        return "the host's command log does not replay:" + output_tail(output)
+    return ""
+
+
+def check_net_quest_lock(args, binary: Path, save: Path) -> tuple[str, str]:
+    """Two clients at one planet, each with a quest to it (--sim-net-quest): Net1 plays the
+    planet's text quest headless before its end turn; the host ran its BeginTextQuest as it came
+    and its status said so (activity=1), and the host's barrier applied the quest's commands
+    (none before it); the host's wait for its peers named Net1's text quest, and so did Net2's
+    wait from the status; the relay of Net1's BeginTextQuest told Net2 who plays the planet's
+    quest, and the host refused Net2's own (in-use). Every state's hash is the host's, and the
+    host's log replays. Returns what is wrong, and a note."""
+    with tempfile.TemporaryDirectory(prefix="rangers-net-quest-") as directory:
+        log = Path(directory) / "host.srcl"
+        problem, host_output, outputs = run_network(args, binary, save, 2, log, quest="planet")
+        if not problem:
+            problem = compare_client_hashes(host_output, outputs)
+        if problem:
+            return problem, ""
+        days = net_lines(host_output, "net host day=")
+        if len(days) != NET_DAYS:
+            return f"the host ran {len(days)} days", ""
+        opened = net_lines(outputs[0], "net client quest open ")
+        if opened and opened[0]["quest"] == "-1":
+            return "", "no planet quest in the save's galaxy: the networked quest was not played"
+        expected = fields(last_line(host_output, "done net host "))["hash"]
+        problem = replay_host_log(args, binary, log, expected, [f"--sim-net-quest={NET_QUEST_DAY}"])
+        if problem:
+            return problem, ""
+    net1, net2 = outputs
+    opened = net_lines(net1, "net client quest open ")
+    status = net_lines(net1, "net client quest status ")
+    done = net_lines(net1, "net client quest done ")
+    if not opened or opened[0]["opened"] != "1" or not done:
+        return "Net1 did not play its quest:" + output_tail(net1), ""
+    human1 = opened[0]["human"]
+    if not status or status[0]["activity"] != "1":
+        return f"the host's status did not say that Net1 plays a text quest: {status}", ""
+    quest = fields(last_line(host_output, "net host quest begun="))
+    if quest.get("begun") != "1" or int(quest.get("barrier", "0")) < 2 or quest.get("closed") != "1":
+        return f"the host's barrier did not apply Net1's quest: {quest}", ""
+    if quest.get("early") != "0":
+        return f"the host applied quest commands before its barrier: {quest}", ""
+    waits = [line for line in host_output.splitlines() if line.startswith("net host wait ")]
+    if not any("(text quest)" in line for line in waits):
+        return f"the host's wait did not name Net1's text quest: {waits}", ""
+    holder = net_lines(net2, "net client quest holder ")
+    if not holder or holder[0]["human"] != human1 or holder[0]["status"] != human1:
+        return f"Net2 did not see that Net1 plays the planet's quest: {holder}", ""
+    tried = net_lines(net2, "net client quest open ")
+    if not tried or tried[0]["opened"] != "0" or tried[0]["refused"] != "1":
+        return "Net2's quest was not refused:" + output_tail(net2), ""
+    refused = [line for line in net_lines(net2, "net client refused ") if line["kind"] == "BeginTextQuest"]
+    if not refused or refused[0]["reason"] != NET_QUEST_REFUSAL:
+        return f"the host did not refuse Net2's BeginTextQuest {NET_QUEST_REFUSAL}: {refused}", ""
+    waited = [line for line in net2.splitlines() if line.startswith("net client wait ")]
+    if not any("(text quest)" in line for line in waited):
+        return f"Net2's wait did not name Net1's text quest: {waited}", ""
+    return "", (
+        f"a client plays a text quest headless ({done[0]['outcome']} in {done[0]['steps']} choices); "
+        f"the host's barrier applies its {quest['barrier']} quest commands with the client's hashes, "
+        "its wait and the other client's name it, and the other client's BeginTextQuest for the "
+        f"planet is refused {NET_QUEST_REFUSAL}; the host's log replays"
+    )
+
+
+def check_net_quest_days(args, binary: Path, save: Path) -> tuple[str, str]:
+    """One client plays QUEST_HOTSEAT_QUEST by name on its first turn (--sim-net-quest with
+    --sim-text-quest): the quest runs no galaxy day and owes its days. The quest's day ends with
+    the client's EndTurn, which the host's day waits for; afterwards each state owes one day
+    less, the host runs its days without waiting for the client, and its wait and status say the
+    client is busy with a text quest. Hashes match and the host's log replays. Returns what is
+    wrong, and a note."""
+    with tempfile.TemporaryDirectory(prefix="rangers-net-quest-days-") as directory:
+        log = Path(directory) / "host.srcl"
+        problem, host_output, outputs = run_network(args, binary, save, 1, log, quest=QUEST_HOTSEAT_QUEST)
+        if not problem:
+            problem = compare_client_hashes(host_output, outputs)
+        if problem:
+            return problem, ""
+        if len(net_lines(host_output, "net host day=")) != NET_DAYS:
+            return "the host did not run its days", ""
+        expected = fields(last_line(host_output, "done net host "))["hash"]
+        problem = replay_host_log(args, binary, log, expected, [f"--sim-net-quest={NET_QUEST_DAY}"])
+        if problem:
+            return problem, ""
+    net1 = outputs[0]
+    done = net_lines(net1, "net client quest done ")
+    if not done:
+        return "the client did not play its quest:" + output_tail(net1), ""
+    quest_days = int(done[0]["days"])
+    lines = net1.splitlines()
+    after = next(i for i, line in enumerate(lines) if line.startswith("net client quest done "))
+    owed = [int(fields(line)["quest-days"]) for line in lines[after:] if line.startswith("net client day=")]
+    if quest_days == 0:
+        if owed and owed[0] != 0:
+            return f"a quest of no days owes {owed[0]}", ""
+        return "", f"a client's {QUEST_HOTSEAT_QUEST} quest passed no days (nothing owed)"
+    expected_owed = [max(quest_days - 1 - i, 0) for i in range(len(owed))]
+    if owed != expected_owed:
+        return f"the days owed went {owed}, not {expected_owed}", ""
+    busy = [
+        line for line in host_output.splitlines()
+        if line.startswith("net host wait ") and "busy with a text quest" in line
+    ]  # fmt: skip
+    if not busy:
+        return "the host's wait did not say the client is busy with a text quest", ""
+    if " activity=2 " not in net1:
+        return "the client's status never said it owes days for a quest", ""
+    return "", (
+        f"a client's {QUEST_HOTSEAT_QUEST} quest by name ({done[0]['outcome']}, respawned="
+        f"{done[0]['respawned']}) owes {quest_days} days: its states count them down ({len(owed)} "
+        "states), the host runs the days without it and its wait says the client is busy; hashes "
+        "match, the log replays"
+    )
+
+
+def check_net_quest_abandon(args, binary: Path, save: Path) -> tuple[str, str]:
+    """One client goes silent in the middle of its planet quest (--sim-net-quest with
+    --sim-net-silent-at): the host times it out, drops its queue and releases its lock, and its
+    barrier never applies the quest's commands; the client reconnects, abandons the quest without
+    CloseQuest, gets its human back, and the planet's quest is still there for it. Returns what
+    is wrong, and a note."""
+    problem, host_output, outputs = run_network(args, binary, save, 1, leave="silent", quest="planet")
+    if not problem:
+        problem = compare_client_hashes(host_output, outputs)
+    if problem:
+        return problem, ""
+    net1 = outputs[0]
+    opened = net_lines(net1, "net client quest open ")
+    if opened and opened[0]["quest"] == "-1":
+        return "", "no planet quest in the save's galaxy: the abandoned quest was not played"
+    abandoned = net_lines(net1, "net client quest abandoned ")
+    if not abandoned:
+        return "the client did not abandon its quest:" + output_tail(net1), ""
+    if "(Net1) abandoned its text quest" not in host_output:
+        return "the host did not release the client's lock:" + output_tail(host_output), ""
+    quest = fields(last_line(host_output, "net host quest begun="))
+    if quest.get("begun") != "1" or quest.get("barrier") != "0" or quest.get("early") != "0":
+        return f"the host applied the abandoned quest's commands: {quest}", ""
+    after = net_lines(net1, "net client quest after rejoin ")
+    if not after or after[0].get("rejoin") != "1" or after[0].get("quest") == "-1" or after[0].get("holds") != "1":
+        return f"the quest is not there after the reconnect: {after}", ""
+    if after[0].get("open") != "0" or after[0].get("holder") != "0":
+        return f"a lock is left after the reconnect: {after}", ""
+    problem, _ = check_reconnected(net1, abandoned[0]["human"], "net client quest abandoned ", False)
+    if problem:
+        return problem, ""
+    return "", (
+        f"a client that goes silent in its text quest (after {abandoned[0]['steps']} choice) is timed "
+        "out, the host releases its lock and drops the quest's commands; it reconnects, abandons "
+        f"the quest and gets its human back with the planet's quest {after[0]['quest']} still there"
+    )
+
+
+def check_network_quests(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
+    """Text quests in a networked session (docs/progress/2026-10-19-text-quests-plan.md, Phase C):
+    check_net_quest_lock, check_net_quest_days, check_net_quest_abandon."""
+    notes = []
+    for label, check in (
+        ("text quest, 3 humans networked", check_net_quest_lock),
+        ("text quest days, 2 humans networked", check_net_quest_days),
+        ("abandoned text quest, 2 humans networked", check_net_quest_abandon),
+    ):
+        problem, note = check(args, binary, save)
+        if problem:
+            return False, [*notes, f"{label}: {problem}"]
+        notes.append(f"{label}: {note}")
+    return True, notes
 
 
 def check_reconnected(
@@ -1537,6 +1733,10 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
         passed_network, network_notes = check_network(args, binary, save, count)
         notes.extend(network_notes)
         passed = passed and passed_network
+
+    passed_network, network_notes = check_network_quests(args, binary, save)
+    notes.extend(network_notes)
+    passed = passed and passed_network
 
     golden = GOLDEN / target_name() / f"{save_digest(save)}.txt"
     header = f"# {save.name}: {args.turns} turns, seed {args.seed}"

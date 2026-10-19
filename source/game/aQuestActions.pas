@@ -34,6 +34,7 @@ interface
 uses
   EC_Expression,
   aCommands,
+  aHuman,
   aScript;
 const
   // Command kinds 600-624 (see TCommandKind).
@@ -47,6 +48,9 @@ const
   ckFinishQueuedTextQuest = 607;
   ckCloseQuest = 608;
   ckBeginTextQuest = 609;
+  // CHANGE: ENHANCEMENT - The form of a BeginTextQuest a host relays to the clients at the
+  // actor's planet (RelayedTextQuestOf; aCommands.RegisterRelayCommand): only the lock.
+  ckRelayedTextQuest = 610;
   // The kinds of quest BeginTextQuest names. Only a planet quest names a planet and can be
   // refused; the values are part of the command log format.
   tqkPlanet = 0;
@@ -95,6 +99,16 @@ procedure CloseQuest(MoneyLimit: Cardinal; DaysOwed: Integer);
 // holds none to it (offer-gone), or another human plays it (in-use); a session's refusal
 // hook tells the player (TradeRefusedHook). A prison, script or named quest always starts.
 function BeginTextQuest(Kind: Integer; Planet: TObject): Boolean;
+// CHANGE: ENHANCEMENT - The human other than Excluded who has Planet's text quest open
+// (BeginTextQuest; THuman.TextQuestPlanetId); nil when none. On a networked client it is known
+// from the relay of that human's BeginTextQuest to the clients at the planet (docs/progress/
+// 2026-10-19-text-quests-plan.md, The lock), until the next state.
+function TextQuestHolder(Planet: TObject; Excluded: THuman): THuman;
+// CHANGE: ENHANCEMENT - What a host relays for a BeginTextQuest it applied (docs/network.md,
+// Trades; docs/progress/2026-10-19-text-quests-plan.md, The lock): the same arguments as a
+// RelayedTextQuest, which sets the actor's lock without the checks, since the host made them
+// and a client's copy may not have the actor's quest (its probe or offer is no trade).
+function RelayedTextQuestOf(const Command: TPlayerCommand): TPlayerCommand;
 implementation
 uses
   SysUtils,
@@ -106,7 +120,6 @@ uses
   aGalaxyStruct,
   aItem,
   aPlanet,
-  aHuman,
   aPlayer,
   aRanger,
   aSession,
@@ -550,14 +563,55 @@ begin
   end;
 end;
 
+function TextQuestHolder(Planet: TObject; Excluded: THuman): THuman;
+var
+  I: Integer;
+begin
+  if Planet is TPlanet then
+    for I := 0 to Session.Humans.Count - 1 do
+    begin
+      Result := Session.Humans[I];
+      if (Result <> Excluded)
+          and Result.TextQuestOpen
+          and (Result.TextQuestPlanetId = Integer(TPlanet(Planet).Id)) then
+        Exit;
+    end;
+  Result := nil;
+end;
+
+// The lock BeginTextQuest leaves: the actor has a quest open, at the planet of a planet quest.
+procedure SetTextQuestLock(Human: THuman; Planet: TPlanet);
+begin
+  Human.TextQuestOpen := True;
+  if Planet <> nil then
+    Human.TextQuestPlanetId := Planet.Id
+  else
+    Human.TextQuestPlanetId := 0;
+end;
+
+procedure ExecuteRelayedTextQuest(const Command: TPlayerCommand);
+var
+  Planet: TPlanet;
+begin
+  Planet := nil;
+  if (IntArg(Command, 0) = tqkPlanet) and (RefObject(Command, 0) is TPlanet) then
+    Planet := TPlanet(RefObject(Command, 0));
+  SetTextQuestLock(ActorHuman(Command), Planet);
+end;
+
+function RelayedTextQuestOf(const Command: TPlayerCommand): TPlayerCommand;
+begin
+  Result := Command;
+  Result.Kind := ckRelayedTextQuest;
+end;
+
 // CHANGE: ENHANCEMENT - The lock of the text-quests plan (docs/progress/
 // 2026-10-19-text-quests-plan.md, The lock): a trade, so a host decides as it arrives. Ints:
 // the kind (tqk...); Refs: the planet of a planet quest. It refuses before any change.
 procedure ExecuteBeginTextQuest(const Command: TPlayerCommand);
 var
-  Human, Other: THuman;
+  Human: THuman;
   Planet: TPlanet;
-  I: Integer;
 begin
   Human := ActorHuman(Command);
   Planet := nil;
@@ -569,21 +623,16 @@ begin
         or (Planet.TextQuestId = -1)
         or not HoldsPlanetQuestTo(Human.Player, Planet) then
       raise ECommandRefused.CreateReason(rrOfferGone, 'BeginTextQuest: the planet''s quest is gone');
-    for I := 0 to Session.Humans.Count - 1 do
-    begin
-      Other := Session.Humans[I];
-      if (Other <> Human) and Other.TextQuestOpen and (Other.TextQuestPlanetId = Planet.Id) then
-        raise ECommandRefused.CreateReason(
-            rrInUse,
-            'BeginTextQuest: another human plays the planet''s quest'
-        );
-    end;
+    // CHANGE: ENHANCEMENT - A networked client runs it only once its host has applied it
+    // (aCommands.TradeSubmitHook): another human's lock it knows of is a relay
+    // (RelayedTextQuest), which the host may have released since (a disconnect).
+    if not Assigned(TradeSubmitHook) and (TextQuestHolder(Planet, Human) <> nil) then
+      raise ECommandRefused.CreateReason(
+          rrInUse,
+          'BeginTextQuest: another human plays the planet''s quest'
+      );
   end;
-  Human.TextQuestOpen := True;
-  if Planet <> nil then
-    Human.TextQuestPlanetId := Planet.Id
-  else
-    Human.TextQuestPlanetId := 0;
+  SetTextQuestLock(Human, Planet);
 end;
 
 function BeginTextQuest(Kind: Integer; Planet: TObject): Boolean;
@@ -618,4 +667,5 @@ initialization
   RegisterCommand(ckFinishQueuedTextQuest, 'FinishQueuedTextQuest', @ExecuteFinishQueuedTextQuest);
   RegisterCommand(ckCloseQuest, 'CloseQuest', @ExecuteCloseQuest);
   RegisterCommand(ckBeginTextQuest, 'BeginTextQuest', @ExecuteBeginTextQuest, True);
+  RegisterRelayCommand(ckRelayedTextQuest, 'RelayedTextQuest', @ExecuteRelayedTextQuest);
 end.

@@ -18,6 +18,10 @@ unit QuestRun;
 // (one human at a time per planet quest, a refusal ends it before it starts), passes no game
 // day (the days are counted and owed, CloseQuest), and a death respawns the ranger instead of
 // ending the game (DieInQuest). The local human's queued quest is the one it plays.
+//
+// CHANGE: ENHANCEMENT - The network (Phase C of the plan): a run a networked client lost its
+// host in is abandoned (Abandon): it closes without CloseQuest, since the host dropped its
+// commands with the connection.
 interface
 uses
   TextQuest,
@@ -112,6 +116,8 @@ type
     // BeginTextQuest refused the quest (another human plays it, or it is gone): Open returned
     // False and nothing started.
     Refused: Boolean;
+    // CHANGE: ENHANCEMENT - Abandon has left the run.
+    Abandoned: Boolean;
     // The galaxy job of a day in the quest is waited for before the quest goes on. The screen
     // leaves it running, so the rest of the page can read the galaxy while it changes; a test
     // that must repeat sets this (HeadlessQuest).
@@ -130,6 +136,11 @@ type
     procedure Choose(Index: Integer);
     // Leaving the quest: the money cap and the quest timers (CloseQuest).
     procedure Close;
+    // CHANGE: ENHANCEMENT - The quest is left without an outcome and without CloseQuest: a
+    // networked client reconnected to its host, which dropped the quest's commands with the old
+    // connection (docs/progress/2026-10-19-text-quests-plan.md, Disconnects). Close then does
+    // nothing more; the state from the host replaces what the quest predicted here.
+    procedure Abandon;
     function ExpandTemplateText(Text: WideString): WideString;
     // The engine's calls.
     procedure ShowText(Text: WideString); override;
@@ -465,6 +476,16 @@ begin
   if LocalPlayer = nil then
     Exit;
   Result := BeginTextQuest(QuestKind, Planet);
+  // CHANGE: ENHANCEMENT - Only a planet quest can be refused by the game; a prison, queued or
+  // named one is refused only when a networked client's host did not answer (or the client
+  // reconnects). It starts all the same: the lock guards nothing for it, its commands go to the
+  // host with the day's, and the prison or the script that queued it would otherwise send the
+  // player back to the quest at once (docs/progress/2026-10-19-text-quests-plan.md, Phase C).
+  if not Result and (QuestKind <> tqkPlanet) then
+  begin
+    AppendLogLineThreadSafe('BeginTextQuest went unanswered; the quest starts all the same');
+    Result := True;
+  end;
   Refused := not Result;
 end;
 
@@ -772,12 +793,20 @@ begin
   end;
   if Page.Outcome = qroNone then
     Page.Outcome := qroAbandoned;
-  // The money cap and the quest timers, in that order; in multiplayer, the days owed.
-  if LocalPlayer <> nil then
+  // The money cap and the quest timers, in that order; in multiplayer, the days owed. CHANGE:
+  // ENHANCEMENT - Not for a quest that never started here (refused) or that was abandoned.
+  if (LocalPlayer <> nil) and not Abandoned and not Refused then
     if OwesDays then
       CloseQuest(MoneyLimit, DaysElapsed)
     else
       CloseQuest(MoneyLimit, 0);
+end;
+
+procedure TQuestRun.Abandon;
+begin
+  Abandoned := True;
+  ClearChoices;
+  Close;
 end;
 
 // Moved from TfPlanetQuest.ExpandTemplateText.

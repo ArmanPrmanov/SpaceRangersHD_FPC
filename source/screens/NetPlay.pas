@@ -15,6 +15,10 @@ unit NetPlay;
 // applied between two screens, where the human's screen then opens. A dialogue the host's day
 // asks the client's human opens over the waiting star map. Without a session every function
 // here does what the game did before.
+// CHANGE: ENHANCEMENT - Text quests in a session (docs/progress/2026-10-19-text-quests-plan.md,
+// Phase C): a game's quest screen is a game screen, the waits name a human in a quest or busy
+// with its days, the quest's own day ends with an EndTurn the host waits for, the planet screens
+// end owed days by themselves, and a reconnect abandons the quest that plays.
 interface
 uses
   GI_MessageLoop,
@@ -32,6 +36,9 @@ const
   // CHANGE: ENHANCEMENT - The port the menus propose, and the one an address without a port
   // (--join=HOST, the main menu's join) connects to.
   DefaultNetPort = 47300;
+  // CHANGE: ENHANCEMENT - How often a screen looks at what the network changed under it (the
+  // planet screens' text quest prompt and owed quest days, NetQuestDayDue).
+  NetScreenPollMs = 250;
 
 // The screen loop calls this between two screens, after the hot-seat pass: it starts hosting
 // or joins as the command line asks, applies a client's state and chooses the screen that
@@ -98,6 +105,19 @@ procedure StopHostingGame;
 function HostStatusText: WideString;
 // The humans connected to this host (not the host's own), by name; '' when none.
 function ConnectedPlayerNames: WideString;
+// CHANGE: ENHANCEMENT - Text quests in a session (docs/progress/2026-10-19-text-quests-plan.md,
+// The day): whether the local human owes days for a text quest, so that its planet screen ends
+// its turns by itself (NetEndTurn), as the star map's automatic continue does: the host's own
+// starts the next day once its peers are ready, a client's ends the quest's own day and then
+// waits for each state.
+function NetQuestDayDue: Boolean;
+// What a wait for the day says (the host's, and a client's from the host's status); the tests
+// print them (HeadlessNet).
+function HostWaitText: WideString;
+function ClientWaitText: WideString;
+// CHANGE: ENHANCEMENT - What the planet screens say about a planet's text quest that another
+// human plays (aQuestActions.TextQuestHolder): '<Player> is playing this quest.'
+function TextQuestTakenText(Holder: THuman): WideString;
 implementation
 uses
   SysUtils,
@@ -132,6 +152,7 @@ uses
   NetClient,
   NetSession,
   HotSeat,
+  fPlanetQuest,
   fStarMap;
 
 const
@@ -154,7 +175,9 @@ const
   // The wait box closes with this when its text has changed, and opens again with the new one.
   WaitRetext = 3;
   // The screens during which the host does not take joins, leaves or commands: no game, or one
-  // being loaded, generated or saved in memory.
+  // being loaded, generated or saved in memory. CHANGE: ENHANCEMENT - Not the quest screen of a
+  // game (NoGameScreen; docs/progress/2026-10-19-text-quests-plan.md, The day): the quest is
+  // not in the galaxy, and the screen pumps as any game screen.
   NoGameScreens = [
       screenNone,
       screenMainMenu,
@@ -163,7 +186,6 @@ const
       screenNewGame,
       screenIntroduction,
       screenGameEnd,
-      screenPlanetQuest,
       screenArcadeBattle,
       screenLoadRobot,
       screenLoadQuest,
@@ -221,6 +243,9 @@ var
   // state after the reconnect has been asked to be applied (ApplyRejoinState), logged once.
   ReconnectBoxOpen: Boolean;
   RejoinApplyLogged: Boolean;
+  // CHANGE: ENHANCEMENT - The reconnect abandoned the text quest the human played (ApplyRejoinState);
+  // the next state's screen tells it.
+  QuestAbandonedNotice: Boolean;
   // CHANGE: ENHANCEMENT - A client's Cancel asked the host to stop its continuing travel
   // (docs/network.md, Continuing travel): until the host has applied it, or the next state has
   // been applied, where the travel stops here too (OpenClientScreen).
@@ -240,6 +265,16 @@ begin
   Result := LocalizedColorText('Multiplayer.' + Key);
   if Result = '' then
     Result := English;
+end;
+
+// CHANGE: ENHANCEMENT - Whether the screen Id holds no game the network may touch
+// (NoGameScreens): the quest screen only when it runs the main menu's quest.
+function NoGameScreen(Id: TGameScreenId): Boolean;
+begin
+  Result :=
+      (Id in NoGameScreens)
+          or ((Id = screenPlanetQuest)
+              and ((Galaxy = nil) or (LocalPlayer = nil) or StandaloneQuestMode));
 end;
 
 function NamedLine(const Key, English, Names: WideString): WideString;
@@ -263,10 +298,33 @@ begin
     Result := '?';
 end;
 
+// CHANGE: ENHANCEMENT - A human the day waits for, as the waits name it: one who plays a text
+// quest says so (docs/progress/2026-10-19-text-quests-plan.md, The day).
+function WaitName(const Name: WideString; Activity: TStatusActivity): WideString;
+begin
+  Result := Name;
+  if Activity = saInTextQuest then
+    Result := Result + ' ' + MultiplayerText('InTextQuest', '(text quest)');
+end;
+
+// CHANGE: ENHANCEMENT - A line of a wait for a human who owes Days for a text quest: the day does
+// not wait for it meanwhile.
+function QuestBusyLine(const Name: WideString; Days: Integer): WideString;
+begin
+  Result :=
+      NamedLine('QuestBusy', '<Players> is busy with a text quest for <Days> more days.', Name);
+  ReplaceTextToken(Result, '<Days>', WideString(IntToStr(Days)), '<color=255,240,100>');
+end;
+
+function TextQuestTakenText(Holder: THuman): WideString;
+begin
+  Result := NamedLine('QuestTaken', '<Players> is playing this quest.', HumanName(Holder));
+end;
+
 // The humans the host's day waits for, and who is away.
 function HostWaitText: WideString;
 var
-  Rest, Item, Names, Away: WideString;
+  Rest, Item, Names, Away, Busy: WideString;
   Position, I: Integer;
   Human: THuman;
 begin
@@ -279,19 +337,29 @@ begin
       Position := Length(Rest) + 1;
     Item := Copy(Rest, 1, Position - 1);
     Delete(Rest, 1, Position);
-    AddName(Names, HumanName(FindHuman(StrToIntDef(AnsiString(Item), -1))));
+    Human := FindHuman(StrToIntDef(AnsiString(Item), -1));
+    if Human <> nil then
+      AddName(Names, WaitName(HumanName(Human), HumanQuestActivity(Human)))
+    else
+      AddName(Names, HumanName(Human));
   end;
   Away := '';
+  Busy := '';
   for I := 0 to Session.Humans.Count - 1 do
   begin
     Human := Session.Humans[I];
     if not Human.Connected and (Human.Player <> nil) and not Human.Finished then
-      AddName(Away, HumanName(Human));
+      AddName(Away, HumanName(Human))
+    else if (Human <> LocalHuman)
+        and (HumanQuestActivity(Human) = saQuestDays)
+        and (Human.Player <> nil) then
+      Busy := Busy + #13#10 + QuestBusyLine(HumanName(Human), Human.QuestDaysOwed);
   end;
   if Names = '' then
     Result := MultiplayerText('WaitingPlayers', 'Waiting for the players.')
   else
     Result := NamedLine('Waiting', 'Waiting for <Players>.', Names);
+  Result := Result + Busy;
   if Away <> '' then
     Result := Result + #13#10 + NamedLine('Away', 'Away: <Players>.', Away);
 end;
@@ -301,20 +369,24 @@ function ClientWaitText: WideString;
 var
   Client: TNetClient;
   Status: TStatusMessage;
-  Names, Away, Talker: WideString;
+  Names, Away, Talker, Busy: WideString;
   I: Integer;
 begin
   Client := CurrentClient;
   Status := Client.Status;
   Names := '';
   Away := '';
+  Busy := '';
   for I := 0 to High(Status.Humans) do
     if Status.Humans[I].Id <> Client.HumanId then
     begin
       if not Status.Humans[I].Connected then
         AddName(Away, Status.Humans[I].Name)
       else if Status.Humans[I].HoldsDay then
-        AddName(Names, Status.Humans[I].Name);
+        AddName(Names, WaitName(Status.Humans[I].Name, Status.Humans[I].Activity))
+      // CHANGE: ENHANCEMENT - The day does not wait for a human busy with a quest's days.
+      else if Status.Humans[I].Activity = saQuestDays then
+        Busy := Busy + #13#10 + QuestBusyLine(Status.Humans[I].Name, Status.Humans[I].QuestDays);
     end;
   Talker := '';
   for I := 0 to High(Status.Humans) do
@@ -329,6 +401,7 @@ begin
     Result := NamedLine('Waiting', 'Waiting for <Players>.', Names)
   else
     Result := MultiplayerText('WaitingHost', 'Waiting for the host.');
+  Result := Result + Busy;
   if Away <> '' then
     Result := Result + #13#10 + NamedLine('Away', 'Away: <Players>.', Away);
 end;
@@ -522,13 +595,16 @@ var
 begin
   Result := False;
   P := LocalPlayer;
+  // CHANGE: ENHANCEMENT - Nor for a human who owes days for a text quest: its days end the turn
+  // by themselves (NetQuestDayDue).
   if ExitScreenLoop
       or (Galaxy = nil)
       or (P = nil)
       or LocalHuman.Finished
       or not LocalHuman.Connected
       or P.InHyperspace
-      or (P.Order = soTakeoff) then
+      or (P.Order = soTakeoff)
+      or (LocalHuman.QuestDaysOwed > 0) then
     Exit;
   case Kind of
     nwHostPeers:
@@ -838,7 +914,7 @@ end;
 // Whether the host may take joins, leaves and states now: a game is on the screen.
 function HostMayTouchGame: Boolean;
 begin
-  Result := (Galaxy <> nil) and not MemorySnapshotActive and not (CurrentScreenId in NoGameScreens);
+  Result := (Galaxy <> nil) and not MemorySnapshotActive and not NoGameScreen(CurrentScreenId);
 end;
 
 // The quiet point after a day (docs/network.md, States): no job runs, and the next day is
@@ -870,7 +946,7 @@ begin
           and not ScreenClosing
           and not ExitScreenLoop
           and not MemorySnapshotActive
-          and not (CurrentScreenId in NoGameScreens)
+          and not NoGameScreen(CurrentScreenId)
           and (HostPeersWaitOpen or (InFramePump and (RunningScreenLoop <> nil)));
 end;
 
@@ -961,7 +1037,7 @@ begin
       or ExitScreenLoop
       or (ClientFilmPlaying and (CurrentScreenId = screenStarMap))
       or (ClientTalkWaits > 0)
-      or (CurrentScreenId in NoGameScreens)
+      or NoGameScreen(CurrentScreenId)
       or (RunningScreenLoop = nil) then
     Exit;
   ReconnectBoxOpen := True;
@@ -1093,6 +1169,7 @@ begin
   HostLossLogged := False;
   RejoinApplyLogged := False;
   ClientStopRequested := False;
+  QuestAbandonedNotice := False;
 end;
 
 // The client goes back to the main menu, which says Text. The session ends between screens.
@@ -1209,6 +1286,49 @@ begin
     LeaveForMainMenu(Screen, ClientGoneText);
 end;
 
+// CHANGE: ENHANCEMENT - The day a client's human played a text quest that owes days
+// (docs/progress/2026-10-19-text-quests-plan.md, The day): the quest's CloseQuest ran here, so
+// the human owes the days and holds no day here, and EndTurn would send nothing. The host has the
+// days only once its barrier applies that CloseQuest, and until then its day waits for the
+// human's EndTurn: the last state said the human owed none, and it has not ended this turn.
+function ClientQuestDayEnds: Boolean;
+var
+  P: TPlayer;
+begin
+  P := LocalPlayer;
+  Result :=
+      (NetRole = nrClient)
+          and (P <> nil)
+          and (LocalHuman.QuestDaysOwed > 0)
+          and (CurrentClient.StateQuestDays = 0)
+          and not LocalHuman.EndedTurn
+          and not LocalHuman.Finished
+          and LocalHuman.Connected
+          and not P.InHyperspace;
+end;
+
+procedure SubmitQuestDayEndTurn;
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckEndTurn);
+  AddInt(Command, 0);
+  SubmitCommand(Command);
+end;
+
+function NetQuestDayDue: Boolean;
+begin
+  Result :=
+      (NetRole <> nrNone)
+          and (Galaxy <> nil)
+          and (LocalPlayer <> nil)
+          and (LocalHuman.QuestDaysOwed > 0)
+          and not LocalHuman.Finished
+          and not ExitScreenLoop
+          and not ScreenClosing
+          and not ((NetRole = nrClient) and CurrentClient.Reconnecting);
+end;
+
 function NetEndTurn(Screen: TMessageLoopGI): Boolean;
 begin
   case NetRole of
@@ -1223,7 +1343,10 @@ begin
         // stops (THuman.ContinueUntilArrival), as the star map's automatic continue goes on:
         // the host then runs the next days without waiting for this client, and the break
         // stops it (docs/network.md, Continuing travel). Not with the break key held.
-        EndTurn(not ((Screen = StarMapScreen) and StarMapScreen.BreakOnNextFilm));
+        if ClientQuestDayEnds then
+          SubmitQuestDayEndTurn
+        else
+          EndTurn(not ((Screen = StarMapScreen) and StarMapScreen.BreakOnNextFilm));
         ClientWaitForDay(Screen);
         Result := False;
       end;
@@ -1527,6 +1650,20 @@ begin
     Galaxy.GenerateSpaceBackground(Star.BackgroundImage);
   OpenClientScreen((Star = nil) or (Star.Id <> OldStarId));
   ClientInGame := True;
+  // CHANGE: ENHANCEMENT - The state replaced the bubbles; the abandoned quest's goes after it.
+  if QuestAbandonedNotice then
+  begin
+    QuestAbandonedNotice := False;
+    LocalHuman.AddOrUpdateBubble(
+        0,
+        Galaxy.CurrentTurn,
+        MultiplayerText(
+            'QuestAbandoned',
+            'The connection to the host was lost: your text quest was abandoned. You can start it again.'
+        ),
+        ''
+    );
+  end;
 end;
 
 var
@@ -1702,6 +1839,23 @@ begin
     Result := nil;
 end;
 
+// CHANGE: ENHANCEMENT - The quest screen of a game, running with nothing above it: a client
+// closes it to apply the state after a reconnect or to leave a lost game, and leaves its quest
+// (docs/progress/2026-10-19-text-quests-plan.md, Disconnects); nil otherwise.
+function ClientQuestScreen: TMessageLoopGI;
+begin
+  Result := nil;
+  if ScreenClosing
+      or (ClientTalkWaits > 0)
+      or ExitScreenLoop
+      or (CurrentScreenId <> screenPlanetQuest)
+      or not PlanetQuestScreen.PlaysGameQuest
+      or (PlanetQuestScreen.ExitCode <> 0) then
+    Exit;
+  if RunningScreenLoop = PlanetQuestScreen then
+    Result := PlanetQuestScreen;
+end;
+
 // CHANGE: ENHANCEMENT - The client lost its host while it plays its turn (NetFrame). It leaves
 // for the main menu, which says why, once a screen that starts a day is the one open: not in a
 // shop, a dialogue or a box, and not while the star map plays a film, whose end leaves anyway.
@@ -1715,6 +1869,14 @@ begin
     NetLog('the host is gone; the game goes back to the main menu at the next safe screen');
   end;
   Screen := SafeClientScreen;
+  // CHANGE: ENHANCEMENT - A text quest that plays is left (docs/progress/
+  // 2026-10-19-text-quests-plan.md, Disconnects): the host never got its commands.
+  if Screen = nil then
+  begin
+    Screen := ClientQuestScreen;
+    if Screen <> nil then
+      PlanetQuestScreen.AbandonQuest;
+  end;
   if Screen <> nil then
     LeaveForMainMenu(Screen, ClientGoneText);
 end;
@@ -1735,8 +1897,20 @@ begin
     NetLog('the state after the reconnect is applied at the next safe screen');
   end;
   Screen := SafeClientScreen;
+  // CHANGE: ENHANCEMENT - The text quest the human plays is abandoned (docs/progress/
+  // 2026-10-19-text-quests-plan.md, Disconnects): the host dropped its commands with the old
+  // connection, so the quest never happened there and can be started again (the planet's quest
+  // is still in the state). The screen closes without CloseQuest, and the human is told after
+  // the state (ApplyClientState).
   if Screen = nil then
-    Exit;
+  begin
+    Screen := ClientQuestScreen;
+    if Screen = nil then
+      Exit;
+    PlanetQuestScreen.AbandonQuest;
+    QuestAbandonedNotice := True;
+    NetLog('the text quest is abandoned: the host dropped it with the lost connection');
+  end;
   RejoinApplyLogged := False;
   RequestApply(Screen, False, False, False);
 end;
@@ -1850,7 +2024,7 @@ begin
   if (CommandLineHostPort >= 0)
       and (Galaxy <> nil)
       and (LocalPlayer <> nil)
-      and not (RequestedScreenId in NoGameScreens) then
+      and not NoGameScreen(RequestedScreenId) then
     StartHostingGame;
 end;
 

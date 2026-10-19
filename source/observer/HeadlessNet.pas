@@ -27,6 +27,14 @@ unit HeadlessNet;
 // host refuses the same (docs/network.md, Tests). Then its end turns ask to continue the travel,
 // and once a state says that it continues, it stops the travel before the host's next day,
 // which waits for that, and plays that day.
+// CHANGE: ENHANCEMENT - --sim-net-quest=DAY (docs/progress/2026-10-19-text-quests-plan.md,
+// Phase C): a client plays a text quest with the headless quest player on its DAY-th turn,
+// before its end turn: the planet quest a probe command gives it, or a quest by name
+// (--sim-text-quest). The host lands every client at the first one's planet, so a second
+// client's BeginTextQuest finds the first one's lock (in-use); with --sim-net-silent-at the
+// client goes silent in the middle of its quest and abandons it after the reconnect. Both sides
+// print the quest's lines, the host what its barrier applied and its wait text, a client the
+// waits its host's status gives.
 interface
 uses
   HeadlessSim;
@@ -42,6 +50,9 @@ function RunNetClient(const Options: TSimulationOptions): Integer;
 // asks the same.
 procedure InstallNetTalkProbe(FromDay: Integer);
 procedure RemoveNetTalkProbe;
+// CHANGE: ENHANCEMENT - The command of --sim-net-quest's probe, for the host, its clients and a
+// replay of the host's log.
+procedure RegisterNetQuestProbe;
 implementation
 uses
   SysUtils,
@@ -74,7 +85,12 @@ uses
   NetProtocol,
   NetHost,
   NetClient,
-  NetSession;
+  NetSession,
+  NetPlay,
+  QuestRun,
+  HeadlessQuest,
+  aQuestActions,
+  aRanger;
 
 const
   // Without progress for this long, a run fails instead of hanging the test.
@@ -884,6 +900,340 @@ begin
   Result := False;
 end;
 
+
+// CHANGE: ENHANCEMENT - --sim-net-quest=DAY (docs/progress/2026-10-19-text-quests-plan.md,
+// Phase C). The probe command gives its human a government planet quest to the planet the
+// human is landed at, whose text quest is the galaxy's first planet quest when it has none. It
+// is a client's command like any other: the host runs it from the queue, before the
+// BeginTextQuest that follows it, and its log records it.
+const
+  ckNetQuestProbe = 1003;
+type
+  // What a client's quest turn did: played the quest and ended the turn; left a turn to play
+  // (the quest was refused); abandoned the quest after a reconnect; failed.
+  TNetQuestTurn = (nqPlayed, nqTurn, nqAbandoned, nqFailed);
+var
+  QuestProbeRegistered: Boolean;
+  // The host: the quest commands of remote humans it applied (aQuestActions, 600-609): the
+  // BeginTextQuests (as they arrive), those its barrier applied (ApplyQueues, QuestBarrier set)
+  // and the CloseQuests among them, and those applied anywhere else; the wait text it printed
+  // last; where its first client joined; the hook the count chains.
+  QuestBarrier: Boolean;
+  QuestBegun: Integer;
+  QuestBarrierCommands: Integer;
+  QuestClosed: Integer;
+  QuestEarly: Integer;
+  QuestWaitShown: WideString;
+  QuestJoinTarget: TObject;
+  PreviousQuestAfterCommand: TCommandHook;
+  // A client: the wait text it printed last (ClientStatusHook).
+  ClientWaitShown: WideString;
+
+function HoldsPlanetQuest(Human: THuman; Planet: TPlanet): Boolean;
+var
+  I: Integer;
+  Quest: PQuest;
+begin
+  Result := False;
+  if Human.Player = nil then
+    Exit;
+  for I := 0 to Human.Player.Quests.Count - 1 do
+  begin
+    Quest := Human.Player.Quests[I];
+    if (Quest.QuestType = qtPlanetQuest) and (Quest.ObjectiveTarget = Planet) then
+      Exit(True);
+  end;
+end;
+
+procedure ExecuteNetQuestProbe(const Command: TPlayerCommand);
+var
+  Human: THuman;
+  Planet: TPlanet;
+  I: Integer;
+begin
+  Human := ActorHuman(Command);
+  if (Human.Player = nil) or (Human.Player.CurrentPlanet = nil) then
+    Exit;
+  Planet := Human.Player.CurrentPlanet;
+  if Planet.TextQuestId = -1 then
+    for I := 0 to Galaxy.Planets.Count - 1 do
+      if TPlanet(Galaxy.Planets[I]).TextQuestId <> -1 then
+      begin
+        Planet.TextQuestId := TPlanet(Galaxy.Planets[I]).TextQuestId;
+        Break;
+      end;
+  if (Planet.TextQuestId <> -1) and not HoldsPlanetQuest(Human, Planet) then
+    GiveProbePlanetQuest(Human, Planet);
+end;
+
+procedure RegisterNetQuestProbe;
+begin
+  if QuestProbeRegistered then
+    Exit;
+  RegisterCommand(ckNetQuestProbe, 'NetQuestProbe', @ExecuteNetQuestProbe);
+  QuestProbeRegistered := True;
+end;
+
+// The text as one line of output.
+function OneLine(const Text: WideString): AnsiString;
+begin
+  Result := StringReplace(UTF8Encode(Text), #13#10, ' | ', [rfReplaceAll]);
+end;
+
+// AfterCommandHook of the host (--sim-net-quest).
+procedure CountQuestCommand(const Command: TPlayerCommand);
+begin
+  if Assigned(PreviousQuestAfterCommand) then
+    PreviousQuestAfterCommand(Command);
+  if (LocalHuman = nil) or (Integer(Command.Actor) = LocalHuman.Id) then
+    Exit;
+  if Command.Kind = ckBeginTextQuest then
+    Inc(QuestBegun)
+  else if (Command.Kind >= ckQuestRandomSeed) and (Command.Kind <= ckCloseQuest) then
+    if QuestBarrier then
+    begin
+      Inc(QuestBarrierCommands);
+      if Command.Kind = ckCloseQuest then
+        Inc(QuestClosed);
+    end
+    else
+      Inc(QuestEarly);
+end;
+
+// The host's wait for its peers names a remote human who plays a text quest, or says who is
+// busy with a quest's days: printed when the text changes.
+procedure EmitHostQuestWait(Day: Integer);
+var
+  I: Integer;
+  Human: THuman;
+  Any: Boolean;
+  Text: WideString;
+begin
+  Any := False;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if (Human <> LocalHuman) and (Human.TextQuestOpen or (Human.QuestDaysOwed > 0)) then
+      Any := True;
+  end;
+  if not Any then
+    Exit;
+  Text := HostWaitText;
+  if Text = QuestWaitShown then
+    Exit;
+  QuestWaitShown := Text;
+  Emit(Format('net host wait day=%d text=%s', [Day, OneLine(Text)]));
+end;
+
+// JoinPlanetHook of the host: every client joins where the first one did.
+function QuestJoinPlanet(Race: Integer): TObject;
+begin
+  if QuestJoinTarget = nil then
+    QuestJoinTarget := FindJoinPlanet(Race);
+  Result := QuestJoinTarget;
+end;
+
+// The activity the host's status gives the human Id (saNone when it names none).
+function StatusActivityOf(Client: TNetClient; Id: Integer): TStatusActivity;
+var
+  I: Integer;
+  Status: TStatusMessage;
+begin
+  Status := Client.Status;
+  for I := 0 to High(Status.Humans) do
+    if Status.Humans[I].Id = Id then
+      Exit(Status.Humans[I].Activity);
+  Result := saNone;
+end;
+
+// The first human but this client's whom the host's status says plays a text quest; 0: none.
+function OtherQuestHuman(Client: TNetClient): Integer;
+var
+  I: Integer;
+  Status: TStatusMessage;
+begin
+  Status := Client.Status;
+  for I := 0 to High(Status.Humans) do
+    if (Status.Humans[I].Id <> Client.HumanId) and (Status.Humans[I].Activity = saInTextQuest) then
+      Exit(Status.Humans[I].Id);
+  Result := 0;
+end;
+
+// ClientStatusHook of a client (--sim-net-quest): its wait for the day, as the host's status
+// gives it, when the status says another human plays a text quest or owes days for one.
+procedure ShowClientQuestWait;
+var
+  I: Integer;
+  Client: TNetClient;
+  Status: TStatusMessage;
+  Any: Boolean;
+  Text: WideString;
+begin
+  Client := ActiveClient;
+  if Client = nil then
+    Exit;
+  Status := Client.Status;
+  Any := False;
+  for I := 0 to High(Status.Humans) do
+    if (Status.Humans[I].Id <> Client.HumanId) and (Status.Humans[I].Activity <> saNone) then
+      Any := True;
+  if not Any then
+    Exit;
+  Text := ClientWaitText;
+  if Text = ClientWaitShown then
+    Exit;
+  ClientWaitShown := Text;
+  Emit(Format('net client wait human=%d text=%s', [Client.HumanId, OneLine(Text)]));
+end;
+
+// A client's quest turn (--sim-net-quest). With a quest by name (TextQuest) the client plays it;
+// otherwise it sends the probe and plays the planet quest its visit gives (TQuestRun.Open),
+// Net1 at once, another client once the host's status says another human plays one: the relay
+// of that human's BeginTextQuest has come before that status, so the planet's prompt would say
+// who plays (TextQuestHolder), and the host must refuse this one (in-use). Played to its end,
+// the quest's day ends with EndTurn, which the host's day waits for although the human owes the
+// quest's days here already (NetPlay.ClientQuestDayEnds). With NetSilentAt the client plays one
+// choice, goes silent until the host must have timed it out, reconnects and abandons the quest
+// once the state after the reconnect has come (TQuestRun.Abandon). Prints what it did; PlanetId
+// is the planet it played at (-1: none).
+function PlayNetQuest(
+    Client: TNetClient;
+    const Options: TSimulationOptions;
+    var Plan: AnsiString;
+    out PlanetId: Integer
+): TNetQuestTurn;
+var
+  Player: THeadlessQuestPlayer;
+  Planet: TPlanet;
+  Holder: THuman;
+  Named, Opened: Boolean;
+  Outcome: TQuestRunOutcome;
+  Deadline: QWord;
+  HolderId, QuestId: Integer;
+begin
+  Result := nqFailed;
+  Named := Options.TextQuest <> '';
+  Planet := LocalPlayer.CurrentPlanet;
+  PlanetId := -1;
+  if Planet <> nil then
+    PlanetId := Planet.Id;
+  if not Named and (Options.NetName <> 'Net1') then
+  begin
+    Deadline := GetTickCount64 + StallTimeoutMs;
+    while OtherQuestHuman(Client) = 0 do
+    begin
+      if GetTickCount64 > Deadline then
+      begin
+        Emit('net client failed: no other human played a text quest');
+        Exit;
+      end;
+      Client.Pump;
+      NetInboxEvent.WaitFor(5);
+    end;
+    Client.ApplyRelayed;
+    Holder := TextQuestHolder(Planet, LocalHuman);
+    HolderId := 0;
+    if Holder <> nil then
+      HolderId := Holder.Id;
+    Emit(
+        Format(
+            'net client quest holder planet=%d human=%d status=%d text=%s',
+            [PlanetId, HolderId, OtherQuestHuman(Client), OneLine(TextQuestTakenText(Holder))]
+        )
+    );
+  end;
+  if not Named then
+    SubmitCommand(NewCommand(ckNetQuestProbe));
+  QuestId := -1;
+  if Planet <> nil then
+    QuestId := Planet.TextQuestId;
+  Player := THeadlessQuestPlayer.Create(Options.Seed);
+  try
+    if Named then
+    begin
+      Player.Start(UTF8Decode(Options.TextQuest));
+      Opened := Player.Run.Quest <> nil;
+    end
+    else
+      Opened := Player.OpenVisit;
+    Emit(
+        Format(
+            'net client quest open day=%d human=%d planet=%d quest=%d opened=%d refused=%d',
+            [Galaxy.CurrentTurn, Client.HumanId, PlanetId, QuestId, Ord(Opened), Ord(Player.Run.Refused)]
+        )
+    );
+    if not Opened then
+      Exit(nqTurn);
+    // The host ran BeginTextQuest as it came, and its status says so next.
+    Deadline := GetTickCount64 + StallTimeoutMs;
+    while (StatusActivityOf(Client, Client.HumanId) <> saInTextQuest) and (GetTickCount64 < Deadline) do
+    begin
+      Client.Pump;
+      NetInboxEvent.WaitFor(5);
+    end;
+    Emit(
+        Format(
+            'net client quest status human=%d activity=%d',
+            [Client.HumanId, Ord(StatusActivityOf(Client, Client.HumanId))]
+        )
+    );
+    if Options.NetSilentAt > 0 then
+    begin
+      Player.Step;
+      Client.FreezeConnection;
+      Emit(
+          Format(
+              'net client silent day=%d human=%d takeover=0 quest=1 steps=%d tick=%d',
+              [Galaxy.CurrentTurn, Client.HumanId, Player.Steps, GetTickCount64]
+          )
+      );
+      Deadline := GetTickCount64 + QWord(NetSilenceTimeoutMs) + SilentLingerMs;
+      while GetTickCount64 < Deadline do
+        Sleep(50);
+      Client.LoseConnection(False);
+      Deadline := GetTickCount64 + StallTimeoutMs;
+      while not Client.RejoinStatePending do
+      begin
+        if Client.HostLeft or (GetTickCount64 > Deadline) then
+        begin
+          Emit('net client failed: no state after the reconnect in the quest');
+          Exit;
+        end;
+        Client.Pump;
+        NetInboxEvent.WaitFor(5);
+      end;
+      Player.Run.Abandon;
+      Emit(
+          Format(
+              'net client quest abandoned human=%d planet=%d steps=%d outcome=%s',
+              [Client.HumanId, PlanetId, Player.Steps, QuestOutcomeName(Player.Run.Page.Outcome)]
+          )
+      );
+      Exit(nqAbandoned);
+    end;
+    Outcome := Player.Finish;
+    Emit(
+        Format(
+            'net client quest done name=%s outcome=%s pages=%d steps=%d days=%d errors=%d respawned=%d human=%d',
+            [Options.TextQuest, QuestOutcomeName(Outcome), Player.Pages, Player.Steps,
+                Player.Run.DaysElapsed, Player.Errors, Ord(Player.Run.Respawned), Client.HumanId]
+        )
+    );
+  finally
+    Player.Free;
+  end;
+  Plan := Plan + 'q';
+  Emit(
+      Format(
+          'net client quest owed day=%d human=%d days=%d holds=%d open=%d',
+          [Galaxy.CurrentTurn, Client.HumanId, LocalHuman.QuestDaysOwed, Ord(HumanHoldsDay(LocalHuman)),
+              Ord(LocalHuman.TextQuestOpen)]
+      )
+  );
+  EndTurnFor(LocalHuman);
+  Result := nqPlayed;
+end;
+
 function RunNetHost(const Options: TSimulationOptions): Integer;
 var
   Host: TNetHost;
@@ -937,6 +1287,22 @@ begin
     Host.OrderedTrades := True;
     Host.MayApplyTrades := @HeadlessMayApplyTrades;
     Host.TradeHook := @HostTradeHook;
+    // CHANGE: ENHANCEMENT - --sim-net-quest: the probe, what the barrier applies of the quests,
+    // and every client at one planet.
+    QuestBegun := 0;
+    QuestBarrierCommands := 0;
+    QuestClosed := 0;
+    QuestEarly := 0;
+    QuestWaitShown := '';
+    QuestJoinTarget := nil;
+    if Options.NetQuestDay > 0 then
+    begin
+      RegisterNetQuestProbe;
+      PreviousQuestAfterCommand := AfterCommandHook;
+      AfterCommandHook := @CountQuestCommand;
+      if not Options.NetShop then
+        Host.JoinPlanetHook := @QuestJoinPlanet;
+    end;
     RaceArmed := Options.NetBuyRace;
     ShopRun := Options.NetShop;
     HostTriedFirst := False;
@@ -994,6 +1360,8 @@ begin
         repeat
           Host.Pump;
           DropFrozenPeers;
+          if Options.NetQuestDay > 0 then
+            EmitHostQuestWait(Day);
           // CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn: the first day waits until a client
           // has taken its end turn back (and ended it again); a day after a state that says a
           // client continues its travel, until it has stopped it (once in the run).
@@ -1012,7 +1380,12 @@ begin
       finally
         TradeWindow := False;
       end;
-      Host.ApplyQueues;
+      QuestBarrier := True;
+      try
+        Host.ApplyQueues;
+      finally
+        QuestBarrier := False;
+      end;
       CloseHostDialogue;
       if not AllHumansEndedTurn then
       begin
@@ -1141,6 +1514,13 @@ begin
       Emit(Format('net host trades remote=%d host=%d', [RemoteTrades, LocalHuman.Id]));
     if Options.NetShop then
       Emit(Format('net host shop notified=%d host=%d', [ShopNotifications, LocalHuman.Id]));
+    if Options.NetQuestDay > 0 then
+      Emit(
+          Format(
+              'net host quest begun=%d barrier=%d closed=%d early=%d host=%d',
+              [QuestBegun, QuestBarrierCommands, QuestClosed, QuestEarly, LocalHuman.Id]
+          )
+      );
     if Options.NetNested then
     begin
       Emit(Format('net host nested outer=%d inner=%d', [NestedOuterRuns, NestedInnerRuns]));
@@ -1153,6 +1533,10 @@ begin
         )
     );
   finally
+    if @AfterCommandHook = @CountQuestCommand then
+      AfterCommandHook := PreviousQuestAfterCommand;
+    PreviousQuestAfterCommand := nil;
+    QuestBarrier := False;
     if @AfterCommandHook = @CountRemoteTrade then
       AfterCommandHook := PreviousAfterCommand;
     PreviousAfterCommand := nil;
@@ -1286,14 +1670,32 @@ var
   TravelProbed: Boolean;
   // Whether a turn it played began in normal space (else it could not travel).
   InSpaceTurns: Integer;
+  // CHANGE: ENHANCEMENT - --sim-net-quest: the quest turn has come; the planet of a quest it
+  // abandoned, checked after the state that follows (-1: none); the trade timeout it replaced.
+  QuestPlayed: Boolean;
+  QuestPlanetId, AbandonedPlanetId: Integer;
+  SavedTradeTimeoutMs: Integer;
+  AbandonedPlanet: TPlanet;
 begin
   Result := 0;
   WentSilent := False;
   CancelProbes := 0;
   TravelProbed := False;
   InSpaceTurns := 0;
+  QuestPlayed := False;
+  AbandonedPlanetId := -1;
+  SavedTradeTimeoutMs := ClientTradeTimeoutMs;
   if Options.NetReconnectMs > 0 then
     NetReconnectMs := Options.NetReconnectMs;
+  // CHANGE: ENHANCEMENT - --sim-net-quest: a second client's BeginTextQuest waits at the host
+  // while the first one plays its quest (OrderedTrades), longer than a player's would.
+  if Options.NetQuestDay > 0 then
+  begin
+    RegisterNetQuestProbe;
+    ClientStatusHook := @ShowClientQuestWait;
+    ClientWaitShown := '';
+    ClientTradeTimeoutMs := StallTimeoutMs;
+  end;
   Colon := LastDelimiter(':', Options.NetJoin);
   Address := Copy(Options.NetJoin, 1, Colon - 1);
   Port := StrToInt(Copy(Options.NetJoin, Colon + 1, MaxInt));
@@ -1418,12 +1820,30 @@ begin
         LastPlayedDay := -1;
       Emit(
           Format(
-              'net client day=%d serial=%d hash=%s match=%d human=%d state=%d received=%d delta=%d film=%d films=%d load=%d rejoin=%d',
+              'net client day=%d serial=%d hash=%s match=%d human=%d state=%d received=%d delta=%d film=%d films=%d load=%d rejoin=%d quest-days=%d',
               [Report.Day, Report.Serial, HashText(Report.Hash), Ord(Report.Hash = Report.HostHash),
                   Client.HumanId, Report.StateBytes, Report.ReceivedBytes, Ord(Report.Delta),
-                  FilmBytes, FilmCount, Report.LoadMs, Ord(Report.Rejoin)]
+                  FilmBytes, FilmCount, Report.LoadMs, Ord(Report.Rejoin), LocalHuman.QuestDaysOwed]
           )
       );
+      // CHANGE: ENHANCEMENT - --sim-net-quest: the quest abandoned in the reconnect is still
+      // there: the host never got it.
+      if AbandonedPlanetId >= 0 then
+      begin
+        AbandonedPlanet := TPlanet(Galaxy.IdToPlanet(Cardinal(AbandonedPlanetId), False));
+        if AbandonedPlanet <> nil then
+          Emit(
+              Format(
+                  'net client quest after rejoin planet=%d quest=%d holds=%d open=%d holder=%d rejoin=%d',
+                  [AbandonedPlanetId, AbandonedPlanet.TextQuestId,
+                      Ord(HoldsPlanetQuest(LocalHuman, AbandonedPlanet)), Ord(LocalHuman.TextQuestOpen),
+                      Ord(TextQuestHolder(AbandonedPlanet, nil) <> nil), Ord(Report.Rejoin)]
+              )
+          )
+        else
+          Emit(Format('net client quest after rejoin planet=%d gone', [AbandonedPlanetId]));
+        AbandonedPlanetId := -1;
+      end;
       FilmBytes := 0;
       FilmCount := 0;
       // The state replaced the human's bubbles; the refusal shows again.
@@ -1449,7 +1869,8 @@ begin
       // it, at once, and the frozen one stays open, so the host still counts it. Either way the
       // client reconnects by itself (TNetClient's reconnect) with its token, gets the whole
       // state and plays on (docs/network.md, Tests).
-      if (Options.NetSilentAt > 0) and (Days >= Options.NetSilentAt) and not WentSilent then
+      if (Options.NetSilentAt > 0) and (Days >= Options.NetSilentAt) and not WentSilent
+          and (Options.NetQuestDay = 0) then
       begin
         WentSilent := True;
         Client.FreezeConnection;
@@ -1507,6 +1928,29 @@ begin
             Exit(1);
           end;
         end
+        // CHANGE: ENHANCEMENT - --sim-net-quest: the quest turn, landed for a planet quest.
+        else if (Options.NetQuestDay > 0) and not QuestPlayed and (Days + 1 >= Options.NetQuestDay)
+            and ((Options.TextQuest <> '') or (LocalPlayer.CurrentPlanet <> nil)) then
+        begin
+          QuestPlayed := True;
+          case PlayNetQuest(Client, Options, Plan, QuestPlanetId) of
+            nqFailed:
+              begin
+                Emit('net client failed: the text quest');
+                Exit(1);
+              end;
+            nqTurn:
+              PlayHumanTurn(LocalHuman, Galaxy.CurrentTurn, Index, Plan);
+            nqAbandoned:
+              begin
+                // The state after the reconnect waits; the turn of its day is played again.
+                WentSilent := True;
+                AbandonedPlanetId := QuestPlanetId;
+                Deadline := GetTickCount64 + StallTimeoutMs;
+                Continue;
+              end;
+          end;
+        end
         else if not (EndTurnContinues and PlayFarTravel(LocalHuman, Plan)) then
           PlayHumanTurn(LocalHuman, Galaxy.CurrentTurn, Index, Plan);
         if Options.NetCancelEndTurn and LocalPlayer.InNormalSpace then
@@ -1561,6 +2005,8 @@ begin
   finally
     BuyWholeStockGood := False;
     EndTurnContinues := False;
+    ClientStatusHook := nil;
+    ClientTradeTimeoutMs := SavedTradeTimeoutMs;
     StopNetwork;
     NetLogHook := nil;
   end;

@@ -279,6 +279,7 @@ uses
   aObjectRefs,
   aPlanet,
   aPlayerActions,
+  aQuestActions,
   aSession,
   aSaveLoad,
   aShopStock,
@@ -811,6 +812,19 @@ begin
   Peer.State := hpHello;
   Human.Connected := False;
   NetLog(Format('human %d (%s) disconnected', [Human.Id, UTF8Encode(Peer.Hello.Name)]));
+  // CHANGE: ENHANCEMENT - A text quest it plays is abandoned (docs/progress/
+  // 2026-10-19-text-quests-plan.md, Disconnects): its commands after BeginTextQuest go with the
+  // peer's queue, so the quest never happened here, and another human may play the planet's.
+  if Human.TextQuestOpen then
+  begin
+    NetLog(
+        Format(
+            'human %d (%s) abandoned its text quest planet=%d',
+            [Human.Id, UTF8Encode(Peer.Hello.Name), Human.TextQuestPlanetId]
+        )
+    );
+    Human.ReleaseTextQuest;
+  end;
   if (Human.Player <> nil) and not Human.Player.InHyperspace and not Human.Finished then
   begin
     Command := NewCommand(ckHoldPosition);
@@ -994,6 +1008,11 @@ begin
       Status.Humans[I].HoldsDay := HumanHoldsDay(Human)
     else
       Status.Humans[I].HoldsDay := DayWaitsFor(Human);
+    // CHANGE: ENHANCEMENT - Its text quest (docs/progress/2026-10-19-text-quests-plan.md, The
+    // day): open from its BeginTextQuest, which runs here as it arrives (for the host's own
+    // human, at once), to the CloseQuest the barrier applies; then the days it owes.
+    Status.Humans[I].QuestDays := Human.QuestDaysOwed;
+    Status.Humans[I].Activity := HumanQuestActivity(Human);
   end;
   Payload := TBufEC.Create;
   try
@@ -1293,7 +1312,13 @@ begin
       );
       Exit;
     end;
-  end;
+  end
+  // CHANGE: ENHANCEMENT - A BeginTextQuest goes as its lock (aQuestActions.RelayedTextQuestOf):
+  // the checks were the host's, and the clients' copies may not have the actor's quest, so that
+  // their planet screens say who plays the planet's quest (docs/progress/
+  // 2026-10-19-text-quests-plan.md, The lock).
+  else if Command.Kind = ckBeginTextQuest then
+    Relayed := RelayedTextQuestOf(Command);
   Payload := nil;
   try
     for I := 0 to FPeers.Count - 1 do

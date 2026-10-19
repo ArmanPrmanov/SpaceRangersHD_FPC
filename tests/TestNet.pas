@@ -249,6 +249,10 @@ begin
     Status.Humans[1].Name := 'B';
     Status.Humans[1].Connected := False;
     Status.Humans[1].HoldsDay := True;
+    Status.Humans[0].Activity := saNone;
+    Status.Humans[0].QuestDays := 0;
+    Status.Humans[1].Activity := saQuestDays;
+    Status.Humans[1].QuestDays := 37;
     Status.TalkHumanId := 9;
     EncodeStatus(Status, Buffer);
     Buffer.SetPosition(0);
@@ -258,6 +262,8 @@ begin
             and (StatusBack.Humans[1].Id = 9) and (StatusBack.Humans[1].Name = 'B')
             and not StatusBack.Humans[1].Connected and StatusBack.Humans[1].HoldsDay
             and StatusBack.Humans[0].Connected and (StatusBack.TalkHumanId = 9)
+            and (StatusBack.Humans[0].Activity = saNone)
+            and (StatusBack.Humans[1].Activity = saQuestDays) and (StatusBack.Humans[1].QuestDays = 37)
             and Buffer.IsAtEnd,
         'Status round trips'
     );

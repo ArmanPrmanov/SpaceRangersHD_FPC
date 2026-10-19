@@ -72,6 +72,13 @@ type
     procedure QuestKeyDown(Sender: TObjectGI; VirtualKey: Cardinal);
     function ConfirmQuestDeath: Boolean;
     procedure EndQuest(Outcome: TQuestRunOutcome);
+    // CHANGE: ENHANCEMENT - The quest is a game's, not the one the main menu runs (galaxy,
+    // player, StandaloneQuestMode off): a networked game's screen (NetPlay).
+    function PlaysGameQuest: Boolean;
+    // CHANGE: ENHANCEMENT - A networked client reconnected while it played the quest
+    // (docs/progress/2026-10-19-text-quests-plan.md, Disconnects): the run is left without
+    // CloseQuest (TQuestRun.Abandon), and the caller closes the screen.
+    procedure AbandonQuest;
   end;
   // CHANGE: ENHANCEMENT - What the run shows goes to the screen (was TTextQuestPlayerInterface).
   TPlanetQuestView = class(TQuestView)
@@ -992,6 +999,17 @@ begin
   end;
   if (RequestedScreenId = screenMainMenu) or (RequestedScreenId = screenLoad) then
     ClearPendingScriptRequests;
+end;
+
+function TfPlanetQuest.PlaysGameQuest: Boolean;
+begin
+  Result := (Galaxy <> nil) and (LocalPlayer <> nil) and not StandaloneQuestMode;
+end;
+
+procedure TfPlanetQuest.AbandonQuest;
+begin
+  if Run <> nil then
+    Run.Abandon;
 end;
 
 function TfPlanetQuest.GetTextColorTag(StyleIndex: Integer): WideString;

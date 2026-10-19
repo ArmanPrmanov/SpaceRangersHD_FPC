@@ -18,8 +18,10 @@ const
   // 6: Command carries the client's number for it, and CommandResult. 7: a host applies a
   // trade as it arrives and answers it (CommandResult, also when applied), and RelayCommand.
   // 8: RelayCommand carries a ship screen sale as its effect (aHoldActions.ckRelayedSale).
-  // 9: Hello and Welcome carry the reconnection token, and Ping.
-  ProtocolVersion = 9;
+  // 9: Hello and Welcome carry the reconnection token, and Ping. 10: Status carries each
+  // human's text-quest activity and the game days it owes for a quest (docs/progress/
+  // 2026-10-19-text-quests-plan.md, Phase C).
+  ProtocolVersion = 10;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 
@@ -108,11 +110,17 @@ type
     Day: Integer;
     StarId: Integer;
   end;
+  // CHANGE: ENHANCEMENT - What a human does in a text quest (Status, docs/network.md, Waiting):
+  // nothing, plays one, or has played one and owes its game days (TStatusHuman.QuestDays).
+  TStatusActivity = (saNone, saInTextQuest, saQuestDays);
   TStatusHuman = record
     Id: Integer;
     Name: WideString;
     Connected: Boolean;
     HoldsDay: Boolean;
+    // CHANGE: ENHANCEMENT - Its text quest, and the days it owes (THuman.QuestDaysOwed).
+    Activity: TStatusActivity;
+    QuestDays: Integer;
   end;
   // host -> client: who the day waits for.
   TStatusMessage = record
@@ -180,6 +188,9 @@ procedure EncodeCharacter(const Message: TCharacterMessage; Buffer: TBufEC);
 function DecodeCharacter(Buffer: TBufEC): TCharacterMessage;
 procedure EncodeStatus(const Message: TStatusMessage; Buffer: TBufEC);
 function DecodeStatus(Buffer: TBufEC): TStatusMessage;
+// CHANGE: ENHANCEMENT - The activity Status gives Human: its text quest is open (its
+// BeginTextQuest's lock, THuman.TextQuestOpen), else it owes days for one, else none.
+function HumanQuestActivity(Human: THuman): TStatusActivity;
 procedure EncodeChat(const Message: TChatMessage; Buffer: TBufEC);
 function DecodeChat(Buffer: TBufEC): TChatMessage;
 procedure EncodeTalkRequest(const Message: TTalkRequestMessage; Buffer: TBufEC);
@@ -437,13 +448,26 @@ begin
     Buffer.AddWideStringZ(Message.Humans[I].Name);
     Buffer.AddBoolean(Message.Humans[I].Connected);
     Buffer.AddBoolean(Message.Humans[I].HoldsDay);
+    Buffer.AddByte(Ord(Message.Humans[I].Activity));
+    Buffer.AddInt32(Message.Humans[I].QuestDays);
   end;
   Buffer.AddInt32(Message.TalkHumanId);
+end;
+
+function HumanQuestActivity(Human: THuman): TStatusActivity;
+begin
+  if Human.TextQuestOpen then
+    Result := saInTextQuest
+  else if Human.QuestDaysOwed > 0 then
+    Result := saQuestDays
+  else
+    Result := saNone;
 end;
 
 function DecodeStatus(Buffer: TBufEC): TStatusMessage;
 var
   I, Count: Integer;
+  Activity: Byte;
 begin
   Result := Default(TStatusMessage);
   Result.DayRunning := Buffer.GetBoolean;
@@ -457,6 +481,11 @@ begin
     Result.Humans[I].Name := Buffer.ReadWideString;
     Result.Humans[I].Connected := Buffer.GetBoolean;
     Result.Humans[I].HoldsDay := Buffer.GetBoolean;
+    Activity := Buffer.GetByte;
+    if Activity > Ord(High(TStatusActivity)) then
+      raise Exception.Create('Bad status message');
+    Result.Humans[I].Activity := TStatusActivity(Activity);
+    Result.Humans[I].QuestDays := Buffer.GetInt32;
   end;
   Result.TalkHumanId := Buffer.GetInt32;
 end;
