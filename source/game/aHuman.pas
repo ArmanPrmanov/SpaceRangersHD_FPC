@@ -156,6 +156,19 @@ type
     // hold the local human's; a command of another human swaps that human's in while it runs
     // (aScript.EnterHumanDialogState). Created when first needed; UI state, not saved.
     ScriptDialogState: TObject;
+    // CHANGE: ENHANCEMENT - Text quests in multiplayer (docs/progress/
+    // 2026-10-19-text-quests-plan.md). A quest runs no galaxy day there: the days it passes
+    // are owed, set by its CloseQuest. While the human owes days it does not hold the day
+    // (HumanHoldsDay), its ranger stays where the quest left it, and StartDayRound takes one
+    // off after each day. Saved in the per-human save block (version 4). Always 0 in single
+    // player, where a quest runs its days.
+    QuestDaysOwed: Integer;
+    // The text quest the human has open, from its BeginTextQuest to its CloseQuest
+    // (aQuestActions): one human at a time plays the quest of a planet, TextQuestPlanetId
+    // (0 for a prison or a script's quest). Session state, not game state: not saved;
+    // ReleaseTextQuest clears it, and a load (RebuildHumans) forgets it.
+    TextQuestOpen: Boolean;
+    TextQuestPlanetId: Integer;
     constructor Create;
     destructor Destroy; override;
     // The message bubbles, under PersistentPlayerMessageLock. SkipLock means the caller
@@ -195,6 +208,8 @@ type
     // the ship's experience comes back from the player's, as CloseShipScreen does, and no
     // human has the ship open any more. For a human whose machine will not close it.
     procedure ReleaseShipScreen;
+    // The human has no text quest open any more (TextQuestOpen).
+    procedure ReleaseTextQuest;
   end;
   // The humans in join order. Every TPlayer in the galaxy is in it, and nothing else is.
   THumanList = class(TList)
@@ -338,7 +353,8 @@ procedure DropRefusedHumanAttacks;
 // runs only when every human who plays has pressed end turn.
 // Whether Human holds the day: its ranger plays and it has not ended its turn. A finished
 // human never holds it, nor does one whose ranger is in hyperspace, since a jump is travel
-// that goes on until arrival, nor a disconnected one (THuman.Connected).
+// that goes on until arrival, nor a disconnected one (THuman.Connected), nor one who owes
+// days for a text quest (THuman.QuestDaysOwed).
 function HumanHoldsDay(Human: THuman): Boolean;
 // Whether the day may start: no human holds it.
 function AllHumansEndedTurn: Boolean;
@@ -353,8 +369,11 @@ function HumanTravelContinues(Human: THuman): Boolean;
 function NeedsHyperspaceStep(Player: TPlayer): Boolean;
 // A day has run (the player-star job): every human who plays holds the next one, except a
 // human who continues until arrival while its travel goes on. Also marks the hyperspace
-// steps that are due.
+// steps that are due, and takes one off every human's text-quest days owed.
 procedure StartDayRound;
+// CHANGE: ENHANCEMENT - Whether Ship is a human's ranger who owes days for a text quest
+// (THuman.QuestDaysOwed): for the days, it is still in the quest.
+function OwesQuestDays(Ship: TObject): Boolean;
 type
   // Told before and after the local human changes (SetLocalHuman); the command log records it.
   TLocalHumanHook = procedure(Human: THuman; Before: Boolean);
@@ -640,6 +659,7 @@ begin
   // CHANGE: BUGFIX - The ship it had open is not in the galaxy that replaces this one.
   LocalHuman.EditedShip := nil;
   LocalHuman.ShipScreenShown := False;
+  LocalHuman.ReleaseTextQuest;
   if Local = nil then
     Exit;
   AddHuman(Local);
@@ -1096,6 +1116,12 @@ begin
   ShipScreenShown := False;
 end;
 
+procedure THuman.ReleaseTextQuest;
+begin
+  TextQuestOpen := False;
+  TextQuestPlanetId := 0;
+end;
+
 function ActorHuman(const Command: TPlayerCommand): THuman;
 begin
   Result := FindHuman(Integer(Command.Actor));
@@ -1217,7 +1243,8 @@ begin
           and not Human.Finished
           and Human.Connected
           and (Human.Player <> nil)
-          and not Human.Player.InHyperspace;
+          and not Human.Player.InHyperspace
+          and (Human.QuestDaysOwed <= 0);
 end;
 
 function AllHumansEndedTurn: Boolean;
@@ -1290,10 +1317,23 @@ begin
   begin
     Human := Session.Humans[I];
     Human.HyperspaceStepPending := NeedsHyperspaceStep(Human.Player);
+    if Human.QuestDaysOwed > 0 then
+      Dec(Human.QuestDaysOwed);
     if Human.ContinueUntilArrival and not HumanTravelContinues(Human) then
       Human.ContinueUntilArrival := False;
     Human.EndedTurn := Human.Finished or Human.ContinueUntilArrival;
   end;
+end;
+
+function OwesQuestDays(Ship: TObject): Boolean;
+var
+  Human: THuman;
+begin
+  Result := False;
+  if not IsHuman(Ship) then
+    Exit;
+  Human := HumanOf(Ship);
+  Result := (Human <> nil) and (Human.QuestDaysOwed > 0);
 end;
 
 procedure SetLocalHuman(Human: THuman);

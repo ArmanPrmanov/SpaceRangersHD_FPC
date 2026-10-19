@@ -1114,7 +1114,7 @@ registered only then): the client must send the outer one only, and the host
 must run each once (`net host nested outer=1 inner=1`). It then sets a session
 flag, which the host must refuse (`net command failed ... kind=SetSessionFlag`,
 and the client's `net client refused`) without changing its own
-(`net host session flag text-quests=` differs from what the client predicted).
+(`net host session flag friendly-fire=` differs from what the client predicted).
 The client then takes its end turn back (`--sim-net-cancel-end-turn`,
 `check_cancel_end_turn`): after its first day's turn it sends `CancelEndTurn`
 and waits for the answer, while the host holds its first day until it has taken

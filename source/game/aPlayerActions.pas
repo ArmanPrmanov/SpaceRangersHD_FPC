@@ -161,7 +161,7 @@ procedure FinishTerronTransformation;
 // The jump screen or the arcade battle no longer shows the dead player's ship; the turn
 // thread, waiting in the player ship's release, goes on.
 procedure DismissScoreScreen;
-// Sets a session flag (aSession: SessionFlagTextQuestsDisabled, SessionFlagFriendlyFire).
+// Sets a session flag (aSession: SessionFlagFriendlyFire; SessionFlagTextQuestsRetired does nothing).
 procedure SetSessionFlagValue(Flag: Integer; Value: Boolean);
 // CHANGE: ENHANCEMENT - The end-turn barrier (ROADMAP.md, Phase 4, item 2; docs/humans.md, End
 // turn). The local human ends its turn when it holds the day (the EndTurn command); with

@@ -17,7 +17,8 @@ unit aHumanSave;
 // - since version 2, whether each human's game has ended (THuman.Finished, FinishReason);
 // - since version 3, the items of the open shop grids that do not write them (aShopStock:
 //   a second grid at a location writes its slots empty), by id, so that a load shows them
-//   again.
+//   again;
+// - since version 4, the game days each human owes for a text quest (THuman.QuestDaysOwed).
 // It is written only when some of this differs from what a save without it loads as: more
 // than one human, a flag that is not its default, a cheat on record, or a script or event
 // bound to a human other than the first. A single-player save is therefore byte for byte as
@@ -61,7 +62,8 @@ const
   HumanBlockMagic = $55485253; // 'SRHU'
   // 2: whether each human's game has ended.
   // 3: the items of the shop grids that write their slots empty.
-  HumanBlockVersion = 3;
+  // 4: the days each human owes for a text quest.
+  HumanBlockVersion = 4;
 
 procedure ResetHumanSessionState;
 begin
@@ -69,6 +71,7 @@ begin
   LocalHuman.ClearCheats;
   LocalHuman.Finished := False;
   LocalHuman.FinishReason := -1;
+  LocalHuman.QuestDaysOwed := 0;
 end;
 
 function FirstHumanId: Integer;
@@ -96,7 +99,9 @@ begin
   if not SessionFlagsAreDefault then
     Exit;
   for I := 0 to Session.Humans.Count - 1 do
-    if Session.Humans[I].HasCheated or Session.Humans[I].Finished then
+    if Session.Humans[I].HasCheated
+        or Session.Humans[I].Finished
+        or (Session.Humans[I].QuestDaysOwed > 0) then
       Exit;
   if Galaxy.Scripts <> nil then
     for I := 0 to Galaxy.Scripts.Count - 1 do
@@ -361,7 +366,8 @@ begin
   Buffer.AddDWord(HumanBlockVersion);
   SizeOffset := Buffer.Position;
   Buffer.AddIntegerValue(0);
-  Buffer.AddBoolean(Session.TextQuestsDisabled);
+  // The retired text-quest flag (aSession), always off.
+  Buffer.AddBoolean(False);
   Buffer.AddBoolean(Session.FriendlyFireEnabled);
   Buffer.AddIntegerValue(Session.Humans.Count);
   for I := 0 to Session.Humans.Count - 1 do
@@ -405,6 +411,13 @@ begin
   end;
   // Version 3.
   SaveShopViewItems(Buffer);
+  // Version 4.
+  Buffer.AddIntegerValue(Session.Humans.Count);
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Buffer.AddDWord(Cardinal(Session.Humans[I].Id));
+    Buffer.AddIntegerValue(Session.Humans[I].QuestDaysOwed);
+  end;
   Buffer.SetInt32At(SizeOffset, Buffer.Position - SizeOffset - 4);
 end;
 
@@ -418,7 +431,7 @@ var
   Points: Integer;
   NextItemId: Cardinal;
   Finished: Boolean;
-  Reason: Integer;
+  Reason, Days: Integer;
 begin
   Start := Buffer.Position;
   if (Buffer.DataSize - Start < 12) or (Buffer.GetUInt32 <> HumanBlockMagic) then
@@ -434,7 +447,8 @@ begin
     Buffer.SetPosition(Start + Size);
     Exit;
   end;
-  Session.TextQuestsDisabled := Buffer.GetBoolean;
+  // The retired text-quest flag: text quests are always on.
+  Buffer.GetBoolean;
   Session.FriendlyFireEnabled := Buffer.GetBoolean;
   // Loading a shop's items raises the next item id past theirs. The original layout reads
   // the saved value after its own shop, so that one stands; keep it here too.
@@ -518,6 +532,18 @@ begin
   end;
   if Version >= 3 then
     LoadShopViewItems(Buffer);
+  // Version 3 and older owe no quest days.
+  if Version >= 4 then
+  begin
+    Count := Buffer.GetInt32;
+    for I := 0 to Count - 1 do
+    begin
+      Human := FindHuman(Integer(Buffer.GetUInt32));
+      Days := Buffer.GetInt32;
+      if Human <> nil then
+        Human.QuestDaysOwed := Days;
+    end;
+  end;
   Buffer.SetPosition(Start + Size);
 end;
 

@@ -460,6 +460,9 @@ type
     SuccessCaption: WideString;
     FailureCaption: WideString;
     Script: TScript;
+    // CHANGE: ENHANCEMENT - The human whose script code queued it, as for the other requests
+    // (docs/progress/2026-10-19-text-quests-plan.md, rule 5); 0: anyone.
+    HumanId: Integer;
   end;
   PQueuedTextQuest = PointerToTScriptTQRequest;
   TScriptABRequest = packed record
@@ -578,15 +581,16 @@ function DispatchPendingScriptRequests: Boolean;
 procedure StartScriptRequestThread;
 // The script that queued the human's first request (HumanId, 0: anyone's) runs with Status.
 procedure CompleteQueuedArcadeBattle(Status, HumanId: Integer);
-procedure CompleteQueuedTextQuest(Status: TScriptQuestStatus);
+procedure CompleteQueuedTextQuest(Status: TScriptQuestStatus; HumanId: Integer);
 procedure CompleteQueuedPlanetaryBattle(Status, HumanId: Integer);
 procedure CompleteQueuedVideo(Status, HumanId: Integer);
-// CHANGE: BUGFIX - A queued arcade battle, planet battle or video (Queue srqArcadeBattle,
-// srqPlanetaryBattle, srqVideo) belongs to the human whose script code queued it: this
+// CHANGE: BUGFIX - A queued arcade battle, planet battle, video or text quest (Queue
+// srqArcadeBattle, srqPlanetaryBattle, srqVideo, srqTextQuest) belongs to the human whose
+// script code queued it: this
 // machine shows only the local human's, and the command that reports how it ended finishes
 // its actor's (docs/humans.md, Scripts). They were shown on whichever machine ran the
 // script, whoever its human was. HumanId 0 matches every request, and a request queued with
-// no human matches every human. Text quests are off in multiplayer and stay one queue.
+// no human matches every human.
 function ScriptRequestCount(Queue, HumanId: Integer): Integer;
 // The human's first request in Queue, or nil.
 function FirstScriptRequest(Queue, HumanId: Integer): Pointer;
@@ -823,6 +827,7 @@ begin
     srqVideo: Result := PScriptVDRequest(Request).HumanId;
     srqArcadeBattle: Result := PScriptABRequest(Request).HumanId;
     srqPlanetaryBattle: Result := PScriptPBRequest(Request).HumanId;
+    srqTextQuest: Result := PQueuedTextQuest(Request).HumanId;
   else
     Result := 0;
   end;
@@ -903,7 +908,7 @@ function HasPendingScriptRequests: Boolean;
 begin
   Result :=
       (LocalScriptRequest(srqArcadeBattle) <> nil)
-          or (QueuedTextQuests.Count > 0)
+          or (LocalScriptRequest(srqTextQuest) <> nil)
           or (LocalScriptRequest(srqPlanetaryBattle) <> nil)
           or (LocalScriptRequest(srqVideo) <> nil)
           or ((LocalHuman <> nil)
@@ -937,7 +942,8 @@ end;
 function TryShowQueuedTextQuest: Boolean;
 begin
   Result := False;
-  if QueuedTextQuests.Count > 0 then
+  // CHANGE: ENHANCEMENT - Only the local human's quest (rule 5 of the text-quests plan).
+  if LocalScriptRequest(srqTextQuest) <> nil then
   begin
     StandaloneQuestMode := False;
     case CurrentScreenId of
@@ -1129,7 +1135,8 @@ begin
   for I := 0 to QueuedTextQuests.Count - 1 do
   begin
     Quest := PQueuedTextQuest(QueuedTextQuests[I]);
-    if Quest.Script = ResumingScript then
+    if (Quest.Script = ResumingScript)
+        and IsRequestOf(srqTextQuest, QueuedTextQuests[I], HumanId) then
     begin
       Index := I;
       Exit(srqTextQuest);
@@ -1296,12 +1303,15 @@ begin
     ResumingScript := nil;
 end;
 
-procedure CompleteQueuedTextQuest(Status: TScriptQuestStatus);
+procedure CompleteQueuedTextQuest(Status: TScriptQuestStatus; HumanId: Integer);
 var
   Request: PQueuedTextQuest;
 begin
-  Request := PQueuedTextQuest(QueuedTextQuests[0]);
-  QueuedTextQuests.Delete(0);
+  // CHANGE: ENHANCEMENT - The human's first quest (HumanId 0: the first of anyone's, as
+  // before); none to finish changes nothing.
+  Request := TakeScriptRequest(srqTextQuest, HumanId);
+  if Request = nil then
+    Exit;
   ResumingScript := Request.Script;
   if Request.Script <> nil then
   begin

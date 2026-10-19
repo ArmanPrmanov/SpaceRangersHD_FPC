@@ -1144,7 +1144,7 @@ begin
     if Options.NetNested then
     begin
       Emit(Format('net host nested outer=%d inner=%d', [NestedOuterRuns, NestedInnerRuns]));
-      Emit(Format('net host session flag text-quests=%d', [Ord(Session.TextQuestsDisabled)]));
+      Emit(Format('net host session flag friendly-fire=%d', [Ord(Session.FriendlyFireEnabled)]));
     end;
     Emit(
         Format(
@@ -1495,8 +1495,8 @@ begin
           Emit(Format('net client nested outer=%d inner=%d', [NestedOuterRuns, NestedInnerRuns]));
           // CHANGE: ENHANCEMENT - The session flags are the host's: it refuses a client's
           // (NetHost.IsHostOnlyCommand), and the next state undoes this prediction.
-          SetSessionFlagValue(SessionFlagTextQuestsDisabled, not Session.TextQuestsDisabled);
-          Emit(Format('net client session flag text-quests=%d', [Ord(Session.TextQuestsDisabled)]));
+          SetSessionFlagValue(SessionFlagFriendlyFire, not Session.FriendlyFireEnabled);
+          Emit(Format('net client session flag friendly-fire=%d', [Ord(Session.FriendlyFireEnabled)]));
         end;
         // CHANGE: ENHANCEMENT - --sim-net-shop: the first day is the shop turn.
         if Options.NetShop and (LastPlayedDay < 0) then

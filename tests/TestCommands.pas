@@ -24,12 +24,13 @@ begin
   ResetSessionFlags;
   Check(SessionFlagsAreDefault, 'session flags start at their defaults');
   Check(Session.FriendlyFireEnabled, 'friendly fire is on by default');
-  Check(not Session.TextQuestsDisabled, 'text quests are on by default');
   SetSessionFlag(SessionFlagFriendlyFire, False);
   Check(not Session.FriendlyFireEnabled, 'the flag turns friendly fire off');
   Check(not SessionFlagsAreDefault, 'a changed flag is not the default');
-  SetSessionFlag(SessionFlagTextQuestsDisabled, True);
-  Check(Session.TextQuestsDisabled, 'the flag disables text quests');
+  // The retired text-quest flag changes nothing: text quests are always on.
+  ResetSessionFlags;
+  SetSessionFlag(SessionFlagTextQuestsRetired, True);
+  Check(SessionFlagsAreDefault, 'the retired text-quest flag changes nothing');
   SetSessionFlag(99, True);
   ResetSessionFlags;
   Check(SessionFlagsAreDefault, 'reset restores the defaults');

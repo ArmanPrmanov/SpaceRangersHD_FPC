@@ -33,8 +33,10 @@ type
     // CHANGE: ENHANCEMENT - Session flags (ROADMAP.md, Phase 4, item 10, and Phase 6). They
     // are part of the saved session (aHumanSave) and change only through the SetSessionFlag
     // command (aPlayerActions), so every machine sees a change at the same point.
-    // Text quests are not offered while this is set; multiplayer sets it.
-    TextQuestsDisabled: Boolean;
+    // CHANGE: ENHANCEMENT - Text quests are always on, in multiplayer too (docs/progress/
+    // 2026-10-19-text-quests-plan.md): the text-quest flag is gone. Its number stays taken
+    // (SessionFlagTextQuestsRetired) and its byte in the save block is written off and
+    // ignored, so old logs and saves load.
     // Whether a human may attack another human. The host owns the switch.
     FriendlyFireEnabled: Boolean;
     UselessItemRemainsCount: Integer;
@@ -64,7 +66,8 @@ type
   end;
 const
   // The flags SetSessionFlag takes. The values are part of the command log format.
-  SessionFlagTextQuestsDisabled = 0;
+  // Was the text-quest switch; SetSessionFlag ignores it now.
+  SessionFlagTextQuestsRetired = 0;
   SessionFlagFriendlyFire = 1;
 var
   Session: TSessionState;
@@ -72,25 +75,23 @@ var
 procedure ResetSessionFlags;
 // Whether every session flag has its default value.
 function SessionFlagsAreDefault: Boolean;
-// Sets one flag; an unknown Flag changes nothing.
+// Sets one flag; an unknown or retired Flag changes nothing.
 procedure SetSessionFlag(Flag: Integer; Value: Boolean);
 implementation
 
 procedure ResetSessionFlags;
 begin
-  Session.TextQuestsDisabled := False;
   Session.FriendlyFireEnabled := True;
 end;
 
 function SessionFlagsAreDefault: Boolean;
 begin
-  Result := not Session.TextQuestsDisabled and Session.FriendlyFireEnabled;
+  Result := Session.FriendlyFireEnabled;
 end;
 
 procedure SetSessionFlag(Flag: Integer; Value: Boolean);
 begin
   case Flag of
-    SessionFlagTextQuestsDisabled: Session.TextQuestsDisabled := Value;
     SessionFlagFriendlyFire: Session.FriendlyFireEnabled := Value;
   end;
 end;

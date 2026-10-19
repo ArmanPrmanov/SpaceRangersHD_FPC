@@ -20,6 +20,10 @@ type
   // the game; the screen lays out its page, maps the clicks and keys to TQuestRun.Choose, and
   // keeps the boxes and the screen changes. A choice's panel holds its index plus one in
   // UserValue (0: played).
+  // CHANGE: ENHANCEMENT - In multiplayer (IsMultiplayer; docs/progress/
+  // 2026-10-19-text-quests-plan.md, rule 3) a quest always ends by its own choices: no exit
+  // (Escape, the exit button), no reload (R), no "load the autosave?" box after a failure or
+  // a death, which respawns the ranger (TQuestRun.Respawned).
   TfPlanetQuest = class(TMessageLoopGI)
     Run: TQuestRun;
     QuestView: TPlanetQuestView;
@@ -1227,6 +1231,8 @@ procedure TfPlanetQuest.RequestLoadGame(Sender: TObjectGI);
 var
   Standalone: Boolean;
 begin
+  if IsMultiplayer then
+    Exit;
   if ShowMessageBoxGI(
           Self,
           LanguageDataConfig.GetParamByPathOrMarker('FormGameMenu.QExit'),
@@ -1297,7 +1303,7 @@ begin
         end;
       end;
     end;
-    if VirtualKey = Ord('R') then
+    if (VirtualKey = Ord('R')) and not IsMultiplayer then
       if (Run = nil) or (Run.QueuedQuest = nil) then
         if SaveManagerScreen.AutoSaveExists then
           if ShowMessageBoxGI(
@@ -1332,6 +1338,9 @@ end;
 // Moved from TfPlanetQuest.CompleteQuestDeath: the box before the run's DieInQuest.
 function TfPlanetQuest.ConfirmQuestDeath: Boolean;
 begin
+  // The death is a ship loss in multiplayer, which RecordHumanDeath records.
+  if IsMultiplayer then
+    Exit(True);
   if SaveManagerScreen.AutoSaveExists
       and (ShowMessageBoxGI(
               Self,
@@ -1383,6 +1392,7 @@ begin
             RequestedScreenId := screenHangar;
         end
         else if (Run.QueuedQuest = nil)
+            and not IsMultiplayer
             and SaveManagerScreen.AutoSaveExists
             and (ShowMessageBoxGI(
                     Self,
@@ -1399,6 +1409,14 @@ begin
       end;
     qroDeath:
       begin
+        // The ranger respawned at a planet (TShip.RespawnHuman): the game goes on there, and
+        // the other humans' script requests stay.
+        if Run.Respawned then
+        begin
+          RequestedScreenId := screenPlanet;
+          RequestClose(1);
+          Exit;
+        end;
         // A death declined for the autosave has asked for it already (ConfirmQuestDeath).
         if Run.Died then
           RequestedScreenId := screenGameEnd

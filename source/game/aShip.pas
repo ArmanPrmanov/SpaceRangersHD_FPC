@@ -2556,10 +2556,12 @@ begin
     if (aGalaxy.Galaxy.CurrentTurn > LastProcessedTurn)
         or ((aGalaxy.Galaxy.StasisModEnabled = 1) and IsHuman(Self)) then
     begin
-      // CHANGE: CLEANUP - The text-quest screen is this machine's; text quests are off in
-      // multiplayer (ROADMAP.md, Phase 6).
+      // CHANGE: CLEANUP - The text-quest screen is this machine's. CHANGE: ENHANCEMENT - In
+      // multiplayer a quest runs no day; a human who owes days for one is still in it
+      // (aHuman.OwesQuestDays).
       if ((CurrentPlanet <> nil) or (DockedTo <> nil))
-          and not ((Self = LocalPlayer) and (HumanScreen = screenPlanetQuest)) then
+          and not ((Self = LocalPlayer) and (HumanScreen = screenPlanetQuest))
+          and not OwesQuestDays(Self) then
         Inc(ConsecutiveDockedDays)
       else
         ConsecutiveDockedDays := 0;

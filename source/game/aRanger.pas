@@ -4638,6 +4638,16 @@ begin
   else
     CurrentStanding := ssPiratePassive;
 end;
+// CHANGE: CLEANUP - Whether Ranger is in the text quest of Planet, where its deadline does not
+// fail the quest: the local human on the quest screen at the planet (the quest screen is
+// this machine's). CHANGE: ENHANCEMENT - Or, in multiplayer, a human who owes days for a quest
+// there (aHuman.OwesQuestDays).
+function InTextQuestAt(Ranger: TRanger; Planet: TPlanet): Boolean;
+begin
+  Result :=
+      ((HumanScreen = screenPlanetQuest) and (LocalPlayer.CurrentPlanet = Planet))
+          or (OwesQuestDays(Ranger) and (Ranger.CurrentPlanet = Planet));
+end;
 procedure TRanger.ProcessQuestTimersAndOutcomes;
 var
   I: Integer;
@@ -4654,11 +4664,8 @@ begin
           and not Quest.Successful then
       begin
         if (Quest.QuestType <> qtPlanetQuest)
-            or (HumanScreen <> screenPlanetQuest)
             or not (Quest.ObjectiveTarget is TPlanet)
-            // CHANGE: CLEANUP - The quest screen is the local human's; text quests are single
-            // player only (ROADMAP.md, Phase 6).
-            or (LocalPlayer.CurrentPlanet <> (Quest.ObjectiveTarget as TPlanet)) then
+            or not InTextQuestAt(Self, Quest.ObjectiveTarget as TPlanet) then
         begin
           PublishQuestStatus(Quest, -1);
           if (Quest.Planet.OwnerId = Byte(oiPirate))
@@ -5677,6 +5684,29 @@ begin
       );
   end;
 end;
+// CHANGE: ENHANCEMENT - Whether a human other than Ranger holds a planet quest to Planet (a
+// qtPlanetQuest in its quests whose target is Planet).
+function PlanetQuestHeldByOtherHuman(Ranger: TRanger; Planet: TPlanet): Boolean;
+var
+  I, J: Integer;
+  Other: TPlayer;
+  Quest: PQuest;
+begin
+  Result := False;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Other := Session.Humans[I].Player;
+    if (Other = nil) or (Other = Ranger) then
+      Continue;
+    for J := 0 to Other.Quests.Count - 1 do
+    begin
+      Quest := Other.Quests[J];
+      if (Quest.QuestType = qtPlanetQuest) and (Quest.ObjectiveTarget = Planet) then
+        Exit(True);
+    end;
+  end;
+end;
+
 function TRanger.GenerateQuestOffer(var Quest: TQuest; var ResponseText: WideString): Boolean;
 label
   OfferPlanetQuest;
@@ -6103,9 +6133,9 @@ begin
     FirstStar := 10;
     if Session.ForcedPlanetQuestId >= 0 then
       FirstStar := 0;
-    // CHANGE: ENHANCEMENT - No text quest is offered while the session disables them
-    // (ROADMAP.md, Phase 6: text quests are off in multiplayer).
-    if not HasQuestOfType(qtPlanetQuest) and not Session.TextQuestsDisabled then
+    // CHANGE: ENHANCEMENT - Text quests are on in multiplayer too; the session flag that turned
+    // them off is gone (docs/progress/2026-10-19-text-quests-plan.md).
+    if not HasQuestOfType(qtPlanetQuest) then
       if (Session.ForcedPlanetQuestId >= 0)
           or (FractionalQuotient(
                   CurrentPlanet.GenerationSeed,
@@ -6124,9 +6154,13 @@ begin
             for J := 0 to Star.Planets.Count - 1 do
             begin
               Planet := Star.Planets[J];
+              // CHANGE: ENHANCEMENT - In multiplayer, not a planet whose quest another human
+              // holds (docs/progress/2026-10-19-text-quests-plan.md, rule 4). This runs in the
+              // RequestQuest executor, so the host decides at the barrier.
               if not Planet.NoLanding
                   and (Planet.OwnerId <> Byte(oiDominator))
-                  and (Planet.TextQuestId <> -1) then
+                  and (Planet.TextQuestId <> -1)
+                  and not (IsMultiplayer and PlanetQuestHeldByOtherHuman(Self, Planet)) then
                 if Planet.GetRelationLevelToShip(Self) > rlHostile then
                   if (LanguageDataConfig
                               .GetBlockByPath('PlanetQuest.PlanetQuest')

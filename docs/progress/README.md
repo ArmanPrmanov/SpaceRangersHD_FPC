@@ -25,8 +25,10 @@ has got.
 - Silent disconnects (2026-10-16): ping and a 10 s silence timeout, a
   reconnection token with takeover, and the client's automatic reconnect
   (protocol 9). The reconnect box and its Cancel are not hand-checked yet.
-- Text quests in multiplayer (2026-10-19): the plan, and Phase A done (the
-  quest run out of the screen, `--sim-text-quest`). Next: Phase B.
+- Text quests in multiplayer (2026-10-19): the plan; Phase A done (the
+  quest run out of the screen, `--sim-text-quest`); Phase B done (the rules
+  in the game layer: always on, owed quest days, respawn on a death, the
+  `BeginTextQuest` lock, script quests per human). Next: Phase C.
 - Latest entry: [2026-10-19-text-quests-plan.md](2026-10-19-text-quests-plan.md)
 
 ## Session entry format

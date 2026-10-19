@@ -11139,6 +11139,8 @@ end;
 // CHANGE: CLEANUP - Whether Ship counts toward its star's control. A docked or landed ship
 // does not, except a human's ranger in its first two days docked or landed, or the local
 // human's while its text quest is open (HumanScreen is the screen at this machine).
+// CHANGE: ENHANCEMENT - Or a human's who owes days for a text quest in multiplayer: for those
+// days it is still in the quest (aHuman.OwesQuestDays).
 function CountsTowardStarControl(Ship: TShip): Boolean;
 begin
   Result :=
@@ -11148,7 +11150,8 @@ begin
           and (not IsHuman(Ship)
               or ((Ship.CurrentPlanet = nil) and (Ship.DockedTo = nil))
               or (Ship.ConsecutiveDockedDays <= 2)
-              or ((Ship = LocalPlayer) and (HumanScreen = screenPlanetQuest)));
+              or ((Ship = LocalPlayer) and (HumanScreen = screenPlanetQuest))
+              or OwesQuestDays(Ship));
 end;
 procedure TStar.GetControlPresence(
     out PlayerPartyPresent,

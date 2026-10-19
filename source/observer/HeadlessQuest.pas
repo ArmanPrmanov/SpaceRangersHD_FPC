@@ -28,6 +28,14 @@ type
     // Plays the quest Name (a number or a name) for the local player to its outcome, or to
     // MaxQuestSteps choices or a page with no enabled choice, and closes it (TQuestRun.Close).
     function Play(const Name: WideString): TQuestRunOutcome;
+    // CHANGE: ENHANCEMENT - The two halves of Play, and the quest the local player's visit
+    // gives (TQuestRun.Open: the prison's, a queued one, its planet quest at its planet), for
+    // probes that act between the start and the end (docs/progress/
+    // 2026-10-19-text-quests-plan.md, Phase B). OpenVisit returns False when there is nothing
+    // to play or BeginTextQuest refused it (Run.Refused).
+    procedure Start(const Name: WideString);
+    function OpenVisit: Boolean;
+    function Finish: TQuestRunOutcome;
     procedure FinishPage; override;
     procedure ShowError(const Text: AnsiString); override;
   end;
@@ -107,8 +115,12 @@ begin
 end;
 
 function THeadlessQuestPlayer.Play(const Name: WideString): TQuestRunOutcome;
-var
-  Enabled, Pick, I: Integer;
+begin
+  Start(Name);
+  Result := Finish;
+end;
+
+procedure THeadlessQuestPlayer.Start(const Name: WideString);
 begin
   FreeAndNil(Run);
   Run := TQuestRun.Create(Self);
@@ -117,6 +129,22 @@ begin
   // A day in the quest leaves the galaxy job running, as on the screen.
   WaitForTurnCalculation;
   RaisePendingWorkerError;
+end;
+
+function THeadlessQuestPlayer.OpenVisit: Boolean;
+begin
+  FreeAndNil(Run);
+  Run := TQuestRun.Create(Self);
+  Run.WaitForQuestDays := True;
+  Result := Run.Open;
+  WaitForTurnCalculation;
+  RaisePendingWorkerError;
+end;
+
+function THeadlessQuestPlayer.Finish: TQuestRunOutcome;
+var
+  Enabled, Pick, I: Integer;
+begin
   while Run.Page.Outcome = qroNone do
   begin
     Enabled := EnabledChoiceCount(Run.Page);

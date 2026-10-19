@@ -8065,7 +8065,17 @@ var
 begin
   if High(av) = 0 then
   begin
-    av[0].SetInt(QueuedTextQuests.Count);
+    av[0].SetInt(ScriptRequestCount(srqTextQuest, ScriptRequestHumanId));
+    Exit;
+  end;
+  // CHANGE: ENHANCEMENT - The quest is the script's human's, played on that human's own machine
+  // (docs/progress/2026-10-19-text-quests-plan.md, rule 5), as StartAB's battle is: queued
+  // where it can be shown and its outcome reported (aScript.MayQueueScriptRequest), otherwise
+  // not started.
+  if not MayQueueScriptRequest then
+  begin
+    LogScriptUiDefault('StartTextQuest');
+    av[0].SetInt(0);
     Exit;
   end;
   New(Request);
@@ -8079,7 +8089,7 @@ begin
   else
     Request.FailureCaption := '';
   Request.Script := CurrentScript;
-  // The quest shows on this machine. Text quests are off in multiplayer (ROADMAP.md, Phase 6).
+  Request.HumanId := ScriptRequestHumanId;
   QueuedTextQuests.Add(Request);
   if CurrentScript <> nil then
     CurrentScript.InitCode.LocalVar.GetVar('GQuestStatus').SetInt(1);

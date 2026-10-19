@@ -38,6 +38,11 @@ REPLAYS = ROOT / "tests" / "replays"
 HOTSEAT_DAYS = 10
 # The command kind of EndTurn (source/game/aPlayerActions.pas).
 END_TURN_KIND = 43
+# Text quests in multiplayer (docs/progress/2026-10-19-text-quests-plan.md, Phase B): in a
+# two-human hot-seat the second human plays this quest on the first day; the run goes on for at
+# least QUEST_HOTSEAT_DAYS days, and until that human has paid the days the quest owes.
+QUEST_HOTSEAT_QUEST = "Prison"
+QUEST_HOTSEAT_DAYS = 3
 # Networked play (ROADMAP.md, Phase 5; docs/network.md, Tests): a headless host and this many
 # headless clients over loopback, for this many days. With one client, a third run has the
 # client leave after NET_LEAVE_DAY days and join again, and a fourth has it leave in the middle
@@ -207,7 +212,8 @@ def check_replay(args, binary: Path, log: Path) -> tuple[bool, list[str]]:
 
 
 def check_session(args, binary: Path, save: Path) -> tuple[bool, str]:
-    """One human: session flags set by command, and a cheat on record, survive a save.
+    """One human: session flags set by command, a cheat on record and text-quest days owed
+    (THuman.QuestDaysOwed) survive a save.
 
     The probe (--sim-session-probe) sets them before the round trip, so the save carries the
     per-human block although the game has one human.
@@ -216,10 +222,11 @@ def check_session(args, binary: Path, save: Path) -> tuple[bool, str]:
         binary, args.game_dir, save, ["--sim-roundtrip", "--sim-session-probe", "--sim-humans-dump"]
     )
     roundtrip = [line for line in output.splitlines() if line.startswith("roundtrip ")]
-    flags = "state session textquests-off=1 friendly-fire=0" in output.splitlines()
-    if code != 0 or not roundtrip or any("=ok" not in line for line in roundtrip) or not flags:
+    flags = "state session friendly-fire=0" in output.splitlines()
+    owed = any(line.startswith("state human 0 ") and " quest-days=1" in line for line in output.splitlines())
+    if code != 0 or not roundtrip or any("=ok" not in line for line in roundtrip) or not flags or not owed:
         return False, "session flags failed:" + output_tail(output)
-    return True, "session flags and cheats survive a save"
+    return True, "session flags, cheats and text-quest days owed survive a save"
 
 
 def check_shared_shop(args, binary: Path, save: Path) -> tuple[bool, str]:
@@ -322,6 +329,109 @@ def check_text_quest(args, binary: Path, save: Path) -> tuple[bool, str]:
         passed, _, note = play_text_quest(args, binary, save, str(first))
         notes.append(note)
     return passed, "; ".join(notes)
+
+
+def check_quest_owed(lines: list[str]) -> str:
+    """The days a hot-seat quest owes (--sim-text-quest with --sim-hotseat): the first "quest
+    owed" line owes the quest's days, each day takes one off, the human holds no day while it
+    owes one and holds the next once it owes none, its quest is no longer open, and while it
+    owes days the day runs without its turn (its plan letter is "."). Returns what is wrong."""
+    done = [line for line in lines if line.startswith("quest done ")]
+    if not done:
+        return "the quest did not end"
+    days = int(done[0].split(" days=")[1].split()[0])
+    previous = None
+    for index, line in enumerate(lines):
+        if not line.startswith("quest owed "):
+            continue
+        fields = dict(part.split("=", 1) for part in line.split()[2:])
+        owed, holds = int(fields["days"]), fields["holds"]
+        if fields["open"] != "0":
+            return f"the quest is still open: {line}"
+        if previous is None and owed != days:
+            return f"the quest passed {days} days, the human owes {owed}"
+        if previous is not None and owed != max(previous - 1, 0):
+            return f"the days owed went from {previous} to {owed}"
+        if (owed > 0) != (holds == "0"):
+            return f"holds the day wrongly: {line}"
+        following = [later for later in lines[index + 1:] if later.startswith("hotseat day=")]
+        # The first is said on the quest's own day, whose plan has the quest ("q").
+        if previous is not None and owed > 0 and following and not following[0].split("plan=")[1].split()[0].endswith("."):
+            return f"the human played a turn while it owed days: {following[0]}"
+        previous = owed
+    if previous is None:
+        return "no day after the quest"
+    if previous != 0:
+        return f"the run ended with {previous} days still owed"
+    return ""
+
+
+def check_hotseat_text_quest(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """A text quest in a two-human hot-seat (docs/progress/2026-10-19-text-quests-plan.md,
+    Phase B): the second human plays QUEST_HOTSEAT_QUEST on the first day with the headless
+    quest player. The quest runs no galaxy day; its days are owed (check_quest_owed), and the
+    next days run without the human's end turn. A death in the quest respawns the ranger.
+    Two runs print the same, and the recording, split into one log per human, replays merged
+    (in reverse order) to the recording's hash with no day started before every end turn.
+    """
+    label = "text quest in a 2-human hot-seat"
+    options = [
+        "--sim-humans=2", f"--sim-hotseat={QUEST_HOTSEAT_DAYS}",
+        f"--sim-text-quest={QUEST_HOTSEAT_QUEST}", "--sim-hash", f"--sim-seed={args.seed}",
+    ]  # fmt: skip
+    runs = []
+    with tempfile.TemporaryDirectory(prefix="rangers-quest-hotseat-") as directory:
+        log = Path(directory) / "session.srcl"
+        for run in range(2):
+            extra = [f"--record-commands={log}"] if run == 0 else []
+            code, output = simulate(binary, args.game_dir, save, [*options, *extra])
+            done = last_line(output, "done hotseat ")
+            if code != 0 or "hotseat barrier ok" not in output or " humans=2 " not in done:
+                return False, f"{label} failed:" + output_tail(output)
+            runs.append(
+                [line for line in output.splitlines() if line.startswith(("quest ", "hotseat ", "done hotseat "))]
+            )
+        if runs[0] != runs[1]:
+            return False, f"{label} nondeterministic: " + first_divergence(runs[0], runs[1])
+        problem = check_quest_owed(runs[0])
+        if problem:
+            return False, f"{label}: {problem}"
+        done = [line for line in runs[0] if line.startswith("done hotseat ")][-1]
+        expected = done.split("hash=")[-1].split()[0]
+        logs = split_commands.split(log, Path(directory) / "humans")
+        replay_logs = ",".join(str(path) for path in reversed(logs))
+        code, output = run_game(
+            binary, args.game_dir, [f"--replay-commands={replay_logs}", f"--sim-seed={args.seed}"]
+        )
+        summary = last_line(output, "done ")
+        if (
+            code != 0
+            or f"hash={expected}" not in summary
+            or " diverged=0 " not in summary
+            or " barrier-waits=0 " not in summary
+            or " logs=2 " not in summary
+        ):
+            return False, f"{label}: the per-human replay failed:" + output_tail(output)
+    quest = next(line for line in runs[0] if line.startswith("quest done "))
+    return True, (
+        f"{label}: {quest.removeprefix('quest done ')}; the days owed count down without the "
+        "human's end turn, repeat, and replay from one log per human"
+    )
+
+
+def check_quest_lock(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """One human at a time plays a planet's text quest (--sim-quest-lock; docs/progress/
+    2026-10-19-text-quests-plan.md, Phase B, the lock): two humans hold a quest to one planet;
+    while the first plays it the second's BeginTextQuest is refused (in-use), and after the
+    first has ended it, again (offer-gone)."""
+    code, output = simulate(binary, args.game_dir, save, ["--sim-quest-lock", f"--sim-seed={args.seed}"])
+    skipped = last_line(output, "quest lock skipped")
+    if code == 0 and skipped:
+        return True, skipped
+    if code != 0 or "quest lock ok" not in output.splitlines():
+        return False, "quest lock failed:" + output_tail(output)
+    result = last_line(output, "quest lock outcome=").removeprefix("quest lock ")
+    return True, f"one human at a time plays a planet's text quest ({result})"
 
 
 def drop_end_turns(log: Path) -> None:
@@ -1087,7 +1197,7 @@ def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
     ]
     if not flag_sent or not flag_host:
         return False, [f"{label}: no session flag probe: {flag_sent} {flag_host}"]
-    if flag_host[0]["text-quests"] == flag_sent[0]["text-quests"]:
+    if flag_host[0]["friendly-fire"] == flag_sent[0]["friendly-fire"]:
         return False, [f"{label}: a client's session flag changed the host's"]
     if not flag_failed or not flag_refused:
         return False, [f"{label}: the host did not refuse a client's session flag: {flag_failed} {flag_refused}"]
@@ -1401,6 +1511,14 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     passed = passed and passed_stale
 
     passed_quest, note = check_text_quest(args, binary, save)
+    notes.append(note)
+    passed = passed and passed_quest
+
+    passed_quest, note = check_hotseat_text_quest(args, binary, save)
+    notes.append(note)
+    passed = passed and passed_quest
+
+    passed_quest, note = check_quest_lock(args, binary, save)
     notes.append(note)
     passed = passed and passed_quest
 

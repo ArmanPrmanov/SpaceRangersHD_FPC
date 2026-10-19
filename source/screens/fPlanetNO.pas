@@ -104,6 +104,7 @@ const
 procedure LinkRecoveredTypes;
 implementation
 uses
+  NetSession,
   aPlayerActions,
   aUiScriptActions,
   aPlanetActions,
@@ -393,7 +394,11 @@ begin
   CaptureSavePreview;
   CaptureGalaxyPreview(Self);
   SaveManagerReturnScreenId := FormToId(Self);
-  SaveGameToFile(SaveManagerScreen.GetAutoSavePath, 'as');
+  // CHANGE: ENHANCEMENT - No autosave before a quest on a networked client (docs/progress/
+  // 2026-10-19-text-quests-plan.md, rule 3): its game is the host's, and the quest has no
+  // reload there.
+  if NetRole <> nrClient then
+    SaveGameToFile(SaveManagerScreen.GetAutoSavePath, 'as');
   StandaloneQuestMode := False;
   QuestReturnScreenId := FormToId(Self);
   RequestedScreenId := screenPlanetQuest;

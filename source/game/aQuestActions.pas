@@ -21,6 +21,13 @@ unit aQuestActions;
 // Replaying these reproduces the galaxy without the interpreter, and without replaying each
 // choice the player made. Days that pass in a quest are turn jobs, as on the star map.
 //
+// CHANGE: ENHANCEMENT - Multiplayer (docs/progress/2026-10-19-text-quests-plan.md, Phase B):
+// - a quest starts with BeginTextQuest, a trade: one human at a time plays a planet's quest;
+// - a quest runs no galaxy day: CloseQuest carries the days it passed, which the human owes
+//   (THuman.QuestDaysOwed);
+// - a death in a quest kills the ranger, which respawns as after a ship loss (DieInQuest);
+// - a queued quest's outcome resumes its actor's request (FinishQueuedTextQuest).
+//
 // With no player (a quest run from the main menu) there is no one to act, and the changes run
 // directly, unrecorded.
 interface
@@ -39,6 +46,13 @@ const
   ckDieInQuest = 606;
   ckFinishQueuedTextQuest = 607;
   ckCloseQuest = 608;
+  ckBeginTextQuest = 609;
+  // The kinds of quest BeginTextQuest names. Only a planet quest names a planet and can be
+  // refused; the values are part of the command log format.
+  tqkPlanet = 0;
+  tqkPrison = 1;
+  tqkQueued = 2;
+  tqkNamed = 3;
 
 // Draws the seed of the quest's own random stream from the galaxy's stream.
 function QuestRandomSeed: Cardinal;
@@ -61,12 +75,26 @@ function CompleteGovernmentQuest(CompleteOnFinish: Boolean; RelationDelta: Integ
 procedure ReleaseFromPrison;
 // The quest on the player's planet was lost: its government quest fails.
 procedure FailGovernmentQuest;
-// The ranger died in the quest; the game ends.
-procedure DieInQuest;
-// The script that queued the quest runs with the outcome.
+// The ranger died in the quest. In single player the game ends. In multiplayer the ranger is
+// killed and respawns as after a ship loss (TShip.RespawnHuman), after the quest's failure:
+// a prison quest frees it with the planet hostile, and with FailGovernmentQuest (a quest no
+// script queued) its government quest to the planet fails. Returns whether the game is over
+// for the ranger: always in single player, in multiplayer only when no planet takes it (it
+// leaves the game as a destroyed human with nowhere to go does).
+function DieInQuest(FailGovernmentQuest: Boolean): Boolean;
+// The script that queued the quest runs with the outcome: the actor's first queued quest.
 procedure FinishQueuedTextQuest(Status: TScriptQuestStatus);
 // Leaving the quest screen: the player keeps at most MoneyLimit, and the quest timers run.
-procedure CloseQuest(MoneyLimit: Cardinal);
+// CHANGE: ENHANCEMENT - DaysOwed: the game days the quest passed in multiplayer, which the
+// human owes (THuman.QuestDaysOwed; 0 in single player, where the quest ran them). The
+// human's quest is no longer open (BeginTextQuest).
+procedure CloseQuest(MoneyLimit: Cardinal; DaysOwed: Integer);
+// CHANGE: ENHANCEMENT - The local human starts a quest of Kind (tqk...), at Planet for a planet
+// quest (nil otherwise), as a trade (docs/commands.md, Trades): one human at a time plays a
+// planet's quest. Returns False when it is refused: the planet's quest is gone or the human
+// holds none to it (offer-gone), or another human plays it (in-use); a session's refusal
+// hook tells the player (TradeRefusedHook). A prison, script or named quest always starts.
+function BeginTextQuest(Kind: Integer; Planet: TObject): Boolean;
 implementation
 uses
   SysUtils,
@@ -321,11 +349,8 @@ begin
 end;
 
 // Moved from TfPlanetQuest.CompleteQuestFailure.
-procedure ExecuteReleaseFromPrison(const Command: TPlayerCommand);
-var
-  P: TPlayer;
+procedure ApplyReleaseFromPrison(P: TPlayer);
 begin
-  P := Actor(Command);
   P.InPrison := False;
   if P.CurrentPlanet <> nil then
     if (P.CurrentPlanet.OwnerId = Byte(oiPirate)) and (MainPiratePlanet <> nil) then
@@ -334,20 +359,25 @@ begin
       P.CurrentPlanet.SetRelationLevelToRanger(P, rlHostile);
 end;
 
+procedure ExecuteReleaseFromPrison(const Command: TPlayerCommand);
+begin
+  ApplyReleaseFromPrison(Actor(Command));
+end;
+
 procedure ReleaseFromPrison;
 begin
   SubmitCommand(NewCommand(ckReleaseFromPrison));
 end;
 
 // Moved from TfPlanetQuest.CompleteQuestFailure.
-procedure ExecuteFailGovernmentQuest(const Command: TPlayerCommand);
+procedure ApplyFailGovernmentQuest(Human: THuman);
 var
   News: WideString;
   GovernmentQuest: PQuest;
   I: Integer;
   P: TPlayer;
 begin
-  P := Actor(Command);
+  P := Human.Player;
   if P.Quests.Count > 0 then
     for I := P.Quests.Count - 1 downto 0 do
     begin
@@ -381,7 +411,7 @@ begin
             GovernmentQuest.Planet.GetRelationLevelTextToShip(P),
             '<color=255,240,100>'
         );
-        ActorHuman(Command).AddOrUpdateBubble(0, Galaxy.CurrentTurn, News, '');
+        Human.AddOrUpdateBubble(0, Galaxy.CurrentTurn, News, '');
         P.CurrentPlanet.TextQuestId := -1;
         P.ArchiveQuest(I);
         Break;
@@ -389,27 +419,75 @@ begin
     end;
 end;
 
+procedure ExecuteFailGovernmentQuest(const Command: TPlayerCommand);
+begin
+  ApplyFailGovernmentQuest(ActorHuman(Command));
+end;
+
 procedure FailGovernmentQuest;
 begin
   SubmitCommand(NewCommand(ckFailGovernmentQuest));
 end;
 
+var
+  DiedForGood: Boolean;
+
 // Moved from TfPlanetQuest.CompleteQuestDeath.
 procedure ExecuteDieInQuest(const Command: TPlayerCommand);
+var
+  Human: THuman;
+  P: TPlayer;
+  RespawnPlanet: TPlanet;
 begin
+  DiedForGood := True;
+  // CHANGE: ENHANCEMENT - In multiplayer the death is a ship loss (docs/progress/
+  // 2026-10-19-text-quests-plan.md, decisions): the quest fails as a lost one does, the
+  // PlayerDeath event names the human (TShip.RecordHumanDeath), and the ranger respawns at once
+  // where FindRespawnPlanet takes it, as a captured human does (aPlanetActions.
+  // ApplyPlanetCaptured). Only the actor's game can end, and only when no planet takes it.
+  if IsMultiplayer then
+  begin
+    Human := ActorHuman(Command);
+    P := Human.Player;
+    if P.InPrison then
+      ApplyReleaseFromPrison(P)
+    else if (Length(Command.Ints) > 0) and (IntArg(Command, 0) <> 0) then
+      ApplyFailGovernmentQuest(Human);
+    P.RecordHumanDeath('KilledInQuest');
+    RespawnPlanet := P.FindRespawnPlanet;
+    if RespawnPlanet <> nil then
+    begin
+      P.RespawnHuman(RespawnPlanet);
+      DiedForGood := False;
+      Exit;
+    end;
+    // As a destroyed human with nowhere to go (TStar.NextDay): it leaves the game, and the
+    // game is over on its own machine only.
+    Human.ReleaseTextQuest;
+    if Human = LocalHuman then
+      Session.GameEndReason := 1;
+    P.Free;
+    Exit;
+  end;
   Actor(Command).Free;
   Session.GameEndReason := 1;
 end;
 
-procedure DieInQuest;
+function DieInQuest(FailGovernmentQuest: Boolean): Boolean;
+var
+  Command: TPlayerCommand;
 begin
-  SubmitCommand(NewCommand(ckDieInQuest));
+  Command := NewCommand(ckDieInQuest);
+  AddInt(Command, Ord(FailGovernmentQuest));
+  SubmitCommand(Command);
+  Result := DiedForGood;
 end;
 
 // Moved from TfPlanetQuest.CompleteQuestSuccess and CompleteQuestFailure.
 procedure ExecuteFinishQueuedTextQuest(const Command: TPlayerCommand);
 begin
-  CompleteQueuedTextQuest(TScriptQuestStatus(IntArg(Command, 0)));
+  // CHANGE: ENHANCEMENT - The actor's request; a command of no human (0) finishes the first.
+  CompleteQueuedTextQuest(TScriptQuestStatus(IntArg(Command, 0)), Integer(Command.Actor));
 end;
 
 procedure FinishQueuedTextQuest(Status: TScriptQuestStatus);
@@ -426,6 +504,7 @@ procedure ExecuteCloseQuest(const Command: TPlayerCommand);
 var
   Money, CappedMoney: Int64;
   Player: TPlayer;
+  Human: THuman;
   MoneyLimit: Cardinal;
 begin
   MoneyLimit := Cardinal(IntArg(Command, 0));
@@ -438,15 +517,94 @@ begin
     CappedMoney := Money;
   Player.SetMoney(Integer(CappedMoney));
   Player.ProcessQuestTimersAndOutcomes;
+  // CHANGE: ENHANCEMENT - The days the quest passed, owed in multiplayer (a command from
+  // before carries none), and the quest is no longer open.
+  Human := ActorHuman(Command);
+  if Length(Command.Ints) > 1 then
+    Inc(Human.QuestDaysOwed, IntArg(Command, 1));
+  Human.ReleaseTextQuest;
 end;
 
-procedure CloseQuest(MoneyLimit: Cardinal);
+procedure CloseQuest(MoneyLimit: Cardinal; DaysOwed: Integer);
 var
   Command: TPlayerCommand;
 begin
   Command := NewCommand(ckCloseQuest);
   AddInt(Command, Integer(MoneyLimit));
+  AddInt(Command, DaysOwed);
   SubmitCommand(Command);
+end;
+
+// Whether P holds a planet quest (qtPlanetQuest) whose target is Planet.
+function HoldsPlanetQuestTo(P: TPlayer; Planet: TPlanet): Boolean;
+var
+  I: Integer;
+  Quest: PQuest;
+begin
+  Result := False;
+  for I := 0 to P.Quests.Count - 1 do
+  begin
+    Quest := P.Quests[I];
+    if (Quest.QuestType = qtPlanetQuest) and (Quest.ObjectiveTarget = Planet) then
+      Exit(True);
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - The lock of the text-quests plan (docs/progress/
+// 2026-10-19-text-quests-plan.md, The lock): a trade, so a host decides as it arrives. Ints:
+// the kind (tqk...); Refs: the planet of a planet quest. It refuses before any change.
+procedure ExecuteBeginTextQuest(const Command: TPlayerCommand);
+var
+  Human, Other: THuman;
+  Planet: TPlanet;
+  I: Integer;
+begin
+  Human := ActorHuman(Command);
+  Planet := nil;
+  if IntArg(Command, 0) = tqkPlanet then
+  begin
+    if RefObject(Command, 0) is TPlanet then
+      Planet := TPlanet(RefObject(Command, 0));
+    if (Planet = nil)
+        or (Planet.TextQuestId = -1)
+        or not HoldsPlanetQuestTo(Human.Player, Planet) then
+      raise ECommandRefused.CreateReason(rrOfferGone, 'BeginTextQuest: the planet''s quest is gone');
+    for I := 0 to Session.Humans.Count - 1 do
+    begin
+      Other := Session.Humans[I];
+      if (Other <> Human) and Other.TextQuestOpen and (Other.TextQuestPlanetId = Planet.Id) then
+        raise ECommandRefused.CreateReason(
+            rrInUse,
+            'BeginTextQuest: another human plays the planet''s quest'
+        );
+    end;
+  end;
+  Human.TextQuestOpen := True;
+  if Planet <> nil then
+    Human.TextQuestPlanetId := Planet.Id
+  else
+    Human.TextQuestPlanetId := 0;
+end;
+
+function BeginTextQuest(Kind: Integer; Planet: TObject): Boolean;
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckBeginTextQuest);
+  AddInt(Command, Kind);
+  AddRef(Command, Planet);
+  Result := True;
+  try
+    SubmitCommand(Command);
+  except
+    on E: ECommandRefused do
+    begin
+      AppendLogLineThreadSafe(AnsiString('BeginTextQuest refused: ' + E.Message));
+      if Assigned(TradeRefusedHook) then
+        TradeRefusedHook(E.Reason);
+      Result := False;
+    end;
+  end;
 end;
 
 initialization
@@ -459,4 +617,5 @@ initialization
   RegisterCommand(ckDieInQuest, 'DieInQuest', @ExecuteDieInQuest);
   RegisterCommand(ckFinishQueuedTextQuest, 'FinishQueuedTextQuest', @ExecuteFinishQueuedTextQuest);
   RegisterCommand(ckCloseQuest, 'CloseQuest', @ExecuteCloseQuest);
+  RegisterCommand(ckBeginTextQuest, 'BeginTextQuest', @ExecuteBeginTextQuest, True);
 end.

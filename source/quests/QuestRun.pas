@@ -13,6 +13,11 @@ unit QuestRun;
 // TQuestView what changes, in the order the screen drew it; the view also shows the boxes and
 // picks the next screen. TfPlanetQuest is one view, the headless quest player
 // (HeadlessQuest) another. A choice is played by its index in the page (Choose).
+//
+// CHANGE: ENHANCEMENT - Multiplayer (Phase B of the plan): a run starts with BeginTextQuest
+// (one human at a time per planet quest, a refusal ends it before it starts), passes no game
+// day (the days are counted and owed, CloseQuest), and a death respawns the ranger instead of
+// ending the game (DieInQuest). The local human's queued quest is the one it plays.
 interface
 uses
   TextQuest,
@@ -97,7 +102,16 @@ type
     // ranger from prison, the ranger died.
     GovernmentQuestDone: Boolean;
     ReleasedFromPrison: Boolean;
+    // Died: the game is over for the ranger (single player, or in multiplayer no planet takes
+    // it); Respawned: in multiplayer it died and respawned (aQuestActions.DieInQuest).
     Died: Boolean;
+    Respawned: Boolean;
+    // CHANGE: ENHANCEMENT - The run passes no game day: the game had more than one human when it
+    // started (IsMultiplayer). Its days are counted in DaysElapsed and owed (CloseQuest).
+    OwesDays: Boolean;
+    // BeginTextQuest refused the quest (another human plays it, or it is gone): Open returned
+    // False and nothing started.
+    Refused: Boolean;
     // The galaxy job of a day in the quest is waited for before the quest goes on. The screen
     // leaves it running, so the rest of the page can read the galaxy while it changes; a test
     // that must repeat sets this (HeadlessQuest).
@@ -105,9 +119,10 @@ type
     constructor Create(AView: TQuestView);
     destructor Destroy; override;
     // Picks and starts the quest the screen opens for, as the visit gives it: the prison's,
-    // the first queued one, the planet quest of the player's government quest to its planet,
-    // or with no player the one from the main menu. False when the player holds no quest to
-    // its planet: there is nothing to play.
+    // the local human's first queued one, the planet quest of the player's government quest
+    // to its planet, or with no player the one from the main menu. False when the player
+    // holds no quest to its planet, or BeginTextQuest refused it (Refused): there is nothing
+    // to play.
     function Open: Boolean;
     // Starts the quest Name (a number or a name) for the local player, as qrkNamed.
     procedure OpenNamed(const Name: WideString);
@@ -134,6 +149,9 @@ type
     procedure ShowError(const Text: AnsiString); override;
   private
     procedure ComputeMoneyLimit;
+    // BeginTextQuest for this run's kind; False (and Refused) when it is refused. With no
+    // player there is no one to lock for.
+    function BeginRun(QuestKind: Integer; Planet: TObject): Boolean;
     procedure LoadQuestById(Id: Integer);
     procedure LoadQuestByName(const Name: WideString);
     procedure SetVisitTexts;
@@ -186,6 +204,7 @@ uses
   aPlayer,
   aPlayerActions,
   aQuestActions,
+  aHuman,
   aSession,
   CPDiapClass,
   ParameterClass,
@@ -394,7 +413,8 @@ end;
 // Moved from TfPlanetQuest.OnOpen.
 procedure TQuestRun.ComputeMoneyLimit;
 begin
-  if (QueuedTextQuests.Count = 0)
+  // CHANGE: ENHANCEMENT - The local human's queued quest (rule 5 of the text-quests plan).
+  if (LocalScriptRequest(srqTextQuest) = nil)
       and (LocalPlayer <> nil)
       and (LocalPlayer.CurrentPlanet <> nil)
       and (LocalPlayer.CurrentPlanet.TextQuestId >= 10000)
@@ -405,7 +425,7 @@ begin
                   .GetParamOrMarker(IntToStr(LocalPlayer.CurrentPlanet.TextQuestId))
               = QuestContentHash(LocalPlayer.CurrentPlanet.TextQuestId))) then
     MoneyLimit := (Galaxy.ComputeScaledBigMoney(2) + LocalPlayer.Money)
-  else if (LocalPlayer <> nil) and (QueuedTextQuests.Count = 0) then
+  else if (LocalPlayer <> nil) and (LocalScriptRequest(srqTextQuest) = nil) then
     MoneyLimit := (LocalPlayer.Money + 50000)
   else
     MoneyLimit := 1000000000;
@@ -439,6 +459,15 @@ begin
   Quest.RangerText.Text := LocalPlayer.Name;
 end;
 
+function TQuestRun.BeginRun(QuestKind: Integer; Planet: TObject): Boolean;
+begin
+  Result := True;
+  if LocalPlayer = nil then
+    Exit;
+  Result := BeginTextQuest(QuestKind, Planet);
+  Refused := not Result;
+end;
+
 // Moved from TfPlanetQuest.OnOpen; the stages continue the screen's.
 function TQuestRun.Open: Boolean;
 var
@@ -453,6 +482,8 @@ begin
   begin
     Stage := 6;
     Kind := qrkPrison;
+    if not BeginRun(tqkPrison, nil) then
+      Exit(False);
     Quest := TTextQuest.Create;
     if LocalPlayer.CurrentPlanet.OwnerId <> Byte(oiPirate) then
       LoadQuestByName('Prison')
@@ -470,11 +501,13 @@ begin
     StartLoadedQuest;
     Stage := 9;
   end
-  else if QueuedTextQuests.Count > 0 then
+  else if LocalScriptRequest(srqTextQuest) <> nil then
   begin
     Stage := 10;
     Kind := qrkQueued;
-    QueuedQuest := QueuedTextQuests[0];
+    if not BeginRun(tqkQueued, nil) then
+      Exit(False);
+    QueuedQuest := LocalScriptRequest(srqTextQuest);
     Quest := TTextQuest.Create;
     if IsIntegerTextW(QueuedQuest.Name) then
       LoadQuestById(StrToInt(QueuedQuest.Name))
@@ -501,6 +534,8 @@ begin
               and ((Candidate.ObjectiveTarget as TPlanet) = LocalPlayer.CurrentPlanet) then
           begin
             Stage := 15;
+            if not BeginRun(tqkPlanet, LocalPlayer.CurrentPlanet) then
+              Break;
             GovernmentQuest := Candidate;
             Quest := TTextQuest.Create;
             LoadQuestById(LocalPlayer.CurrentPlanet.TextQuestId);
@@ -554,6 +589,8 @@ procedure TQuestRun.OpenNamed(const Name: WideString);
 begin
   ComputeMoneyLimit;
   Kind := qrkNamed;
+  if not BeginRun(tqkNamed, nil) then
+    Exit;
   Quest := TTextQuest.Create;
   if IsIntegerTextW(Name) then
     LoadQuestById(StrToInt(Name))
@@ -568,6 +605,7 @@ procedure TQuestRun.StartLoadedQuest;
 begin
   ClearChoices;
   DaysElapsed := 0;
+  OwesDays := (LocalPlayer <> nil) and IsMultiplayer;
   if Quest.FormatVersion <= 1111111124 then
     ApplyLegacyPictureOverrides;
   if LocalPlayer = nil then
@@ -708,14 +746,19 @@ end;
 procedure TQuestRun.Die;
 begin
   Died := False;
+  Respawned := False;
   if LocalPlayer <> nil then
     if View.ConfirmDeath then
     begin
-      Died := True;
-      DieInQuest;
+      // CHANGE: ENHANCEMENT - In multiplayer the ranger respawns, and the quest has failed
+      // (DieInQuest), a queued one too.
+      Died := DieInQuest(QueuedQuest = nil);
+      Respawned := not Died;
     end;
   Page.Outcome := qroDeath;
   View.EndQuest(qroDeath);
+  if Respawned then
+    FinishQueuedQuest(sqsFailure);
 end;
 
 // Moved from TfPlanetQuest.OnClose.
@@ -729,9 +772,12 @@ begin
   end;
   if Page.Outcome = qroNone then
     Page.Outcome := qroAbandoned;
-  // The money cap and the quest timers, in that order.
+  // The money cap and the quest timers, in that order; in multiplayer, the days owed.
   if LocalPlayer <> nil then
-    CloseQuest(MoneyLimit);
+    if OwesDays then
+      CloseQuest(MoneyLimit, DaysElapsed)
+    else
+      CloseQuest(MoneyLimit, 0);
 end;
 
 // Moved from TfPlanetQuest.ExpandTemplateText.
@@ -741,6 +787,9 @@ var
 begin
   if LocalPlayer = nil then
     CurrentDate := TrimWideString(Galaxy.FormatTurnDate(DaysElapsed + 300))
+  // CHANGE: ENHANCEMENT - In multiplayer the galaxy's date stays; the quest's goes on.
+  else if OwesDays then
+    CurrentDate := TrimWideString(Galaxy.FormatTurnDate(Galaxy.CurrentTurn + DaysElapsed))
   else
     CurrentDate := TrimWideString(Galaxy.FormatTurnDate(Galaxy.CurrentTurn));
   Expanded := ExpandExternalText(Text);
@@ -1151,6 +1200,14 @@ var
 begin
   ExportMoneyToPlayer;
   ExportExternalParameters;
+  // CHANGE: ENHANCEMENT - In multiplayer the days are only counted; the human owes them after
+  // the quest (CloseQuest), and the others do not wait for them.
+  if OwesDays then
+  begin
+    if Days > 0 then
+      Inc(DaysElapsed, Days);
+    Exit;
+  end;
   for I := 1 to Days do
   begin
     Inc(DaysElapsed);

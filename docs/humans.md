@@ -116,8 +116,8 @@ Converting the script functions (`aScriptFun`):
   path overlay, sounds, the arcade ship, Steam achievements) stay on the local
   human (`LocalPlayer`, `LocalHuman`). A script's dialogue is not sent to a
   remote human's client ([network.md](network.md), Remote dialogue, says why);
-  an NPC's offer or demand is. Text quests are off in multiplayer (ROADMAP.md,
-  Phase 6), so they follow the local human.
+  an NPC's offer or demand is. A script's text quest (`StartTextQuest`) is the
+  script's human's, queued as its battles and videos are (below).
 - **Script code of another human.** On a host, a client's commands run its
   script code with `ScriptHuman` its human; so does script code bound to
   another human, in the day or in someone else's command, and in hot-seat
@@ -193,14 +193,14 @@ Converting the script functions (`aScriptFun`):
     local human's are dispatched (`aScript.DispatchPendingScriptRequests`);
     `OrderScriptTakeoff` and `ClearScriptEndTurn` clear their actor's. They are
     UI requests and are not saved.
-  - Queued arcade and planet battles and videos carry their human
+  - Queued arcade and planet battles, videos and text quests carry their human
     (`HumanId`). A request is queued when its human is local or the code runs
     in that human's own command (`aScript.MayQueueScriptRequest`): then the
     human's own machine runs the same command, shows the request and reports
     the outcome (`ArcadeBattleExit`, `FinishQueuedPlanetaryBattle`,
-    `FinishQueuedVideo`), and the report finishes its actor's request. Any
-    other request is not started: `StartAB` answers 0 and the status
-    variables stay as they were. This machine shows only the local human's
+    `FinishQueuedVideo`, `FinishQueuedTextQuest`), and the report finishes its
+    actor's request. Any other request is not started: `StartAB` and
+    `StartTextQuest` answer 0 and the status variables stay as they were. This machine shows only the local human's
     requests (`LocalScriptRequest`). Robot battles are automatic victories in
     any case (ROADMAP.md, Phase 6). A video for a human who is not local while
     that human's ship screen shows (`THuman.ShipScreenShown`, set by its own
@@ -249,6 +249,15 @@ shown the fatal hit. In multiplayer the ranger is not freed there:
   `Galaxy.ShipsInTransit` at the end of the turn job, like a ship that jumps. The
   human's `PlayerStar` follows, and the human gets a bubble
   (`Multiplayer.Respawned` in the language data, English when missing).
+
+**Death in a text quest.** In multiplayer a quest that ends in death
+(`DieInQuest`) is a ship loss: the quest fails as a lost one does (a prison
+quest frees the ranger with the planet hostile, a government planet quest
+fails), the `PlayerDeath` event names the human (cause `KilledInQuest`), and
+the ranger respawns at once at `FindRespawnPlanet`'s planet through
+`RespawnHuman`, as a captured human does (`ApplyPlanetCaptured`): in the command,
+not at the end of a star's day, since no film shows a quest. A script's quest
+resumes its script with a failure. With one human the game ends, as native.
 
 Only when no planet at all takes it is the ranger freed: the human leaves
 `Session.Humans` (`RemoveHuman`) and the others stay. For the local human that
@@ -330,7 +339,8 @@ like everyone else.
 the human has not ended its turn (`THuman.EndedTurn`). A finished human never holds the day,
 nor does one whose ranger is in hyperspace: a jump is travel that goes on until arrival,
 nor a disconnected one (`THuman.Connected`, session state that is not saved; see
-[network.md](network.md), Disconnects).
+[network.md](network.md), Disconnects), nor one who owes days for a text quest
+(`THuman.QuestDaysOwed`, see Text quests).
 `AllHumansEndedTurn` is true when no human holds the day, and `NextHumanToEndTurn` is the
 first human in `Session.Humans` order who does.
 
@@ -406,8 +416,39 @@ the barrier ([network.md](network.md), Trades). Its single log replays as it was
 checks that no human holds the day (`barrier-waits`).
 
 **Not covered.** Days that other screens start without an end turn: the old hyperspace
-arcade battle, the planet battles (Terron), text quests (off in multiplayer), and the new
-game's opening days. The film-end steps of a day (landing wear, the black-hole scripts) run
+arcade battle, the planet battles (Terron), and the new game's opening days. Text quests
+start none in multiplayer (see Text quests).
+
+## Text quests
+
+Text quests are on in multiplayer (the session flag that turned them off is gone). The
+human who plays one runs the quest on its own machine; only its effects are commands
+([commands.md](commands.md), 600-609). With more than one human (`IsMultiplayer` when the
+quest starts, `TQuestRun.OwesDays`):
+
+- **No galaxy day in a quest.** A page that passes days only counts them
+  (`TQuestRun.AdvanceDays`; the quest's date shows the galaxy's day plus them). `CloseQuest`
+  carries them, and the human owes them (`THuman.QuestDaysOwed`, saved in the per-human
+  block, version 4). While it owes days it does not hold the day (`HumanHoldsDay`), its
+  ranger stays where the quest left it, and `StartDayRound` takes one off after each day;
+  the others play on without it. The three sites that treat the local human on the quest
+  screen as in the quest (star control, a planet quest's deadline, the docked-days count)
+  treat a human who owes days the same (`OwesQuestDays`). In single player the quest runs
+  its days as native did and owes none.
+- **One human per planet quest.** A quest starts with `BeginTextQuest` (609, a trade): a
+  planet quest is refused when the planet's quest is gone or the human holds none to it
+  (`offer-gone`), or another human plays it (`in-use`); the run then does not start. The
+  lock is `THuman.TextQuestOpen` and `TextQuestPlanetId`, session state that is not saved;
+  `CloseQuest` releases it. A government offers no planet quest whose planet another human's
+  quest targets (`GenerateQuestOffer`, in the `RequestQuest` executor).
+- **Script quests are per human** (Scripts, above).
+- **A death respawns** (Respawn and game end, above).
+- **No reload or exit.** The quest screen ignores Escape, its exit button and `R`, and shows
+  no "load the autosave?" box; a quest ends by its own choices. A networked client writes no
+  autosave before a quest (the host, and hot-seat, still do).
+
+The network flow, the status and the watchers are later phases of
+[the plan](progress/2026-10-19-text-quests-plan.md). The film-end steps of a day (landing wear, the black-hole scripts) run
 for the human whose film it was. A human who is not local while its ship lands or docks does
 not see the landing; the next turn opens the planet or station screen.
 
@@ -429,11 +470,13 @@ reference table:
 - from version 2, whether each human's game has ended (`Finished`,
   `FinishReason`). A version 1 block loads with every human playing;
 - from version 3, the items of the shop grids that write their slots empty, by
-  id (see Shops). An older block has none.
+  id (see Shops). An older block has none;
+- from version 4, the days each human owes for a text quest
+  (`THuman.QuestDaysOwed`, see Text quests). An older block owes none.
 
 The block is written only when a save without it would load differently: more
 than one human, a flag that is not its default, a cheat on record, a finished
-human, or a script or event bound to a human other than the first. A single-player save is
+human, quest days owed, or a script or event bound to a human other than the first. A single-player save is
 therefore byte for byte as before. A save without the block loads as the
 original does: every script and event is bound to the first human. After a
 load the local human is still the saved `PlayerRangerIndex`, and
@@ -449,8 +492,11 @@ are the host's: a host refuses a client's `SetSessionFlag` before it is queued
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `TextQuestsDisabled` | off | no text quest is offered at a government (`TRanger.GenerateQuestOffer`) |
 | `FriendlyFireEnabled` | on | whether a human may attack another human (see PvP) |
+
+Flag 0 was `TextQuestsDisabled`. It is retired (`SessionFlagTextQuestsRetired`): text quests
+are always on. `SetSessionFlag` ignores it, and the block keeps its byte, written off and
+ignored on load, so old saves and logs load.
 
 **Cheats.** `Human.RecordCheat(Name, Points)` records that a human used a
 cheat. A cheat command's executor calls it for the command's actor. Nothing
@@ -628,6 +674,20 @@ note in the progress entry.
   enabled choices with a generator of its own, at most 1000 choices. It prints
   each page's hash, the outcome and the state hash after it; two runs must
   print the same. A ranger who dies in a quest leaves no state to hash.
+- Each save also plays a text quest in a two-human hot-seat (`--sim-text-quest=Prison
+  --sim-humans=2 --sim-hotseat=3`, `check_hotseat_text_quest`; Text quests): the second human
+  is local and plays the quest on the first day instead of its turn. It must owe the quest's
+  days (`quest owed day= human= days= holds= open=`), one fewer each day, hold no day and play
+  no turn while it owes one, and hold the next once it owes none; the run goes on until it has
+  played two more days. On the local saves the prison quest kills the ranger after 37 to 71
+  quest days, and it respawns. Two runs must print the same, and the recording, split into
+  one log per human, must replay merged to its hash with no day started early.
+- Each save also runs `--sim-quest-lock` (`check_quest_lock`): two humans join at the first
+  inhabited planet with a text quest and both hold a quest to it. While the first plays it
+  from its visit, the second's `BeginTextQuest` must be refused `in-use`; after the first's
+  quest has ended (and the planet's quest is gone), `offer-gone`.
+- The session probe also gives every human text-quest days owed; the round trips keep
+  them (`quest-days=` in the `state human` lines).
 - The same counts run `--sim-pvp` on each save: a second human joins in the
   local human's star and the local one attacks it. With friendly fire on its
   hits must do damage; after the `SetSessionFlag` command turns it off, the

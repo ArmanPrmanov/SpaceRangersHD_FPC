@@ -326,6 +326,9 @@ begin
     // CHANGE: ENHANCEMENT - A text quest played headlessly (HeadlessSim.RunTextQuest).
     else if Pos('--sim-text-quest=', Argument) = 1 then
       Simulation.TextQuest := Copy(Argument, 18, MaxInt)
+    // CHANGE: ENHANCEMENT - One human at a time plays a planet's quest (HeadlessSim.RunQuestLock).
+    else if Argument = '--sim-quest-lock' then
+      Simulation.QuestLock := True
     else if Pos('--sim-kill-human=', Argument) = 1 then
       Simulation.KillHumansAt := StrToInt(Copy(Argument, 18, MaxInt))
     else if Pos('--sim-reload-at=', Argument) = 1 then

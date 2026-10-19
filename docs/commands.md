@@ -126,6 +126,12 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
     window, the count is the same again and the shifted ordinal names the
     wrong instance. Nothing saved tells instances of one file apart; closing
     it needs a per-instance serial in the save.
+  - The text quest commands ([humans.md](humans.md), Text quests):
+    `CloseQuest` (608) carries the days the quest owes after the money limit
+    (absent: none); `DieInQuest` (606) carries whether a government quest
+    fails with the death (absent: none, which only matters in multiplayer,
+    where the ranger respawns); `FinishQueuedTextQuest` (607) finishes its
+    actor's queued quest (a command of no human, the first one).
 
 ## Trades
 
@@ -145,6 +151,7 @@ the screen.
 | `aHoldActions` (the ship screen) | `SellHeld` (225), `RepairHeld`, `RefuelHeld`, `ReloadHeld`, `RepairAll`, `BuyRockets`, `SellHoldInventory`, `SellHoldArtefact`, `SellHoldGoods`, `SellStoredItem` |
 | `aStationActions` | `PayForModernization` (520), `BuyPirateNodes` (532), `BuySatellite` (552), `Invest` (565), `BuySpecialShip` (574), `BuildPirateShip` (580) |
 | `aPlanetActions` | `BuyMap` (413) |
+| `aQuestActions` | `BeginTextQuest` (609): the start of a text quest, which one human at a time may play per planet ([humans.md](humans.md), Text quests); its wrapper catches the refusal itself, and the quest does not start |
 
 `RelayedSale` (254, `aHoldActions`) is no player's command: a host relays a
 ship screen sale as it (the location, the actor's money, the items put into the

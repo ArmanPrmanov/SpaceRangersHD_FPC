@@ -1,12 +1,14 @@
 # 2026-10-19 — Text quests in multiplayer: plan
 
 - Done: the plan; Phase A (the quest run out of the screen, the headless
-  quest player), see its notes below.
+  quest player); Phase B (the multiplayer rules in the game layer). See their
+  notes below.
 - In progress: nothing.
-- Next: Phase B, then C to F in order, one subagent at a time.
+- Next: Phase C, then D to F in order, one subagent at a time.
 - Notes: the owner asked for text quests in multiplayer, with the other
   players able to watch a quest but not act in it. This entry is the plan.
-  Decisions marked **Owner** need the owner's answer; each has a default.
+  The decisions marked **Owner** have the owner's answers (2026-10-19), in
+  section 4 and at each rule.
 
 ## 1. How text quests work today
 
@@ -110,6 +112,9 @@ government quest in `P.Quests` are.
 
 ### What the session flag blocks, every site
 
+(Before Phase B. The owner has since retired the flag: text quests are always
+on in multiplayer; see section 4.)
+
 `Session.TextQuestsDisabled` (`aSession`, flag 0, `SetSessionFlag` 42,
 host only):
 
@@ -178,7 +183,7 @@ the absolute value is right. Keep it.
 
 ### Rules in multiplayer (`IsMultiplayer`: hot-seat and network alike)
 
-1. **Days in a quest.** **Owner.** Default: the quest runs no game days. The
+1. **Days in a quest.** **Owner: as the default** (decided). The quest runs no game days. The
    days it would pass are counted (`DaysElapsed`) and sent with `CloseQuest`
    (a new last integer). Its executor stores them as
    `THuman.QuestDaysOwed`. While that is above 0 the human does not hold the
@@ -187,11 +192,13 @@ the absolute value is right. Keep it.
    costs its time, and the others do not wait for it. The date text shows
    `CurrentTurn + DaysElapsed`. Alternative: ignore the days (simpler,
    free time). Single player keeps running the days in the quest.
-2. **Death.** **Owner.** Default: in multiplayer a death in a quest is a
-   failure: `DieInQuest` with `IsMultiplayer` fails the government quest (as
-   `FailGovernmentQuest`) and leaves the ranger as it is (Phase 6: a
-   destroyed human loses nothing). It does not free the ranger or end the
-   game. Alternative: respawn at `FindRespawnPlanet`.
+2. **Death.** **Owner: respawn** (decided, instead of the default). In
+   multiplayer a death in a quest is a ship loss: the ranger is killed and
+   respawns as a destroyed human does (`FindRespawnPlanet`, `RespawnHuman`),
+   after the quest's failure (a prison quest frees it with the planet hostile,
+   a government planet quest fails, a script's quest resumes with a failure).
+   It does not end the game for anyone; single player still ends it. (The
+   rejected default was: a failure that leaves the ranger as it is.)
 3. **No reload, no exit.** In multiplayer: no autosave before a quest on a
    client, no `R`, no "load the autosave?" box, and Escape does nothing (a
    quest always ends by its own choices). The host may keep its autosave.
@@ -205,10 +212,12 @@ the absolute value is right. Keep it.
    (srqTextQuest)`; `FinishQueuedTextQuest` finishes its actor's request
    (`CompleteQueuedTextQuest(Status, HumanId)`; `HumanId` 0 matches any, so
    old logs replay).
-6. **The flag stays** as the host's switch. **Owner.** Default: text quests
-   on (the flag's default), and the flag also declines script-queued quests.
-   The prison quest is never gated. No settings UI exists for the flags yet
-   (friendly fire has none either); that is separate work.
+6. **The flag is gone.** **Owner: text quests are always on in multiplayer**
+   (decided, instead of the default, which kept the flag as the host's
+   switch). `Session.TextQuestsDisabled` is removed; its number stays taken
+   (`SessionFlagTextQuestsRetired`, which `SetSessionFlag` ignores) and its
+   byte in the per-human save block is written off and ignored on load, so old
+   logs and saves load.
 
 ### The lock: one human per quest
 
@@ -294,7 +303,7 @@ sees the player's language. Pictures go by name; a missing one is left out.
 - `Status` changes (activity, days owed), so the version goes to 10 anyway.
 - Pages are presentation: not commands, not logged, not hashed.
 
-**Where to open it.** **Owner.** Default: (a) every wait box for the day that
+**Where to open it.** **Owner: as the default** (decided; Phase E). (a) every wait box for the day that
 names a human in a quest gets a line "W: watch <Player>'s text quest." and
 the `W` key (the box's buttons are pictures, as with Cancel); (b) the in-game
 round menu gets a "Watch text quest" button while some other human plays one
@@ -465,6 +474,80 @@ its own progress entry.
   after. A save round trip keeps `QuestDaysOwed`. Single-player goldens
   unchanged (all of this is behind `IsMultiplayer`).
 
+#### Phase B notes (done)
+
+- Decisions applied: 1 (owed days), 2 (respawn), 4 (no flag); 3 is Phase E's.
+- **The flag.** `Session.TextQuestsDisabled` is gone (`aSession`); flag 0 is
+  `SessionFlagTextQuestsRetired`, which `SetSessionFlag` ignores. The save
+  block writes its byte off and skips it on load. `GenerateQuestOffer` no
+  longer reads it. The probes that used it use friendly fire instead: the
+  session probe (a finished human's `SetSessionFlag` turning friendly fire
+  back on must be refused), the networked client's refused flag
+  (`net client session flag friendly-fire=`, `net host session flag
+  friendly-fire=`), `state session friendly-fire=` (the `textquests-off=`
+  field is gone), and the unit test checks that the retired flag changes
+  nothing.
+- **Script quests per human** (rule 5): `TScriptTQRequest.HumanId` (after
+  `Script`, so the native record view of the other queues is unchanged);
+  `StartTextQuest` declines (0) unless `MayQueueScriptRequest`, and its count
+  is the human's; `TryShowQueuedTextQuest`, `HasPendingScriptRequests`,
+  `FindResumingScriptRequest` and the run (`Open`, `ComputeMoneyLimit`) take
+  the local human's request; `CompleteQueuedTextQuest(Status, HumanId)` takes
+  the actor's (`TakeScriptRequest`; 0 any, and none to finish now logs instead
+  of raising).
+- **Days** (rule 1): `TQuestRun.OwesDays` is `IsMultiplayer` when the quest
+  starts. Then `AdvanceDays` exports money and variables as before and only
+  counts; the quest's `<CurDate>` is the galaxy's day plus the days counted;
+  `Close` sends them as `CloseQuest`'s second integer, which the executor adds
+  to `THuman.QuestDaysOwed` (save block version 4; written also for one human
+  who owes days). `HumanHoldsDay` is false while it is above 0, and
+  `StartDayRound` takes one off. The three local-screen sites use
+  `aHuman.OwesQuestDays`: star control (`CountsTowardStarControl`), the
+  planet quest's deadline (`aRanger.InTextQuestAt`, the human at its own
+  planet), the docked-days count. Single player sends 0 and is unchanged.
+- **Death** (rule 2 as decided): `DieInQuest` carries whether a government
+  quest fails with it (the run's `QueuedQuest = nil`, as `Fail`). In
+  multiplayer its executor applies the failure (`ApplyReleaseFromPrison` or
+  `ApplyFailGovernmentQuest`, split out of their executors), records the
+  `PlayerDeath` event (`RecordHumanDeath('KilledInQuest')`) and respawns the
+  ranger at once (`FindRespawnPlanet`, `RespawnHuman`), as
+  `ApplyPlanetCaptured` does; only when no planet takes it is the ranger
+  freed, and the game ends only on that human's machine. The run says
+  `Respawned`, resumes a queued quest's script with a failure, and the screen
+  goes to the planet. The ranger usually respawns where it was: its own
+  planet is the nearest.
+- **Offers** (rule 4): `GenerateQuestOffer` with `IsMultiplayer` skips a
+  planet whose quest another human holds (`PlanetQuestHeldByOtherHuman`).
+- **Screens** (rule 3): with `IsMultiplayer` the quest screen ignores Escape,
+  the exit button and `R`, and shows no load box after a failure or a death.
+  `fPlanet`, `fPlanetNO` and `fGov.EnterPrison` write no autosave on a
+  networked client (`NetRole = nrClient`); hot-seat and a host keep it.
+- **The lock** (`BeginTextQuest`, 609, a trade): `TQuestRun.Open` and
+  `OpenNamed` send it before the quest starts (`BeginRun`; kinds `tqkPlanet`,
+  `tqkPrison`, `tqkQueued`, `tqkNamed`); a refusal leaves `Refused` set and
+  nothing started (the screen goes back; a session's `TradeRefusedHook`
+  shows the bubble). The lock is `THuman.TextQuestOpen` and
+  `TextQuestPlanetId`, not saved; `CloseQuest` and a load (`RebuildHumans`)
+  release it (`THuman.ReleaseTextQuest`).
+- **Tests.** `--sim-text-quest=NAME` with `--sim-hotseat=DAYS` (and
+  `--sim-humans=2`): the last human is made local and plays the quest on the
+  first day (`HeadlessSim.PlayQuestTurn`); the run goes on until it has paid
+  its days and played two more. `check_hotseat_text_quest` checks the owed
+  days (`quest owed ...`), two equal runs, and the merged per-human replay.
+  On the three local saves (seed 0) the prison quest dies after 37, 71 and 39
+  quest days and the ranger respawns; the replay reaches the hash with
+  `barrier-waits=0`. `--sim-quest-lock` (`RunQuestLock`, `check_quest_lock`):
+  in-use while the first plays, offer-gone after (its planet quests 38 and 11
+  fail). `THeadlessQuestPlayer` gained `Start`, `OpenVisit` and `Finish`.
+  The session probe gives every human quest days owed, and `check_session`
+  checks that a round trip keeps them.
+- Left for Phase C, as planned: the host clearing a disconnected human's lock
+  and a client's fresh lock after a state; the owed-day waits and the host's
+  automatic day start (in hot-seat a human who owes days is skipped by the
+  screen switch already, as `NextHumanToEndTurn` skips it); the planet
+  screen's "<Player> is playing this quest" (the refusal bubble covers it for
+  now).
+
 ### Phase C — Network flow
 
 - Goal: a client and the host can play quests in a session.
@@ -532,10 +615,18 @@ its own progress entry.
 
 ## 4. Risks and open questions
 
-- **Owner decisions** (defaults in bold): days in a quest (**owed days,
-  human does not hold them**; or ignored); death (**failure**; or respawn);
-  where to watch from (**waits and the round menu**); the flag (**kept,
-  quests on**).
+- **Owner decisions** (decided 2026-10-19):
+  1. Days in a quest: the quest runs no galaxy day in multiplayer; afterwards
+     the human owes those days and does not hold them, and the others play on
+     without waiting for it (the default).
+  2. Death in a quest in multiplayer: the ranger is killed and respawns as
+     after a ship loss (not the default "count as a failure"). Single player
+     keeps ending the game.
+  3. Watching: the `W` key in the wait boxes and a button in the in-game
+     menu (the default; Phase E).
+  4. The flag: text quests are always on in multiplayer; the
+     `text-quests` session flag is removed as a switch (not the default
+     "kept, quests on"), with protocol and save compatibility kept.
 - Two humans predicted an offer to the same planet on the same day: the
   host's barrier gives the second a different planet or none, and that
   client sees it only in the next state.

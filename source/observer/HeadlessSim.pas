@@ -105,8 +105,12 @@ type
     // network.md, Tests).
     NetCancelEndTurn: Boolean;
     // CHANGE: ENHANCEMENT - --sim-text-quest=ID|NAME: the save's one human plays this text quest
-    // with the headless quest player (RunTextQuest; HeadlessQuest).
+    // with the headless quest player (RunTextQuest; HeadlessQuest). With --sim-hotseat, the
+    // last human plays it on the first day instead of its turn (RunHotSeat).
     TextQuest: AnsiString;
+    // CHANGE: ENHANCEMENT - --sim-quest-lock: two humans hold the quest of one planet; one at a
+    // time plays it (RunQuestLock).
+    QuestLock: Boolean;
   end;
 function RunHeadlessSimulation(const Options: TSimulationOptions): Integer;
 // Shared with the networked runner (HeadlessNet).
@@ -171,7 +175,8 @@ uses
   fGameSettings,
   fIntroduction,
   HeadlessQuest,
-  QuestRun;
+  QuestRun,
+  aQuestActions;
 
 var
   // Where each object starts in the state being dumped (SaveTrace).
@@ -410,12 +415,7 @@ var
   Entry: TPlayerHoldUnit;
   Event: TGalaxyEvent;
 begin
-  Lines.Add(
-      Format(
-          'session textquests-off=%d friendly-fire=%d',
-          [Ord(Session.TextQuestsDisabled), Ord(Session.FriendlyFireEnabled)]
-      )
-  );
+  Lines.Add(Format('session friendly-fire=%d', [Ord(Session.FriendlyFireEnabled)]));
   for I := 0 to Session.Humans.Count - 1 do
   begin
     Human := Session.Humans[I];
@@ -496,6 +496,7 @@ begin
       Part := Part + UTF8Encode(Human.UsedCheats[J]) + ',';
     Line := Line + ' cheats=' + Part;
     Line := Line + Format(' finished=%d:%d', [Ord(Human.Finished), Human.FinishReason]);
+    Line := Line + Format(' quest-days=%d', [Human.QuestDaysOwed]);
     Lines.Add(Line);
   end;
   for I := 0 to Galaxy.Scripts.Count - 1 do
@@ -517,9 +518,9 @@ begin
 end;
 
 // Gives the session, the humans, the scripts and an event state that a load without the
-// per-human save block would lose: the flags, set by command, a cheat for every human, the
-// other humans' THuman state with a shop for those who are landed, scripts bound to every
-// human in turn, and the last event bound to the last human. With more than one human, the
+// per-human save block would lose: the flags, set by command, a cheat and text-quest days
+// owed for every human, the other humans' THuman state with a shop for those who are landed,
+// scripts bound to every human in turn, and the last event bound to the last human. With more than one human, the
 // last one's game ends, as a script's EndGame ends it, and a command it issues must be
 // refused.
 procedure ProbeSession;
@@ -530,12 +531,12 @@ var
   Entry: TPlayerHoldUnit;
   Command: TPlayerCommand;
 begin
-  SetSessionFlagValue(SessionFlagTextQuestsDisabled, True);
   SetSessionFlagValue(SessionFlagFriendlyFire, False);
   for I := 0 to Session.Humans.Count - 1 do
   begin
     Human := Session.Humans[I];
     Human.RecordCheat('Probe' + WideString(IntToStr(Human.Id)), I + 1);
+    Human.QuestDaysOwed := I + 1;
     if Human = LocalHuman then
       Continue;
     Human.PendingPlayerFollowTarget := LocalPlayer;
@@ -574,10 +575,10 @@ begin
     FinishHuman(Human, 7);
     Command := NewCommand(ckSetSessionFlag);
     Command.Actor := Cardinal(Human.Id);
-    AddInt(Command, SessionFlagTextQuestsDisabled);
-    AddInt(Command, 0);
+    AddInt(Command, SessionFlagFriendlyFire);
+    AddInt(Command, 1);
     SubmitCommand(Command);
-    if Session.TextQuestsDisabled then
+    if not Session.FriendlyFireEnabled then
       Emit(Format('probe finished human=%d command=refused', [Human.Id]))
     else
       Emit(Format('probe finished human=%d command=applied', [Human.Id]));
@@ -1190,14 +1191,60 @@ begin
   SubmitFor(Human, Command);
 end;
 
+// CHANGE: ENHANCEMENT - The quest human's first hot-seat day (docs/progress/
+// 2026-10-19-text-quests-plan.md, Phase B): it plays the text quest Name with the headless
+// quest player, as the local human (the run's commands are the local human's), and ends its
+// turn only when the quest owes no day: in multiplayer the quest passes no galaxy day, and
+// a human who owes days does not hold the day.
+procedure PlayQuestTurn(Human: THuman; const Name: AnsiString; Seed: Cardinal; var Plan: AnsiString);
+var
+  Player: THeadlessQuestPlayer;
+  Outcome: TQuestRunOutcome;
+  Command: TPlayerCommand;
+begin
+  Player := THeadlessQuestPlayer.Create(Seed);
+  try
+    Outcome := Player.Play(UTF8Decode(Name));
+    Emit(
+        Format(
+            'quest done name=%s outcome=%s pages=%d steps=%d days=%d errors=%d respawned=%d',
+            [Name, QuestOutcomeName(Outcome), Player.Pages, Player.Steps,
+                Player.Run.DaysElapsed, Player.Errors, Ord(Player.Run.Respawned)]
+        )
+    );
+  finally
+    Player.Free;
+  end;
+  Plan := Plan + 'q';
+  if Human.Player = nil then
+    Exit;
+  Emit(
+      Format(
+          'quest owed day=%d human=%d days=%d holds=%d open=%d',
+          [Galaxy.CurrentTurn, Human.Id, Human.QuestDaysOwed, Ord(HumanHoldsDay(Human)),
+              Ord(Human.TextQuestOpen)]
+      )
+  );
+  if HumanHoldsDay(Human) then
+  begin
+    Command := NewCommand(ckEndTurn);
+    AddInt(Command, 0);
+    SubmitFor(Human, Command);
+  end;
+end;
+
 // Hot-seat without a window (ROADMAP.md, Phase 4, test plan): every day each human who holds
 // the day plays its turn in Session.Humans order, each from its own commands; the day starts
 // only when none holds it. With --record-commands the log splits into one log per human
 // (tools/split_commands.py), and the merged replay of those must reach the same hash.
+// CHANGE: ENHANCEMENT - With --sim-text-quest, the last human is the local one and plays the
+// quest on the first day (PlayQuestTurn); the days go on, at least HotSeatDays, until it has
+// paid the days the quest owes and played two more. Each day after the quest says what it
+// owes and whether it holds the day.
 function RunHotSeat(const Options: TSimulationOptions): Integer;
 var
-  Day, I, Waits, Early, Holders: Integer;
-  Human: THuman;
+  Day, I, Waits, Early, Holders, PlayedAfter: Integer;
+  Human, QuestHuman: THuman;
   Plan: AnsiString;
 begin
   Result := 0;
@@ -1205,8 +1252,18 @@ begin
   Early := 0;
   CurrentScreenId := screenPlanet;
   RequestedScreenId := screenNone;
-  for Day := 1 to Options.HotSeatDays do
+  QuestHuman := nil;
+  PlayedAfter := 0;
+  if (Options.TextQuest <> '') and (Session.Humans.Count > 1) then
   begin
+    QuestHuman := Session.Humans[Session.Humans.Count - 1];
+    SetLocalHuman(QuestHuman);
+  end;
+  Day := 0;
+  while (Day < Options.HotSeatDays)
+      or ((QuestHuman <> nil) and (PlayedAfter < 2) and (Day < Options.HotSeatDays + 400)) do
+  begin
+    Inc(Day);
     Plan := '';
     Holders := 0;
     for I := 0 to Session.Humans.Count - 1 do
@@ -1222,7 +1279,14 @@ begin
         Plan := Plan + '.';
         Continue;
       end;
-      PlayHumanTurn(Human, Day, I, Plan);
+      if (Human = QuestHuman) and (Day = 1) then
+        PlayQuestTurn(Human, Options.TextQuest, Options.Seed, Plan)
+      else
+      begin
+        if (Human = QuestHuman) and (Day > 1) then
+          Inc(PlayedAfter);
+        PlayHumanTurn(Human, Day, I, Plan);
+      end;
       Dec(Holders);
       // Its end turn counts, and the day still waits for every human after it.
       if HumanHoldsDay(Human) then
@@ -1253,6 +1317,17 @@ begin
               [Galaxy.CurrentTurn, Plan, IntToHex(GalaxyStateHash, 16)]
           )
       );
+    if (QuestHuman <> nil) and (QuestHuman.Player <> nil) then
+      Emit(
+          Format(
+              'quest owed day=%d human=%d days=%d holds=%d open=%d',
+              [Galaxy.CurrentTurn, QuestHuman.Id, QuestHuman.QuestDaysOwed,
+                  Ord(HumanHoldsDay(QuestHuman)), Ord(QuestHuman.TextQuestOpen)]
+          )
+      )
+    else if QuestHuman <> nil then
+      // No ranger to play for (it left the game in the quest): the days stop.
+      PlayedAfter := 2;
   end;
   if (Waits > 0) or (Early > 0) then
   begin
@@ -1264,8 +1339,7 @@ begin
   Emit(
       Format(
           'done hotseat days=%d humans=%d day=%d hash=%s',
-          [Options.HotSeatDays, Session.Humans.Count, Galaxy.CurrentTurn,
-              IntToHex(GalaxyStateHash, 16)]
+          [Day, Session.Humans.Count, Galaxy.CurrentTurn, IntToHex(GalaxyStateHash, 16)]
       )
   );
 end;
@@ -3365,6 +3439,116 @@ begin
   Emit(Format('done text-quest day=%d', [Galaxy.CurrentTurn]));
 end;
 
+// Gives Human a government planet quest to Planet, as AcceptQuest gives the offer.
+procedure GiveProbePlanetQuest(Human: THuman; Planet: TPlanet);
+var
+  Quest: PQuest;
+begin
+  New(Quest);
+  Quest.QuestType := qtPlanetQuest;
+  Quest.QuestNumber := Word(Planet.TextQuestId);
+  Quest.Planet := Planet;
+  Quest.DeadlineTurn := Galaxy.CurrentTurn + 100;
+  Quest.RewardMoney := 1000;
+  Quest.ObjectiveTarget := Planet;
+  Quest.Successful := False;
+  Quest.Description := 'Probe';
+  Quest.CompletionText := '';
+  Quest.SpecialCompletionText := '';
+  Human.Player.Quests.Add(Quest);
+end;
+
+// Human's BeginTextQuest for Planet's quest: 'applied', or the refusal's name.
+function TryBeginPlanetQuest(Human: THuman; Planet: TPlanet): AnsiString;
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckBeginTextQuest);
+  AddInt(Command, tqkPlanet);
+  AddRef(Command, Planet);
+  Result := 'applied';
+  try
+    SubmitFor(Human, Command);
+  except
+    on E: ECommandRefused do
+      Result := RefusalReasonName(E.Reason);
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - --sim-quest-lock (docs/progress/2026-10-19-text-quests-plan.md, Phase
+// B, the lock): two humans join at the first inhabited planet with a text quest, and both hold
+// a government quest to it. The first plays it from its visit (TQuestRun.Open) with the
+// headless quest player; while it plays, the second's BeginTextQuest must be refused
+// (in-use); once the quest has ended (and the planet's quest is gone), again (offer-gone).
+function RunQuestLock(const Options: TSimulationOptions): Integer;
+var
+  I: Integer;
+  Planet, Candidate: TPlanet;
+  A, B: THuman;
+  Player: THeadlessQuestPlayer;
+  Opened: Boolean;
+  Outcome: TQuestRunOutcome;
+  WhilePlaying, After: AnsiString;
+begin
+  Result := 0;
+  Planet := nil;
+  for I := 0 to Galaxy.Planets.Count - 1 do
+  begin
+    Candidate := TPlanet(Galaxy.Planets[I]);
+    if (Candidate.TextQuestId <> -1)
+        and not Candidate.NoLanding
+        and (Candidate.OwnerId <= Byte(oiGaal)) then
+    begin
+      Planet := Candidate;
+      Break;
+    end;
+  end;
+  if Planet = nil then
+  begin
+    Emit('quest lock skipped: no inhabited planet with a text quest');
+    Exit;
+  end;
+  A := JoinHumanAt(Planet, 'HumanA', 1);
+  B := JoinHumanAt(Planet, 'HumanB', 2);
+  GiveProbePlanetQuest(A, Planet);
+  GiveProbePlanetQuest(B, Planet);
+  SetLocalHuman(A);
+  CurrentScreenId := screenPlanet;
+  RequestedScreenId := screenNone;
+  Player := THeadlessQuestPlayer.Create(Options.Seed);
+  try
+    Opened := Player.OpenVisit;
+    Emit(
+        Format(
+            'quest lock planet=%d quest=%d first=%d open=%d locked=%d',
+            [Planet.Id, Planet.TextQuestId, Ord(Opened), Ord(A.TextQuestOpen),
+                Ord(A.TextQuestPlanetId = Planet.Id)]
+        )
+    );
+    WhilePlaying := TryBeginPlanetQuest(B, Planet);
+    Outcome := Player.Finish;
+  finally
+    Player.Free;
+  end;
+  After := TryBeginPlanetQuest(B, Planet);
+  Emit(
+      Format(
+          'quest lock outcome=%s quest=%d released=%d while-playing=%s after=%s',
+          [QuestOutcomeName(Outcome), Planet.TextQuestId, Ord(not A.TextQuestOpen), WhilePlaying,
+              After]
+      )
+  );
+  if Opened and (WhilePlaying = 'in-use') and (After = 'offer-gone') and not A.TextQuestOpen
+      and not B.TextQuestOpen then
+    Emit('quest lock ok')
+  else
+  begin
+    Emit('quest lock failed');
+    Result := 1;
+  end;
+  Emit(Format('done quest-lock humans=%d', [Session.Humans.Count]));
+end;
+
 procedure EmitHumans(const Options: TSimulationOptions);
 var
   Lines: TStringList;
@@ -3404,9 +3588,15 @@ begin
     Result := RunStaleCommands(Options);
     Exit;
   end;
-  if Options.TextQuest <> '' then
+  // With --sim-hotseat, the hot-seat run plays the quest (RunHotSeat).
+  if (Options.TextQuest <> '') and (Options.HotSeatDays <= 0) then
   begin
     Result := RunTextQuest(Options);
+    Exit;
+  end;
+  if Options.QuestLock then
+  begin
+    Result := RunQuestLock(Options);
     Exit;
   end;
   if Options.Pvp then
