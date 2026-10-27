@@ -767,6 +767,10 @@ begin
             TObject(Galaxy.IdToShip(Cardinal(Quest.ObjectiveTarget), True)) as TShip;
     end;
   end;
+  // CHANGE: FIX - The player's quest targets are set from the resolved quests, here rather
+  // than in TPlayer.LoadFromBuffer: there a target is still a saved id, and the checked cast
+  // to TShip crashed the load of a save holding a kill or defend ship quest.
+  RefreshPlayerQuestTargets;
   LastDockedNonPlanetLocation :=
       TObject(Galaxy.IdToShip(Cardinal(LastDockedNonPlanetLocation), False)) as TShip;
 end;

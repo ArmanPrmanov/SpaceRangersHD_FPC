@@ -887,7 +887,7 @@ begin
     end;
   end;
   Session.LastLoadedPlayerName := Name;
-  RefreshPlayerQuestTargets;
+  // The quest targets are set once the quests resolve (TRanger.ResolveLoadedReferences).
 end;
 
 procedure TPlayer.ResolveLoadedReferences(Galaxy: TGalaxy);
