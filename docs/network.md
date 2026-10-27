@@ -242,7 +242,12 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   host queues a `StopContinuing` of that human as if the peer had sent it
   (Continuing travel) and answers applied when its next day has not begun,
   else refused (`rrTooLate`) with the stop queued all the same; not while the
-  barrier applies the queues (refused, nothing queued).
+  barrier applies the queues (refused, nothing queued). An `EndTurn` that took
+  off (a `Takeoff` queued before it, or the human's ranger taking off on the
+  host) is taken back with the takeoff: the cancel takes the `EndTurn`'s place
+  in the queue instead (`takeoff=1` in the log line), and the barrier runs it
+  after the `Takeoff`, as the client ran both, so the ranger stays landed or
+  docked there too; the log records both.
 - A queued command that raises when the host applies it is logged and dropped.
   The command log does not record it, and records the commands after it
   (`CommandFailedHook`, [commands.md](commands.md)). The same holds for a
@@ -865,9 +870,15 @@ while the end turn can be taken back, and a line under the text says so
 continues); the message box's buttons are pictures, so the line names it. Only
 where taking it back makes the human hold the day again
 (`NetPlay.MayCancelEndTurn`): not in hyperspace (a jump cannot stop), not when
-the human has finished, and not while it takes off (the screen that took off
-would stay with the ranger leaving; the takeoffs from the planet, hangar and
-station have no Cancel). While the travel continues, Cancel stops it
+the human has finished. A takeoff is taken back with its end turn while the
+ranger is still landed or docked (`aPlayerActions.TakeoffMayBeTakenBack`): the
+cancel's executor clears the takeoff order, the ranger stays, and the screen
+that took off stays open (`NetPlay.NetTakeoffTakenBack`; the hangar's
+`TryTakeOff` returns false, and the government and station dialogues that took
+off through it open the hangar). Not a takeoff a script ordered
+(`TryDispatchScriptTakeoff`, `NetPlay.ScriptTakeoffEndingTurn`). What the
+takeoff ran stays (its scripts' turn code, the shop's stock given back, the
+music faded on the station travel's). While the travel continues, Cancel stops it
 (Continuing travel); a client may also do that while the host's day runs, and
 then it holds the day after. The reconnect's Cancel comes first: while a
 client reconnects, Cancel ends the reconnect.
@@ -1268,7 +1279,13 @@ accepted=1 holds=1`) and ends its turn again, and the day runs. After its
 second day's turn, once the host's status says the day runs (or the state has
 come), it tries again: the host must refuse it (`net command failed ...
 kind=CancelEndTurn reason=too-late`) and the client must hear it (`net end turn
-cancel answered ok=0 reason=too-late`). From then on its turns in normal space
+cancel answered ok=0 reason=too-late`). Its first turn takes off when the human
+is landed or docked (`HeadlessNet.PlayTakeoffTurn`, `net client takeoff turn`),
+so the first cancel takes the takeoff back: the host must put the cancel in the
+`EndTurn`'s place (`takeoff=1`), the client's human must still be landed or
+docked (`takeoff=1 landed=1`), and the next state must have it there (`net
+client after takeoff cancel landed=1`); in the new games whose clients never
+leave their planet this last line proves little, the saves' runs do. From then on its turns in normal space
 fly to the farthest planet of its star and ask to continue until arrival
 (`HeadlessNet.PlayFarTravel`); after the first state that says it continues
 (not in hyperspace) it stops the travel (`CancelEndTurn` with `StopTravel`),
@@ -1459,8 +1476,11 @@ star's film once; every client in that star gets it.
   `TNetClient` code. The same holds for the Cancel that takes the end turn back:
   the headless runs send `CancelEndTurn` through `TNetClient` directly, and
   nothing runs the host's own Cancel.
-- A takeoff's end turn cannot be taken back, nor a jump in hyperspace. The
-  host's own Cancel at the end of a continuing film, and its break, are not
+- A jump in hyperspace cannot be taken back, nor a script's takeoff. A takeoff
+  taken back keeps what the takeoff ran (its scripts' turn code and the global
+  scripts' takeoff context, which run again at the next takeoff; the shop's
+  stock given back; the extortion pact it ended). The host's own Cancel of a
+  takeoff is not run by the tests. The host's own Cancel at the end of a continuing film, and its break, are not
   run by the tests (they need the star map's film).
 - A client's stop that comes while the host's barrier applies the queues is
   refused without a stop queued; the client stops after the next state, which

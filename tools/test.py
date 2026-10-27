@@ -1532,8 +1532,10 @@ def check_cancel_end_turn(host_output: str, outputs: list[str]) -> tuple[str, st
     after which the day ran. Once the second day had begun, the host refused the same (too-late),
     and the client heard it. Later, after a state that said its travel continued, the client
     stopped it before the host's next day: the host queued a StopContinuing and was no longer
-    ready, the client's human held the day and played it, and the days went on. Returns what is
-    wrong, and a note."""
+    ready, the client's human held the day and played it, and the days went on. When the first
+    turn took off (the human was landed or docked), the takeoff was taken back with the end turn:
+    the host ran the cancel in the EndTurn's place (takeoff=1), the client's human stayed, and
+    the next state still had it landed or docked. Returns what is wrong, and a note."""
     probes = [line for output in outputs for line in net_lines(output, "net client end turn cancel ")]
     first = [line for line in probes if line.get("first") == "1"]
     late = [line for line in probes if line.get("first") == "0"]
@@ -1543,6 +1545,15 @@ def check_cancel_end_turn(host_output: str, outputs: list[str]) -> tuple[str, st
     cancelled = [line for line in net_lines(host_output, "net end turn cancelled ") if line["human"] == human]
     if len(cancelled) != 1 or cancelled[0]["ready"] != "0":
         return f"the host did not take human {human}'s end turn back, or was still ready: {cancelled}", ""
+    took_off = first[0].get("takeoff") == "1"
+    takeoff_note = ""
+    if took_off:
+        after = [line for output in outputs for line in net_lines(output, "net client after takeoff cancel ")]
+        if first[0].get("landed") != "1" or cancelled[0].get("takeoff") != "1":
+            return f"the takeoff was not taken back with the end turn: {first} {cancelled}", ""
+        if not after or after[0].get("landed") != "1":
+            return f"the host's next day did not keep the human landed after its takeoff was taken back: {after}", ""
+        takeoff_note = " (with its takeoff: it stays landed for the day)"
     if not late or late[0]["sent"] != "1" or late[0]["accepted"] != "0":
         return f"a cancelled end turn after the day began was not refused: {late}", ""
     failed = [
@@ -1559,8 +1570,8 @@ def check_cancel_end_turn(host_output: str, outputs: list[str]) -> tuple[str, st
     if not travel and untried and untried[0].get("in-space-turns") == "0":
         # Some new games' clients never leave their planet: no travel continues to stop.
         return "", (
-            f"a client takes its end turn back before the day (the host is no longer ready) and "
-            f"ends it again; once day {late[0]['day']} has begun it is refused (too-late); the "
+            f"a client takes its end turn back{takeoff_note} before the day (the host is no longer "
+            f"ready) and ends it again; once day {late[0]['day']} has begun it is refused (too-late); the "
             "client never left its planet, so no continuing travel was stopped in this new game"
         )
     if not travel or travel[0].get("accepted") != "1" or travel[0].get("holds") != "1":
@@ -1569,8 +1580,8 @@ def check_cancel_end_turn(host_output: str, outputs: list[str]) -> tuple[str, st
     if len(stopped) != 1 or stopped[0]["ready"] != "0":
         return f"the host did not stop human {human}'s travel, or was still ready: {stopped}", ""
     return "", (
-        f"a client takes its end turn back before the day (the host is no longer ready) and ends "
-        f"it again; once day {late[0]['day']} has begun it is refused (too-late); a client whose "
+        f"a client takes its end turn back{takeoff_note} before the day (the host is no longer "
+        f"ready) and ends it again; once day {late[0]['day']} has begun it is refused (too-late); a client whose "
         f"travel continues stops it before day {travel[0]['day']} and plays that day"
     )
 

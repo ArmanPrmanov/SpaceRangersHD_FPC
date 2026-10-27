@@ -26,7 +26,8 @@ unit HeadlessNet;
 // host's first day, which waits for that, and ends it again; once the second day has begun, the
 // host refuses the same (docs/network.md, Tests). Then its end turns ask to continue the travel,
 // and once a state says that it continues, it stops the travel before the host's next day,
-// which waits for that, and plays that day.
+// which waits for that, and plays that day. The first turn takes off when the human is landed
+// or docked, so that its end turn is taken back with the takeoff: the human stays.
 // CHANGE: ENHANCEMENT - --sim-net-quest=DAY (docs/progress/2026-10-19-text-quests-plan.md,
 // Phase C): a client plays a text quest with the headless quest player on its DAY-th turn,
 // before its end turn: the planet quest a probe command gives it, or a quest by name
@@ -754,12 +755,16 @@ end;
 // for it; the host applies it, the human holds the day again here, and ends its turn again.
 // Otherwise once the host's day has begun (its status says so) or run: the host refuses it.
 // Whether it went as it should.
+// CHANGE: ENHANCEMENT - A turn that took off is taken back with the takeoff: the human is still
+// landed or docked here (Landed), and the host's next state keeps it there.
 function ProbeCancelEndTurn(Client: TNetClient; First: Boolean): Boolean;
 var
   Deadline: QWord;
-  Sent, Accepted, Holds: Boolean;
+  Sent, Accepted, Holds, TookOff, Landed: Boolean;
 begin
   Result := False;
+  TookOff := (LocalPlayer <> nil) and (LocalPlayer.Order = soTakeoff);
+  Landed := False;
   Deadline := GetTickCount64 + StallTimeoutMs;
   while not First and not Client.Status.DayRunning and not Client.HasState do
   begin
@@ -788,15 +793,40 @@ begin
   begin
     Client.TakeCancelledEndTurn;
     Holds := HumanHoldsDay(LocalHuman);
+    Landed :=
+        (LocalPlayer.Order <> soTakeoff)
+            and ((LocalPlayer.CurrentPlanet <> nil) or (LocalPlayer.DockedTo <> nil));
     EndTurnFor(LocalHuman);
   end;
   Emit(
       Format(
-          'net client end turn cancel day=%d first=%d sent=%d accepted=%d holds=%d human=%d',
-          [Galaxy.CurrentTurn, Ord(First), Ord(Sent), Ord(Accepted), Ord(Holds), Client.HumanId]
+          'net client end turn cancel day=%d first=%d sent=%d accepted=%d holds=%d human=%d takeoff=%d landed=%d',
+          [Galaxy.CurrentTurn, Ord(First), Ord(Sent), Ord(Accepted), Ord(Holds), Client.HumanId,
+              Ord(TookOff), Ord(Landed)]
       )
   );
-  Result := Sent and (Accepted = First) and (Holds = First);
+  Result := Sent and (Accepted = First) and (Holds = First) and (not (First and TookOff) or Landed);
+end;
+
+// CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn: the first turn, landed or docked, is
+// PlayHumanTurn's turn that takes off (it buys first, as every landed turn), and ends the turn;
+// the probe takes both back. False when the human is in space.
+function PlayTakeoffTurn(Human: THuman; Index: Integer; var Plan: AnsiString): Boolean;
+var
+  P: TPlayer;
+  Day: Integer;
+begin
+  Result := False;
+  P := Human.Player;
+  if (P = nil) or ((P.CurrentPlanet = nil) and (P.DockedTo = nil)) then
+    Exit;
+  // A landed turn takes off unless (Day + Index) mod 3 = 0.
+  Day := Galaxy.CurrentTurn;
+  if (Day + Index) mod 3 = 0 then
+    Inc(Day);
+  PlayHumanTurn(Human, Day, Index, Plan);
+  Emit(Format('net client takeoff turn day=%d order=%d', [Galaxy.CurrentTurn, Ord(P.Order)]));
+  Result := True;
 end;
 
 // CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn, after a state that says the client's human
@@ -1702,6 +1732,8 @@ var
   // CHANGE: ENHANCEMENT - The turns after which --sim-net-cancel-end-turn took the end turn back,
   // and whether it has stopped a continuing travel.
   CancelProbes: Integer;
+  // CHANGE: ENHANCEMENT - The first probe's turn took off (PlayTakeoffTurn), until the next state.
+  TakeoffProbed: Boolean;
   TravelProbed: Boolean;
   // Whether a turn it played began in normal space (else it could not travel).
   InSpaceTurns: Integer;
@@ -1718,6 +1750,7 @@ begin
   Result := 0;
   WentSilent := False;
   CancelProbes := 0;
+  TakeoffProbed := False;
   TravelProbed := False;
   InSpaceTurns := 0;
   QuestPlayed := False;
@@ -1858,6 +1891,19 @@ begin
       Inc(Days);
       if Report.Hash <> Report.HostHash then
         Inc(Mismatches);
+      // CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn: the day after the takeoff taken back, as
+      // the host ran it: the human stayed.
+      if TakeoffProbed and (CancelProbes = 1) and (LocalPlayer <> nil) then
+      begin
+        TakeoffProbed := False;
+        Emit(
+            Format(
+                'net client after takeoff cancel day=%d landed=%d',
+                [Galaxy.CurrentTurn,
+                    Ord((LocalPlayer.CurrentPlanet <> nil) or (LocalPlayer.DockedTo <> nil))]
+            )
+        );
+      end;
       // CHANGE: ENHANCEMENT - The state after a reconnect: the turn of its day is played again,
       // since the host never got the one sent before the loss (rejoin=1).
       if Report.Rejoin then
@@ -1995,6 +2041,10 @@ begin
               end;
           end;
         end
+        // CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn: the first turn takes off, for the
+        // probe to take back.
+        else if Options.NetCancelEndTurn and (CancelProbes = 0) and PlayTakeoffTurn(LocalHuman, Index, Plan) then
+          TakeoffProbed := True
         else if not (EndTurnContinues and PlayFarTravel(LocalHuman, Plan)) then
           PlayHumanTurn(LocalHuman, Galaxy.CurrentTurn, Index, Plan);
         if Options.NetCancelEndTurn and LocalPlayer.InNormalSpace then

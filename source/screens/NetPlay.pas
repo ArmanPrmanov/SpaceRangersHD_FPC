@@ -37,6 +37,10 @@ var
   // --join=HOST:PORT and --name=NAME; empty without them.
   CommandLineJoin: AnsiString;
   CommandLineName: AnsiString;
+  // CHANGE: ENHANCEMENT - A script ordered the takeoff whose end turn waits (aScript's
+  // TryDispatchScriptTakeoff, through TfHangar.TryTakeOff): the wait's Cancel does not take it
+  // back. The hangar sets it around its NetEndTurn.
+  ScriptTakeoffEndingTurn: Boolean;
 
 const
   // CHANGE: ENHANCEMENT - The port the menus propose, and the one an address without a port
@@ -58,6 +62,10 @@ procedure EndNetSession;
 // waits, modal, for the host's day, and returns false: then either a film waits for the star
 // map (ClientFilmWaiting) or Screen closes (NetScreenClosing).
 function NetEndTurn(Screen: TMessageLoopGI): Boolean;
+// CHANGE: ENHANCEMENT - After a NetEndTurn of a takeoff that returned false: the wait's Cancel
+// took the end turn back with the takeoff (aPlayerActions.CancelEndTurn), so the ranger is still
+// landed or docked and its human holds the day; the screen that took off stays open.
+function NetTakeoffTakenBack: Boolean;
 // Host: waits until every peer is ready (the last day's state goes first), applies their
 // commands and begins the day. False when the local human still holds the day.
 function HostDayMayStart: Boolean;
@@ -701,7 +709,9 @@ begin
   // CHANGE: ENHANCEMENT - The Cancel takes the end turn back, or stops the travel that goes on;
   // a client's waits for the host's answer, or for the next state when the day had begun
   // (docs/network.md, Waiting).
-  if MayCancelEndTurn(Kind) and LocalHuman.ContinueUntilArrival then
+  // CHANGE: ENHANCEMENT - A client's takeoff asks to continue too: its Cancel takes the end turn
+  // back with the takeoff.
+  if MayCancelEndTurn(Kind) and LocalHuman.ContinueUntilArrival and (LocalPlayer.Order <> soTakeoff) then
     Result :=
         Result + #13#10 + MultiplayerText('CancelTravel', 'Cancel: stop your travel and take your turn back.')
   else if MayCancelEndTurn(Kind) then
@@ -714,8 +724,9 @@ end;
 
 // CHANGE: ENHANCEMENT - Whether the wait for the day may take the local human's end turn back
 // (docs/network.md, Waiting): before the day has begun, when the end turn made the human stop
-// holding the day and taking it back makes it hold the day again. Not for a takeoff (the screen
-// that took off would stay with the ranger leaving), nor in hyperspace (the jump cannot stop).
+// holding the day and taking it back makes it hold the day again. Not in hyperspace (the jump
+// cannot stop). CHANGE: ENHANCEMENT - A takeoff is taken back with the end turn, while the ranger
+// is still landed or docked (aPlayerActions.TakeoffMayBeTakenBack), unless a script ordered it.
 // On the host, while it waits for its peers (also at the end of a film whose travel goes on);
 // on a client, while it waits for the day, for the EndTurn it sent since its last state, once.
 // CHANGE: ENHANCEMENT - A client whose travel continues (it sent no EndTurn) may stop it in its
@@ -735,7 +746,7 @@ begin
       or LocalHuman.Finished
       or not LocalHuman.Connected
       or P.InHyperspace
-      or (P.Order = soTakeoff)
+      or ((P.Order = soTakeoff) and (ScriptTakeoffEndingTurn or not TakeoffMayBeTakenBack(P)))
       or (LocalHuman.QuestDaysOwed > 0) then
     Exit;
   case Kind of
@@ -1575,6 +1586,19 @@ begin
   else
     Result := EndTurn(False);
   end;
+end;
+
+function NetTakeoffTakenBack: Boolean;
+begin
+  Result :=
+      (NetRole <> nrNone)
+          and not ExitScreenLoop
+          and not ScreenClosing
+          and (Galaxy <> nil)
+          and (LocalPlayer <> nil)
+          and (LocalPlayer.Order <> soTakeoff)
+          and ((LocalPlayer.CurrentPlanet <> nil) or (LocalPlayer.DockedTo <> nil))
+          and HumanHoldsDay(LocalHuman);
 end;
 
 function ClientFilmWaiting: Boolean;

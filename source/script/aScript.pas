@@ -1076,7 +1076,8 @@ begin
       aCalc.WaitForTurnCalculationUI;
       if LocalPlayer.Order = soTakeoff then
       begin
-        HangarScreen.TryTakeOff;
+        // CHANGE: ENHANCEMENT - Forced: the script's takeoff is not taken back (NetPlay).
+        HangarScreen.TryTakeOff(True);
         ClearScriptEndTurn;
         TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
         Result := True;

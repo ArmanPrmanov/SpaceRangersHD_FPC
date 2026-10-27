@@ -179,6 +179,9 @@ procedure StopContinuing;
 // same.
 function CancelEndTurnCommand(StopTravel: Boolean = False): TPlayerCommand;
 procedure CancelEndTurn;
+// CHANGE: ENHANCEMENT - Whether P's takeoff may be taken back with its end turn (CancelEndTurn):
+// it is ordered and has not begun, the ranger still landed or docked.
+function TakeoffMayBeTakenBack(P: TShip): Boolean;
 // Adds a human whose ranger starts landed at Planet (aHuman.JoinHuman), as a command so that a
 // command log replays it. Returns the new human.
 function JoinHumanAt(Planet: TObject; const Name: WideString; CharacterPreset: Integer): THuman; overload;
@@ -1173,16 +1176,36 @@ begin
     SubmitCommand(NewCommand(ckStopContinuing));
 end;
 
+function TakeoffMayBeTakenBack(P: TShip): Boolean;
+begin
+  Result :=
+      (P <> nil)
+          and (P.Order = soTakeoff)
+          and not P.InHyperspace
+          and ((P.CurrentPlanet <> nil) or (P.DockedTo <> nil));
+end;
+
 // CHANGE: ENHANCEMENT - The end turn is taken back: the human holds the day again, and does not
 // continue its travel (the end turn may have asked for that, or the travel went on by itself).
 // A host applies a client's only before its day, by taking the client's EndTurn out of its
 // queue, or for a continuing one by queueing a StopContinuing; the cancel never runs there.
+// CHANGE: ENHANCEMENT - An end turn that took off (Takeoff) is taken back with the takeoff: the
+// ranger, still on its planet or docked, stays there with no order, and its human may act again
+// (docs/network.md, Waiting). A host queues a client's cancel in place of its EndTurn then, so
+// that it runs there after the client's Takeoff, at the same point as on the client. What the
+// takeoff ran (its scripts, the shop's stock given back) stays.
 procedure ExecuteCancelEndTurn(const Command: TPlayerCommand);
 var
   H: THuman;
+  P: TShip;
 begin
   H := ActorHuman(Command);
-  if (not H.EndedTurn and not H.ContinueUntilArrival) or H.Finished then
+  if H.Finished then
+    Exit;
+  P := Actor(Command);
+  if TakeoffMayBeTakenBack(P) then
+    P.OrderNone(False);
+  if not H.EndedTurn and not H.ContinueUntilArrival then
     Exit;
   H.EndedTurn := False;
   H.ContinueUntilArrival := False;

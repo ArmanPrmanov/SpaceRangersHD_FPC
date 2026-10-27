@@ -177,7 +177,13 @@ neither, and refuses it (`rrTooLate`) once the day has begun. With its second
 integer (`StopTravel`, a continuing client's), the host queues a
 `StopContinuing` of that human instead, which the log records when the barrier
 applies it. The client runs it only once the host has applied it
-([network.md](network.md), Waiting and Continuing travel).
+([network.md](network.md), Waiting and Continuing travel). An end turn that
+took off is taken back with the takeoff: while the actor's ranger is still
+landed or docked with `soTakeoff` (`TakeoffMayBeTakenBack`), the executor
+clears that order first, so the ranger stays; what the `Takeoff` ran (scripts,
+the shop's stock given back) stays. For a client's, the host puts the cancel in
+the queued `EndTurn`'s place instead of taking it out, so the barrier runs it
+right after the client's `Takeoff` and the log records both.
 
 Not trades, though close:
 

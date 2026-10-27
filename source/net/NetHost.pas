@@ -168,6 +168,10 @@ type
     // ready any more, and the peer gets CommandResult (applied); the commands before and after
     // the EndTurn stay queued. Once the day has begun (or has run) it is refused (rrTooLate).
     // It is never queued or run here, so the command log does not record it, nor the EndTurn.
+    // CHANGE: ENHANCEMENT - An end turn that took off (a Takeoff queued before it, or the human's
+    // ranger taking off here) is taken back with the takeoff: the cancel takes the EndTurn's place
+    // in the queue and runs after the Takeoff (aPlayerActions.ExecuteCancelEndTurn), as on the
+    // client.
     procedure CancelEndTurn(Peer: THostPeer; Sequence: Cardinal; const Command: TPlayerCommand);
     // CHANGE: ENHANCEMENT - The day waits for the human: it holds the day and its peer has no
     // EndTurn queued (the host's own: it holds the day), or it continues its travel and its peer
@@ -1261,12 +1265,26 @@ begin
     TradeHook(Self, Peer.HumanId, Trade, True, Applied);
 end;
 
+// CHANGE: ENHANCEMENT - Whether the peer's end turn at Index took off: a Takeoff is queued before
+// it, or its human's ranger takes off here (an order of its automatic control).
+function TakeoffQueued(Peer: THostPeer; Index: Integer): Boolean;
+var
+  I: Integer;
+  Human: THuman;
+begin
+  for I := 0 to Index - 1 do
+    if Peer.Queue[I].Command.Kind = ckTakeoff then
+      Exit(True);
+  Human := FindHuman(Peer.HumanId);
+  Result := (Human <> nil) and TakeoffMayBeTakenBack(Human.Player);
+end;
+
 procedure TNetHost.CancelEndTurn(Peer: THostPeer; Sequence: Cardinal; const Command: TPlayerCommand);
 var
   Index: Integer;
   Why: AnsiString;
   Refusal: ECommandRefused;
-  StopTravel, Begun: Boolean;
+  StopTravel, Begun, Takeoff: Boolean;
   Stop: TQueuedCommand;
 begin
   // The day is checked first: in a remote dialogue the turn thread calls this.
@@ -1322,12 +1340,21 @@ begin
     CommandApplied(Peer, Sequence, Command);
     Exit;
   end;
-  Delete(Peer.Queue, Index, 1);
+  // CHANGE: ENHANCEMENT - A takeoff is taken back too: the cancel runs here in the EndTurn's
+  // place, after the Takeoff.
+  Takeoff := TakeoffQueued(Peer, Index);
+  if Takeoff then
+  begin
+    Peer.Queue[Index].Sequence := Sequence;
+    Peer.Queue[Index].Command := Command;
+  end
+  else
+    Delete(Peer.Queue, Index, 1);
   Inc(FCancelledEndTurns);
   NetLog(
       Format(
-          'end turn cancelled human=%d seq=%d queued=%d ready=%d',
-          [Peer.HumanId, Sequence, Length(Peer.Queue), Ord(PeersReady)]
+          'end turn cancelled human=%d seq=%d queued=%d ready=%d takeoff=%d',
+          [Peer.HumanId, Sequence, Length(Peer.Queue), Ord(PeersReady), Ord(Takeoff)]
       )
   );
   CommandApplied(Peer, Sequence, Command);

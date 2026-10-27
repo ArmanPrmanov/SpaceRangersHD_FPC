@@ -47,7 +47,10 @@ type
     destructor Destroy; override;
     procedure CaptureDispatcherMirror(Sender: TObjectGI);
     procedure DispatcherAnimationComplete(Sender: TObjectGI);
-    function TryTakeOff: Boolean;
+    // CHANGE: ENHANCEMENT - Forced: a script ordered the takeoff, so its end turn is not taken
+    // back (NetPlay.ScriptTakeoffEndingTurn). False also when the end turn was taken back with
+    // the takeoff (NetPlay.NetTakeoffTakenBack): the ranger is still docked.
+    function TryTakeOff(Forced: Boolean = False): Boolean;
     procedure EndTurnClicked(Sender: TObjectGI);
     procedure ShipClicked(Sender: TObjectGI);
     procedure BeginTakeOff;
@@ -624,7 +627,9 @@ begin
   end;
 end;
 
-function TfHangar.TryTakeOff: Boolean;
+function TfHangar.TryTakeOff(Forced: Boolean): Boolean;
+var
+  DayMayStart: Boolean;
 begin
 
   aCalc.WaitForTurnCalculationUI;
@@ -640,8 +645,20 @@ begin
   // CHANGE: ENHANCEMENT - The day starts only when every human has ended the turn
   // (ROADMAP.md, Phase 4, item 2); in hot-seat the next human's screen follows instead. A
   // networked host waits for its peers; a client waits for the host's day (NetPlay).
-  if not NetEndTurn(TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)])) then
+  ScriptTakeoffEndingTurn := Forced;
+  try
+    DayMayStart := NetEndTurn(TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]));
+  finally
+    ScriptTakeoffEndingTurn := False;
+  end;
+  if not DayMayStart then
   begin
+    // CHANGE: ENHANCEMENT - The wait's Cancel took the takeoff back: the hangar stays.
+    if NetTakeoffTakenBack then
+    begin
+      Result := False;
+      Exit;
+    end;
     SwitchToNextHuman;
     Exit;
   end;
