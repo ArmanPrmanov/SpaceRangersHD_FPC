@@ -658,6 +658,13 @@ film, since the end-of-film branch reads it (landed, docked, in hyperspace); it
 waits there for the state when it has not arrived (`CompleteHostedTurnFilm`),
 then the star map closes and the state is applied between screens.
 
+A star's one film carries every human's camera: its view commands (view
+center, radar center, camera anchor) and combat camera events name the human
+ship they follow (film version 7), and each screen applies only its own ship's
+and those with no owner (`aEFilm.FollowsLocalView`). The client starts the
+film's camera at its own ranger, not at the anchor in the film's header, which
+is the host's.
+
 A client plays a film when its ranger was in space or taking off when it
 ended its turn, and only the film of its own star. Taking off from a planet,
 the hangar or a station, the star map opens (through the load screen) and plays

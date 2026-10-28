@@ -7649,8 +7649,11 @@ begin
         if PEFilmCameraEventArray(SecondaryFilm.CameraEvents)[FilmCameraEventIndex].StepIndex
             >= FilmStepIndex + FilmCameraLookAheadSteps then
           Break;
-        if PEFilmCameraEventArray(SecondaryFilm.CameraEvents)[FilmCameraEventIndex].Priority
-            > BestPriority then
+        // CHANGE: ENHANCEMENT - Another human's combat does not move this screen's camera.
+        if FollowsLocalView(
+                PEFilmCameraEventArray(SecondaryFilm.CameraEvents)[FilmCameraEventIndex].OwnerId)
+            and (PEFilmCameraEventArray(SecondaryFilm.CameraEvents)[FilmCameraEventIndex].Priority
+                > BestPriority) then
         begin
           BestPriority :=
               PEFilmCameraEventArray(SecondaryFilm.CameraEvents)[FilmCameraEventIndex].Priority;

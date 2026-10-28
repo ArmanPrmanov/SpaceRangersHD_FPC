@@ -15118,13 +15118,21 @@ begin
             if IsHuman(Ship) or IsHuman(Ship.InterceptorSourceShip) then
             begin
               Self.PlayerCombatOccurred := True;
-              // CHANGE: CLEANUP - The camera follows the human the film follows.
-              if (FilmPlayer(Self) <> nil) and (FilmPlayer(Self) = Ship.InterceptorSourceShip) then
-                CurrentFilm.AddCameraEvent(StepIndex, FilmPlayer(Self).Position, Ship.Position, 1);
-              if (FilmPlayer(Self) = Ship) and (Ship.InterceptorSourceShip <> nil) then
+              // CHANGE: ENHANCEMENT - Each human's camera event carries its ship, for its own
+              // screen.
+              if IsHuman(Ship.InterceptorSourceShip) then
                 CurrentFilm.AddCameraEvent(
+                    Ship.InterceptorSourceShip.Id,
                     StepIndex,
-                    FilmPlayer(Self).Position,
+                    Ship.InterceptorSourceShip.Position,
+                    Ship.Position,
+                    1
+                );
+              if IsHuman(Ship) and (Ship.InterceptorSourceShip <> nil) then
+                CurrentFilm.AddCameraEvent(
+                    Ship.Id,
+                    StepIndex,
+                    Ship.Position,
                     Ship.InterceptorSourceShip.Position,
                     1
                 );

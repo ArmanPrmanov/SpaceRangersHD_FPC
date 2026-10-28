@@ -5733,9 +5733,9 @@ begin
   StepIndex := Star.CurrentStepIndex;
   if IsHuman(Target) or IsHuman(Self) then
     Star.PlayerCombatOccurred := True;
-  // HUMANS: Whose view does a star's one film follow when the star holds several humans?
-  if {$B+} (RecordFilm and (GetPlayer = Target)) {$B-} then
-    PrimaryFilm.AddCameraEvent(StepIndex, GetPlayer.Position, Position, 1);
+  // CHANGE: ENHANCEMENT - Each human's combat camera events carry its ship, for its own screen.
+  if RecordFilm and IsHuman(Target) then
+    PrimaryFilm.AddCameraEvent(Target.Id, StepIndex, Target.Position, Position, 1);
   PrimaryDamage := 0;
   DrainedDamage := 0;
   Info := Weapon.GetWeaponInfo;
@@ -5747,9 +5747,9 @@ begin
     PrimaryDamage := Damage;
     if RecordFilm then
     begin
-      // HUMANS: Whose view does a star's one film follow when the star holds several humans?
-      if {$B+} (RecordFilm and (GetPlayer = Self)) {$B-} then
-        PrimaryFilm.AddCameraEvent(StepIndex, GetPlayer.Position, Target.Position, 1);
+      // CHANGE: ENHANCEMENT - Each human's combat camera events carry its ship, for its own screen.
+      if RecordFilm and IsHuman(Self) then
+        PrimaryFilm.AddCameraEvent(Id, StepIndex, Position, Target.Position, 1);
       Effect := TWeaponSE.Create(Info.PrimarySE, Classes.Point(0, 0), Weapon.GetShotPalette, -1);
       Film := PrimaryFilm.AddObject(0, Effect);
       PrimaryFilm.SetWeaponEndpoints(StepIndex, Film, FilmObject, Target.FilmObject);
@@ -5930,9 +5930,9 @@ begin
   end
   else if Info.ShotType = wstExploder then
   begin
-    // HUMANS: Whose view does a star's one film follow when the star holds several humans?
-    if {$B+} (RecordFilm and (GetPlayer = Self)) {$B-} then
-      PrimaryFilm.AddCameraEvent(StepIndex, GetPlayer.Position, Target.Position, 1);
+    // CHANGE: ENHANCEMENT - Each human's combat camera events carry its ship, for its own screen.
+    if RecordFilm and IsHuman(Self) then
+      PrimaryFilm.AddCameraEvent(Id, StepIndex, Position, Target.Position, 1);
     Damage := Target.ApplyWeaponHit(Self, Weapon, -1, Color, Dword(Flags), 1, 0);
     if (dkDrain in Flags) and (Damage > 0) then
       Inc(DrainedDamage, Damage);
@@ -13391,9 +13391,9 @@ begin
       if RecordFilm and not IsOnPlanet and not IsDockedToShip then
       begin
         InitializeFilm(255);
-        // HUMANS: film viewpoint
-        if Self = LocalPlayer then
-          TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
+        // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+        if IsHuman(Self) then
+          TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, Position, False);
       end;
   end
   else if Order = soMove then
@@ -13403,9 +13403,9 @@ begin
     if RecordFilm then
     begin
       InitializeFilm(255);
-      // HUMANS: film viewpoint
-      if Self = LocalPlayer then
-        TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, OrderDestination, True);
+      // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+      if IsHuman(Self) then
+        TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, OrderDestination, True);
     end;
   end
   else if Order = soLand then
@@ -13447,9 +13447,9 @@ begin
         begin
           FilmAlphaStep := -(FilmAlpha / MovementPath.NodeCount);
           TEFilm(PrimaryFilm).SetObjectAlpha(StartStepIndex, FilmObject, 255);
-          // HUMANS: film viewpoint
-          if Self = LocalPlayer then
-            TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
+          // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+          if IsHuman(Self) then
+            TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, Position, False);
         end
         else
           FilmAlpha := 0;
@@ -13460,9 +13460,9 @@ begin
     else if RecordFilm then
     begin
       TEFilm(PrimaryFilm).SetObjectAlpha(StartStepIndex, FilmObject, 255);
-      // HUMANS: film viewpoint
-      if Self = LocalPlayer then
-        TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, TargetPosition, True);
+      // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+      if IsHuman(Self) then
+        TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, TargetPosition, True);
     end;
   end
   else if Order = soTeleport then
@@ -13471,9 +13471,9 @@ begin
     begin
       if RecordFilm then
       begin
-        // HUMANS: film viewpoint
-        if Self = LocalPlayer then
-          TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
+        // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+        if IsHuman(Self) then
+          TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, Position, False);
         if (FilmObject.SceneObject is TRuinsSE)
             and TRuinsSE(FilmObject.SceneObject).HasTransitionImages then
           TEFilm(PrimaryFilm).SetRuinsState(StartStepIndex, FilmObject, 2)
@@ -13548,9 +13548,9 @@ begin
             FilmAlphaStep := 3.825;
             InitializeFilm(0);
           end;
-          // HUMANS: film viewpoint
-          if Self = LocalPlayer then
-            TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, True);
+          // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+          if IsHuman(Self) then
+            TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, Position, True);
           if (Self is TRuins)
               and (TypeId = Byte(rstDominion))
               and (TransitOriginStar = CurrentStar) then
@@ -13593,9 +13593,9 @@ begin
           end;
         if RecordFilm then
         begin
-          // HUMANS: film viewpoint
-          if Self = LocalPlayer then
-            TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
+          // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+          if IsHuman(Self) then
+            TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, Position, False);
           FilmAlphaStep := -(510 / MovementPath.NodeCount);
           // CHANGE: CLEANUP - The gate is drawn in the film of every star a human's day is
           // filmed in.
@@ -13680,9 +13680,9 @@ begin
           end;
         end;
       end
-      // HUMANS: film viewpoint
-      else if RecordFilm and (Self = LocalPlayer) then
-        TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, OrderDestination, False);
+      // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+      else if RecordFilm and IsHuman(Self) then
+        TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, OrderDestination, False);
     end
     else
     begin
@@ -13763,9 +13763,9 @@ begin
         begin
           FilmAlphaStep := 510 / MovementPath.NodeCount;
           InitializeFilm(0);
-          // HUMANS: film viewpoint
-          if Self = LocalPlayer then
-            TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, True);
+          // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+          if IsHuman(Self) then
+            TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, Position, True);
           // CHANGE: CLEANUP - The gate is drawn in the film of every star a human's day is
           // filmed in.
           if IsFilmedStar(CurrentStar) then
@@ -13838,11 +13838,11 @@ begin
               TEFilm(PrimaryFilm).AttachObject(StartStepIndex, EffectFilm);
             end;
           end;
-          // HUMANS: film viewpoint
-          if Self = LocalPlayer then
+          // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+          if IsHuman(Self) then
           begin
-            TEFilm(PrimaryFilm).SetViewCenter(StartStepIndex, OrderDestination);
-            TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, OrderDestination, False);
+            TEFilm(PrimaryFilm).SetViewCenter(Id, StartStepIndex, OrderDestination);
+            TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, OrderDestination, False);
           end;
           // CHANGE: CLEANUP - The human arriving is Self's; the achievement belongs to the
           // human at this machine.
@@ -13877,9 +13877,9 @@ begin
           begin
             FilmAlphaStep := -(FilmAlpha / MovementPath.NodeCount);
             TEFilm(PrimaryFilm).SetObjectAlpha(StartStepIndex, FilmObject, 255);
-            // HUMANS: film viewpoint
-            if Self = LocalPlayer then
-              TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
+            // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+            if IsHuman(Self) then
+              TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, Position, False);
           end
           else
             FilmAlpha := 0;
@@ -13888,9 +13888,9 @@ begin
       else if RecordFilm then
       begin
         TEFilm(PrimaryFilm).SetObjectAlpha(StartStepIndex, FilmObject, 255);
-        // HUMANS: film viewpoint
-        if Self = LocalPlayer then
-          TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, OrderDestination, True);
+        // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+        if IsHuman(Self) then
+          TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, OrderDestination, True);
       end;
     end
     else
@@ -13941,11 +13941,11 @@ begin
         begin
           FilmAlphaStep := 1.275;
           InitializeFilm(0);
-          // HUMANS: film viewpoint
-          if Self = LocalPlayer then
+          // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+          if IsHuman(Self) then
           begin
-            TEFilm(PrimaryFilm).SetViewCenter(StartStepIndex, Position);
-            TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
+            TEFilm(PrimaryFilm).SetViewCenter(Id, StartStepIndex, Position);
+            TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, Position, False);
           end;
           // CHANGE: CLEANUP - The human arriving is Self's.
           if IsHuman(Self) then
@@ -13967,11 +13967,11 @@ begin
       FilmAlpha := 0;
       FilmAlphaStep := 1.33875;
       InitializeFilm(0);
-      // HUMANS: film viewpoint
-      if Self = LocalPlayer then
+      // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+      if IsHuman(Self) then
       begin
-        TEFilm(PrimaryFilm).SetViewCenter(StartStepIndex, Position);
-        TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, Position, False);
+        TEFilm(PrimaryFilm).SetViewCenter(Id, StartStepIndex, Position);
+        TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, Position, False);
       end;
     end;
     if IsHuman(Self) and (TPlayer(Self).QueuedTravelTarget <> nil) then
@@ -14061,9 +14061,9 @@ begin
     if RecordFilm then
     begin
       InitializeFilm(255);
-      // HUMANS: film viewpoint
-      if Self = LocalPlayer then
-        TEFilm(PrimaryFilm).SetCameraAnchor(StartStepIndex, (OrderTarget as TShip).Position, True);
+      // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+      if IsHuman(Self) then
+        TEFilm(PrimaryFilm).SetCameraAnchor(Id, StartStepIndex, (OrderTarget as TShip).Position, True);
     end;
     if Self is TTranclucator then
       if (Self as TTranclucator).CanFollowOwnerInCurrentStar then
@@ -14100,9 +14100,9 @@ begin
   end
   else
     raise Exception.Create('Error in TShip.StepDayStart');
-  // HUMANS: film viewpoint
-  if RecordFilm and (Self = LocalPlayer) then
-    TEFilm(PrimaryFilm).SetRadarCenter(StartStepIndex, Position);
+  // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+  if RecordFilm and IsHuman(Self) then
+    TEFilm(PrimaryFilm).SetRadarCenter(Id, StartStepIndex, Position);
 end;
 
 function TShip.ProcessMovementStep(StepIndex: Integer; RecordFilm: Boolean): Boolean;
@@ -14135,9 +14135,9 @@ var
       TEFilm(PrimaryFilm).SetObjectPosition(StepIndex, FilmObject, Position);
       if AuxiliaryFilmObject <> nil then
         TEFilm(PrimaryFilm).SetObjectPosition(StepIndex, AuxiliaryFilmObject, Position);
-      // HUMANS: film viewpoint
-      if Self = LocalPlayer then
-        TEFilm(PrimaryFilm).SetRadarCenter(StepIndex, Position);
+      // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+      if IsHuman(Self) then
+        TEFilm(PrimaryFilm).SetRadarCenter(Id, StepIndex, Position);
       if FilmAlphaStep <> 0 then
       begin
         FilmAlpha := FilmAlpha + FilmAlphaStep;
@@ -14199,14 +14199,14 @@ begin
     if MovementPath.ActiveHead <> nil then
     begin
       AdvancePath;
-      // HUMANS: film viewpoint
-      if RecordFilm and (Self = LocalPlayer) and (OrderStateData = 0) then
+      // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+      if RecordFilm and IsHuman(Self) and (OrderStateData = 0) then
       begin
         if OrderTarget is TShip then
-          TEFilm(PrimaryFilm).SetCameraAnchor(StepIndex, (OrderTarget as TShip).Position, True)
+          TEFilm(PrimaryFilm).SetCameraAnchor(Id, StepIndex, (OrderTarget as TShip).Position, True)
         else
           TEFilm(PrimaryFilm)
-              .SetCameraAnchor(StepIndex, (OrderTarget as TPlanet).GetPosition, True);
+              .SetCameraAnchor(Id, StepIndex, (OrderTarget as TPlanet).GetPosition, True);
       end;
       if ((MovementPath.ActiveHead = nil) or (MovementPath.ActiveHead.Next = nil))
           and (OrderStateData = 1) then
@@ -14346,9 +14346,9 @@ begin
     else if not InHyperspace and (MovementPath.ActiveHead <> nil) then
     begin
       AdvancePath;
-      // HUMANS: film viewpoint
-      if RecordFilm and (FilmAlphaStep = 0) and (Self = LocalPlayer) then
-        TEFilm(PrimaryFilm).SetCameraAnchor(StepIndex, OrderDestination, True);
+      // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+      if RecordFilm and (FilmAlphaStep = 0) and IsHuman(Self) then
+        TEFilm(PrimaryFilm).SetCameraAnchor(Id, StepIndex, OrderDestination, True);
       if (Position.X = OrderDestination.X) and (Position.Y = OrderDestination.Y) then
       begin
         if THole(OrderTarget).HoleType in [1] then
@@ -14387,9 +14387,9 @@ begin
     if MovementPath.ActiveHead <> nil then
     begin
       AdvancePath;
-      // HUMANS: film viewpoint
-      if RecordFilm and (Self = LocalPlayer) then
-        TEFilm(PrimaryFilm).SetCameraAnchor(StepIndex, (OrderTarget as TShip).Position, True);
+      // CHANGE: ENHANCEMENT - Each human's view commands carry its ship, for its own screen.
+      if RecordFilm and IsHuman(Self) then
+        TEFilm(PrimaryFilm).SetCameraAnchor(Id, StepIndex, (OrderTarget as TShip).Position, True);
     end;
   end
   else

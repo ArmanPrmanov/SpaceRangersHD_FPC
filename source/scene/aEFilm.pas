@@ -59,6 +59,7 @@ type
   PointerToTEFilmObjectCommand = ^TEFilmObjectCommand;
   PointerToTEFilmSizeCommand = ^TEFilmSizeCommand;
   PointerToTEFilmVectorCommand = ^TEFilmVectorCommand;
+  PointerToTEFilmViewCommand = ^TEFilmViewCommand;
   TEFilmObj = class(TObject)
     Prev: TEFilmObj;
     Next: TEFilmObj;
@@ -97,6 +98,20 @@ type
     Position: TPointF;
     ForceMovement: Boolean;
     Gap1D: array[0..2] of Byte;
+  end;
+  // CHANGE: ENHANCEMENT - A view command (view center, radar center, camera anchor) names the
+  // human ship whose view it moves, so each human's screen follows its own ship in a star's one
+  // film (FollowsLocalView). 0 is any view, as in films before version 7.
+  PEFilmViewCommand = PointerToTEFilmViewCommand;
+  TEFilmViewCommand = packed record
+    Links: array[0..1] of Pointer;
+    Kind: Byte;
+    Gap9: array[0..2] of Byte;
+    StepIndex: Integer;
+    OwnerId: Cardinal;
+    Position: TPointF;
+    ForceMovement: Boolean;
+    Gap19: array[0..2] of Byte;
   end;
   PEFilmSizeCommand = PointerToTEFilmSizeCommand;
   TEFilmSizeCommand = packed record
@@ -148,6 +163,7 @@ type
     Priority: Integer;
     StartPosition: TPointF;
     EndPosition: TPointF;
+    OwnerId: Cardinal;
   end;
   PEFilmCameraEventArray = PointerToTEFilmCameraEventArray;
   TEFilmCameraEventArray = array[0..0] of TEFilmCameraEvent;
@@ -181,6 +197,7 @@ type
     procedure Clear;
     procedure ReserveCameraEventSlot;
     procedure AddCameraEvent(
+        AOwnerId: Cardinal;
         AStepIndex: Integer;
         AStartPosition: TPointF;
         AEndPosition: TPointF;
@@ -254,9 +271,14 @@ type
     procedure DetachObject(StepIndex: Integer; Obj: TEFilmObj);
     procedure ReleaseObject(StepIndex: Integer; Obj: TEFilmObj);
     procedure ReleaseWeaponEffects(StepIndex: Integer);
-    procedure SetViewCenter(StepIndex: Integer; Position: TPointF);
-    procedure SetRadarCenter(StepIndex: Integer; Position: TPointF);
-    procedure SetCameraAnchor(StepIndex: Integer; Position: TPointF; ForceMovement: Boolean);
+    procedure SetViewCenter(OwnerId: Cardinal; StepIndex: Integer; Position: TPointF);
+    procedure SetRadarCenter(OwnerId: Cardinal; StepIndex: Integer; Position: TPointF);
+    procedure SetCameraAnchor(
+        OwnerId: Cardinal;
+        StepIndex: Integer;
+        Position: TPointF;
+        ForceMovement: Boolean
+    );
     procedure OpenGate(StepIndex: Integer; Obj: TEFilmObj);
     procedure CloseGate(StepIndex: Integer; Obj: TEFilmObj);
     procedure SetGateState(StepIndex: Integer; Obj: TEFilmObj; State: Integer);
@@ -275,7 +297,8 @@ type
     procedure LoadFromBuffer(Buffer: TBufEC);
   end;
 const
-  FilmFormatVersion: Integer = 6;
+  FilmFormatVersion: Integer = 7;
+function FollowsLocalView(OwnerId: Cardinal): Boolean;
 procedure LinkRecoveredTypes;
 implementation
 uses
@@ -367,7 +390,15 @@ begin
   Inc(CameraEventCount);
 end;
 
+// CHANGE: ENHANCEMENT - Whether a view command or camera event of OwnerId's ship moves this
+// screen's view: the local human's own, or one with no owner.
+function FollowsLocalView(OwnerId: Cardinal): Boolean;
+begin
+  Result := (OwnerId = 0) or (LocalPlayer = nil) or (OwnerId = LocalPlayer.Id);
+end;
+
 procedure TEFilm.AddCameraEvent(
+    AOwnerId: Cardinal;
     AStepIndex: Integer;
     AStartPosition, AEndPosition: TPointF;
     APriority: Integer
@@ -381,6 +412,7 @@ begin
     Priority := APriority;
     StartPosition := AStartPosition;
     EndPosition := AEndPosition;
+    OwnerId := AOwnerId;
   end;
   Inc(CameraEventCount);
 end;
@@ -934,30 +966,38 @@ begin
   Command.Kind := efcReleaseWeaponEffects;
 end;
 
-procedure TEFilm.SetViewCenter(StepIndex: Integer; Position: TPointF);
+procedure TEFilm.SetViewCenter(OwnerId: Cardinal; StepIndex: Integer; Position: TPointF);
 var
-  Command: PEFilmVectorCommand;
+  Command: PEFilmViewCommand;
 begin
-  Command := PEFilmVectorCommand(AddCommand(StepIndex));
+  Command := PEFilmViewCommand(AddCommand(StepIndex));
   Command.Kind := efcSetViewCenter;
+  Command.OwnerId := OwnerId;
   Command.Position := Position;
 end;
 
-procedure TEFilm.SetRadarCenter(StepIndex: Integer; Position: TPointF);
+procedure TEFilm.SetRadarCenter(OwnerId: Cardinal; StepIndex: Integer; Position: TPointF);
 var
-  Command: PEFilmVectorCommand;
+  Command: PEFilmViewCommand;
 begin
-  Command := PEFilmVectorCommand(AddCommand(StepIndex));
+  Command := PEFilmViewCommand(AddCommand(StepIndex));
   Command.Kind := efcSetRadarCenter;
+  Command.OwnerId := OwnerId;
   Command.Position := Position;
 end;
 
-procedure TEFilm.SetCameraAnchor(StepIndex: Integer; Position: TPointF; ForceMovement: Boolean);
+procedure TEFilm.SetCameraAnchor(
+    OwnerId: Cardinal;
+    StepIndex: Integer;
+    Position: TPointF;
+    ForceMovement: Boolean
+);
 var
-  Command: PEFilmVectorCommand;
+  Command: PEFilmViewCommand;
 begin
-  Command := PEFilmVectorCommand(AddCommand(StepIndex));
+  Command := PEFilmViewCommand(AddCommand(StepIndex));
   Command.Kind := efcSetCameraAnchor;
+  Command.OwnerId := OwnerId;
   Command.Position := Position;
   Command.ForceMovement := ForceMovement;
 end;
@@ -1255,21 +1295,24 @@ begin
         end;
       end;
       efcSetViewCenter:
-        if ReplayMode then
-          FilmScreen.FollowViewOffset(TruncatePointF(PEFilmVectorCommand(Command).Position))
+        if not FollowsLocalView(PEFilmViewCommand(Command).OwnerId) then
+        else if ReplayMode then
+          FilmScreen.FollowViewOffset(TruncatePointF(PEFilmViewCommand(Command).Position))
         else
-          StarMapScreen.SetMapCenter(TruncatePointF(PEFilmVectorCommand(Command).Position));
+          StarMapScreen.SetMapCenter(TruncatePointF(PEFilmViewCommand(Command).Position));
       efcSetRadarCenter:
-      begin
-        if ReplayMode then
-          FilmScreen.CameraTarget := PEFilmVectorCommand(Command).Position;
-        SpaceProcess.RadarCenter := PEFilmVectorCommand(Command).Position;
-      end;
+        if FollowsLocalView(PEFilmViewCommand(Command).OwnerId) then
+        begin
+          if ReplayMode then
+            FilmScreen.CameraTarget := PEFilmViewCommand(Command).Position;
+          SpaceProcess.RadarCenter := PEFilmViewCommand(Command).Position;
+        end;
       efcSetCameraAnchor:
-      begin
-        CameraAnchor := PEFilmVectorCommand(Command).Position;
-        ForceCameraMovement := PEFilmVectorCommand(Command).ForceMovement;
-      end;
+        if FollowsLocalView(PEFilmViewCommand(Command).OwnerId) then
+        begin
+          CameraAnchor := PEFilmViewCommand(Command).Position;
+          ForceCameraMovement := PEFilmViewCommand(Command).ForceMovement;
+        end;
       efcOpenGate:
         if (PEFilmObjectCommand(Command).Obj <> nil)
             and (PEFilmObjectCommand(Command).Obj.SceneObject <> nil)
@@ -1605,19 +1648,22 @@ begin
     end
     else if Command.Kind = efcSetViewCenter then
     begin
-      Buffer.AddSingle(PEFilmVectorCommand(Command).Position.X);
-      Buffer.AddSingle(PEFilmVectorCommand(Command).Position.Y);
+      Buffer.AddSingle(PEFilmViewCommand(Command).Position.X);
+      Buffer.AddSingle(PEFilmViewCommand(Command).Position.Y);
+      Buffer.AddDWord(PEFilmViewCommand(Command).OwnerId);
     end
     else if Command.Kind = efcSetRadarCenter then
     begin
-      Buffer.AddSingle(PEFilmVectorCommand(Command).Position.X);
-      Buffer.AddSingle(PEFilmVectorCommand(Command).Position.Y);
+      Buffer.AddSingle(PEFilmViewCommand(Command).Position.X);
+      Buffer.AddSingle(PEFilmViewCommand(Command).Position.Y);
+      Buffer.AddDWord(PEFilmViewCommand(Command).OwnerId);
     end
     else if Command.Kind = efcSetCameraAnchor then
     begin
-      Buffer.AddSingle(PEFilmVectorCommand(Command).Position.X);
-      Buffer.AddSingle(PEFilmVectorCommand(Command).Position.Y);
-      Buffer.AddBoolean(PEFilmVectorCommand(Command).ForceMovement);
+      Buffer.AddSingle(PEFilmViewCommand(Command).Position.X);
+      Buffer.AddSingle(PEFilmViewCommand(Command).Position.Y);
+      Buffer.AddBoolean(PEFilmViewCommand(Command).ForceMovement);
+      Buffer.AddDWord(PEFilmViewCommand(Command).OwnerId);
     end
     else if Command.Kind = efcOpenGate then
     begin
@@ -1681,6 +1727,7 @@ begin
       Buffer.AddSingle(StartPosition.Y);
       Buffer.AddSingle(EndPosition.X);
       Buffer.AddSingle(EndPosition.Y);
+      Buffer.AddDWord(OwnerId);
     end;
   (ObjectInfo as TEObjInfo).SaveToBuffer(Buffer);
 end;
@@ -1839,19 +1886,25 @@ begin
     end
     else if Command.Kind = efcSetViewCenter then
     begin
-      PEFilmVectorCommand(Command).Position.X := Buffer.GetSingle;
-      PEFilmVectorCommand(Command).Position.Y := Buffer.GetSingle;
+      PEFilmViewCommand(Command).Position.X := Buffer.GetSingle;
+      PEFilmViewCommand(Command).Position.Y := Buffer.GetSingle;
+      if Version >= 7 then
+        PEFilmViewCommand(Command).OwnerId := Buffer.GetUInt32;
     end
     else if Command.Kind = efcSetRadarCenter then
     begin
-      PEFilmVectorCommand(Command).Position.X := Buffer.GetSingle;
-      PEFilmVectorCommand(Command).Position.Y := Buffer.GetSingle;
+      PEFilmViewCommand(Command).Position.X := Buffer.GetSingle;
+      PEFilmViewCommand(Command).Position.Y := Buffer.GetSingle;
+      if Version >= 7 then
+        PEFilmViewCommand(Command).OwnerId := Buffer.GetUInt32;
     end
     else if Command.Kind = efcSetCameraAnchor then
     begin
-      PEFilmVectorCommand(Command).Position.X := Buffer.GetSingle;
-      PEFilmVectorCommand(Command).Position.Y := Buffer.GetSingle;
-      PEFilmVectorCommand(Command).ForceMovement := Buffer.GetBoolean;
+      PEFilmViewCommand(Command).Position.X := Buffer.GetSingle;
+      PEFilmViewCommand(Command).Position.Y := Buffer.GetSingle;
+      PEFilmViewCommand(Command).ForceMovement := Buffer.GetBoolean;
+      if Version >= 7 then
+        PEFilmViewCommand(Command).OwnerId := Buffer.GetUInt32;
     end
     else if Command.Kind = efcOpenGate then
     begin
@@ -1916,6 +1969,10 @@ begin
       StartPosition.Y := Buffer.GetSingle;
       EndPosition.X := Buffer.GetSingle;
       EndPosition.Y := Buffer.GetSingle;
+      if Version >= 7 then
+        OwnerId := Buffer.GetUInt32
+      else
+        OwnerId := 0;
     end;
   end;
   if Version > 0 then
