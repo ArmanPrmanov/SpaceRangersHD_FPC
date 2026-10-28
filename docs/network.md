@@ -739,7 +739,8 @@ to ships, planets and items. So a client applies a state only at a safe point:
   the new state, as commands of the client's human that go to the host with its
   next day's: the engine wears after a landing (`ApplyLandingWear`) and the
   scripts run for a jump into a black hole (`RunScriptTurns`). So a remote
-  human gets them too, a day later than a local one. The old hyperspace arcade
+  human gets them too, a day later than a local one. A black hole's battle is
+  the client's own (Black hole battles). The old hyperspace arcade
   battle and the Terron planet battle are not offered to a client; it goes to
   the jump screen or the station.
 - **In hyperspace** the host runs the client's steps and does not wait for it;
@@ -993,6 +994,43 @@ short, and where each part is described:
   text quest; Hosting and joining).
 - A disconnect drops the quest's commands with the peer and releases the lock;
   a client that reconnects mid-quest abandons it (Disconnects).
+
+## Black hole battles
+
+A client's ranger that falls into a black hole fights the hole's arcade battle
+on the client, as the host's own ranger does on the host:
+
+- **The day waits for it.** On the host, the day the ranger of a connected
+  human other than the host's own falls into a hole that has a battle (not a
+  `SkipAB` map), the human's `THuman.ArcadeBattleHeld` is set
+  (`aHuman.HoldRemoteArcadeBattle`, from the hole step in `TShip`, through
+  `RemoteArcadeHook`, which only a host sets). Such a human holds the day
+  though in hyperspace (`HumanHoldsDay`): its end turn and travel continuation
+  are cleared, so the next day waits for its peer, as for a human in order
+  mode. The flag is in the per-human save block (version 6), so it reaches the
+  client with the state.
+- **The client plays it.** After that state, the client's screen
+  (`OpenClientScreen`) runs the hole's scripts as before, notes its ranger's
+  hold (`aArcadeActions.BeginArcadeLoot`) and opens the battle of the hole, or
+  the one the scripts queued for it, instead of the jump screen.
+- **The result goes as commands.** At the battle's end (`TfAB.BeginBattleExit`)
+  the client takes back what the battle put straight into its galaxy (new
+  items, grown stacks, cargo goods, kill counts) and submits it as `ArcadeLoot`
+  (632), which adds it again on both machines; each new item travels as a save
+  writes it and gets a new id where it lands. Then `ArcadeBattleExit` (which
+  clears the flag) and an `EndTurn` that continues the jump, and the client goes
+  to the jump screen. The host's barrier applies them in that order and the
+  jump goes on.
+- **A defeat** in multiplayer, here or on the host, ends no game: the ranger
+  comes out of the battle with one hull point (`BeginBattleExit`).
+- **A disconnect.** A disconnected human holds no day; a client that reconnects
+  while its flag is set gets it with the state and plays the battle again.
+
+Each human fights alone: two rangers in one hole fight two battles, one on each
+machine. Not carried by `ArcadeLoot`: the galaxy events the battle adds (a
+scripted battle's labelled kills, the subportal penalty), the scripts its loot
+runs (`satOnABItemDrop`) beyond what they change in the item, and Keller's
+reward. The old hyperspace arcade battle is still not offered to a client.
 
 ## Remote dialogue
 

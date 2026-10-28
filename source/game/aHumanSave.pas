@@ -19,7 +19,8 @@ unit aHumanSave;
 //   a second grid at a location writes its slots empty), by id, so that a load shows them
 //   again;
 // - since version 4, the game days each human owes for a text quest (THuman.QuestDaysOwed);
-// - since version 5, the cheats session flag (Session.CheatsAllowed).
+// - since version 5, the cheats session flag (Session.CheatsAllowed);
+// - since version 6, the humans whose black hole battle holds the day (THuman.ArcadeBattleHeld).
 // It is written only when some of this differs from what a save without it loads as: more
 // than one human, a flag that is not its default, a cheat on record, or a script or event
 // bound to a human other than the first. A single-player save is therefore byte for byte as
@@ -65,7 +66,8 @@ const
   // 3: the items of the shop grids that write their slots empty.
   // 4: the days each human owes for a text quest.
   // 5: whether cheats work in multiplayer (Session.CheatsAllowed).
-  HumanBlockVersion = 5;
+  // 6: the humans whose black hole battle holds the day (THuman.ArcadeBattleHeld).
+  HumanBlockVersion = 6;
 
 procedure ResetHumanSessionState;
 begin
@@ -74,6 +76,7 @@ begin
   LocalHuman.Finished := False;
   LocalHuman.FinishReason := -1;
   LocalHuman.QuestDaysOwed := 0;
+  LocalHuman.ArcadeBattleHeld := False;
 end;
 
 function FirstHumanId: Integer;
@@ -103,7 +106,8 @@ begin
   for I := 0 to Session.Humans.Count - 1 do
     if Session.Humans[I].HasCheated
         or Session.Humans[I].Finished
-        or (Session.Humans[I].QuestDaysOwed > 0) then
+        or (Session.Humans[I].QuestDaysOwed > 0)
+        or Session.Humans[I].ArcadeBattleHeld then
       Exit;
   if Galaxy.Scripts <> nil then
     for I := 0 to Galaxy.Scripts.Count - 1 do
@@ -422,6 +426,13 @@ begin
   end;
   // Version 5.
   Buffer.AddBoolean(Session.CheatsAllowed);
+  // Version 6.
+  Buffer.AddIntegerValue(Session.Humans.Count);
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Buffer.AddDWord(Cardinal(Session.Humans[I].Id));
+    Buffer.AddBoolean(Session.Humans[I].ArcadeBattleHeld);
+  end;
   Buffer.SetInt32At(SizeOffset, Buffer.Position - SizeOffset - 4);
 end;
 
@@ -434,7 +445,7 @@ var
   Cheats: array of WideString;
   Points: Integer;
   NextItemId: Cardinal;
-  Finished: Boolean;
+  Finished, Held: Boolean;
   Reason, Days: Integer;
 begin
   Start := Buffer.Position;
@@ -553,6 +564,18 @@ begin
     Session.CheatsAllowed := Buffer.GetBoolean
   else
     Session.CheatsAllowed := True;
+  // Version 5 and older hold no day for a battle.
+  if Version >= 6 then
+  begin
+    Count := Buffer.GetInt32;
+    for I := 0 to Count - 1 do
+    begin
+      Human := FindHuman(Integer(Buffer.GetUInt32));
+      Held := Buffer.GetBoolean;
+      if Human <> nil then
+        Human.ArcadeBattleHeld := Held;
+    end;
+  end;
   Buffer.SetPosition(Start + Size);
 end;
 

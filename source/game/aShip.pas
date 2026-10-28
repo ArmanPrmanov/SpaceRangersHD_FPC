@@ -14360,6 +14360,11 @@ begin
           THole(OrderTarget).CreatedTurn := Galaxy.CurrentTurn - 10 - 1;
         InHyperspace := True;
         AbductedByPirateClan := False;
+        // CHANGE: ENHANCEMENT - A remote human's black hole battle holds the day until its
+        // result comes (THuman.ArcadeBattleHeld); not a hole that has none (the star map's
+        // 'SkipAB' maps).
+        if IsHuman(Self) and (Pos('SkipAB', THole(OrderTarget).ArcadeMapName) <> 1) then
+          HoldRemoteArcadeBattle(Self);
         if RecordFilm then
         begin
           TEFilm(PrimaryFilm).DetachObject(StepIndex, FilmObject);

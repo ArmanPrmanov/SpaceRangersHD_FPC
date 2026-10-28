@@ -279,6 +279,11 @@ uses
   SE_Star,
   SE_Planet;
 
+var
+  // CHANGE: ENHANCEMENT - The ranger was beaten in a multiplayer battle and is on its way out
+  // with one hull point (BeginBattleExit); its defeat no longer counts down.
+  ArcadeDefeatEscaped: Boolean;
+
 constructor TfAB.Create;
 begin
   inherited Create;
@@ -473,6 +478,7 @@ begin
   ArcadeKellerEncounter := False;
   ArcadeMapViewPosition := Classes.Point(0, 0);
   DefeatCountdownTicks := 150;
+  ArcadeDefeatEscaped := False;
   if LocalPlayer <> nil then
   begin
     DepartureTurn := Galaxy.CurrentTurn;
@@ -2941,10 +2947,19 @@ begin
       ab_Item_Update;
     end;
     Stage := 2;
-    if (LocalPlayer <> nil) and ((PlayerArcadeShip = nil) or (PlayerArcadeShip.Health <= 0)) then
+    if (LocalPlayer <> nil)
+        and ((PlayerArcadeShip = nil) or (PlayerArcadeShip.Health <= 0))
+        and not ArcadeDefeatEscaped then
     begin
       Stage := 3;
-      if DefeatCountdownTicks <= 0 then
+      // CHANGE: ENHANCEMENT - In multiplayer the defeat does not end the game for everyone:
+      // the ranger comes out of the battle with one hull point and goes on (BeginBattleExit).
+      if (DefeatCountdownTicks <= 0) and IsMultiplayer then
+      begin
+        ArcadeDefeatEscaped := True;
+        BeginBattleExit;
+      end
+      else if DefeatCountdownTicks <= 0 then
       begin
         ScoreScreen.RecordPlayerResult(False);
         // The ranger's death, then the Keller encounter's reward.
@@ -4574,7 +4589,7 @@ end;
 procedure TfAB.BeginBattleExit;
 var
   HullPoints: Integer;
-  ScriptedBattle: Boolean;
+  ScriptedBattle, HeldBattle: Boolean;
   Survivors: TArcadeSurvivors;
 begin
   LocalHuman.StarMapWeaponPanelOpen := False;
@@ -4583,7 +4598,10 @@ begin
     aCalc.WaitForTurnCalculationUI;
     aCalc.WaitForTurnCalculationUI;
     HullPoints := 0;
-    if LocalPlayer <> nil then
+    // CHANGE: ENHANCEMENT - A ranger beaten in multiplayer comes out with one hull point.
+    if ArcadeDefeatEscaped then
+      HullPoints := 1
+    else if LocalPlayer <> nil then
       HullPoints := PlayerArcadeShip.Health;
     ScriptedBattle := ActiveArcadeRequest <> nil;
     Survivors := nil;
@@ -4593,8 +4611,17 @@ begin
       ActiveArcadeRequest := nil;
       ActiveArcadeRequestShips := nil;
     end;
+    // CHANGE: ENHANCEMENT - A client's black hole battle (docs/network.md, Black hole battles):
+    // its loot goes before the exit, and then the day it held ends and the jump goes on.
+    HeldBattle := LocalArcadeBattleHeld;
+    SubmitArcadeLoot;
     ExitArcadeBattle(HullPoints, ScriptedBattle, Survivors);
-    if ScriptedBattle then
+    if HeldBattle then
+    begin
+      EndHeldArcadeBattleDay;
+      RequestedScreenId := screenJump;
+    end
+    else if ScriptedBattle then
       RequestedScreenId := TGameScreenId(ScriptArcadeReturnScreenId)
     else
       RequestedScreenId := screenStarMap;

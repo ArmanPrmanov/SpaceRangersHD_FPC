@@ -243,6 +243,12 @@ function RelayedSaleOf(const Command: TPlayerCommand; Location: TObject): TPlaye
 // slot and its item as a save writes it; its Kind is ckNone when the actor reaches no storage.
 function IsStorageCommand(Kind: TCommandKind): Boolean;
 function RelayedStorageOf(const Command: TPlayerCommand): TPlayerCommand;
+type
+  TStoredBytes = array of Byte;
+// An item as TPlayer.SaveToBuffer writes it: its type, then the item.
+function StoredItemBytes(Item: TItem): TStoredBytes;
+// The item StoredItemBytes wrote, as TPlayer.LoadFromBuffer and ResolveLoadedReferences read it.
+function LoadStoredItem(const Bytes: TStoredBytes): TItem;
 implementation
 uses
   Classes,
@@ -3614,9 +3620,6 @@ begin
       or (Kind = ckPutAllIntoStorage)
       or (Kind = ckSortStorage);
 end;
-
-type
-  TStoredBytes = array of Byte;
 
 // A stored item as TPlayer.SaveToBuffer writes it: its type, then the item.
 function StoredItemBytes(Item: TItem): TStoredBytes;

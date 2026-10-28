@@ -163,6 +163,13 @@ type
     // off after each day. Saved in the per-human save block (version 4). Always 0 in single
     // player, where a quest runs its days.
     QuestDaysOwed: Integer;
+    // CHANGE: ENHANCEMENT - A remote human's black hole battle (docs/network.md, Black hole
+    // battles): on a host, the day its ranger falls into a black hole that has a battle, the
+    // human holds the day again (HumanHoldsDay), though in hyperspace, while its own machine
+    // plays the battle; the battle's ArcadeBattleExit (or ArcadeDefeat) clears it. Saved in
+    // the per-human save block (version 6), so that the client's state says to play it.
+    // Never set without a network session (RemoteArcadeHook).
+    ArcadeBattleHeld: Boolean;
     // The text quest the human has open, from its BeginTextQuest to its CloseQuest
     // (aQuestActions): one human at a time plays the quest of a planet, TextQuestPlanetId
     // (0 for a prison or a script's quest). Session state, not game state: not saved;
@@ -354,7 +361,8 @@ procedure DropRefusedHumanAttacks;
 // Whether Human holds the day: its ranger plays and it has not ended its turn. A finished
 // human never holds it, nor does one whose ranger is in hyperspace, since a jump is travel
 // that goes on until arrival, nor a disconnected one (THuman.Connected), nor one who owes
-// days for a text quest (THuman.QuestDaysOwed).
+// days for a text quest (THuman.QuestDaysOwed). One whose black hole battle is played on its
+// own machine holds it in hyperspace too (THuman.ArcadeBattleHeld).
 function HumanHoldsDay(Human: THuman): Boolean;
 // Whether the day may start: no human holds it.
 function AllHumansEndedTurn: Boolean;
@@ -395,6 +403,16 @@ type
   TRemoteTalkHook = function(Human: THuman): Boolean;
 var
   RemoteTalkHook: TRemoteTalkHook;
+type
+  // CHANGE: ENHANCEMENT - Whether Human's battles are played on another machine, whose result
+  // the day must wait for (THuman.ArcadeBattleHeld): on a host, a connected remote human. A
+  // host sets it; without it no battle holds the day.
+  TRemoteArcadeHook = function(Human: THuman): Boolean;
+var
+  RemoteArcadeHook: TRemoteArcadeHook;
+// The ranger of a human fell into a black hole with a battle: where its battle is played on
+// another machine (RemoteArcadeHook), the human holds the day until the battle's result comes.
+procedure HoldRemoteArcadeBattle(Ship: TObject);
 // CHANGE: ENHANCEMENT - Whether a dialogue can reach Human (docs/network.md, Remote dialogue):
 // the local human, or, where a network session can ask remote humans (RemoteTalkHook), a
 // connected human who plays on. The answer about a remote human is recorded
@@ -1253,8 +1271,21 @@ begin
           and not Human.Finished
           and Human.Connected
           and (Human.Player <> nil)
-          and not Human.Player.InHyperspace
+          and (not Human.Player.InHyperspace or Human.ArcadeBattleHeld)
           and (Human.QuestDaysOwed <= 0);
+end;
+
+procedure HoldRemoteArcadeBattle(Ship: TObject);
+var
+  Human: THuman;
+begin
+  Human := HumanOf(Ship);
+  if (Human <> nil) and Assigned(RemoteArcadeHook) and RemoteArcadeHook(Human) then
+  begin
+    Human.ArcadeBattleHeld := True;
+    Human.EndedTurn := False;
+    Human.ContinueUntilArrival := False;
+  end;
 end;
 
 function AllHumansEndedTurn: Boolean;

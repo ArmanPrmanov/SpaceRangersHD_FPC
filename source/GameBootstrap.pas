@@ -316,6 +316,9 @@ begin
     // CHANGE: ENHANCEMENT - The humans share the government quests (HeadlessSim.RunSharedQuests).
     else if Argument = '--sim-shared-quests' then
       Simulation.SharedQuests := True
+    // CHANGE: ENHANCEMENT - A remote human's black hole battle (HeadlessSim.RunArcadeHold).
+    else if Argument = '--sim-arcade-hold' then
+      Simulation.ArcadeHold := True
     // CHANGE: ENHANCEMENT - The shared storage between networked humans (HeadlessNet).
     else if Argument = '--sim-net-storage' then
       Simulation.NetStorage := True

@@ -297,6 +297,21 @@ def check_shared_quests(args, binary: Path, save: Path) -> tuple[bool, str]:
     return True, f"the humans share the quests: another human delivers, the reward splits ({delivered})"
 
 
+def check_arcade_hold(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """A remote human's black hole battle (--sim-arcade-hold; docs/network.md, Black hole
+    battles).
+
+    The fall of a human whose battles are played elsewhere holds the day, though in hyperspace,
+    and a round trip keeps that; its battle's loot comes back by one command (an item with a
+    new id, kills, goods); the exit clears the hold and the end turn after it ends the day."""
+    code, output = simulate(binary, args.game_dir, save, ["--sim-arcade-hold", f"--sim-seed={args.seed}"])
+    lines = [line.strip() for line in output.splitlines()]
+    if code != 0 or "arcade hold ok" not in lines:
+        return False, "arcade hold failed:" + output_tail(output)
+    loot = last_line(output, "arcade hold loot ")
+    return True, f"a remote black hole battle holds the day and sends its loot ({loot})"
+
+
 def check_script_routing(args, binary: Path, save: Path) -> tuple[bool, str]:
     """Script builtins act for the script's human, on that human's machine (--sim-script-routing).
 
@@ -2091,6 +2106,10 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     passed_quests, note = check_shared_quests(args, binary, save)
     notes.append(note)
     passed = passed and passed_quests
+
+    passed_arcade, note = check_arcade_hold(args, binary, save)
+    notes.append(note)
+    passed = passed and passed_arcade
 
     passed_routing, note = check_script_routing(args, binary, save)
     notes.append(note)

@@ -93,6 +93,9 @@ type
     // CHANGE: ENHANCEMENT - The humans share the government quests (RunSharedQuests;
     // docs/humans.md, Quests).
     SharedQuests: Boolean;
+    // CHANGE: ENHANCEMENT - A remote human's black hole battle holds the day and its loot comes
+    // as one command (RunArcadeHold; docs/network.md, Black hole battles).
+    ArcadeHold: Boolean;
     // CHANGE: ENHANCEMENT - The shared storage between networked humans (HeadlessNet): the
     // host's clients join at its human's planet and on their first day play a scripted storage
     // turn instead of PlayHumanTurn.
@@ -173,6 +176,7 @@ uses
   Classes,
   Math,
   aConst,
+  aArcadeActions,
   aHoldActions,
   EC_Buf,
   EC_Expression,
@@ -2366,6 +2370,167 @@ begin
   end;
 end;
 
+// The probe's RemoteArcadeHook: only ArcadeProbeHuman plays its battles elsewhere.
+var
+  ArcadeProbeHuman: THuman;
+
+function ArcadeProbeRemote(Human: THuman): Boolean;
+begin
+  Result := Human = ArcadeProbeHuman;
+end;
+
+// CHANGE: ENHANCEMENT - --sim-arcade-hold (docs/network.md, Black hole battles). Humans A and B
+// join; B plays its battles on another machine (RemoteArcadeHook). (a) B's ranger falls into a
+// black hole with a battle (HoldRemoteArcadeBattle, in hyperspace): B holds the day, though in
+// hyperspace, and the day waits for it after A's end turn; A's own fall holds nothing. A round
+// trip keeps the flag. (b) B's battle loots an item, 3 kills and 5 units of goods; its loot
+// command (SubmitArcadeLoot) takes them back and adds them again, the item with a new id. (c)
+// The exit clears the flag, and the end turn after it ends B's day.
+function RunArcadeHold(const Options: TSimulationOptions): Integer;
+var
+  I, J, Count, Kills, Goods, GoodsCost: Integer;
+  Star: TStar;
+  P, Q, Candidate: TPlanet;
+  A, B, Saved: THuman;
+  Source, Loot, Found: TItem;
+  LootId, BId: Cardinal;
+  LootType: TItemType;
+  LootWeight: Integer;
+
+  procedure Fail(const Text: AnsiString);
+  begin
+    Emit('arcade hold failed: ' + Text);
+    raise EAbort.Create(Text);
+  end;
+
+begin
+  Result := 0;
+  Saved := LocalHuman;
+  try
+    try
+      P := nil;
+      Q := nil;
+      for I := 0 to Galaxy.Stars.Count - 1 do
+      begin
+        Star := TStar(Galaxy.Stars[I]);
+        for J := 0 to Star.Planets.Count - 1 do
+        begin
+          Candidate := TPlanet(Star.Planets[J]);
+          if Candidate.OwnerId > Byte(oiGaal) then
+            Continue;
+          if P = nil then
+            P := Candidate
+          else if Q = nil then
+            Q := Candidate;
+        end;
+      end;
+      if (P = nil) or (Q = nil) then
+        Fail('no two coalition planets');
+      A := JoinHumanAt(P, 'ArcadeA', 1);
+      B := JoinHumanAt(Q, 'ArcadeB', 2);
+      if (A = nil) or (B = nil) then
+        Fail('the humans did not join');
+      BId := B.Id;
+      ArcadeProbeHuman := B;
+      RemoteArcadeHook := @ArcadeProbeRemote;
+      // (a) The fall holds B's day, not A's.
+      B.Player.InHyperspace := True;
+      A.Player.InHyperspace := True;
+      HoldRemoteArcadeBattle(A.Player);
+      HoldRemoteArcadeBattle(B.Player);
+      if A.ArcadeBattleHeld then
+        Fail('A''s own battle held the day');
+      if not B.ArcadeBattleHeld then
+        Fail('B''s battle did not hold the day');
+      if HumanHoldsDay(A) then
+        Fail('A holds the day in hyperspace');
+      if not HumanHoldsDay(B) then
+        Fail('B does not hold the day');
+      for I := 0 to Session.Humans.Count - 1 do
+        if Session.Humans[I] <> B then
+          Session.Humans[I].EndedTurn := True;
+      if NextHumanToEndTurn <> B then
+        Fail('the day does not wait for B');
+      A.Player.InHyperspace := False;
+      B.Player.InHyperspace := False;
+      if not CheckRoundTrip(Options.DumpDirectory, Options.Seed) then
+        Fail('round trip');
+      B := FindHuman(Integer(BId));
+      if (B = nil) or not B.ArcadeBattleHeld then
+        Fail('the round trip lost the flag');
+      ArcadeProbeHuman := B;
+      Emit('arcade hold held=B day-waits=B roundtrip=kept');
+      // (b) The loot, as B's battle leaves it.
+      SetLocalHuman(B);
+      BeginArcadeLoot;
+      Source := nil;
+      for I := 0 to B.Player.Inventory.Count - 1 do
+        if (TObject(B.Player.Inventory[I]) is TEquipment)
+            and not (TObject(B.Player.Inventory[I]) is THull)
+            and not (TObject(B.Player.Inventory[I]) is TCountableItem) then
+        begin
+          Source := B.Player.Inventory[I];
+          Break;
+        end;
+      if Source = nil then
+        Fail('B has no equipment to copy');
+      Loot := TEquipment(Source).Clone;
+      LootType := Loot.ItemType;
+      LootWeight := Loot.Weight;
+      B.Player.Inventory.Add(Loot);
+      Count := B.Player.Inventory.Count;
+      Kills := B.Player.BlackHoleKillCount;
+      Goods := B.Player.CargoGoods[1].Count;
+      GoodsCost := B.Player.CargoGoods[1].TotalCost;
+      Inc(B.Player.BlackHoleKillCount, 3);
+      Inc(B.Player.CargoGoods[1].Count, 5);
+      Inc(B.Player.CargoGoods[1].TotalCost, 700);
+      LootId := Loot.Id;
+      SubmitArcadeLoot;
+      if B.Player.Inventory.Count <> Count then
+        Fail(Format('inventory count %d, expected %d', [B.Player.Inventory.Count, Count]));
+      Found := B.Player.Inventory[B.Player.Inventory.Count - 1];
+      if (Found.ItemType <> LootType) or (Found.Weight <> LootWeight) then
+        Fail('the looted item came back different');
+      if Found.Id = LootId then
+        Fail('the looted item kept the battle''s id');
+      for I := 0 to B.Player.Inventory.Count - 2 do
+        if TItem(B.Player.Inventory[I]).Id = Found.Id then
+          Fail('the looted item''s id is taken');
+      if B.Player.BlackHoleKillCount <> Kills + 3 then
+        Fail('kills');
+      if (B.Player.CargoGoods[1].Count <> Goods + 5)
+          or (B.Player.CargoGoods[1].TotalCost <> GoodsCost + 700) then
+        Fail('goods');
+      Emit(Format('arcade hold loot items=1 kills=3 goods=5 id=%d->%d', [LootId, Found.Id]));
+      // (c) The exit and the end turn.
+      B.Player.InHyperspace := True;
+      ExitArcadeBattle(B.Player.GetHull.HullPoints, False, nil);
+      if B.ArcadeBattleHeld then
+        Fail('the exit kept the flag');
+      // The exit lands a ranger whose order is no jump; B's is none here.
+      B.Player.InHyperspace := True;
+      if HumanHoldsDay(B) then
+        Fail('B still holds the day after the exit');
+      B.EndedTurn := False;
+      EndHeldArcadeBattleDay;
+      if not B.EndedTurn then
+        Fail('the end turn did not end B''s day');
+      B.Player.InHyperspace := False;
+      Emit('arcade hold exit=cleared endturn=ended');
+      Emit('arcade hold ok');
+    except
+      on E: EAbort do
+        Result := 1;
+    end;
+  finally
+    RemoteArcadeHook := nil;
+    ArcadeProbeHuman := nil;
+    if LocalHuman <> Saved then
+      SetLocalHuman(Saved);
+  end;
+end;
+
 // CHANGE: ENHANCEMENT - Script builtins act for the script's human, on that human's machine
 // (--sim-script-routing; docs/humans.md, Scripts). Two joined humans: one is made local, the
 // other stands for a remote one. Headless there are no screens, so a builtin that touched one
@@ -4233,6 +4398,11 @@ begin
   if Options.SharedQuests then
   begin
     Result := RunSharedQuests(Options);
+    Exit;
+  end;
+  if Options.ArcadeHold then
+  begin
+    Result := RunArcadeHold(Options);
     Exit;
   end;
   if Options.ScriptRouting then

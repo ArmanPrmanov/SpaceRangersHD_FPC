@@ -19,6 +19,10 @@ unit aArcadeActions;
 // ships' own random streams), cargo picked up in the battle (TfAB.PickUpItem) and the item
 // scripts run on the arcade's own objects (the player's arcade ship on entry, an item's info).
 // Those name objects that exist only in the battle.
+//
+// CHANGE: ENHANCEMENT - A client's black hole battle (docs/network.md, Black hole battles):
+// on a client those direct changes would be lost with the host's next state, so the battle's
+// loot goes as one command before its exit (ArcadeLoot, BeginArcadeLoot and SubmitArcadeLoot).
 interface
 uses
   aCommands;
@@ -31,6 +35,7 @@ const
   ckArcadeKellerTalk = 629;
   ckArcadeKellerDestroyed = 630;
   ckArcadeNoShotsVictory = 631;
+  ckArcadeLoot = 632;
 type
   // A labelled ship alive at the end of a scripted battle.
   TArcadeSurvivor = record
@@ -59,21 +64,36 @@ procedure BeginArcadeKellerTalk;
 procedure DestroyKellerInArcade;
 // The battle was won without a shot.
 procedure CheckNoShotsArcadeVictory;
+// CHANGE: ENHANCEMENT - Whether the local human's battle holds the host's day: a client plays
+// it, and its result is the day's (THuman.ArcadeBattleHeld).
+function LocalArcadeBattleHeld: Boolean;
+// Notes the local ranger's hold, cargo and kill counts before such a battle.
+procedure BeginArcadeLoot;
+// At the battle's end: what it added since BeginArcadeLoot (new items, grown stacks, cargo,
+// kill counts) is taken back and submitted as ArcadeLoot, which adds it again here and on the
+// host. Nothing without BeginArcadeLoot.
+procedure SubmitArcadeLoot;
+// After the exit of such a battle: the local human ends the day it held, continuing its jump.
+procedure EndHeldArcadeBattleDay;
 implementation
 uses
   SysUtils,
+  Classes,
   aConst,
   aGalaxy,
   aGalaxyEvent,
   aGalaxyStruct,
   aHold,
+  aHoldActions,
   aHuman,
   aItem,
   aKling,
   aPlayer,
+  aPlayerActions,
   aScript,
   aSession,
   aShip,
+  aTranclucator,
   GR_Main;
 
 // Moved from TfAB.ToggleWeaponGroup.
@@ -119,6 +139,7 @@ var
   Event: TGalaxyEvent;
 begin
   P := Actor(Command);
+  ActorHuman(Command).ArcadeBattleHeld := False;
   Flags := IntArg(Command, 0);
   if (Flags and 1) <> 0 then
   begin
@@ -205,6 +226,263 @@ begin
   SubmitCommand(NewCommand(ckArcadeDefeat));
 end;
 
+type
+  TArcadeLootStack = record
+    Item: TCountableItem;
+    StackCount: Integer;
+    Cost: Integer;
+  end;
+
+var
+  // What BeginArcadeLoot noted.
+  ArcadeLootTaken: Boolean;
+  ArcadeLootItems: TList;
+  ArcadeLootStacks: array of TArcadeLootStack;
+  ArcadeLootGoods: array[0..7] of TCargoGoodsEntry;
+  ArcadeLootBlackHoleKills, ArcadeLootHyperspaceKills: Integer;
+
+function LocalArcadeBattleHeld: Boolean;
+begin
+  Result := (LocalHuman <> nil) and LocalHuman.ArcadeBattleHeld;
+end;
+
+procedure BeginArcadeLoot;
+var
+  P: TPlayer;
+  I: Integer;
+begin
+  P := LocalPlayer;
+  if P = nil then
+    Exit;
+  if ArcadeLootItems = nil then
+    ArcadeLootItems := TList.Create;
+  ArcadeLootItems.Clear;
+  ArcadeLootStacks := nil;
+  for I := 0 to P.Inventory.Count - 1 do
+  begin
+    ArcadeLootItems.Add(P.Inventory[I]);
+    if TObject(P.Inventory[I]) is TCountableItem then
+    begin
+      SetLength(ArcadeLootStacks, Length(ArcadeLootStacks) + 1);
+      with ArcadeLootStacks[High(ArcadeLootStacks)] do
+      begin
+        Item := TCountableItem(P.Inventory[I]);
+        StackCount := Item.StackCount;
+        Cost := Item.Cost;
+      end;
+    end;
+  end;
+  for I := 0 to P.Artefacts.Count - 1 do
+    ArcadeLootItems.Add(P.Artefacts[I]);
+  for I := 0 to High(ArcadeLootGoods) do
+    ArcadeLootGoods[I] := P.CargoGoods[I];
+  ArcadeLootBlackHoleKills := P.BlackHoleKillCount;
+  ArcadeLootHyperspaceKills := P.HyperspaceKillCount;
+  ArcadeLootTaken := True;
+end;
+
+// An item's bytes (aHoldActions.StoredItemBytes), as its length and then four to an integer,
+// low byte first.
+procedure AddItemBytes(var Command: TPlayerCommand; Item: TItem);
+var
+  Bytes: TStoredBytes;
+  J, Quad: Integer;
+begin
+  Bytes := StoredItemBytes(Item);
+  AddInt(Command, Length(Bytes));
+  J := 0;
+  while J < Length(Bytes) do
+  begin
+    Quad := Bytes[J];
+    if J + 1 < Length(Bytes) then
+      Quad := Quad or (Integer(Bytes[J + 1]) shl 8);
+    if J + 2 < Length(Bytes) then
+      Quad := Quad or (Integer(Bytes[J + 2]) shl 16);
+    if J + 3 < Length(Bytes) then
+      Quad := Quad or Integer(Cardinal(Bytes[J + 3]) shl 24);
+    AddInt(Command, Quad);
+    Inc(J, 4);
+  end;
+end;
+
+// The item AddItemBytes wrote at Position, with a new id; Position moves past it.
+function ReadItemBytes(const Command: TPlayerCommand; var Position: Integer): TItem;
+var
+  Bytes: TStoredBytes;
+  ByteCount, J, Quad: Integer;
+  NewId: Cardinal;
+begin
+  ByteCount := IntArg(Command, Position);
+  Inc(Position);
+  SetLength(Bytes, ByteCount);
+  J := 0;
+  while J < ByteCount do
+  begin
+    Quad := IntArg(Command, Position);
+    Inc(Position);
+    Bytes[J] := Byte(Quad);
+    if J + 1 < ByteCount then
+      Bytes[J + 1] := Byte(Quad shr 8);
+    if J + 2 < ByteCount then
+      Bytes[J + 2] := Byte(Quad shr 16);
+    if J + 3 < ByteCount then
+      Bytes[J + 3] := Byte(Cardinal(Quad) shr 24);
+    Inc(J, 4);
+  end;
+  // As TEquipment.Clone: the battle's machine gave the item an id of its own copy.
+  NewId := Galaxy.NextItemId;
+  Session.LoadedSaveVersion := CurrentSaveVersion;
+  Result := LoadStoredItem(Bytes);
+  Result.Id := NewId;
+  Galaxy.NextItemId := NewId + 1;
+end;
+
+// Ints: the black hole and hyperspace kills, the count and total cost of each of the 8 cargo
+// goods, all added; the count of grown stacks, then for each its index in the inventory, the
+// units and the cost added; the count of new items, then for each 1 for an artefact (0 for
+// the inventory) and its bytes (AddItemBytes).
+procedure ExecuteArcadeLoot(const Command: TPlayerCommand);
+var
+  P: TPlayer;
+  I, Count, Index, Position, Flags: Integer;
+  Stack: TCountableItem;
+  Item: TItem;
+begin
+  P := Actor(Command);
+  ClearPlayerHoldEntries(ActorHuman(Command));
+  Inc(P.BlackHoleKillCount, IntArg(Command, 0));
+  Inc(P.HyperspaceKillCount, IntArg(Command, 1));
+  Position := 2;
+  for I := 0 to High(P.CargoGoods) do
+  begin
+    Inc(P.CargoGoods[I].Count, IntArg(Command, Position));
+    Inc(P.CargoGoods[I].TotalCost, IntArg(Command, Position + 1));
+    Inc(Position, 2);
+  end;
+  Count := IntArg(Command, Position);
+  Inc(Position);
+  for I := 0 to Count - 1 do
+  begin
+    Index := IntArg(Command, Position);
+    if (Index >= 0)
+        and (Index < P.Inventory.Count)
+        and (TObject(P.Inventory[Index]) is TCountableItem) then
+    begin
+      Stack := TCountableItem(P.Inventory[Index]);
+      Inc(Stack.StackCount, IntArg(Command, Position + 1));
+      Stack.Weight := Stack.GetUnitSize * Stack.StackCount;
+      Inc(Stack.Cost, IntArg(Command, Position + 2));
+    end;
+    Inc(Position, 3);
+  end;
+  Count := IntArg(Command, Position);
+  Inc(Position);
+  for I := 0 to Count - 1 do
+  begin
+    Flags := IntArg(Command, Position);
+    Inc(Position);
+    Item := ReadItemBytes(Command, Position);
+    if (Flags and 1) <> 0 then
+      P.Artefacts.Add(Item)
+    else
+      P.Inventory.Add(Item);
+    if Item is TArtefactTranclucator then
+      (TObject((Item as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip := P;
+  end;
+  P.RefreshDerivedStats(True);
+end;
+
+procedure SubmitArcadeLoot;
+var
+  P: TPlayer;
+  Command: TPlayerCommand;
+  I, Count, CountAt: Integer;
+  Item: TItem;
+  NewItems: TList;
+  Artefact: array of Boolean;
+begin
+  P := LocalPlayer;
+  if not ArcadeLootTaken or (P = nil) then
+    Exit;
+  ArcadeLootTaken := False;
+  ClearPlayerHoldEntries(LocalHuman);
+  Command := NewCommand(ckArcadeLoot);
+  AddInt(Command, P.BlackHoleKillCount - ArcadeLootBlackHoleKills);
+  AddInt(Command, P.HyperspaceKillCount - ArcadeLootHyperspaceKills);
+  P.BlackHoleKillCount := ArcadeLootBlackHoleKills;
+  P.HyperspaceKillCount := ArcadeLootHyperspaceKills;
+  for I := 0 to High(ArcadeLootGoods) do
+  begin
+    AddInt(Command, P.CargoGoods[I].Count - ArcadeLootGoods[I].Count);
+    AddInt(Command, P.CargoGoods[I].TotalCost - ArcadeLootGoods[I].TotalCost);
+    P.CargoGoods[I] := ArcadeLootGoods[I];
+  end;
+  NewItems := TList.Create;
+  try
+    // The stacks that grew, by their index in the inventory without the new items, which
+    // come after the noted ones in ArcadeLootItems.
+    CountAt := Length(Command.Ints);
+    AddInt(Command, 0);
+    Count := 0;
+    for I := 0 to High(ArcadeLootStacks) do
+      with ArcadeLootStacks[I] do
+        if (P.Inventory.IndexOf(Item) >= 0)
+            and ((Item.StackCount <> StackCount) or (Item.Cost <> Cost)) then
+        begin
+          AddInt(Command, ArcadeLootItems.IndexOf(Item));
+          AddInt(Command, Item.StackCount - StackCount);
+          AddInt(Command, Item.Cost - Cost);
+          Item.StackCount := StackCount;
+          Item.Weight := Item.GetUnitSize * StackCount;
+          Item.Cost := Cost;
+          Inc(Count);
+        end;
+    Command.Ints[CountAt] := Count;
+    Artefact := nil;
+    for I := 0 to P.Inventory.Count - 1 do
+      if ArcadeLootItems.IndexOf(P.Inventory[I]) < 0 then
+      begin
+        NewItems.Add(P.Inventory[I]);
+        SetLength(Artefact, Length(Artefact) + 1);
+        Artefact[High(Artefact)] := False;
+      end;
+    for I := 0 to P.Artefacts.Count - 1 do
+      if ArcadeLootItems.IndexOf(P.Artefacts[I]) < 0 then
+      begin
+        NewItems.Add(P.Artefacts[I]);
+        SetLength(Artefact, Length(Artefact) + 1);
+        Artefact[High(Artefact)] := True;
+      end;
+    AddInt(Command, NewItems.Count);
+    for I := 0 to NewItems.Count - 1 do
+    begin
+      Item := TItem(NewItems[I]);
+      AddInt(Command, Ord(Artefact[I]));
+      AddItemBytes(Command, Item);
+      P.Inventory.Remove(Item);
+      P.Artefacts.Remove(Item);
+      Item.Free;
+    end;
+  finally
+    NewItems.Free;
+  end;
+  ArcadeLootItems.Clear;
+  ArcadeLootStacks := nil;
+  P.RefreshDerivedStats(True);
+  SubmitCommand(Command);
+end;
+
+procedure EndHeldArcadeBattleDay;
+var
+  Command: TPlayerCommand;
+begin
+  // Not EndTurn: the exit's prediction has cleared the flag here, so the human no longer holds
+  // the day on this copy, but it does on the host's until the exit is applied there.
+  Command := NewCommand(ckEndTurn);
+  AddInt(Command, 1);
+  SubmitCommand(Command);
+end;
+
 // Moved from TfAB.TimerTakt.
 procedure ExecuteArcadeKellerTalk(const Command: TPlayerCommand);
 var
@@ -269,4 +547,7 @@ initialization
   RegisterCommand(ckArcadeKellerTalk, 'ArcadeKellerTalk', @ExecuteArcadeKellerTalk);
   RegisterCommand(ckArcadeKellerDestroyed, 'ArcadeKellerDestroyed', @ExecuteArcadeKellerDestroyed);
   RegisterCommand(ckArcadeNoShotsVictory, 'ArcadeNoShotsVictory', @ExecuteArcadeNoShotsVictory);
+  RegisterCommand(ckArcadeLoot, 'ArcadeLoot', @ExecuteArcadeLoot);
+finalization
+  ArcadeLootItems.Free;
 end.

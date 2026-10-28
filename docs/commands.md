@@ -70,7 +70,7 @@ renumber a kind: the numbers are part of the log format.
 | 300–399 | conversations (`fTalk`, script dialogs) |
 | 400–499 | planets and the government (`fGov`, `fPlanet`, `fPlanetNO`, `fInfo`, `fJournal`) |
 | 500–599 | stations (`fRuinsTalk`) |
-| 600–699 | text quests, arcade battles, cheats (`CheatCode`: 675 `Cheat`, 676 `CheatScript`), UI scripts |
+| 600–699 | text quests, arcade battles (632 `ArcadeLoot`: a client's battle loot), cheats (`CheatCode`: 675 `Cheat`, 676 `CheatScript`), UI scripts |
 
 Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
 

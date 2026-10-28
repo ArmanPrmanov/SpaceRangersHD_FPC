@@ -167,6 +167,8 @@ uses
   aPlayerActions,
   aShip,
   aCommands,
+  aArcadeActions,
+  aScript,
   ThreadCalc,
   NetThread,
   NetProtocol,
@@ -1733,6 +1735,13 @@ begin
   finally
     DropPendingFilm;
   end;
+  // The film's header anchor is the host's last view; this screen starts at its own ship, as a
+  // film that this screen played last would.
+  if LocalPlayer <> nil then
+  begin
+    Film.CameraAnchor := LocalPlayer.Position;
+    Film.ForceCameraMovement := False;
+  end;
   BindFilmToScene(Film, Star);
   ClientFilmPlaying := True;
 end;
@@ -1779,6 +1788,28 @@ end;
 
 // Between screens ------------------------------------------------------------------------------
 
+// CHANGE: ENHANCEMENT - The black hole battle the host's day waits for (THuman.ArcadeBattleHeld;
+// docs/network.md, Black hole battles): the battle of the hole, or the one its scripts queued,
+// as the star map opens it after its film. Its end sends the loot, the exit and the end turn
+// (TfAB.BeginBattleExit), and goes to the jump screen.
+procedure OpenHeldArcadeBattle(P: TPlayer);
+var
+  Request: PScriptABRequest;
+begin
+  if P.OrderTarget is THole then
+    ArcadeBattleScreen.SelectedMapName := THole(P.OrderTarget).ArcadeMapName
+  else
+    ArcadeBattleScreen.SelectedMapName := '';
+  Request := LocalScriptRequest(srqArcadeBattle);
+  if Request <> nil then
+  begin
+    ArcadeBattleScreen.SelectedMapName := Request.MapName;
+    ScriptArcadeReturnScreenId := Ord(screenJump);
+  end;
+  BeginArcadeLoot;
+  RequestedScreenId := screenArcadeBattle;
+end;
+
 // The screen of the client's human after a state: the film's end steps run first, on the new
 // state, as the star map runs them after a film (landing wear, a black hole's scripts); the
 // commands go to the host with the next day's.
@@ -1792,7 +1823,10 @@ begin
   begin
     if AppliedAfterFilm and (P.Order = soJumpHole) then
       RunScriptTurns;
-    RequestedScreenId := screenJump;
+    if LocalArcadeBattleHeld then
+      OpenHeldArcadeBattle(P)
+    else
+      RequestedScreenId := screenJump;
   end
   else if P.CurrentPlanet <> nil then
   begin

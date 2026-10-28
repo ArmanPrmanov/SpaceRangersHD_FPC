@@ -287,6 +287,9 @@ procedure HostStarDay(Star, Film: TObject; Recorded: Boolean);
 procedure HostDayCompleted;
 // aHuman.RemoteTalkHook of a host (TNetHost.RemoteTalk).
 function HostRemoteTalk(Human: THuman): Boolean;
+// CHANGE: ENHANCEMENT - aHuman.RemoteArcadeHook of a host: a connected human other than the
+// host's own plays its battles on its client (docs/network.md, Black hole battles).
+function HostRemoteArcade(Human: THuman): Boolean;
 // CHANGE: ENHANCEMENT - aCommands.NetworkCommandHook of a host: relays a trade (RelayTrade).
 procedure HostCommandSubmitted(const Command: TPlayerCommand);
 implementation
@@ -1815,6 +1818,12 @@ end;
 function HostRemoteTalk(Human: THuman): Boolean;
 begin
   Result := (ActiveHost <> nil) and ActiveHost.RemoteTalk(Human);
+end;
+
+// In a session every human but the host's own is a peer's (hot-seat passes nothing there).
+function HostRemoteArcade(Human: THuman): Boolean;
+begin
+  Result := (ActiveHost <> nil) and (Human <> LocalHuman) and Human.Connected and not Human.Finished;
 end;
 
 function TNetHost.SendFilms: Integer;

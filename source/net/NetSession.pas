@@ -94,6 +94,8 @@ begin
   StarDayHook := @HostStarDay;
   DayCompletedHook := @HostDayCompleted;
   RemoteTalkHook := @HostRemoteTalk;
+  // CHANGE: ENHANCEMENT - A client's black hole battle holds the day (docs/network.md).
+  RemoteArcadeHook := @HostRemoteArcade;
   // CHANGE: ENHANCEMENT - The host relays the trades it applies (docs/network.md, Trades).
   NetworkCommandHook := @HostCommandSubmitted;
   // CHANGE: ENHANCEMENT - Its own human's text-quest pages go to the clients.
@@ -125,6 +127,7 @@ begin
   StarDayHook := nil;
   DayCompletedHook := nil;
   RemoteTalkHook := nil;
+  RemoteArcadeHook := nil;
   NetworkCommandHook := nil;
   TradeSubmitHook := nil;
   QuestPageHook := nil;
