@@ -654,10 +654,10 @@ as before.
   another human's quest target counts as a quest kill (`TNormalShip.ProcessShipKill`). The
   letters of every human's quests are kept out of the research and military sales.
 - **Reward.** The sharers are every human whose game has not ended, the one who turns the
-  quest in always among them (`CollectQuestSharers`). The money and the experience are split
-  equally (`GrantSharedQuestMoney`, `GrantSharedQuestExperience`); the one who turns it in also
-  gets what does not divide, and its text says its part of the experience (the money shown is
-  the quest's). Every sharer's relation to the planet rises as native raised the deliverer's,
+  quest in always among them (`CollectQuestSharers`). The money is split equally
+  (`GrantSharedQuestMoney`); the one who turns it in also gets what does not divide (the money
+  shown is the quest's). Every sharer gets the quest's whole experience
+  (`GrantSharedQuestExperience`). Every sharer's relation to the planet rises as native raised the deliverer's,
   and the pirates' main planet's for a pirate quest. The item the government adds (a medal,
   programs, an artefact, a micromodule) cannot be split and goes to the one who turns it in.
   Everything runs in the command or the day on every machine, in `Session.Humans` order, so
@@ -821,7 +821,7 @@ note in the progress entry.
 - Each save also runs `--sim-shared-quests` (Quests, `check_shared_quests`): human A joins and
   takes a letter quest, and every human's journal must show it; human B, in another star, gets
   A's letter and delivers it: A's quest is done, the reward is split equally (B gets what does
-  not divide), every human gets experience, the completion, the finished quest and the
+  not divide), every human gets the whole experience, the completion, the finished quest and the
   relation to the planet. While A holds a quest from a planet, another human there must be
   offered none and its stale offer refused (`offer-gone`). A quest's deadline must fail it once
   for every human (journal, finished quest, relation), and a round trip must keep every

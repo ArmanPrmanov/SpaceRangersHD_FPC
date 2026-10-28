@@ -2112,7 +2112,7 @@ end;
 // planet P and takes a letter quest to a planet Q of another star, where human B joined: every
 // human's journal shows it. A's letter goes to B (by the storage, in play) and B delivers it:
 // A's quest is done, the reward is split equally (B gets what does not divide), every human
-// gets the experience share, the journal's completion, the finished quest and the relation to
+// gets the whole experience, the journal's completion, the finished quest and the relation to
 // Q. A takes another quest from P: a third human at P is refused a quest there (the government
 // gave its quest), and so is its AcceptQuest of an earlier offer (offer-gone). The quest's
 // deadline passes: it fails once, for every human (journal, finished quest, relation to P). A
@@ -2284,6 +2284,12 @@ begin
             [Human.Id, Human.Player.Money - Before[I], J]));
       if Human.Player.TotalExperience <= Experience[I] then
         Fail(Format('human %d got no experience', [Human.Id]));
+      // Each gets the whole experience: the same gain as B's.
+      if Human.Player.TotalExperience - Experience[I]
+          <> B.Player.TotalExperience - Experience[Session.Humans.IndexOf(B)] then
+        Fail(Format('human %d got %d experience, B %d',
+            [Human.Id, Human.Player.TotalExperience - Experience[I],
+                B.Player.TotalExperience - Experience[Session.Humans.IndexOf(B)]]));
       if (Integer(Q.RelationToShip(Human.Player)) and $7F) < 70 then
         Fail(Format('human %d''s relation to Q did not rise', [Human.Id]));
     end;

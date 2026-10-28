@@ -414,27 +414,19 @@ begin
   end;
 end;
 
-// CHANGE: ENHANCEMENT - The quest experience split as GrantSharedQuestMoney splits money;
-// returns Ranger's part.
+// CHANGE: ENHANCEMENT - The quest experience, in full to each of Ranger's quest sharers (it is
+// not split like the money); returns Ranger's part, Amount.
 function GrantSharedQuestExperience(Ranger: TRanger; Amount: Integer): Integer;
 var
   Sharers: TList;
-  I, Share: Integer;
-  Sharer: TRanger;
+  I: Integer;
 begin
+  Result := Amount;
   Sharers := TList.Create;
   try
     CollectQuestSharers(Ranger, Sharers);
-    Share := Amount div Sharers.Count;
-    Result := Amount - Share * (Sharers.Count - 1);
     for I := 0 to Sharers.Count - 1 do
-    begin
-      Sharer := TRanger(Sharers[I]);
-      if Sharer = Ranger then
-        Sharer.GainExperience(Result, 0)
-      else
-        Sharer.GainExperience(Share, 0);
-    end;
+      TRanger(Sharers[I]).GainExperience(Amount, 0);
   finally
     Sharers.Free;
   end;

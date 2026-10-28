@@ -285,7 +285,7 @@ def check_shared_quests(args, binary: Path, save: Path) -> tuple[bool, str]:
 
     Human A takes a letter quest and every human's journal shows it; human B, in another star,
     delivers A's letter: the reward is split equally (B gets what does not divide), every human
-    gets experience, the completion, the finished quest and the relation. While A holds a quest
+    gets the whole experience, the completion, the finished quest and the relation. While A holds a quest
     from a planet, another human there is offered none and its stale offer is refused
     (offer-gone). A quest's deadline fails it once for every human, and a round trip keeps
     every human's finished quests."""
