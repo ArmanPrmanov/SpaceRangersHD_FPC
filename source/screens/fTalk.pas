@@ -352,16 +352,22 @@ begin
   ClearDialogEffects;
   if LocalPlayer.InNormalSpace then
   begin
+    // CHANGE: ENHANCEMENT - No ring for another human's ranger in another star (the star map's
+    // players' buttons talk at any distance): it is not on this map.
     if Flag128 = 0 then
     begin
-      if LocalHuman.TalkShip <> nil then
-        Position := TruncatePointF(LocalHuman.TalkShip.Position)
-      else
-        Position := TruncatePointF(LocalHuman.TalkPlanet.GetPosition);
-      Position := StarMapScreen.MapControls.ToAbsolutePoint(Position);
-      AddDialogEffect(PointToPointF(Position), 'Bm.SI.' + GiResourceSuffix + 'Ring', 0);
-      AddDialogEffect(PointToPointF(Position), 'Bm.SI.' + GiResourceSuffix + 'Ring', 200);
-      AddDialogEffect(PointToPointF(Position), 'Bm.SI.' + GiResourceSuffix + 'Ring', 400);
+      if (LocalHuman.TalkShip = nil)
+          or (LocalHuman.TalkShip.CurrentStar = LocalPlayer.CurrentStar) then
+      begin
+        if LocalHuman.TalkShip <> nil then
+          Position := TruncatePointF(LocalHuman.TalkShip.Position)
+        else
+          Position := TruncatePointF(LocalHuman.TalkPlanet.GetPosition);
+        Position := StarMapScreen.MapControls.ToAbsolutePoint(Position);
+        AddDialogEffect(PointToPointF(Position), 'Bm.SI.' + GiResourceSuffix + 'Ring', 0);
+        AddDialogEffect(PointToPointF(Position), 'Bm.SI.' + GiResourceSuffix + 'Ring', 200);
+        AddDialogEffect(PointToPointF(Position), 'Bm.SI.' + GiResourceSuffix + 'Ring', 400);
+      end;
     end
     else if RequestedMapCenter <> nil then
     begin
@@ -2093,7 +2099,10 @@ begin
   else if not LocalHuman.TalkShip.HasCargoGoods
       and ((Capacity < 1) or (Money < GoodsMarket[0].AveragePrice)) then
     DialogText := LocalHuman.TalkShip.LookupTalkText('Talk.Trade.AnswerNoNeedGoods')
-  else if PointDistanceSquared(LocalPlayer.Position, LocalHuman.TalkShip.Position) > 250000 then
+  // CHANGE: ENHANCEMENT - Another human's ranger can be talked with from any star (the star
+  // map's players' buttons); one in another star is too far to trade.
+  else if (PointDistanceSquared(LocalPlayer.Position, LocalHuman.TalkShip.Position) > 250000)
+      or (LocalHuman.TalkShip.CurrentStar <> LocalPlayer.CurrentStar) then
     DialogText := LocalHuman.TalkShip.LookupTalkText('Talk.Trade.AnswerBigDist')
   else
   begin

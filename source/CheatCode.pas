@@ -4,10 +4,28 @@ unit CheatCode;
 {$Q-}
 {$B-}
 {$A8}
+
+// CHANGE: ENHANCEMENT - Cheats are commands (docs/commands.md; ROADMAP.md, Phase 6: cheats are
+// enabled for everyone). HandleDebugKey matches the code on the machine where it is typed and
+// submits it as a Cheat command, which carries the code's name and what the screen showed (its
+// id and the star map's mode). Its executor runs the code's procedure for the command's actor
+// (CheatPlayer, CheatHuman) at the same point on every machine, and records the cheat for that
+// human (THuman.RecordCheat). Only the machine whose human typed the code touches screens
+// (CheatUi); it shows the cheat's message box once the command has run. In multiplayer the
+// host's session flag (Session.CheatsAllowed) turns cheats off for everyone. The codes that
+// only show or dump something (MAKEDUMP, SEED, EVENTS, INFOS) and WIN stay local, as before;
+// MAKEDUMP and WIN do nothing in multiplayer.
 interface
 uses
   ab_Global,
-  Classes;
+  Classes,
+  aCommands;
+const
+  // Command kinds (docs/commands.md: 600-699). Cheat: Text is the code; Ints: the screen id
+  // (TGameScreenId), the star map's mode (TStarMapMode), then HOLE's map index; Refs: SKILL's
+  // ship (none: the actor's ranger). CheatScript: SUDO's script command, in Text.
+  ckCheat = 675;
+  ckCheatScript = 676;
 type
   TCheatList = class;
   PointerToTCheatEntry = ^TCheatEntry;
@@ -27,6 +45,11 @@ var
   CheatCandidateIndex: Integer = 0;
   CheatPrefixLength: Integer = 0;
   CheatPrefixSum: Integer = 0;
+// CHANGE: ENHANCEMENT - Whether a cheat may run now: not when the mod disables cheats, and in
+// multiplayer only while the host's session flag allows them.
+function CheatsAllowedNow: Boolean;
+// A Cheat command for the code Name, as this machine's screen would submit it.
+function NewCheatCommand(const Name: WideString): TPlayerCommand;
 procedure AddCheatPoints(Points: Integer);
 procedure ReportCheat(Points: Integer; const Name: WideString);
 procedure CheatRepair;
@@ -104,6 +127,7 @@ uses
   GI_MessageLoop,
   GI_MessageBox,
   aGalaxy,
+  aSession,
   ThreadCalc,
   aPlayer,
   aShip,
@@ -158,6 +182,25 @@ uses
 // @unit-finalization $50CAC8
 var
   CheatEntries: TCheatList; // @addr $88A41C
+  // CHANGE: ENHANCEMENT - The context a cheat's procedure runs in (see the unit's header). The
+  // executor sets it from the command; the codes that stay local run with this machine's.
+  // CheatPlayer, CheatHuman: the actor. CheatScreenId, CheatStarMapMode: what the actor's
+  // screen showed when the code was typed. CheatName: the code. CheatUi: whether this machine
+  // typed the code, so that the procedure may touch its screens.
+  CheatPlayer: TPlayer;
+  CheatHuman: THuman;
+  CheatScreenId: TGameScreenId;
+  CheatStarMapMode: TStarMapMode;
+  CheatName: WideString;
+  CheatUi: Boolean;
+  // SKILL's ship and HOLE's map, from the command.
+  CheatTargetShip: TShip;
+  CheatHoleMapIndex: Integer;
+  // Set while HandleDebugKey submits a cheat of this machine's human.
+  CheatSubmitting: Boolean;
+  // The message box a cheat of this machine's human shows after its command has run.
+  PendingCheatReport: WideString;
+  PendingCheatReportSet: Boolean;
 
 function TCheatList.AddEntry(Entry: PCheatEntry): Integer;
 begin
@@ -196,22 +239,33 @@ begin
   Galaxy.SetCheatPoints(PreviousPoints + Points);
 end;
 
+// CHANGE: ENHANCEMENT - The galaxy's part runs in the command for its actor, who has the cheat on
+// record; the message box waits for ShowPendingCheatReport on the machine that typed the code.
 procedure ReportCheat(Points: Integer; const Name: WideString);
 var
   Text: WideString;
-  Parent: TMessageLoopGI;
   Event: TGalaxyEvent;
 begin
-  Text := LocalizedColorText('Cheat.Info');
-  ReplaceTextToken(Text, '<Name>', Name, '<color=255,240,100>');
-  ReplaceTextToken(Text, '<CheatPoints>', WideString(IntToStr(Points)), '<color=255,240,100>');
+  if CheatUi then
+  begin
+    Text := LocalizedColorText('Cheat.Info');
+    ReplaceTextToken(Text, '<Name>', Name, '<color=255,240,100>');
+    ReplaceTextToken(Text, '<CheatPoints>', WideString(IntToStr(Points)), '<color=255,240,100>');
+  end;
   if Galaxy <> nil then
   begin
     AddCheatPoints(Points);
     Event := AddGalaxyEvent('PlayerEntersCheatCode');
-    Event.AddTextData(CheatEntries.GetEntry(CheatCandidateIndex).Text);
+    Event.AddTextData(CheatName);
     Event.AddData(Points);
+    if CheatHuman <> nil then
+    begin
+      Event.HumanId := CheatHuman.Id;
+      CheatHuman.RecordCheat(CheatName, Points);
+    end;
   end;
+  if not CheatUi then
+    Exit;
   Text := Text + #13#10 + LocalizedColorText('Cheat.Ok');
   // Native code reads the total without a nil-galaxy guard.
   ReplaceTextToken(
@@ -220,13 +274,32 @@ begin
       WideString(IntToStr(Galaxy.GetCheatPoints)),
       '<color=255,240,100>'
   );
+  PendingCheatReport := Text;
+  PendingCheatReportSet := True;
+end;
+
+// CHANGE: ENHANCEMENT - Whether this machine's space shows Star, so that what a cheat puts there
+// joins the scene; with one human it always does, as the code assumed.
+function CheatStarShown(Star: TStar): Boolean;
+begin
+  Result := (SpaceProcess <> nil) and (LocalPlayer <> nil) and (LocalPlayer.CurrentStar = Star);
+end;
+
+// The message box of the cheat this machine's human just entered, as ReportCheat showed it.
+procedure ShowPendingCheatReport;
+var
+  Parent: TMessageLoopGI;
+begin
+  if not PendingCheatReportSet then
+    Exit;
+  PendingCheatReportSet := False;
   if ShipScreen.IsOpen then
     Parent := ShipScreen
   else if RangerRatingScreen.IsOpen then
     Parent := RangerRatingScreen
   else
     Parent := TObject(RegisteredScreens[Ord(CurrentScreenId)]) as TMessageLoopGI;
-  ShowMessageBoxGI(Parent, Text, mbgCancel);
+  ShowMessageBoxGI(Parent, PendingCheatReport, mbgCancel);
   FullFrameRedrawRequested := True;
   Parent.InvalidateViewport;
   Parent.DrawQueuedUpdateRects;
@@ -245,21 +318,21 @@ var
   Item: TEquipment;
 begin
   if (Galaxy <> nil)
-      and (CurrentScreenId = screenStarMap)
-      and (StarMapScreen.Mode = smmOrders)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.InNormalSpace then
+      and (CheatScreenId = screenStarMap)
+      and (CheatStarMapMode = smmOrders)
+      and (CheatPlayer <> nil)
+      and CheatPlayer.InNormalSpace then
   begin
-    for I := 0 to LocalPlayer.Inventory.Count - 1 do
+    for I := 0 to CheatPlayer.Inventory.Count - 1 do
     begin
-      Item := TEquipment(LocalPlayer.Inventory[I]);
+      Item := TEquipment(CheatPlayer.Inventory[I]);
       if (Item.ItemType = t_Hull)
           or ((Item.EquippedFlag <> 0) and (Item.ConditionPercent < 90)) then
         Item.Repair;
     end;
-    for I := 0 to LocalPlayer.Artefacts.Count - 1 do
+    for I := 0 to CheatPlayer.Artefacts.Count - 1 do
     begin
-      Item := TEquipment(LocalPlayer.Artefacts[I]);
+      Item := TEquipment(CheatPlayer.Artefacts[I]);
       if (Item.EquippedFlag <> 0) and (Item.ConditionPercent < 90) then
         Item.Repair;
     end;
@@ -273,7 +346,7 @@ var
   Planet: TPlanet;
   Star: TStar;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     for StarIndex := 0 to Galaxy.Stars.Count - 1 do
     begin
@@ -309,7 +382,7 @@ var
   Created: Integer;
 begin
   Created := 0;
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     for StarIndex := 0 to Galaxy.Stars.Count - 1 do
     begin
@@ -350,7 +423,7 @@ var
   Created: Integer;
 begin
   Created := 0;
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     for StarIndex := 0 to Galaxy.Stars.Count - 1 do
     begin
@@ -378,12 +451,12 @@ var
   Star: TStar;
   Ship: TShip;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     Sent := 0;
     for DistanceIndex := 1 to Galaxy.Stars.Count - 1 do
     begin
-      Star := TObject(LocalPlayer.CurrentStar.StarDistances[DistanceIndex].Star) as TStar;
+      Star := TObject(CheatPlayer.CurrentStar.StarDistances[DistanceIndex].Star) as TStar;
       if (Star.ControlFaction = sfDominators)
           and (Star.Battle = 0)
           and Galaxy.HasUnresolvedDominatorSeries([dsBlazer, dsKeller, dsTerron])
@@ -408,7 +481,7 @@ begin
                 and Ship.InNormalSpace
                 and not Ship.HasIndependentScriptFaction then
             begin
-              Ship.OrderJump(LocalPlayer.CurrentStar, True);
+              Ship.OrderJump(CheatPlayer.CurrentStar, True);
               Inc(Sent);
               Dec(Eligible);
               if Eligible <= 2 then
@@ -429,12 +502,12 @@ var
   Star: TStar;
   Ship: TShip;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     Sent := 0;
     for DistanceIndex := 1 to Galaxy.Stars.Count - 1 do
     begin
-      Star := TObject(LocalPlayer.CurrentStar.StarDistances[DistanceIndex].Star) as TStar;
+      Star := TObject(CheatPlayer.CurrentStar.StarDistances[DistanceIndex].Star) as TStar;
       if (Star.ControlFaction = sfPirates)
           and (Star.Battle = 0)
           and (Star.Status.CustomFaction = '') then
@@ -458,7 +531,7 @@ begin
                 and Ship.InNormalSpace
                 and not Ship.HasIndependentScriptFaction then
             begin
-              Ship.OrderJump(LocalPlayer.CurrentStar, True);
+              Ship.OrderJump(CheatPlayer.CurrentStar, True);
               Inc(Sent);
               Dec(Eligible);
               if Eligible <= 2 then
@@ -476,13 +549,13 @@ end;
 procedure CheatRangerpoints;
 begin
   if (Galaxy <> nil)
-      and (CurrentScreenId <> screenShip)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.IsDockedToShip
-      and (LocalPlayer.DockedTo.TypeId = Byte(rstRangerCenter))
-      and (LocalPlayer.FreeExperience < 1000) then
+      and (CheatScreenId <> screenShip)
+      and (CheatPlayer <> nil)
+      and CheatPlayer.IsDockedToShip
+      and (CheatPlayer.DockedTo.TypeId = Byte(rstRangerCenter))
+      and (CheatPlayer.FreeExperience < 1000) then
   begin
-    LocalPlayer.GainExperience(1000, 0);
+    CheatPlayer.GainExperience(1000, 0);
     ReportCheat(150, 'RANGERPOINTS');
   end;
 end;
@@ -490,14 +563,14 @@ end;
 procedure CheatNextrank;
 begin
   ReportCheat(90, 'NEXTRANK');
-  if (Galaxy <> nil) and (LocalPlayer <> nil) and (CurrentScreenId <> screenShip) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) and (CheatScreenId <> screenShip) then
   begin
-    if LocalPlayer.Rank <> 7 then
-      LocalPlayer.AddRankPoints(LocalPlayer.GetRankPointsToNextRank);
-    if LocalPlayer.PirateClanReal and (LocalPlayer.PirateRank <> 7) then
-      LocalPlayer.AddPirateRankPoints(LocalPlayer.GetPirateRankPointsToNextRank);
+    if CheatPlayer.Rank <> 7 then
+      CheatPlayer.AddRankPoints(CheatPlayer.GetRankPointsToNextRank);
+    if CheatPlayer.PirateClanReal and (CheatPlayer.PirateRank <> 7) then
+      CheatPlayer.AddPirateRankPoints(CheatPlayer.GetPirateRankPointsToNextRank);
   end;
-  if CurrentScreenId = screenRuinsTalk then
+  if CheatUi and (CheatScreenId = screenRuinsTalk) then
   begin
     RuinsTalkScreen.I_Start;
     RuinsTalkScreen.RestartTextPresentation;
@@ -510,22 +583,22 @@ var
   Item: TEquipment;
 begin
   if (Galaxy <> nil)
-      and (CurrentScreenId <> screenShip)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.IsOnPlanet then
+      and (CheatScreenId <> screenShip)
+      and (CheatPlayer <> nil)
+      and CheatPlayer.IsOnPlanet then
   begin
-    RestoreTemporaryShopStock;
+    RestoreTemporaryShopStock(CheatHuman);
     Item := TWeapon.Create;
-    LocalPlayer.CurrentPlanet.EquipmentShop.Add(Item);
+    CheatPlayer.CurrentPlanet.EquipmentShop.Add(Item);
     (Item as TWeapon)
         .Init(
             TItemType(GameRandomIntRange(58, 61)),
             GameRandomIntRange(50, 100),
             GameRandomIntRange(4, 8),
-            RaceToOwner(LocalPlayer.CurrentPlanet.RaceId));
+            RaceToOwner(CheatPlayer.CurrentPlanet.RaceId));
     (Item as TWeapon).Improve(ikAny);
-    BuildTemporaryShopSlotGrid;
-    if CurrentScreenId = screenEquipmentShop then
+    BuildTemporaryShopSlotGrid(CheatHuman);
+    if CheatUi and (CheatScreenId = screenEquipmentShop) then
     begin
       EquipmentShopScreen.BuildGoodsControls;
       EquipmentShopScreen.UpdateScrollButtons;
@@ -541,25 +614,25 @@ var
   Info: PWeaponInfo;
 begin
   if (Galaxy <> nil)
-      and (CurrentScreenId <> screenShip)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.IsOnPlanet then
+      and (CheatScreenId <> screenShip)
+      and (CheatPlayer <> nil)
+      and CheatPlayer.IsOnPlanet then
   begin
-    RestoreTemporaryShopStock;
+    RestoreTemporaryShopStock(CheatHuman);
     Info := Galaxy.SelectWeaponInfo(GameRandomIntRange(1, 100000), [0], 8, 1);
     Item :=
         CreateGeneratedWeapon(
             Info,
             GameRandomIntRange(14, 200),
             GameRandomIntRange(1, 8),
-            RaceToOwner(LocalPlayer.CurrentPlanet.RaceId)
+            RaceToOwner(CheatPlayer.CurrentPlanet.RaceId)
         );
-    LocalPlayer.CurrentPlanet.EquipmentShop.Add(Item);
+    CheatPlayer.CurrentPlanet.EquipmentShop.Add(Item);
     Item.Cost := GameRandomIntRange(1, 10);
     if Item.Weight > 100 then
       Item.Improve(ikMajor);
-    BuildTemporaryShopSlotGrid;
-    if CurrentScreenId = screenEquipmentShop then
+    BuildTemporaryShopSlotGrid(CheatHuman);
+    if CheatUi and (CheatScreenId = screenEquipmentShop) then
     begin
       EquipmentShopScreen.BuildGoodsControls;
       EquipmentShopScreen.UpdateScrollButtons;
@@ -573,35 +646,36 @@ var
   Item: TArtefact;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.InNormalSpace
-      and (CurrentScreenId = screenStarMap)
-      and (StarMapScreen.Mode = smmOrders) then
+      and (CheatPlayer <> nil)
+      and CheatPlayer.InNormalSpace
+      and (CheatScreenId = screenStarMap)
+      and (CheatStarMapMode = smmOrders) then
   begin
     Item := TArtefact.Create;
-    Item.Init(LocalPlayer.HomePlanet.OwnerId, t_ArtefactBomb);
-    LocalPlayer.Artefacts.Add(Item);
+    Item.Init(CheatPlayer.HomePlanet.OwnerId, t_ArtefactBomb);
+    CheatPlayer.Artefacts.Add(Item);
     Item := TArtefact.Create;
-    Item.Init(LocalPlayer.HomePlanet.OwnerId, t_ArtefactBomb);
-    LocalPlayer.Artefacts.Add(Item);
-    LocalPlayer.RefreshDerivedStats(True);
-    StarMapScreen.MainPanel.RefreshMoneyAndCargo;
+    Item.Init(CheatPlayer.HomePlanet.OwnerId, t_ArtefactBomb);
+    CheatPlayer.Artefacts.Add(Item);
+    CheatPlayer.RefreshDerivedStats(True);
+    if CheatUi then
+      StarMapScreen.MainPanel.RefreshMoneyAndCargo;
     ReportCheat(60, 'BOMB');
   end;
 end;
 
 procedure CheatRobotforce;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) and not LocalPlayer.InHyperspace then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) and not CheatPlayer.InHyperspace then
   begin
-    LocalPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 0));
-    LocalPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 1));
-    LocalPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 2));
-    LocalPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 3));
-    LocalPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 4));
-    LocalPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 6));
-    LocalPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 7));
-    LocalPlayer.RefreshDerivedStats(True);
+    CheatPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 0));
+    CheatPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 1));
+    CheatPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 2));
+    CheatPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 3));
+    CheatPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 4));
+    CheatPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 6));
+    CheatPlayer.Artefacts.Add(CreateConfiguredArtefactByItemType(t_ArtefactTranclucator, 7));
+    CheatPlayer.RefreshDerivedStats(True);
     ReportCheat(60, 'ROBOTFORCE');
   end;
 end;
@@ -611,47 +685,48 @@ procedure CheatArtefact;
 var
   Item: TItem;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) and (CurrentScreenId = screenArcadeBattle) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) and (CheatScreenId = screenArcadeBattle) then
   begin
     Item :=
         CreateRandomLootItem(
             ilpAnyAvailable,
-            RaceToOwner(LocalPlayer.HomePlanet.RaceId),
+            RaceToOwner(CheatPlayer.HomePlanet.RaceId),
             GameRandomIntRange(1, 1000000000)
         );
     if Item is TArtefact then
-      LocalPlayer.Artefacts.Add(Item)
+      CheatPlayer.Artefacts.Add(Item)
     else
-      LocalPlayer.Inventory.Add(Item);
-    LocalPlayer.RefreshDerivedStats(True);
+      CheatPlayer.Inventory.Add(Item);
+    CheatPlayer.RefreshDerivedStats(True);
     ReportCheat(40, 'ARTEFACT');
   end;
 end;
 
 procedure CheatMoney;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
-    if (LocalPlayer.InNormalSpace
-            and (CurrentScreenId = screenStarMap)
-            and (StarMapScreen.Mode = smmOrders))
-        or (CurrentScreenId = screenPlanet)
-        or (CurrentScreenId = screenPlanetNO)
-        or (CurrentScreenId = screenGoodsShop)
-        or (CurrentScreenId = screenEquipmentShop) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
+    if (CheatPlayer.InNormalSpace
+            and (CheatScreenId = screenStarMap)
+            and (CheatStarMapMode = smmOrders))
+        or (CheatScreenId = screenPlanet)
+        or (CheatScreenId = screenPlanetNO)
+        or (CheatScreenId = screenGoodsShop)
+        or (CheatScreenId = screenEquipmentShop) then
     begin
-      LocalPlayer.SetMoney(LocalPlayer.Money + 10000);
-      if CurrentScreenId = screenStarMap then
+      CheatPlayer.SetMoney(CheatPlayer.Money + 10000);
+      if not CheatUi then
+      else if CheatScreenId = screenStarMap then
         StarMapScreen.MainPanel.RefreshMoneyAndCargo
-      else if CurrentScreenId = screenPlanet then
+      else if CheatScreenId = screenPlanet then
         PlanetScreen.MainPanel.RefreshMoneyAndCargo
-      else if CurrentScreenId = screenPlanetNO then
+      else if CheatScreenId = screenPlanetNO then
         UninhabitedPlanetScreen.MainPanel.RefreshMoneyAndCargo
-      else if CurrentScreenId = screenGoodsShop then
+      else if CheatScreenId = screenGoodsShop then
       begin
         GoodsShopScreen.MainPanel.RefreshMoneyAndCargo;
         GoodsShopScreen.RefreshGoodsDisplay;
       end
-      else if CurrentScreenId = screenEquipmentShop then
+      else if CheatScreenId = screenEquipmentShop then
         EquipmentShopScreen.MainPanel.RefreshMoneyAndCargo;
       ReportCheat(40, 'MONEY');
     end;
@@ -665,24 +740,24 @@ var
   Item: TEquipment;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.InNormalSpace
-      and (CurrentScreenId = screenStarMap)
-      and (StarMapScreen.Mode = smmOrders) then
+      and (CheatPlayer <> nil)
+      and CheatPlayer.InNormalSpace
+      and (CheatScreenId = screenStarMap)
+      and (CheatStarMapMode = smmOrders) then
   begin
     BestDistance := 1.0e30;
     Nearest := nil;
-    for I := 0 to LocalPlayer.CurrentStar.Ships.Count - 1 do
+    for I := 0 to CheatPlayer.CurrentStar.Ships.Count - 1 do
     begin
-      Ship := TShip(LocalPlayer.CurrentStar.Ships[I]);
-      if (LocalPlayer <> Ship)
+      Ship := TShip(CheatPlayer.CurrentStar.Ships[I]);
+      if (CheatPlayer <> Ship)
           and (BlazerShip <> Ship)
           and (KellerShip <> Ship)
           and (TerronShip <> Ship)
           and (Ship.TypeId in [stKling..stWarrior])
           and not Ship.IsOutsideStarSpace then
       begin
-        Distance := PointDistanceSquared(Ship.Position, LocalPlayer.Position);
+        Distance := PointDistanceSquared(Ship.Position, CheatPlayer.Position);
         if Distance < BestDistance then
         begin
           BestDistance := Distance;
@@ -713,26 +788,27 @@ var
   I: Integer;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and not LocalPlayer.InHyperspace
-      and ((CurrentScreenId <> screenStarMap) or (StarMapScreen.Mode = smmOrders)) then
+      and (CheatPlayer <> nil)
+      and not CheatPlayer.InHyperspace
+      and ((CheatScreenId <> screenStarMap) or (CheatStarMapMode = smmOrders)) then
   begin
-    for I := 1 to LocalPlayer.Inventory.Count - 1 do
+    for I := 1 to CheatPlayer.Inventory.Count - 1 do
     begin
-      Item := TItem(LocalPlayer.Inventory[I]);
+      Item := TItem(CheatPlayer.Inventory[I]);
       if Item.ItemType <> t_Hull then
         Item.Weight := Max(1, Item.Weight div 2);
     end;
-    for I := 0 to LocalPlayer.Artefacts.Count - 1 do
+    for I := 0 to CheatPlayer.Artefacts.Count - 1 do
     begin
-      Item := TItem(LocalPlayer.Artefacts[I]);
+      Item := TItem(CheatPlayer.Artefacts[I]);
       if Item.ItemType = t_ArtefactTranclucator then
         TTranclucator((Item as TArtefactTranclucator).Ship).ArtefactSize :=
             Max(1, Item.Weight div 2);
       Item.Weight := Max(1, Item.Weight div 2);
     end;
-    LocalPlayer.RefreshDerivedStats(True);
-    StarMapScreen.MainPanel.RefreshMoneyAndCargo;
+    CheatPlayer.RefreshDerivedStats(True);
+    if CheatUi then
+      StarMapScreen.MainPanel.RefreshMoneyAndCargo;
     ReportCheat(300, 'PACKING');
   end;
 end;
@@ -744,10 +820,10 @@ var
   Info: PWeaponInfo;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.IsDockedToShip
-      and (CurrentScreenId <> screenShip)
-      and (LocalPlayer.DockedTo.TypeId = Byte(rstScienceBase)) then
+      and (CheatPlayer <> nil)
+      and CheatPlayer.IsDockedToShip
+      and (CheatScreenId <> screenShip)
+      and (CheatPlayer.DockedTo.TypeId = Byte(rstScienceBase)) then
   begin
     Info := Galaxy.SelectWeaponInfo(GameRandomIntRange(1, 100000), [4], 8, 1);
     Item := CreateGeneratedWeapon(Info, GameRandomIntRange(77, 200), GameRandomIntRange(1, 8), 5);
@@ -756,18 +832,19 @@ begin
       2: Item.DominatorSeries := dsKeller;
       3: Item.DominatorSeries := dsTerron;
     end;
-    LocalPlayer.Inventory.Add(Item);
-    LocalPlayer.RefreshDerivedStats(True);
-    if CurrentScreenId = screenRuinsTalk then
+    CheatPlayer.Inventory.Add(Item);
+    CheatPlayer.RefreshDerivedStats(True);
+    if not CheatUi then
+    else if CheatScreenId = screenRuinsTalk then
       StarMapScreen.MainPanel.RefreshMoneyAndCargo
-    else if CurrentScreenId = screenGoodsShop then
+    else if CheatScreenId = screenGoodsShop then
     begin
       GoodsShopScreen.MainPanel.RefreshMoneyAndCargo;
       GoodsShopScreen.RefreshGoodsDisplay;
     end
-    else if CurrentScreenId = screenEquipmentShop then
+    else if CheatScreenId = screenEquipmentShop then
       EquipmentShopScreen.MainPanel.RefreshMoneyAndCargo
-    else if CurrentScreenId = screenInfo then
+    else if CheatScreenId = screenInfo then
       InfoScreen.MainPanel.RefreshMoneyAndCargo;
     ReportCheat(160, 'KLISSANITEM');
   end;
@@ -781,10 +858,10 @@ var
   Ship: TShip;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.IsDockedToShip
-      and (CurrentScreenId <> screenShip)
-      and (LocalPlayer.DockedTo.TypeId = Byte(rstPirateBase)) then
+      and (CheatPlayer <> nil)
+      and CheatPlayer.IsDockedToShip
+      and (CheatScreenId <> screenShip)
+      and (CheatPlayer.DockedTo.TypeId = Byte(rstPirateBase)) then
   begin
     for I := 0 to Galaxy.Stars.Count - 1 do
     begin
@@ -794,11 +871,11 @@ begin
         Ship := TShip(Star.Ships[J]);
         if not (Ship.TypeId in [stKling, stTranclucator..Ord(rstCustomStation)]) then
           if not ((Ship.TypeId = stPirate)
-              or (LocalPlayer = Ship)
+              or (CheatPlayer = Ship)
               or ((Ship.TypeId = stRanger) and ((Ship as TRanger).PreferredCareer = rcPirate))) then
           begin
-            if LocalPlayer <> Ship.PartnerShip then
-              Ship.ChangeRelationToRanger(LocalPlayer, -60);
+            if CheatPlayer <> Ship.PartnerShip then
+              Ship.ChangeRelationToRanger(CheatPlayer, -60);
           end
           else
           begin
@@ -806,25 +883,26 @@ begin
             begin
               Ship.Weapons[K].MaxDamage :=
                   Min(255, Ship.Weapons[K].MaxDamage + GameRandomIntRange(10, 20));
-              if LocalPlayer <> Ship then
-                Ship.ChangeRelationToRanger(LocalPlayer, 50);
+              if CheatPlayer <> Ship then
+                Ship.ChangeRelationToRanger(CheatPlayer, 50);
             end;
             Ship.RefreshDerivedStats(True);
           end;
       end;
     end;
-    LocalPlayer.CareerStatus[Ord(rcPirate)] := 100;
-    LocalPlayer.ChangePlanetRelations(nil, rcmDecrease, 60, [0, 2, 3, 4]);
-    if CurrentScreenId = screenRuinsTalk then
+    CheatPlayer.CareerStatus[Ord(rcPirate)] := 100;
+    CheatPlayer.ChangePlanetRelations(nil, rcmDecrease, 60, [0, 2, 3, 4]);
+    if not CheatUi then
+    else if CheatScreenId = screenRuinsTalk then
       StarMapScreen.MainPanel.RefreshMoneyAndCargo
-    else if CurrentScreenId = screenGoodsShop then
+    else if CheatScreenId = screenGoodsShop then
     begin
       GoodsShopScreen.MainPanel.RefreshMoneyAndCargo;
       GoodsShopScreen.RefreshGoodsDisplay;
     end
-    else if CurrentScreenId = screenEquipmentShop then
+    else if CheatScreenId = screenEquipmentShop then
       EquipmentShopScreen.MainPanel.RefreshMoneyAndCargo
-    else if CurrentScreenId = screenInfo then
+    else if CheatScreenId = screenInfo then
       InfoScreen.MainPanel.RefreshMoneyAndCargo;
     ReportCheat(200, 'WEAPONSTRENGTH');
   end;
@@ -838,21 +916,22 @@ var
   I: Integer;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.InNormalSpace
-      and (CurrentScreenId = screenStarMap)
-      and (StarMapScreen.Mode = smmOrders) then
+      and (CheatPlayer <> nil)
+      and CheatPlayer.InNormalSpace
+      and (CheatScreenId = screenStarMap)
+      and (CheatStarMapMode = smmOrders) then
   begin
     for I := 0 to 9 do
     begin
       Item := TArtefact.Create;
-      Item.Init(LocalPlayer.HomePlanet.OwnerId, t_ArtefactBomb);
+      Item.Init(CheatPlayer.HomePlanet.OwnerId, t_ArtefactBomb);
       Radius := GameRandomIntRange(300, 700);
       Angle := HeadingDegreesToRadians(GameRandomIntRange(0, 360));
-      Item.Position.X := LocalPlayer.Position.X + Sin(Angle) * Radius;
-      Item.Position.Y := LocalPlayer.Position.Y - Cos(Angle) * Radius;
-      LocalPlayer.CurrentStar.Items.Add(Item);
-      Item.GetGraphObject.AttachToSpace(SpaceProcess.Space);
+      Item.Position.X := CheatPlayer.Position.X + Sin(Angle) * Radius;
+      Item.Position.Y := CheatPlayer.Position.Y - Cos(Angle) * Radius;
+      CheatPlayer.CurrentStar.Items.Add(Item);
+      if CheatStarShown(CheatPlayer.CurrentStar) then
+        Item.GetGraphObject.AttachToSpace(SpaceProcess.Space);
       Item.DestroyFlag := 2;
     end;
     ReportCheat(140, 'TENBOMB');
@@ -867,10 +946,10 @@ var
   X, Y: Single;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.InNormalSpace
-      and (CurrentScreenId = screenStarMap)
-      and (StarMapScreen.Mode = smmOrders) then
+      and (CheatPlayer <> nil)
+      and CheatPlayer.InNormalSpace
+      and (CheatScreenId = screenStarMap)
+      and (CheatStarMapMode = smmOrders) then
   begin
     Total := 0;
     while Total < 10000 do
@@ -887,10 +966,11 @@ begin
         X := GameRandomIntRange(-250, 250);
         Y := GameRandomIntRange(-250, 250);
       until (Sqr(X) + Sqr(Y) > Sqr(50)) and (Sqr(X) + Sqr(Y) < Sqr(250));
-      Item.Position.X := LocalPlayer.Position.X + X;
-      Item.Position.Y := LocalPlayer.Position.Y + Y;
-      LocalPlayer.CurrentStar.Items.Add(Item);
-      Item.GetGraphObject.AttachToSpace(SpaceProcess.Space);
+      Item.Position.X := CheatPlayer.Position.X + X;
+      Item.Position.Y := CheatPlayer.Position.Y + Y;
+      CheatPlayer.CurrentStar.Items.Add(Item);
+      if CheatStarShown(CheatPlayer.CurrentStar) then
+        Item.GetGraphObject.AttachToSpace(SpaceProcess.Space);
     end;
     ReportCheat(140, 'RANGERSDREAM');
   end;
@@ -905,14 +985,14 @@ var
   Kind: Byte;
   Kinds: TShipTypeMask; // Shared DCU set has the native word-aligned local layout.
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     TotalKinds := 7;
     Remaining := TotalKinds;
     Kinds := [6..12];
-    for I := 0 to LocalPlayer.CurrentStar.Ships.Count - 1 do
+    for I := 0 to CheatPlayer.CurrentStar.Ships.Count - 1 do
     begin
-      Ship := TShip(LocalPlayer.CurrentStar.Ships[I]);
+      Ship := TShip(CheatPlayer.CurrentStar.Ships[I]);
       if Ship is TRuins then
       begin
         Dec(Remaining);
@@ -930,7 +1010,7 @@ begin
           if I = Choice then
           begin
             Station := TRuins.Create;
-            Station.Init(TStationType(Kind), LocalPlayer.CurrentStar, '');
+            Station.Init(TStationType(Kind), CheatPlayer.CurrentStar, '');
             Break;
           end;
         end;
@@ -946,10 +1026,10 @@ var
   Constellation: TConstellation;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.IsDockedToShip
-      and (CurrentScreenId <> screenShip)
-      and (LocalPlayer.DockedTo.TypeId = Byte(rstPirateBase)) then
+      and (CheatPlayer <> nil)
+      and CheatPlayer.IsDockedToShip
+      and (CheatScreenId <> screenShip)
+      and (CheatPlayer.DockedTo.TypeId = Byte(rstPirateBase)) then
   begin
     I := 0;
     // Native search skips hidden sectors here, then randomly seeks a hidden one.
@@ -975,28 +1055,29 @@ end;
 
 procedure CheatHugemoney;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
-    if (LocalPlayer.InNormalSpace
-            and (CurrentScreenId = screenStarMap)
-            and (StarMapScreen.Mode = smmOrders))
-        or (CurrentScreenId = screenPlanet)
-        or (CurrentScreenId = screenPlanetNO)
-        or (CurrentScreenId = screenGoodsShop)
-        or (CurrentScreenId = screenEquipmentShop) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
+    if (CheatPlayer.InNormalSpace
+            and (CheatScreenId = screenStarMap)
+            and (CheatStarMapMode = smmOrders))
+        or (CheatScreenId = screenPlanet)
+        or (CheatScreenId = screenPlanetNO)
+        or (CheatScreenId = screenGoodsShop)
+        or (CheatScreenId = screenEquipmentShop) then
     begin
-      LocalPlayer.SetMoney((LocalPlayer.Money div 1000000 + 1) * 1000000);
-      if CurrentScreenId = screenStarMap then
+      CheatPlayer.SetMoney((CheatPlayer.Money div 1000000 + 1) * 1000000);
+      if not CheatUi then
+      else if CheatScreenId = screenStarMap then
         StarMapScreen.MainPanel.RefreshMoneyAndCargo
-      else if CurrentScreenId = screenPlanet then
+      else if CheatScreenId = screenPlanet then
         PlanetScreen.MainPanel.RefreshMoneyAndCargo
-      else if CurrentScreenId = screenPlanetNO then
+      else if CheatScreenId = screenPlanetNO then
         UninhabitedPlanetScreen.MainPanel.RefreshMoneyAndCargo
-      else if CurrentScreenId = screenGoodsShop then
+      else if CheatScreenId = screenGoodsShop then
       begin
         GoodsShopScreen.MainPanel.RefreshMoneyAndCargo;
         GoodsShopScreen.RefreshGoodsDisplay;
       end
-      else if CurrentScreenId = screenEquipmentShop then
+      else if CheatScreenId = screenEquipmentShop then
         EquipmentShopScreen.MainPanel.RefreshMoneyAndCargo;
       ReportCheat(300, 'HUGEMONEY');
     end;
@@ -1008,18 +1089,20 @@ var
   I: Integer;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.IsOnPlanet
-      and (LocalPlayer.CurrentPlanet.OwnerId = Byte(oiPeleng))
-      and (CurrentScreenId <> screenShip) then
+      and (CheatPlayer <> nil)
+      and CheatPlayer.IsOnPlanet
+      and (CheatPlayer.CurrentPlanet.OwnerId = Byte(oiPeleng))
+      and (CheatScreenId <> screenShip) then
   begin
-    for I := 0 to LocalHuman.TemporaryShopSlots.Count - 1 do
+    // CHANGE: BUGFIX - Another human's grid may be closed (nil) when its command runs here.
+    if CheatHuman.TemporaryShopSlots <> nil then
+    for I := 0 to CheatHuman.TemporaryShopSlots.Count - 1 do
     begin
-      Item := TShopSlot(LocalHuman.TemporaryShopSlots[I]).Item;
+      Item := TShopSlot(CheatHuman.TemporaryShopSlots[I]).Item;
       if (Item <> nil) and (Item is TWeapon) then
         (Item as TWeapon).Range := (Item as TWeapon).Range * 2;
     end;
-    LocalPlayer.ChangePlanetRelations(nil, rcmDecrease, 50, [0, 2, 3, 4]);
+    CheatPlayer.ChangePlanetRelations(nil, rcmDecrease, 50, [0, 2, 3, 4]);
     ReportCheat(100, 'PELENGSURPRISE');
   end;
 end;
@@ -1027,15 +1110,16 @@ end;
 procedure CheatSuperhull;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and not LocalPlayer.InHyperspace
-      and ((CurrentScreenId <> screenStarMap) or (StarMapScreen.Mode = smmOrders)) then
+      and (CheatPlayer <> nil)
+      and not CheatPlayer.InHyperspace
+      and ((CheatScreenId <> screenStarMap) or (CheatStarMapMode = smmOrders)) then
   begin
-    LocalPlayer.GetHull.Weight := Min(2000, Round(LocalPlayer.GetHull.Weight * 1.3));
-    LocalPlayer.GetHull.HullPoints := LocalPlayer.GetHull.Weight;
-    LocalPlayer.RefreshDerivedStats(True);
-    LocalPlayer.RefreshGraphicSize;
-    StarMapScreen.MainPanel.RefreshMoneyAndCargo;
+    CheatPlayer.GetHull.Weight := Min(2000, Round(CheatPlayer.GetHull.Weight * 1.3));
+    CheatPlayer.GetHull.HullPoints := CheatPlayer.GetHull.Weight;
+    CheatPlayer.RefreshDerivedStats(True);
+    CheatPlayer.RefreshGraphicSize;
+    if CheatUi then
+      StarMapScreen.MainPanel.RefreshMoneyAndCargo;
     ReportCheat(250, 'SUPERHULL');
   end;
 end;
@@ -1045,20 +1129,21 @@ var
   I: Integer;
   Ship: TShip;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
-    if (CurrentScreenId = screenArcadeBattle) and (KellerArcadeShip = nil) then
+    // The arcade battle exists only on the machine that plays it.
+    if CheatUi and (CheatScreenId = screenArcadeBattle) and (KellerArcadeShip = nil) then
       for I := PlayerArcadeShip.Enemies.Count - 1 downto 0 do
         TabHit(PlayerArcadeShip.Enemies[I])
             .ApplyDamage(
                 Round(TabHit(PlayerArcadeShip.Enemies[I]).Health * 2 / ShieldDamageScale),
                 nil,
                 False);
-    if CurrentScreenId = screenStarMap then
-      for I := 0 to LocalPlayer.CurrentStar.Ships.Count - 1 do
+    if CheatScreenId = screenStarMap then
+      for I := 0 to CheatPlayer.CurrentStar.Ships.Count - 1 do
       begin
-        Ship := TShip(LocalPlayer.CurrentStar.Ships[I]);
-        if (LocalPlayer <> Ship)
+        Ship := TShip(CheatPlayer.CurrentStar.Ships[I]);
+        if (CheatPlayer <> Ship)
             and not Ship.InHyperspace
             and ((Ship.CurrentPlanet = nil)
                 or (Ship.CurrentPlanet.OwnerId <> Byte(oiUninhabited))) then
@@ -1077,10 +1162,10 @@ var
   Ship: TShip;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.InNormalSpace
-      and (CurrentScreenId = screenStarMap)
-      and (StarMapScreen.Mode = smmOrders) then
+      and (CheatPlayer <> nil)
+      and CheatPlayer.InNormalSpace
+      and (CheatScreenId = screenStarMap)
+      and (CheatStarMapMode = smmOrders) then
   begin
     ReportCheat(10, 'HATERANGERS');
     for I := 0 to Galaxy.Rangers.Count - 1 do
@@ -1099,10 +1184,10 @@ var
   Planet: TPlanet;
 begin
   if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.IsDockedToShip
-      and (CurrentScreenId <> screenShip)
-      and (LocalPlayer.DockedTo.TypeId = Byte(rstPirateBase)) then
+      and (CheatPlayer <> nil)
+      and CheatPlayer.IsDockedToShip
+      and (CheatScreenId <> screenShip)
+      and (CheatPlayer.DockedTo.TypeId = Byte(rstPirateBase)) then
   begin
     for I := 0 to Galaxy.Stars.Count - 1 do
     begin
@@ -1131,17 +1216,17 @@ var
   I: Integer;
   Info: PWeaponInfo;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     for I := 1 to CountItemTypesInMask([Ord(t_Weapon1)..Ord(t_Weapon18)]) do
     begin
       Kind := GetItemTypeFromMask([Ord(t_Weapon1)..Ord(t_Weapon18)], I);
-      LocalPlayer.Inventory.Add(
+      CheatPlayer.Inventory.Add(
           CreateGeneratedEquipment(
               TItemType(Kind),
               Round(WeaponInfos[Kind].AverageSize * EquipmentSizeFactors[5]),
               Galaxy.TechLevel,
-              LocalPlayer.OwnerId
+              CheatPlayer.OwnerId
           )
       );
     end;
@@ -1149,12 +1234,12 @@ begin
     begin
       Info := Galaxy.CustomWeaponTypes[I];
       if Info.Availability <> waSystemOnly then
-        LocalPlayer.Inventory.Add(
+        CheatPlayer.Inventory.Add(
             CreateGeneratedWeapon(
                 Info,
                 Round(Info.AverageSize * EquipmentSizeFactors[5]),
                 Galaxy.TechLevel,
-                LocalPlayer.OwnerId
+                CheatPlayer.OwnerId
             )
         );
     end;
@@ -1167,12 +1252,12 @@ var
   Owner: Byte;
   Item: TEquipment;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     for Owner := 0 to 4 do
     begin
       Item := CreateGeneratedEquipment(t_Weapon14, 20, Galaxy.TechLevel, Owner);
-      LocalPlayer.Inventory.Add(Item);
+      CheatPlayer.Inventory.Add(Item);
     end;
     ReportCheat(10, 'VERTIX');
   end;
@@ -1182,15 +1267,15 @@ procedure CheatDevice;
 var
   Kind: Byte;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     for Kind := 43 to 49 do
-      LocalPlayer.Inventory.Add(
+      CheatPlayer.Inventory.Add(
           CreateGeneratedEquipment(
               TItemType(Kind),
               Round(GetAverageItemSize(Kind) * EquipmentSizeFactors[5]),
               8,
-              LocalPlayer.OwnerId
+              CheatPlayer.OwnerId
           )
       );
     ReportCheat(10, 'DEVICE');
@@ -1202,29 +1287,29 @@ var
   I: Integer;
   Item: TEquipment;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     for I := 0 to Length(ArtefactLootPools[3]) - 1 do
     begin
       Item :=
-          TObject(CreateConfiguredArtefactByItemType(ArtefactLootPools[3][I], LocalPlayer.OwnerId))
+          TObject(CreateConfiguredArtefactByItemType(ArtefactLootPools[3][I], CheatPlayer.OwnerId))
               as TEquipmentWithActCode;
-      LocalPlayer.Artefacts.Add(Item);
+      CheatPlayer.Artefacts.Add(Item);
     end;
     for I := 0 to Length(CustomArtefactLootPools[3]) - 1 do
     begin
       Item := TArtefactCustom.Create;
       Item.ConfigBlockName := CustomArtefactLootPools[3][I];
       TArtefactCustom(Item).LoadConfig(True);
-      TArtefact(Item).Init(LocalPlayer.OwnerId, Item.ItemType);
-      LocalPlayer.Artefacts.Add(Item);
+      TArtefact(Item).Init(CheatPlayer.OwnerId, Item.ItemType);
+      CheatPlayer.Artefacts.Add(Item);
     end;
     for I := 0 to Length(UselessItemLootPools[3]) - 1 do
     begin
       Item := TUselessItem.Create;
       TUselessItem(Item).Init(UselessItemLootPools[3][I], dsBlazer, 0, False);
-      Item.OwnerId := LocalPlayer.OwnerId;
-      LocalPlayer.Inventory.Add(Item);
+      Item.OwnerId := CheatPlayer.OwnerId;
+      CheatPlayer.Inventory.Add(Item);
     end;
     ReportCheat(10, 'ARTS');
   end;
@@ -1235,17 +1320,30 @@ var
   I: Integer;
   Item: TMicroModule;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     for I := 0 to MicroModuleTemplateCount - 1 do
       if not MicroModuleTemplates[I].SpecialOnly then
       begin
         Item := TMicroModule.Create;
         Item.Init(I);
-        LocalPlayer.Inventory.Add(Item);
+        CheatPlayer.Inventory.Add(Item);
       end;
     ReportCheat(10, 'MODULE');
   end;
+end;
+
+// CHANGE: ENHANCEMENT - The ship whose skills SKILL raises is the one the screen shows; the
+// command names it (CheatTargetShip).
+function SkillTargetShip: TShip;
+begin
+  Result := nil;
+  if GetInnermostScreenLoop = HangarScreen then
+    Result := HangarScreen.SelectedShip
+  else if GetInnermostScreenLoop = ScannerScreen then
+    Result := ScannerScreen.ShipToInspect
+  else if GetInnermostScreenLoop = ShipScreen then
+    Result := LocalHuman.PlayerHoldShip;
 end;
 
 procedure CheatSkill;
@@ -1253,21 +1351,16 @@ var
   I: Byte;
   Ship: TShip;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
-    Ship := nil;
-    if GetInnermostScreenLoop = HangarScreen then
-      Ship := HangarScreen.SelectedShip
-    else if GetInnermostScreenLoop = ScannerScreen then
-      Ship := ScannerScreen.ShipToInspect
-    else if GetInnermostScreenLoop = ShipScreen then
-      Ship := LocalHuman.PlayerHoldShip;
+    Ship := CheatTargetShip;
     if Ship = nil then
-      Ship := LocalPlayer;
+      Ship := CheatPlayer;
     ReportCheat(10, 'SKILL');
     for I := 0 to 5 do
       Ship.BaseSkills[I] := 6;
-    if GetInnermostScreenLoop = ScannerScreen then
+    if not CheatUi then
+    else if GetInnermostScreenLoop = ScannerScreen then
       ScannerScreen.CloseClicked(nil)
     else if GetInnermostScreenLoop = ShipScreen then
       ShipScreen.CloseClicked(nil);
@@ -1278,10 +1371,10 @@ procedure CheatProgram;
 var
   I: Byte;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     for I := Low(ProgramNames) to High(ProgramNames) do
-      LocalPlayer.ProgramCounts[I] := 100;
+      CheatPlayer.ProgramCounts[I] := 100;
     ReportCheat(10, 'PROGRAM');
   end;
 end;
@@ -1291,9 +1384,9 @@ var
   I: Integer;
   Player: TPlayer;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
-    Player := LocalPlayer;
+    Player := CheatPlayer;
     for I := 1 to 12 do
     begin
       Player.CaptainHealth[I].Progress := 100;
@@ -1309,9 +1402,9 @@ var
   I: Integer;
   Player: TPlayer;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
-    Player := LocalPlayer;
+    Player := CheatPlayer;
     for I := 13 to 24 do
     begin
       Player.CaptainHealth[I].Progress := 100;
@@ -1326,11 +1419,11 @@ procedure CheatIdeal;
 var
   I: Integer;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) and (LocalPlayer.GetHull <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) and (CheatPlayer.GetHull <> nil) then
     for I := 0 to HullSeriesCount - 1 do
       if HullSeriesDefinitions[I].SystemName = '99' then
       begin
-        LocalPlayer.GetHull.HullSeries := I;
+        CheatPlayer.GetHull.HullSeries := I;
         ReportCheat(10, 'IDEAL');
         Break;
       end;
@@ -1341,7 +1434,7 @@ var
   I: Integer;
   Constellation: TConstellation;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     for I := 0 to Galaxy.Constellations.Count - 1 do
     begin
@@ -1360,18 +1453,18 @@ var
   Award: Byte;
   Found: Boolean;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     ReportCheat(10, 'MEDAL');
     LastAward := StrToInt(AnsiString(LookupLocalizedTextByKey('Reward.Count'))) - 1;
-    if LocalPlayer.AwardIds = nil then
-      LocalPlayer.AwardIds := TList.Create;
+    if CheatPlayer.AwardIds = nil then
+      CheatPlayer.AwardIds := TList.Create;
     for I := 0 to LastAward do
     begin
       Found := False;
-      for J := 0 to LocalPlayer.AwardIds.Count - 1 do
+      for J := 0 to CheatPlayer.AwardIds.Count - 1 do
       begin
-        Award := Byte(LocalPlayer.AwardIds[J]);
+        Award := Byte(CheatPlayer.AwardIds[J]);
         if Award = I then
         begin
           Found := True;
@@ -1379,7 +1472,7 @@ begin
         end;
       end;
       if not Found then
-        LocalPlayer.AddAward(I);
+        CheatPlayer.AddAward(I);
     end;
   end;
 end;
@@ -1388,7 +1481,7 @@ procedure SetCheatDominatorLevel(Level: Integer);
 var
   Name: WideString;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     case Level of
       1: Name := 'HORROR';
@@ -1400,7 +1493,8 @@ begin
     else
       Galaxy.DominatorModLevel := 0;
     ReportCheat(10, Name);
-    StarMapScreen.RefreshScoreModsLabel;
+    if CheatUi then
+      StarMapScreen.RefreshScoreModsLabel;
   end;
 end;
 
@@ -1421,51 +1515,51 @@ end;
 
 procedure CheatTechnic;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     if Galaxy.TechnicModEnabled <> 1 then
       Galaxy.TechnicModEnabled := 1
     else
       Galaxy.TechnicModEnabled := 0;
     ReportCheat(10, 'TECHNIC');
-    StarMapScreen.RefreshScoreModsLabel;
+    if CheatUi then
+      StarMapScreen.RefreshScoreModsLabel;
   end;
 end;
 
 procedure CheatAmmo;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     if Galaxy.AmmoModEnabled <> 1 then
       Galaxy.AmmoModEnabled := 1
     else
       Galaxy.AmmoModEnabled := 0;
     ReportCheat(10, 'AMMO');
-    StarMapScreen.RefreshScoreModsLabel;
+    if CheatUi then
+      StarMapScreen.RefreshScoreModsLabel;
   end;
 end;
 
 procedure CheatGod;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) and (Galaxy.GodModEnabled in [0, 1]) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) and (Galaxy.GodModEnabled in [0, 1]) then
   begin
     Galaxy.GodModEnabled := 1 - Galaxy.GodModEnabled;
     ReportCheat(10, 'GOD');
-    StarMapScreen.RefreshScoreModsLabel;
+    if CheatUi then
+      StarMapScreen.RefreshScoreModsLabel;
   end;
 end;
 
 // CHANGE: BUGFIX - Draw from the simulation stream, not the shared presentation one.
-procedure CheatHole;
+// CHANGE: ENHANCEMENT - HOLE is split at its dialog: the screen asks for the map
+// (ChooseCheatHoleMap) and closes after the command (CloseAfterCheatHole); the command, which
+// names the map by its index in this list, makes the hole (CheatHole).
+procedure AddCheatHoleMapNames(Items: TList);
 var
-  Items: TList;
   Index, Count: Integer;
-  Hole: THole;
-  Angle, Radius: Single;
-  MapName: WideString;
-  Parent: TMessageLoopGI;
   Block: TBlockParEC;
-  Event: TGalaxyEvent;
   procedure CheatHoleAddName(
       Text: WideString
   ); // @addr $50ABE4 @ida "void __usercall $name(unsigned __int16 *Text@<eax>, void *ParentFrame@<^0>);" @stackpop 0 @calls "0x50AD41 0x50AD4F" @note "Nested in CheatHole; appends an owned PWideString to the list at ParentFrame-4. Caller removes the static link."
@@ -1477,42 +1571,92 @@ var
     Items.Add(Cell);
   end;
 begin
-  if (Galaxy <> nil)
-      and (LocalPlayer <> nil)
-      and LocalPlayer.InNormalSpace
-      and (CurrentScreenId = screenStarMap)
-      and (StarMapScreen.Mode = smmOrders) then
+  Block := GameDataConfig.GetBlock('ABMap');
+  Count := Block.GetBlockCount;
+  for Index := 0 to Count do
+    if Index < Count then
+      CheatHoleAddName(Block.GetBlockByIndex(Index).GetParam('Path'))
+    else
+      CheatHoleAddName('ABMap.map_boss');
+end;
+
+procedure FreeCheatHoleMapNames(Items: TList);
+begin
+  while Items.Count > 0 do
   begin
-    Parent := TObject(RegisteredScreens[Ord(CurrentScreenId)]) as TMessageLoopGI;
+    // Native cleanup frees only the cell, leaving its string allocation intact.
+    Dispose(Pointer(Items[0]));
+    Items.Delete(0);
+  end;
+  Items.Free;
+end;
+
+function CheatHoleScreenReady: Boolean;
+begin
+  Result :=
+      (Galaxy <> nil)
+          and (CheatPlayer <> nil)
+          and CheatPlayer.InNormalSpace
+          and (CheatScreenId = screenStarMap)
+          and (CheatStarMapMode = smmOrders);
+end;
+
+function ChooseCheatHoleMap(var Index: Integer): Boolean;
+var
+  Items: TList;
+  Parent: TMessageLoopGI;
+begin
+  Parent := TObject(RegisteredScreens[Ord(CheatScreenId)]) as TMessageLoopGI;
+  Items := TList.Create;
+  AddCheatHoleMapNames(Items);
+  Result := ShowListDialog(Parent, Index, LocalizedColorText('Cheat.SelectABMap'), Items, 0, 0) = 1;
+  FreeCheatHoleMapNames(Items);
+end;
+
+procedure CloseAfterCheatHole;
+begin
+  RequestedScreenId := CheatScreenId;
+  (TObject(RegisteredScreens[Ord(CheatScreenId)]) as TMessageLoopGI).RequestClose(1);
+end;
+
+procedure CheatHole;
+var
+  Items: TList;
+  Hole: THole;
+  Angle, Radius: Single;
+  MapName: WideString;
+  Event: TGalaxyEvent;
+begin
+  if CheatHoleScreenReady then
+  begin
     Items := TList.Create;
-    Block := GameDataConfig.GetBlock('ABMap');
-    Count := Block.GetBlockCount;
-    for Index := 0 to Count do
-      if Index < Count then
-        CheatHoleAddName(Block.GetBlockByIndex(Index).GetParam('Path'))
-      else
-        CheatHoleAddName('ABMap.map_boss');
-    if ShowListDialog(Parent, Index, LocalizedColorText('Cheat.SelectABMap'), Items, 0, 0) = 1 then
+    AddCheatHoleMapNames(Items);
+    if (CheatHoleMapIndex >= 0) and (CheatHoleMapIndex < Items.Count) then
     begin
-      MapName := PWideString(Items[Index])^;
+      MapName := PWideString(Items[CheatHoleMapIndex])^;
       AddCheatPoints(10);
       if Galaxy <> nil then
       begin
         Event := AddGalaxyEvent('PlayerEntersCheatCode');
         Event.AddTextData('Hole');
         Event.AddData(10);
+        if CheatHuman <> nil then
+        begin
+          Event.HumanId := CheatHuman.Id;
+          CheatHuman.RecordCheat(CheatName, 10);
+        end;
       end;
       Hole := THole.Create;
       Hole.InitializeGraphic('');
       THoleSE(Hole.Graphic).SetState(1);
-      Hole.Star1 := LocalPlayer.CurrentStar;
-      Hole.Star2 := LocalPlayer.CurrentStar;
+      Hole.Star1 := CheatPlayer.CurrentStar;
+      Hole.Star2 := CheatPlayer.CurrentStar;
       Hole.ArcadeMapName := MapName;
-      Angle := ArcTan2(LocalPlayer.Position.X, -LocalPlayer.Position.Y);
+      Angle := ArcTan2(CheatPlayer.Position.X, -CheatPlayer.Position.Y);
       Radius :=
           Max(
-              LocalPlayer.CurrentStar.SafeRadius + 100,
-              Sqrt(PointDistanceSquared(LocalPlayer.Position, MakePointF(0, 0))) + 200
+              CheatPlayer.CurrentStar.SafeRadius + 100,
+              Sqrt(PointDistanceSquared(CheatPlayer.Position, MakePointF(0, 0))) + 200
           );
       Hole.Position1 := MakePointF(Sin(Angle) * Radius, -Cos(Angle) * Radius);
       Angle := HeadingDegreesToRadians(GameRandomIntRange(0, 359));
@@ -1520,30 +1664,23 @@ begin
       Hole.Position2 := MakePointF(Sin(Angle) * Radius, -Cos(Angle) * Radius);
       Hole.CreatedTurn := Galaxy.CurrentTurn;
       Hole.HoleType := 1;
-      StarMapScreen.PendingHoleRefresh := Hole;
+      if CheatStarShown(Hole.Star1) then
+        StarMapScreen.PendingHoleRefresh := Hole;
       Galaxy.Holes.Add(Hole);
     end;
-    while Items.Count > 0 do
-    begin
-      // Native cleanup frees only the cell, leaving its string allocation intact.
-      Dispose(Pointer(Items[0]));
-      Items.Delete(0);
-    end;
-    Items.Free;
-    RequestedScreenId := CurrentScreenId;
-    Parent.RequestClose(1);
+    FreeCheatHoleMapNames(Items);
   end;
 end;
 
 procedure CheatWin;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) and (CurrentScreenId <> screenArcadeBattle) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) and (CheatScreenId <> screenArcadeBattle) then
   begin
     AddCheatPoints(10);
     ScoreScreen.RecordPlayerResult(True);
     AboutScreen.ReturnToScores := True;
     RequestedScreenId := screenAbout;
-    (TObject(RegisteredScreens[Ord(CurrentScreenId)]) as TMessageLoopGI).RequestClose(1);
+    (TObject(RegisteredScreens[Ord(CheatScreenId)]) as TMessageLoopGI).RequestClose(1);
   end;
 end;
 
@@ -1552,11 +1689,11 @@ var
   I: Integer;
   Item: TEquipment;
 begin
-  if LocalPlayer <> nil then
+  if CheatPlayer <> nil then
   begin
-    for I := 0 to LocalPlayer.Inventory.Count - 1 do
+    for I := 0 to CheatPlayer.Inventory.Count - 1 do
     begin
-      Item := TEquipment(LocalPlayer.Inventory[I]);
+      Item := TEquipment(CheatPlayer.Inventory[I]);
       if (Item.EquippedFlag <> 0) and (Item is TWeapon) then
         with Item as TWeapon do
         begin
@@ -1587,14 +1724,15 @@ end;
 
 procedure CheatUltrascan;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
     if Galaxy.UltraScanModEnabled <> 1 then
       Galaxy.UltraScanModEnabled := 1
     else
       Galaxy.UltraScanModEnabled := 0;
     ReportCheat(10, 'ULTRASCAN');
-    StarMapScreen.RefreshScoreModsLabel;
+    if CheatUi then
+      StarMapScreen.RefreshScoreModsLabel;
   end;
 end;
 
@@ -1603,16 +1741,16 @@ var
   I: Integer;
   Item: TArtefactTransmitter;
 begin
-  if LocalPlayer <> nil then
+  if CheatPlayer <> nil then
   begin
     for I := 1 to 10 do
     begin
       Item :=
           TArtefactTransmitter(
-              CreateConfiguredArtefactByItemType(t_ArtefactTransmitter, LocalPlayer.OwnerId)
+              CreateConfiguredArtefactByItemType(t_ArtefactTransmitter, CheatPlayer.OwnerId)
           );
       Item.Power := 100;
-      LocalPlayer.Artefacts.Add(Item);
+      CheatPlayer.Artefacts.Add(Item);
     end;
     ReportCheat(10, 'TENTM');
   end;
@@ -1623,11 +1761,11 @@ var
   I: Integer;
   Item: TArtefact;
 begin
-  if LocalPlayer <> nil then
+  if CheatPlayer <> nil then
   begin
-    for I := 0 to LocalPlayer.Artefacts.Count - 1 do
+    for I := 0 to CheatPlayer.Artefacts.Count - 1 do
     begin
-      Item := TArtefact(LocalPlayer.Artefacts[I]);
+      Item := TArtefact(CheatPlayer.Artefacts[I]);
       if (Item is TArtefactTransmitter) and (TArtefactTransmitter(Item).Power <= 1000) then
         Inc(TArtefactTransmitter(Item).Power, 100);
     end;
@@ -1637,9 +1775,9 @@ end;
 
 procedure CheatExpa;
 begin
-  if LocalPlayer <> nil then
+  if CheatPlayer <> nil then
   begin
-    Inc(LocalPlayer.FreeExperience, 1000000);
+    Inc(CheatPlayer.FreeExperience, 1000000);
     ReportCheat(10, 'EXPA');
   end;
 end;
@@ -1649,12 +1787,12 @@ var
   I: Integer;
   Item: TEquipment;
 begin
-  if LocalPlayer <> nil then
+  if CheatPlayer <> nil then
   begin
     // The native loop deliberately starts at one.
-    for I := 1 to LocalPlayer.Inventory.Count - 1 do
+    for I := 1 to CheatPlayer.Inventory.Count - 1 do
     begin
-      Item := TEquipment(LocalPlayer.Inventory[I]);
+      Item := TEquipment(CheatPlayer.Inventory[I]);
       if Item.EquippedFlag <> 0 then
         Item.OwnerId := Byte(oiUninhabited);
     end;
@@ -1664,23 +1802,28 @@ end;
 
 procedure CheatZawarudo;
 begin
-  if LocalPlayer <> nil then
+  if CheatPlayer <> nil then
   begin
     if Galaxy.StasisModEnabled <> 1 then
       Galaxy.StasisModEnabled := 1
     else
       Galaxy.StasisModEnabled := 0;
     ReportCheat(10, 'ZAWARUDO');
-    StarMapScreen.RefreshScoreModsLabel;
+    if CheatUi then
+      StarMapScreen.RefreshScoreModsLabel;
   end;
 end;
 
+// CHANGE: ENHANCEMENT - The bubble is the cheat's actor's (a bubble is its human's state).
 procedure ShowCheatFeedback(Text: WideString);
 begin
   if Galaxy = nil then
-    ShowMessageBoxGI(nil, Text, mbgOK)
-  else
-    AddOrUpdatePlayerBubble(0, Galaxy.CurrentTurn, Text, '');
+  begin
+    if CheatUi then
+      ShowMessageBoxGI(nil, Text, mbgOK);
+  end
+  else if CheatHuman <> nil then
+    CheatHuman.AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
 end;
 
 function IsCheatMessageBoxOpen: Boolean;
@@ -1700,6 +1843,224 @@ begin
   end;
 end;
 
+function CheatsAllowedNow: Boolean;
+begin
+  Result :=
+      ((Galaxy = nil) or not Galaxy.CheatsDisabled)
+          and (not IsMultiplayer or Session.CheatsAllowed);
+end;
+
+function NewCheatCommand(const Name: WideString): TPlayerCommand;
+begin
+  Result := NewCommand(ckCheat);
+  Result.Text := Name;
+  AddInt(Result, Ord(CurrentScreenId));
+  if StarMapScreen <> nil then
+    AddInt(Result, Ord(StarMapScreen.Mode))
+  else
+    AddInt(Result, Ord(smmInactive));
+end;
+
+// The codes that change no galaxy, or leave it (WIN), run on this machine only, as before.
+function IsLocalCheat(const Name: WideString): Boolean;
+begin
+  Result :=
+      (Name = 'MAKEDUMP')
+          or (Name = 'SEED')
+          or (Name = 'EVENTS')
+          or (Name = 'INFOS')
+          or (Name = 'WIN')
+          or (Name = 'SUDO');
+end;
+
+type
+  TCheatContext = record
+    Player: TPlayer;
+    Human: THuman;
+    ScreenId: TGameScreenId;
+    StarMapMode: TStarMapMode;
+    Name: WideString;
+    Ui: Boolean;
+    TargetShip: TShip;
+    HoleMapIndex: Integer;
+  end;
+
+function SaveCheatContext: TCheatContext;
+begin
+  Result.Player := CheatPlayer;
+  Result.Human := CheatHuman;
+  Result.ScreenId := CheatScreenId;
+  Result.StarMapMode := CheatStarMapMode;
+  Result.Name := CheatName;
+  Result.Ui := CheatUi;
+  Result.TargetShip := CheatTargetShip;
+  Result.HoleMapIndex := CheatHoleMapIndex;
+end;
+
+procedure RestoreCheatContext(const Context: TCheatContext);
+begin
+  CheatPlayer := Context.Player;
+  CheatHuman := Context.Human;
+  CheatScreenId := Context.ScreenId;
+  CheatStarMapMode := Context.StarMapMode;
+  CheatName := Context.Name;
+  CheatUi := Context.Ui;
+  CheatTargetShip := Context.TargetShip;
+  CheatHoleMapIndex := Context.HoleMapIndex;
+end;
+
+// This machine's human and screen, for the codes that run here and for the screen's part of
+// the others.
+procedure SetLocalCheatContext(const Name: WideString);
+begin
+  CheatPlayer := LocalPlayer;
+  CheatHuman := LocalHuman;
+  CheatScreenId := CurrentScreenId;
+  if StarMapScreen <> nil then
+    CheatStarMapMode := StarMapScreen.Mode
+  else
+    CheatStarMapMode := smmInactive;
+  CheatName := Name;
+  CheatUi := True;
+  CheatTargetShip := nil;
+  CheatHoleMapIndex := -1;
+end;
+
+function FindCheat(const Name: WideString): Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to CheatEntries.Count - 1 do
+    if CheatEntries.GetEntry(I).Text = Name then
+      Exit(I);
+  Result := -1;
+end;
+
+// CHANGE: ENHANCEMENT - What a matched code does on the machine where it was typed: a local
+// code runs here; the others go as a Cheat command, then show their message box.
+procedure EnterCheat(Index: Integer);
+var
+  Name: WideString;
+  Command: TPlayerCommand;
+  Saved: TCheatContext;
+  MapIndex: Integer;
+  HoleScreen: Boolean;
+begin
+  Name := CheatEntries.GetEntry(Index).Text;
+  Saved := SaveCheatContext;
+  try
+    SetLocalCheatContext(Name);
+    if IsLocalCheat(Name) then
+    begin
+      // Saving and winning are the whole session's, not one human's.
+      if IsMultiplayer and ((Name = 'MAKEDUMP') or (Name = 'WIN')) then
+        Exit;
+      CheatEntries.GetEntry(Index).Callback;
+      Exit;
+    end;
+    if (Galaxy = nil) or (LocalPlayer = nil) then
+      Exit;
+    Command := NewCheatCommand(Name);
+    HoleScreen := False;
+    if Name = 'HOLE' then
+    begin
+      HoleScreen := CheatHoleScreenReady;
+      if not HoleScreen then
+        Exit;
+      MapIndex := 0;
+      if not ChooseCheatHoleMap(MapIndex) then
+      begin
+        CloseAfterCheatHole;
+        Exit;
+      end;
+      AddInt(Command, MapIndex);
+    end
+    else if Name = 'SKILL' then
+      AddRef(Command, SkillTargetShip);
+    PendingCheatReportSet := False;
+    CheatSubmitting := True;
+    try
+      try
+        SubmitCommand(Command);
+      except
+        // In multiplayer the host's flag may have turned cheats off meanwhile.
+        on E: ECommandRefused do
+          PendingCheatReportSet := False;
+      end;
+    finally
+      CheatSubmitting := False;
+    end;
+    SetLocalCheatContext(Name);
+    if HoleScreen then
+      CloseAfterCheatHole;
+    ShowPendingCheatReport;
+  finally
+    RestoreCheatContext(Saved);
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - A Cheat command: the code's procedure for the command's actor.
+procedure ExecuteCheat(const Command: TPlayerCommand);
+var
+  Index, ScreenValue, ModeValue: Integer;
+  Saved: TCheatContext;
+begin
+  if not CheatsAllowedNow then
+    raise ECommandRefused.CreateReason(rrOther, 'Cheats are off in this game');
+  Index := FindCheat(Command.Text);
+  if (Index < 0) or IsLocalCheat(Command.Text) then
+    raise Exception.Create('Not a cheat command: ' + UTF8Encode(Command.Text));
+  ScreenValue := IntArg(Command, 0);
+  ModeValue := IntArg(Command, 1);
+  if (ScreenValue < Ord(Low(TGameScreenId))) or (ScreenValue > Ord(High(TGameScreenId)))
+      or (ModeValue < Ord(Low(TStarMapMode))) or (ModeValue > Ord(High(TStarMapMode))) then
+    raise Exception.Create('Cheat command with an unknown screen');
+  Saved := SaveCheatContext;
+  try
+    CheatPlayer := Actor(Command);
+    CheatHuman := ActorHuman(Command);
+    CheatScreenId := TGameScreenId(ScreenValue);
+    CheatStarMapMode := TStarMapMode(ModeValue);
+    CheatName := CheatEntries.GetEntry(Index).Text;
+    CheatUi := CheatSubmitting and (CheatHuman = LocalHuman);
+    CheatTargetShip := nil;
+    if Length(Command.Refs) > 0 then
+      CheatTargetShip := RefObject(Command, 0) as TShip;
+    CheatHoleMapIndex := -1;
+    if Length(Command.Ints) > 2 then
+      CheatHoleMapIndex := IntArg(Command, 2);
+    CheatEntries.GetEntry(Index).Callback;
+  finally
+    RestoreCheatContext(Saved);
+  end;
+end;
+
+function RunCheatScript(Value: WideString): WideString; forward;
+
+// CHANGE: ENHANCEMENT - A CheatScript command: SUDO's script command, for the command's actor.
+procedure ExecuteCheatScript(const Command: TPlayerCommand);
+var
+  Error: WideString;
+  Saved: TCheatContext;
+begin
+  if not CheatsAllowedNow then
+    raise ECommandRefused.CreateReason(rrOther, 'Cheats are off in this game');
+  Saved := SaveCheatContext;
+  try
+    CheatHuman := ActorHuman(Command);
+    CheatUi := CheatSubmitting and (CheatHuman = LocalHuman);
+    CheatHuman.RecordCheat('SUDO', 0);
+    Error := RunCheatScript(Command.Text);
+    if CheatUi and (Error <> '') then
+    begin
+      PendingCheatReport := Error;
+      PendingCheatReportSet := True;
+    end;
+  finally
+    RestoreCheatContext(Saved);
+  end;
+end;
+
 procedure HandleDebugKey(Key: Word);
   function SumCheatPrefix(
       Index,
@@ -1715,7 +2076,7 @@ procedure HandleDebugKey(Key: Word);
 begin
   if IsCheatMessageBoxOpen then
     Exit;
-  if (Galaxy <> nil) and Galaxy.CheatsDisabled then
+  if not CheatsAllowedNow then
     Exit;
   // The native subtract/test chain is DCC32 set membership, not a case statement.
   if not (Integer(TurnCalculationPhase) in [0, 2, 4, 6]) then
@@ -1740,7 +2101,7 @@ begin
   if Length(CheatEntries.GetEntry(CheatCandidateIndex).Text) = CheatPrefixLength then
   begin
     if CheatEntries.Count > CheatCandidateIndex then
-      CheatEntries.GetEntry(CheatCandidateIndex).Callback;
+      EnterCheat(CheatCandidateIndex);
     CheatCandidateIndex := 0;
     CheatPrefixLength := 0;
     CheatPrefixSum := 0;
@@ -1749,11 +2110,11 @@ end;
 
 procedure CheatMakedump;
 begin
-  if (LocalPlayer <> nil)
+  if (CheatPlayer <> nil)
       and not Galaxy.IronWill
-      and not LocalPlayer.InHyperspace
+      and not CheatPlayer.InHyperspace
       and (Galaxy.FinalizationName = '')
-      and (CurrentScreenId
+      and (CheatScreenId
           in [
               screenHangar,
               screenPlanet,
@@ -1764,17 +2125,17 @@ begin
               screenRuinsTalk,
               screenInfo,
               screenGoodsShop])
-      and (TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).ChildLoop = nil) then
+      and (TMessageLoopGI(RegisteredScreens[Ord(CheatScreenId)]).ChildLoop = nil) then
   begin
     aCalc.WaitForTurnCalculationUI;
     Galaxy.CampaignFlag183 := 1;
     CaptureSavePreview;
-    CaptureGalaxyPreview(TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]));
+    CaptureGalaxyPreview(TMessageLoopGI(RegisteredScreens[Ord(CheatScreenId)]));
     aCalc.WaitForTurnCalculationUI;
-    SaveManagerReturnScreenId := CurrentScreenId;
+    SaveManagerReturnScreenId := CheatScreenId;
     SaveManagerMode := smmSave;
     RequestedScreenId := screenSaveManager;
-    TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]).RequestClose(1);
+    TMessageLoopGI(RegisteredScreens[Ord(CheatScreenId)]).RequestClose(1);
   end;
 end;
 
@@ -1786,16 +2147,22 @@ var
   Path: WideString;
   Item: TEquipment;
 begin
-  if (Galaxy <> nil) and (LocalPlayer <> nil) then
+  if (Galaxy <> nil) and (CheatPlayer <> nil) then
   begin
+    // The file is the typing machine's; the other machines only record the cheat.
+    if not CheatUi then
+    begin
+      ReportCheat(0, 'FITNESS');
+      Exit;
+    end;
     FileName := GetGameUserDirectory + 'PlayerFit.txt';
     Block := TBlockParEC.Create;
     Number := 1;
     Block.AddParam('GameVersion', '2.1.2500');
-    Block.AddParam(LocalPlayer.GetLocalizedTypeName, LocalPlayer.GetName);
-    for Index := 0 to LocalPlayer.Inventory.Count - 1 do
+    Block.AddParam(CheatPlayer.GetLocalizedTypeName, CheatPlayer.GetName);
+    for Index := 0 to CheatPlayer.Inventory.Count - 1 do
     begin
-      Item := LocalPlayer.Inventory[Index];
+      Item := CheatPlayer.Inventory[Index];
       if (Item is THull) or (Item.EquippedFlag <> 0) then
       begin
         if Item is TWeapon then
@@ -1809,9 +2176,9 @@ begin
       end;
     end;
     Number := 1;
-    for Index := 0 to LocalPlayer.Artefacts.Count - 1 do
+    for Index := 0 to CheatPlayer.Artefacts.Count - 1 do
     begin
-      Item := LocalPlayer.Artefacts[Index];
+      Item := CheatPlayer.Artefacts[Index];
       if Item.EquippedFlag <> 0 then
       begin
         Path := 'Artefact' + IntToStr(Number);
@@ -1831,12 +2198,12 @@ var
   Good: Byte;
   Item: TEquipment;
 begin
-  if LocalPlayer <> nil then
+  if CheatPlayer <> nil then
   begin
-    Count := LocalPlayer.Inventory.Count;
+    Count := CheatPlayer.Inventory.Count;
     for I := 1 to Count - 1 do
     begin
-      Item := TEquipment(LocalPlayer.Inventory[I]);
+      Item := TEquipment(CheatPlayer.Inventory[I]);
       if (Item.EquippedFlag = 0) and (Item.ScriptItem = nil) and not (Item is TTreasureMap) then
       begin
         if Item is TCountableItem then
@@ -1848,47 +2215,40 @@ begin
         begin
           Item := TEquipment(Item.Clone);
           if Item <> nil then
-            LocalPlayer.Inventory.Add(Item);
+            CheatPlayer.Inventory.Add(Item);
         end;
       end;
     end;
-    Count := LocalPlayer.Artefacts.Count;
+    Count := CheatPlayer.Artefacts.Count;
     for I := 0 to Count - 1 do
     begin
-      Item := TEquipment(LocalPlayer.Artefacts[I]);
+      Item := TEquipment(CheatPlayer.Artefacts[I]);
       if (Item.EquippedFlag = 0) and (Item.ScriptItem = nil) then
       begin
         Item := TEquipment(Item.Clone);
         if Item <> nil then
-          LocalPlayer.Artefacts.Add(Item);
+          CheatPlayer.Artefacts.Add(Item);
       end;
     end;
     for Good := 0 to 7 do
-      LocalPlayer.CargoGoods[Good].Count := LocalPlayer.CargoGoods[Good].Count * 2;
-    LocalPlayer.RefreshDerivedStats(True);
+      CheatPlayer.CargoGoods[Good].Count := CheatPlayer.CargoGoods[Good].Count * 2;
+    CheatPlayer.RefreshDerivedStats(True);
     ReportCheat(10, 'EXTRAONE');
   end;
 end;
 
-procedure CheatSudo;
+// CHANGE: ENHANCEMENT - SUDO's script command runs as a CheatScript command once a game runs, so
+// that it changes the galaxy on every machine; its error shows on the machine that typed it.
+// Returns the error, or '' when the command ran.
+function RunCheatScript(Value: WideString): WideString;
 var
-  Value, ScriptName: WideString;
+  ScriptName: WideString;
   Quote: WideChar;
   Index, Count: Integer;
   Script: TScript;
   Found: Boolean;
 begin
-  if Galaxy <> nil then
-    aCalc.WaitForTurnCalculationUI;
-  Value := '';
-  if ShowTextInputDialog(
-          TObject(RegisteredScreens[Ord(CurrentScreenId)]) as TMessageLoopGI,
-          'Enter script command',
-          Value,
-          255,
-          0,
-          0)
-      = 1 then
+  Result := '';
     try
       Count := Length(Value);
       if Count > 0 then
@@ -1925,12 +2285,57 @@ begin
       end;
     except
       on E: Exception do
-        ShowMessageBoxGI(
-            TObject(RegisteredScreens[Ord(CurrentScreenId)]) as TMessageLoopGI,
-            E.Message,
-            mbgCancel
-        );
+        Result := WideString(E.Message);
     end;
+end;
+
+procedure CheatSudo;
+var
+  Value, Error: WideString;
+  Command: TPlayerCommand;
+begin
+  if Galaxy <> nil then
+    aCalc.WaitForTurnCalculationUI;
+  Value := '';
+  if ShowTextInputDialog(
+          TObject(RegisteredScreens[Ord(CheatScreenId)]) as TMessageLoopGI,
+          'Enter script command',
+          Value,
+          255,
+          0,
+          0)
+      = 1 then
+  begin
+    if (Galaxy <> nil) and (LocalPlayer <> nil) then
+    begin
+      Command := NewCommand(ckCheatScript);
+      Command.Text := Value;
+      PendingCheatReportSet := False;
+      CheatSubmitting := True;
+      try
+        try
+          SubmitCommand(Command);
+        except
+          on E: ECommandRefused do
+            ;
+        end;
+      finally
+        CheatSubmitting := False;
+      end;
+      Error := '';
+      if PendingCheatReportSet then
+        Error := PendingCheatReport;
+      PendingCheatReportSet := False;
+    end
+    else
+      Error := RunCheatScript(Value);
+    if Error <> '' then
+      ShowMessageBoxGI(
+          TObject(RegisteredScreens[Ord(CurrentScreenId)]) as TMessageLoopGI,
+          Error,
+          mbgCancel
+      );
+  end;
   if Galaxy <> nil then
     aCalc.WaitForTurnCalculationUI;
 end;
@@ -1976,7 +2381,7 @@ procedure CheatSeed;
 var
   Value: WideString;
 begin
-  if TMessageLoopGI(RegisteredScreens[Ord(CurrentScreenId)]) = NewGameScreen then
+  if TMessageLoopGI(RegisteredScreens[Ord(CheatScreenId)]) = NewGameScreen then
     if (NewGameScreen.GetByName('ButExtended') as TGraphButtonGI).Down then
     begin
       if NewGameSeedText = '' then
@@ -2129,6 +2534,8 @@ initialization
   CheatEntries.AddCheat('SUDO', CheatSudo);
   CheatEntries.AddCheat('EVENTS', CheatEvents);
   CheatEntries.AddCheat('INFOS', CheatInfos);
+  RegisterCommand(ckCheat, 'Cheat', @ExecuteCheat);
+  RegisterCommand(ckCheatScript, 'CheatScript', @ExecuteCheatScript);
 finalization
   CheatEntries.Destroy;
 end.

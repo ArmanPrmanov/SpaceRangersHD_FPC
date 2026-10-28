@@ -22,8 +22,11 @@ const
   // 9: Hello and Welcome carry the reconnection token, and Ping. 10: Status carries each
   // human's text-quest activity and the game days it owes for a quest (docs/progress/
   // 2026-10-19-text-quests-plan.md, Phase C). 11: QuestPage (Phase D), so that a peer without
-  // the watchers' pages does not join.
-  ProtocolVersion = 11;
+  // the watchers' pages does not join. 12: the storage commands are trades, and RelayCommand
+  // carries a change to the shared storage as its effect (aHoldActions.ckRelayedStorage).
+  // 13: TransferMoney, a trade, and RelayCommand carries it as RelayedTransfer to every client
+  // (aPlayerActions), so that a peer without them does not join.
+  ProtocolVersion = 13;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 

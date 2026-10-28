@@ -113,7 +113,7 @@ protocol; never renumber one, add new ones at the end and bump
 
 The host numbers its states from 1. A day number cannot name a base: a join
 between two days sends a state of the same day as the one before it.
-`ProtocolVersion` is 11 (2: `TalkRequest` has its payload; 3: `Status` names
+`ProtocolVersion` is 13 (2: `TalkRequest` has its payload; 3: `Status` names
 the human whose answer to a dialogue the day waits for; 4: `NewHuman` and
 `Character`; 5: `Film` is compressed; 6: `Command` carries the client's number
 for it, and `CommandResult`; 7: the host applies a trade as it arrives and
@@ -122,7 +122,9 @@ answers it, also when it applied it, and `RelayCommand`, Trades; 8:
 9: `Hello` and `Welcome` carry the reconnection token, and `Ping`, Disconnects;
 10: `Status` carries each human's text-quest activity and the days it owes for a
 quest, Waiting; 11: `QuestPage`, Watching a text quest, so that a peer without
-the watchers' pages does not join).
+the watchers' pages does not join; 12: the storage commands are trades and
+`RelayCommand` carries their effect, `RelayedStorage`, Trades; 13: `TransferMoney`
+and its relay to every client, `RelayedTransfer`, Trades).
 | `Status` | host → client | per human: id, name, connected, holds the day, its text-quest activity (a byte: 0 none, 1 plays one, 2 owes days for one) and the days it owes; whether a day is running; the human whose answer to a dialogue the day waits for (0: none) |
 | `TalkRequest` | host → client | human id, ship id, planet id (0: none), scripted, talk kind, amount, text: the human's talk fields (Remote dialogue) |
 | `TalkDone` | client → host | nothing: the client's answer is complete, or it cannot show the talk |
@@ -211,7 +213,8 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
   only such commands too.
 - The host refuses a command whose actor is not the peer's human, and queues
   the rest per peer. A command only the host's human gives (`SetSessionFlag`:
-  the session flags are the host's, [humans.md](humans.md); and a relay's form,
+  the session flags are the host's, [humans.md](humans.md), among them whether cheats
+  work; and a relay's form,
   `RelayedSale`, Trades) is refused as it
   arrives, also in a remote dialogue, and the peer gets a `CommandResult`
   (`rrOther`); it is never queued (`TNetHost.RefuseHostOnlyCommand`). It does
@@ -262,12 +265,12 @@ reads about 1.6 GB, which takes well under a second once the files are cached.
 
   | Reason | Byte | Log | Raised by |
   | --- | --- | --- | --- |
-  | `rrOther` | 0 | `other` | any other exception; also a sale in space of goods the seller does not carry, a dominator program the human has none of, another human's medals, an equipment configuration that is not there, and a client's `SetSessionFlag` |
+  | `rrOther` | 0 | `other` | any other exception; also a sale in space of goods the seller does not carry, a dominator program the human has none of, another human's medals, an equipment configuration that is not there, a client's `SetSessionFlag`, and a money transfer below 1 or one the recipient cannot hold (the money cap) |
   | `rrOutOfStock` | 1 | `out-of-stock` | a purchase of goods beyond the stock (`TShip.CheckGoodsPurchase`); nodes from a pirate base that has none |
-  | `rrNoMoney` | 2 | `no-money` | a purchase of goods or equipment, a refuel, reload or rockets the human cannot pay; a sale in space the partner cannot pay in full; a ship built at a Dominion, a map, a satellite, an investment or a Dominion order the human cannot pay; a repair of the held item or of everything, a bribe, a gift to a partner, a deposit, a modernization, a side change, a pirate raid or nodes the money does not cover |
-  | `rrItemGone` | 3 | `item-gone` | a shop command whose item (by id) the shop's stock no longer holds (`aShopActions.ShopItemArg`); a ship built at a Dominion with a part no longer in the shop, the hold or the storage, or named twice; surface loot (by id) no longer on the planet; a hold cell whose item is no longer in the edited ship, or (`TakeHoldEntry`) is not the item the sender's cell showed |
-  | `rrOfferGone` | 4 | `offer-gone` | a station's one-off special ship already sold; a satellite offer that is not the one the human accepted, or no more satellites allowed; an investment the business center would not offer now (too soon, or the star or its constellation has the station or no room for it); a map of a constellation that is charted or no longer an uncharted neighbour; a station's modernization someone has paid for; a side change or pirate raid whose price went above the quote |
-  | `rrTargetGone` | 5 | `target-gone` | a script dialog command whose script, injected answer or override (by key, [commands.md](commands.md)) is not there, or an override command with no override; a request for protection when the partner is after no ship; a dominator a program already hacked; a Dominion relocation, ambush or assault when the Dominion has other plans (it flies or teleports, a script controls it, or it lacks the energy), the star has a Dominion, or an ambush at the star is under way; a truce with a ship that keeps one with another human (the offer itself is declined); a recall of interceptors that are not the human's |
+  | `rrNoMoney` | 2 | `no-money` | a purchase of goods or equipment, a refuel, reload or rockets the human cannot pay; a sale in space the partner cannot pay in full; a ship built at a Dominion, a map, a satellite, an investment or a Dominion order the human cannot pay; a repair of the held item or of everything, a bribe, a gift to a partner, a deposit, a modernization, a side change, a pirate raid or nodes the money does not cover; a money transfer above the sender's money (`TransferMoney`) |
+  | `rrItemGone` | 3 | `item-gone` | a shop command whose item (by id) the shop's stock no longer holds (`aShopActions.ShopItemArg`); a take from the shared storage (`TakeStored`, `TakeStoredHull`) whose cell no longer holds the item the sender's cell showed, or a sale of a stored item no storage holds (`SellStoredItem`); a ship built at a Dominion with a part no longer in the shop, the hold or the storage, or named twice; surface loot (by id) no longer on the planet; a hold cell whose item is no longer in the edited ship, or (`TakeHoldEntry`) is not the item the sender's cell showed |
+  | `rrOfferGone` | 4 | `offer-gone` | a station's one-off special ship already sold; a satellite offer that is not the one the human accepted, or no more satellites allowed; an investment the business center would not offer now (too soon, or the star or its constellation has the station or no room for it); a map of a constellation that is charted or no longer an uncharted neighbour; a station's modernization someone has paid for; a side change or pirate raid whose price went above the quote; a government quest whose government another human's accepted quest came from first (shared quests, [humans.md](humans.md), Quests) |
+  | `rrTargetGone` | 5 | `target-gone` | a script dialog command whose script, injected answer or override (by key, [commands.md](commands.md)) is not there, or an override command with no override; a request for protection when the partner is after no ship; a dominator a program already hacked; a Dominion relocation, ambush or assault when the Dominion has other plans (it flies or teleports, a script controls it, or it lacks the energy), the star has a Dominion, or an ambush at the star is under way; a truce with a ship that keeps one with another human (the offer itself is declined); a recall of interceptors that are not the human's; a money transfer to a human who is gone, has finished, or is the sender |
   | `rrNoRoom` | 6 | `no-room` | a sale in space that does not fit in the partner's hold |
   | `rrInUse` | 7 | `in-use` | opening the screen of a ship (not the human's own ranger) another human has open (`THuman.EditedShip`, [humans.md](humans.md)) |
   | `rrTooLate` | 8 | `too-late` | a `CancelEndTurn` after the day has begun (Waiting) |
@@ -413,6 +416,42 @@ humans at the same planet or station see it before the next state.
   a peer (`IsHostOnlyCommand`). The purchases and `TradeGoods` (counts on the
   goods screen's own cargo) are relayed as themselves; they run on the
   client's copy as on the host's.
+- **A storage command goes as its effect.** The storage at a planet or station
+  is one pool for every human ([humans.md](humans.md), Storage), and the
+  commands that change it from the ship screen are trades
+  (`aHoldActions.IsStorageCommand`: `TakeStored`, `TakeStoredHull`,
+  `StoreHeld`, `CloseVacantStorageSlot`, `ChangeHull`, `TakeAllFromStorage`,
+  `PutAllIntoStorage`, `SortStorage`), so the host decides between two humans
+  as their commands arrive: a second take of the same item is refused
+  (`rrItemGone`) while its client waits. Like a sale they run on what the
+  actor holds, so the host relays, in `RelayCommand`, a `RelayedStorage` (255,
+  relay only; `aHoldActions.RelayedStorageOf`) to the clients whose human
+  reaches the same storage (`aPlayer.PlayerStorageLocation`: the planet, or the
+  ship docked to; not the shop's location): the location and every entry of
+  the pool there, its cell and its item as a save writes it (packed four bytes
+  to an integer), logged with `storage=` and the command's kind. The client
+  makes the pool's entries there the host's (`ExecuteRelayedStorage`): an item
+  its copy has there, or that the actor has on it (moved in, as a sale's relay
+  moves it), stays the same object, a stored one that changed (a merged stack)
+  and that no script knows is read again from the bytes, one it lacks is read
+  from them, and what the actor took out goes to the actor's ranger on that
+  copy until the next state. The screen is told
+  (`SimEvents.NotifyStorageChanged`); the host's own screen is told the same
+  way when a client's storage trade applies. A storage command of the host's
+  own human is relayed too. What the barrier applies (a held storage item put
+  back by `ReturnHeldEntry` or by closing the screen) comes with the next
+  state.
+- **A money transfer goes to every client.** `TransferMoney` (48, a trade;
+  [commands.md](commands.md)) changes only the two humans' money, wherever they
+  are, so the host relays it, as `RelayedTransfer` (49, relay only;
+  `aPlayerActions.RelayedTransferOf`, the same arguments), to every other joined
+  client, not only those at the actor's location (`net relayed human= kind=RelayedTransfer
+  to= recipient= amount=`). The client moves the amount without the checks (the
+  host made them) rather than setting the host's money: its copy may lack the
+  barrier's commands, and a client's own transfer can run before an earlier relay
+  that reaches it later, so relays out of order still add up. Both humans get a
+  bubble and the star map's panel shows the money again
+  (`SimEvents.NotifyMoneyTransfer`); the next state brings the host's money anyway.
 - **A text quest's start goes as its lock.** `BeginTextQuest` (609, a trade:
   one human at a time plays a planet's quest, [commands.md](commands.md)) is
   relayed as a `RelayedTextQuest` (610, relay only;
@@ -1269,6 +1308,11 @@ must run each once (`net host nested outer=1 inner=1`). It then sets a session
 flag, which the host must refuse (`net command failed ... kind=SetSessionFlag`,
 and the client's `net client refused`) without changing its own
 (`net host session flag friendly-fire=` differs from what the client predicted).
+It then enters the cheat EXPA as a `Cheat` command (`CheatCode.NewCheatCommand`): its
+prediction must give its ranger the experience (`net client cheat gained=1000000 used=1`),
+and the host, which applies it at the barrier like any queued command, must put the cheat on
+that human's record and on no other's (`net host cheat human= used=1 cheats=1`); the client
+states after it must have the host's hash, as every state's must.
 The client then takes its end turn back (`--sim-net-cancel-end-turn`,
 `check_cancel_end_turn`): after its first day's turn it sends `CancelEndTurn`
 and waits for the answer, while the host holds its first day until it has taken
@@ -1329,6 +1373,61 @@ host applies with the purchase while the host's human has a script dialogue open
 (a message, a script and an injected answer): the host's dialogue state must be
 as it was after every trade and after the barrier (`net host dialogue kept=1
 checks= remote=`).
+
+A host that starts a new game and two clients share one planet's storage
+(`--sim-net-storage`, `check_network_storage`): the host's human is landed at
+the planet as for the shop run and ends its first day there; the clients join
+there with money and room. On its first day Net1 buys two items X and Y, puts
+them into the storage (`net client storage stored`), takes X back and puts it
+into its hold (`net client storage took`), and ends its turn. The host applies
+each store and the take as they come and relays their effect
+(`net relayed human= kind=RelayedStorage to= storage=StoreHeld`). Net2 runs the
+relays: its copy shows both items stored (`net client storage relay`), then X
+gone and Y still there (`net client storage saw take`), its screen told each
+time, before any state. Its take of X by the cell and id it had is refused
+(`item-gone`) while it waits (`net client storage take-gone`); its take of Y
+goes through. (The host applies a client's trades only once the clients before
+it have ended their turns, so the later client is the one refused.) At the end
+the host's humans share one pool, X is Net1's and Y Net2's, and the host's screen
+was told of each client's change (`net host storage notified= shared=1`). Every
+state has the host's hash. `--sim-shared-storage` (`check_shared_storage`, one
+process) checks the pool on each save: two humans at one planet share it, a
+second take is refused, and a save with a storage per human loads merged.
+
+A host that starts a new game and two clients share a quest
+(`--sim-net-shared-quest`, `check_network_shared_quest`; [humans.md](humans.md),
+Quests): the host's human is landed and the clients join as for the storage run.
+On its first day Net1 is offered a letter quest from a planet of another star to
+this one (the probe command `NetSharedQuestOffer`), accepts it (`AcceptQuest`,
+predicted, applied by the host at the barrier: `net client shared-quest accepted
+held=1 entry=3`) and hands the letter to the host's human
+(`NetSharedQuestHandOver`; in play, through the shared storage). On its second
+day the host's human, whose journal shows Net1's quest (`net host shared-quest
+before entry=3`), delivers it (`BeginGovernmentDialog`, `turned-in=1`): each of
+the three humans gains its share of the reward, the deliverer what does not
+divide, and has the completion in its journal (`net host shared-quest human=
+gain= entry=4`). Each client prints its journal entry after every state (`net
+client shared-quest day= entry=`): 3 after the first day's, 4 after the
+second's, also Net2, which never ran Net1's command. Every state has the host's
+hash. `--sim-shared-quests` (`check_shared_quests`, one process) checks the rules
+on each save.
+
+A host that starts a new game and two clients transfer money
+(`--sim-net-transfer`, `check_network_transfer`; [commands.md](commands.md),
+`TransferMoney`): on its first day, before its turn, the host's human gives the
+last client 50 and then tries to give it 100000 more than it has; on its first
+turn Net1 gives Net2 100 (a trade: it waits for the host's answer) and tries the
+same. Every machine prints each transfer it applies (`net host|client transfer
+from= to= amount= from-money= to-money= bubble=`, from
+`SimEvents.MoneyTransferHandler`): all three see both transfers with the
+recipient's bubble, and the sender's money after each is the host's everywhere.
+Each sender lost exactly its amount (`transfer sent before= after=`), and both
+over-amounts are refused `no-money` and change nothing (`transfer over`), Net1's
+through the host's answer. The host relays the host's transfer to both clients
+and Net1's to Net2 (`net relayed ... kind=RelayedTransfer`). Net2 also talks with
+the host's human's ranger, in another star, as the star map's players' buttons do
+(`BeginTalk` to `EndTalk`, applied by the host at the barrier: `net client remote
+talk`). Every state has the host's hash.
 
 The headless runner (`HeadlessNet`):
 

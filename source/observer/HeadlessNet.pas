@@ -58,13 +58,18 @@ procedure RemoveNetTalkProbe;
 // CHANGE: ENHANCEMENT - The command of --sim-net-quest's probe, for the host, its clients and a
 // replay of the host's log.
 procedure RegisterNetQuestProbe;
+// CHANGE: ENHANCEMENT - The commands of --sim-net-shared-quest's probe, likewise.
+procedure RegisterNetSharedQuestProbe;
 implementation
 uses
   SysUtils,
+  aConst,
   EC_Buf,
   Globals,
   aCommands,
   aDialogActions,
+  aHold,
+  aHoldActions,
   aMyFunction,
   aPlanetActions,
   aScript,
@@ -96,7 +101,8 @@ uses
   QuestRun,
   HeadlessQuest,
   aQuestActions,
-  aRanger;
+  aRanger,
+  CheatCode;
 
 const
   // Without progress for this long, a run fails instead of hanging the test.
@@ -717,6 +723,258 @@ begin
   Result := Reason = RefusalReasonName(rrItemGone);
 end;
 
+var
+  // CHANGE: ENHANCEMENT - --sim-net-storage: the local screen's storage notifications
+  // (SimEvents.NotifyStorageChanged) counted, and the handler the count chains.
+  StorageNotifications: Integer;
+  PreviousStorageHandler: TSimEventHandler;
+  // The host's planet, where the clients join.
+  StoragePlanet: TObject;
+
+procedure CountStorageNotification;
+begin
+  Inc(StorageNotifications);
+end;
+
+// The ids of the equipment and artefacts of P's ranger, comma-separated.
+function OwnedIds(P: TPlayer): AnsiString;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to P.Inventory.Count - 1 do
+    Result := Result + ',' + IntToStr(TItem(P.Inventory[I]).Id);
+  for I := 0 to P.Artefacts.Count - 1 do
+    Result := Result + ',' + IntToStr(TItem(P.Artefacts[I]).Id);
+  Result := Copy(Result, 2, MaxInt);
+end;
+
+// The storage cell at Location that holds the item with that id, -1 for none.
+function StoredSlotAt(P: TPlayer; Location: TObject; Id: Integer): Integer;
+var
+  I: Integer;
+  Entry: PStorageEntry;
+begin
+  Result := -1;
+  for I := 0 to P.StorageEntries.Count - 1 do
+  begin
+    Entry := P.StorageEntries[I];
+    if (Entry.LocationOwner = Location) and (Entry.Item <> nil) and (Integer(Entry.Item.Id) = Id) then
+      Exit(Entry.SlotIndex);
+  end;
+end;
+
+// The ids of the items stored at Location, in cell order, comma-separated.
+function StoredIdsAt(P: TPlayer; Location: TObject): AnsiString;
+var
+  Slot, Extent, Index: Integer;
+begin
+  Result := '';
+  Extent := P.GetStorageSlotExtent(Location);
+  for Slot := 0 to Extent - 1 do
+  begin
+    Index := P.FindStorageIndexByLocationAndSlot(Location, Slot);
+    if Index < 0 then
+      Continue;
+    if Result <> '' then
+      Result := Result + ',';
+    Result := Result + IntToStr(PStorageEntry(P.StorageEntries[Index]).Item.Id);
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - --sim-net-storage, a client's first day (docs/humans.md, Storage). Net1
+// buys the shop's first two items X and Y, puts them into the planet's storage (two trades,
+// relayed as their effect), takes X back into its hand and puts it into its hold, and ends its
+// turn. Net2 waits until the relays of Net1's stores have run here (two new items stored, before
+// any state), then until the relay of Net1's take has (X no longer stored, Y still), and takes X
+// by the cell and id it had: the host refuses it (item-gone), as it would a second take that
+// came at once. Then it takes Y, puts it into its hold and ends its turn. (The host applies a
+// client's trades only once the clients before it have ended their turns, so the later client
+// is the one refused.)
+function PlayStorageTurn(Client: TNetClient; const Name: AnsiString): Boolean;
+var
+  H: THuman;
+  P: TPlayer;
+  Planet: TPlanet;
+  X, Y, Z: TItem;
+  XId, YId, SlotX, SlotY, I, Index: Integer;
+  Before, Reason: AnsiString;
+  Deadline: QWord;
+  Entry: PStorageEntry;
+
+  procedure PutHeldIntoHold;
+  var
+    Command: TPlayerCommand;
+  begin
+    // The screen recomputes the hold list before it draws.
+    Command := NewCommand(ckRefreshHoldView);
+    Command.Actor := Cardinal(H.Id);
+    SubmitCommand(Command);
+    Command := NewCommand(ckPutHeldEquipment);
+    AddInt(Command, H.PlayerHoldEntries.Count);
+    AddInt(Command, 0);
+    Command.Actor := Cardinal(H.Id);
+    SubmitCommand(Command);
+  end;
+
+  function Holds(Id: Integer): Integer;
+  begin
+    Result := Ord((H.SelectedHoldItem <> nil) and (Integer(H.SelectedHoldItem.Id) = Id));
+  end;
+
+begin
+  Result := False;
+  H := LocalHuman;
+  P := H.Player;
+  Planet := P.CurrentPlanet;
+  if Planet = nil then
+  begin
+    Emit('net client storage failed: not landed');
+    Exit;
+  end;
+  Deadline := GetTickCount64 + StallTimeoutMs;
+  if Name = 'Net1' then
+  begin
+    OpenShopFor(H);
+    if not PickShopItems(Planet, X, Y, Z) then
+    begin
+      Emit('net client storage failed: nothing to buy');
+      Exit;
+    end;
+    XId := X.Id;
+    YId := Y.Id;
+    Reason := BuyShopItem(H, ShopSlotIndexOf(H, X), X);
+    if Reason = '' then
+      Reason := BuyShopItem(H, ShopSlotIndexOf(H, Y), Y);
+    if Reason <> '' then
+    begin
+      Emit('net client storage failed: a purchase was refused: ' + Reason);
+      Exit;
+    end;
+    OpenOwnShipScreen(H);
+    SlotX := StoreFromHold(H, X);
+    SlotY := StoreFromHold(H, Y);
+    Emit(Format('net client storage stored x=%d y=%d slot-x=%d slot-y=%d', [XId, YId, SlotX, SlotY]));
+    Reason := TakeFromStorage(H, SlotX, XId);
+    Emit(
+        Format(
+            'net client storage took item=%d reason=%s held=%d stored=%d',
+            [XId, Reason, Holds(XId), Ord(StoredSlotAt(P, Planet, XId) >= 0)]
+        )
+    );
+    if Reason <> '' then
+      Exit;
+    PutHeldIntoHold;
+    EndTurnFor(H);
+    Exit(True);
+  end;
+  Before := ',' + StoredIdsAt(P, Planet) + ',';
+  // Net1's two stores, as their relays put them here.
+  repeat
+    Client.Pump;
+    if Client.ApplyRelayed(1) = 0 then
+      NetInboxEvent.WaitFor(5);
+    XId := 0;
+    YId := 0;
+    SlotX := MaxInt;
+    I := 0;
+    for Index := 0 to P.StorageEntries.Count - 1 do
+    begin
+      Entry := P.StorageEntries[Index];
+      if (Entry.LocationOwner <> Planet) or (Entry.Item = nil)
+          or (Pos(',' + IntToStr(Entry.Item.Id) + ',', Before) > 0) then
+        Continue;
+      Inc(I);
+      if Entry.SlotIndex < SlotX then
+      begin
+        if XId <> 0 then
+          YId := XId;
+        SlotX := Entry.SlotIndex;
+        XId := Entry.Item.Id;
+      end
+      else
+        YId := Entry.Item.Id;
+    end;
+    if I >= 2 then
+      Break;
+    if GetTickCount64 > Deadline then
+    begin
+      Emit('net client storage failed: the stores did not come');
+      Exit;
+    end;
+  until False;
+  SlotY := StoredSlotAt(P, Planet, YId);
+  Emit(
+      Format(
+          'net client storage relay x=%d y=%d slot-x=%d notified=%d',
+          [XId, YId, SlotX, StorageNotifications]
+      )
+  );
+  // Net1's take of X, as its relay shows it here.
+  repeat
+    if StoredSlotAt(P, Planet, XId) < 0 then
+      Break;
+    Client.Pump;
+    if Client.ApplyRelayed(1) = 0 then
+      NetInboxEvent.WaitFor(5);
+    if GetTickCount64 > Deadline then
+    begin
+      Emit('net client storage failed: the other take did not come');
+      Exit;
+    end;
+  until False;
+  Emit(
+      Format(
+          'net client storage saw take x-stored=0 y-stored=%d notified=%d',
+          [Ord(StoredSlotAt(P, Planet, YId) = SlotY), StorageNotifications]
+      )
+  );
+  OpenOwnShipScreen(H);
+  Reason := TakeFromStorage(H, SlotX, XId);
+  Emit(Format('net client storage take-gone reason=%s held=%d', [Reason, Ord(H.SelectedHoldKind <> phkEmpty)]));
+  if Reason <> RefusalReasonName(rrItemGone) then
+    Exit;
+  Reason := TakeFromStorage(H, SlotY, YId);
+  Emit(
+      Format(
+          'net client storage took item=%d reason=%s held=%d stored=%d',
+          [YId, Reason, Holds(YId), Ord(StoredSlotAt(P, Planet, YId) >= 0)]
+      )
+  );
+  if Reason <> '' then
+    Exit;
+  PutHeldIntoHold;
+  EndTurnFor(H);
+  Result := True;
+end;
+
+// --sim-net-storage, the host at the end: how often its screen was told of another human's
+// change to the storage, the items stored at its planet, whether every human shares one pool,
+// and what each human's ranger has.
+procedure EmitHostStorage;
+var
+  I: Integer;
+  Shared: Boolean;
+begin
+  Shared := True;
+  for I := 1 to Session.Humans.Count - 1 do
+    if Session.Humans[I].Player.StorageEntries <> Session.Humans[0].Player.StorageEntries then
+      Shared := False;
+  Emit(
+      Format(
+          'net host storage notified=%d shared=%d stored=%s',
+          [StorageNotifications, Ord(Shared), StoredIdsAt(LocalPlayer, StoragePlanet)]
+      )
+  );
+  for I := 0 to Session.Humans.Count - 1 do
+    Emit(
+        Format(
+            'net host storage human=%d owns=%s',
+            [Session.Humans[I].Id, OwnedIds(Session.Humans[I].Player)]
+        )
+    );
+end;
+
 // CHANGE: ENHANCEMENT - --sim-net-nested (docs/network.md, Tests): on its first day a client
 // submits a command whose executor submits another one. A client sends only the outer one, and
 // the host's run of it submits the inner one again, so the host runs each once.
@@ -748,6 +1006,43 @@ begin
   RegisterCommand(ckNetNestedOuter, 'NetNestedOuter', @ExecuteNetNestedOuter);
   RegisterCommand(ckNetNestedInner, 'NetNestedInner', @ExecuteNetNestedInner);
   NestedRegistered := True;
+end;
+
+// CHANGE: ENHANCEMENT - With --sim-net-nested a client also enters the cheat EXPA (a Cheat
+// command, CheatCode) on its first day: its prediction gives its ranger the experience at once,
+// and the host, which applies it at the barrier, puts the cheat on that human's record
+// (EmitHostCheats). The states the client applies afterwards must have the host's hash.
+procedure ProbeClientCheat;
+var
+  Before: Integer;
+begin
+  if LocalPlayer = nil then
+    Exit;
+  Before := LocalPlayer.FreeExperience;
+  SubmitCommand(NewCheatCommand('EXPA'));
+  Emit(
+      Format(
+          'net client cheat human=%d gained=%d used=%d',
+          [LocalHuman.Id, LocalPlayer.FreeExperience - Before, Ord(LocalHuman.HasUsedCheat('EXPA'))]
+      )
+  );
+end;
+
+procedure EmitHostCheats;
+var
+  I: Integer;
+  Human: THuman;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    Emit(
+        Format(
+            'net host cheat human=%d used=%d points=%d cheats=%d',
+            [Human.Id, Ord(Human.HasUsedCheat('EXPA')), Human.CheatPoints, Ord(Session.CheatsAllowed)]
+        )
+    );
+  end;
 end;
 
 // CHANGE: ENHANCEMENT - --sim-net-cancel-end-turn, after a client's turn: it takes the end turn
@@ -1007,6 +1302,186 @@ begin
     Exit;
   RegisterCommand(ckNetQuestProbe, 'NetQuestProbe', @ExecuteNetQuestProbe);
   QuestProbeRegistered := True;
+end;
+
+// CHANGE: ENHANCEMENT - --sim-net-shared-quest (docs/humans.md, Quests): the host's human stays
+// at its planet, where the clients join. On its first day Net1 is offered a letter quest from
+// a planet of another star to this one (a probe command sets the offer), accepts it
+// (AcceptQuest, predicted and applied by the host at the barrier) and hands the letter to the
+// host's human (a probe command: in play, by the shared storage). On its second day the host's
+// human delivers it (BeginGovernmentDialog): the reward is split among the three humans. Every
+// client prints its journal entry of the quest after each state: the accepted quest (kind 3)
+// after the first day's, the completed one (4) after the second's, also on the client that did
+// not take it.
+const
+  ckNetSharedQuestOffer = 1004;
+  ckNetSharedQuestHandOver = 1005;
+  NetSharedQuestReward = 3001;
+var
+  SharedQuestProbeRegistered: Boolean;
+  // A client: the key of the quest's journal entry, once known.
+  SharedQuestKey: WideString;
+
+// The planet the probe's quest comes from: the first coalition planet outside Target's star.
+function SharedQuestOrigin(Target: TPlanet): TPlanet;
+var
+  I: Integer;
+  Planet: TPlanet;
+begin
+  for I := 0 to Galaxy.Planets.Count - 1 do
+  begin
+    Planet := TPlanet(Galaxy.Planets[I]);
+    if (Planet.OwnerId <= Byte(oiGaal)) and (Planet.CurrentStar <> Target.CurrentStar) then
+      Exit(Planet);
+  end;
+  Result := nil;
+end;
+
+function SharedQuestLetterName(Number: Integer): WideString;
+begin
+  Result := LocalizedColorText('Quest.SendLetter.' + IntToStr(Number) + '.SysName');
+end;
+
+// The first letter quest the texts have.
+function SharedQuestNumber: Integer;
+var
+  Name: WideString;
+begin
+  for Result := 1 to 500 do
+  begin
+    Name := SharedQuestLetterName(Result);
+    if (Name <> '') and (Pos('Quest.', Name) <> 1) then
+      Exit;
+  end;
+  Result := -1;
+end;
+
+function SharedQuestKeyAt(Target: TPlanet): WideString;
+var
+  Origin: TPlanet;
+begin
+  Origin := SharedQuestOrigin(Target);
+  if (Origin = nil) or (SharedQuestNumber < 0) then
+    Result := ''
+  else
+    Result := 'ZP_' + IntToStr(Cardinal(Origin.Id)) + '_' + IntToStr(SharedQuestNumber);
+end;
+
+procedure ExecuteNetSharedQuestOffer(const Command: TPlayerCommand);
+var
+  H: THuman;
+  Offer: TQuest;
+begin
+  H := ActorHuman(Command);
+  if (H.Player = nil) or (H.Player.CurrentPlanet = nil) or (SharedQuestNumber < 0)
+      or (SharedQuestOrigin(H.Player.CurrentPlanet) = nil) then
+    Exit;
+  FillChar(Offer, SizeOf(Offer), 0);
+  Offer.QuestType := qtSendLetter;
+  Offer.QuestNumber := SharedQuestNumber;
+  Offer.Planet := SharedQuestOrigin(H.Player.CurrentPlanet);
+  Offer.DeadlineTurn := Galaxy.CurrentTurn + 50;
+  Offer.RewardMoney := NetSharedQuestReward;
+  Offer.ObjectiveTarget := H.Player.CurrentPlanet;
+  H.GovernmentQuestOffer := Offer;
+end;
+
+procedure ExecuteNetSharedQuestHandOver(const Command: TPlayerCommand);
+var
+  P: TPlayer;
+  I: Integer;
+  Item: TItem;
+begin
+  P := Actor(Command);
+  if (HostHuman = nil) or (HostHuman.Player = nil) or (HostHuman.Player = P) then
+    Exit;
+  for I := P.Inventory.Count - 1 downto 1 do
+  begin
+    Item := P.Inventory[I];
+    if (Item is TUselessItem)
+        and (TUselessItem(Item).ConfigBlockName = SharedQuestLetterName(SharedQuestNumber)) then
+    begin
+      P.Inventory.Delete(I);
+      HostHuman.Player.Inventory.Add(Item);
+      P.RefreshDerivedStats(True);
+      HostHuman.Player.RefreshDerivedStats(True);
+      Exit;
+    end;
+  end;
+end;
+
+procedure RegisterNetSharedQuestProbe;
+begin
+  if SharedQuestProbeRegistered then
+    Exit;
+  RegisterCommand(ckNetSharedQuestOffer, 'NetSharedQuestOffer', @ExecuteNetSharedQuestOffer);
+  RegisterCommand(ckNetSharedQuestHandOver, 'NetSharedQuestHandOver', @ExecuteNetSharedQuestHandOver);
+  SharedQuestProbeRegistered := True;
+end;
+
+// Net1's first day: the offer, the acceptance, the letter to the host's human, the end turn.
+procedure PlaySharedQuestTurn;
+var
+  Message: TMessagePlayer;
+begin
+  SubmitCommand(NewCommand(ckNetSharedQuestOffer));
+  AcceptQuest;
+  SubmitCommand(NewCommand(ckNetSharedQuestHandOver));
+  Message := LocalHuman.FindBubbleByKey(SharedQuestKey, False);
+  if Message = nil then
+    Emit(Format('net client shared-quest accepted held=%d entry=0', [LocalPlayer.Quests.Count]))
+  else
+    Emit(Format('net client shared-quest accepted held=%d entry=%d', [LocalPlayer.Quests.Count, Message.Kind]));
+  EndTurnFor(LocalHuman);
+end;
+
+// A client after each state: the kind of its journal entry of the quest (0: none).
+procedure EmitClientSharedQuest(Day: Integer);
+var
+  Message: TMessagePlayer;
+  Kind: Integer;
+begin
+  if (SharedQuestKey = '') and (LocalPlayer <> nil) and (LocalPlayer.CurrentPlanet <> nil) then
+    SharedQuestKey := SharedQuestKeyAt(LocalPlayer.CurrentPlanet);
+  Kind := 0;
+  Message := LocalHuman.FindBubbleByKey(SharedQuestKey, False);
+  if Message <> nil then
+    Kind := Message.Kind;
+  Emit(Format('net client shared-quest day=%d entry=%d', [Day, Kind]));
+end;
+
+// The host's second day: its human delivers Net1's letter; each human's share is printed.
+procedure TurnInSharedQuest;
+var
+  I: Integer;
+  Before: array of Integer;
+  Message: TMessagePlayer;
+  Key: WideString;
+  Command: TPlayerCommand;
+begin
+  Key := SharedQuestKeyAt(LocalPlayer.CurrentPlanet);
+  Message := LocalHuman.FindBubbleByKey(Key, False);
+  if Message = nil then
+    Emit('net host shared-quest before entry=0')
+  else
+    Emit(Format('net host shared-quest before entry=%d', [Message.Kind]));
+  SetLength(Before, Session.Humans.Count);
+  for I := 0 to Session.Humans.Count - 1 do
+    Before[I] := Session.Humans[I].Player.Money;
+  Command := NewCommand(ckBeginGovernmentDialog);
+  Command.Actor := Cardinal(LocalHuman.Id);
+  SubmitCommand(Command);
+  Emit(Format('net host shared-quest turned-in=%d reward=%d', [Ord(GovernmentQuestTurnedIn), NetSharedQuestReward]));
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Message := Session.Humans[I].FindBubbleByKey(Key, False);
+    if Message = nil then
+      Emit(Format('net host shared-quest human=%d gain=%d entry=0',
+          [Session.Humans[I].Id, Session.Humans[I].Player.Money - Before[I]]))
+    else
+      Emit(Format('net host shared-quest human=%d gain=%d entry=%d',
+          [Session.Humans[I].Id, Session.Humans[I].Player.Money - Before[I], Message.Kind]));
+  end;
 end;
 
 // The text as one line of output.
@@ -1292,6 +1767,112 @@ begin
   Result := nqPlayed;
 end;
 
+// CHANGE: ENHANCEMENT - --sim-net-transfer (docs/network.md, Tests): money transfers between
+// humans (aPlayerActions.TransferMoney, a trade the host relays to every client as
+// RelayedTransfer). Every machine prints each transfer it applies (SimEvents.MoneyTransferHandler):
+// the host's own and the clients' as it applies them, a client its own once the host has applied
+// it and the others' as their relays run.
+var
+  TransferSide: AnsiString;
+
+procedure EmitTransfer(FromId, ToId, Amount: Integer);
+var
+  From, Target: THuman;
+  FromMoney, ToMoney: Integer;
+begin
+  From := FindHuman(FromId);
+  Target := FindHuman(ToId);
+  FromMoney := -1;
+  ToMoney := -1;
+  if (From <> nil) and (From.Player <> nil) then
+    FromMoney := From.Player.Money;
+  if (Target <> nil) and (Target.Player <> nil) then
+    ToMoney := Target.Player.Money;
+  Emit(
+      Format(
+          'net %s transfer from=%d to=%d amount=%d from-money=%d to-money=%d local=%d bubble=%d',
+          [TransferSide, FromId, ToId, Amount, FromMoney, ToMoney, LocalHuman.Id,
+              Ord((Target <> nil) and (Target.FirstPersistentPlayerMessage <> nil))]
+      )
+  );
+end;
+
+// The human Local gives money to: the last other human that is not the host's (a client gives
+// to another client; the host to the last client).
+function TransferTarget(Local: THuman): THuman;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := Session.Humans.Count - 1 downto 1 do
+    if (Session.Humans[I] <> Local) and (Session.Humans[I].Player <> nil) then
+      Exit(Session.Humans[I]);
+end;
+
+// The local human gives TransferTarget a fixed amount (at most what it has), then tries to give
+// it far more than it has: refused, as the host refuses it too (rrNoMoney).
+procedure ProbeTransfer(Amount: Integer);
+var
+  Target: THuman;
+  Before: Integer;
+  Reason: AnsiString;
+begin
+  Target := TransferTarget(LocalHuman);
+  if (Target = nil) or (LocalPlayer = nil) or (LocalPlayer.Money < 1) then
+  begin
+    Emit(Format('net %s transfer untried human=%d', [TransferSide, LocalHuman.Id]));
+    Exit;
+  end;
+  Before := LocalPlayer.Money;
+  if Amount > Before then
+    Amount := Before;
+  SubmitCommand(TransferMoneyCommand(Target, Amount));
+  Emit(
+      Format(
+          'net %s transfer sent to=%d amount=%d before=%d after=%d human=%d',
+          [TransferSide, Target.Id, Amount, Before, LocalPlayer.Money, LocalHuman.Id]
+      )
+  );
+  Before := LocalPlayer.Money;
+  Reason := 'none';
+  try
+    SubmitCommand(TransferMoneyCommand(Target, Before + 100000));
+  except
+    on E: ECommandRefused do
+      Reason := RefusalReasonName(E.Reason);
+  end;
+  Emit(
+      Format(
+          'net %s transfer over reason=%s before=%d after=%d human=%d',
+          [TransferSide, Reason, Before, LocalPlayer.Money, LocalHuman.Id]
+      )
+  );
+end;
+
+// CHANGE: ENHANCEMENT - --sim-net-transfer: Net2 talks with the host's human's ranger as the star
+// map's players' buttons start it, at any distance (docs/humans.md, Players): the talk's
+// commands (BeginTalk, EnterTalk, LeaveTalk, EndTalk) are predicted here and applied by the host at
+// the barrier, so the states after it must still have the host's hash.
+procedure ProbeRemoteTalk;
+var
+  Ship: TShip;
+begin
+  if (LocalPlayer = nil) or (HostHuman = nil) or (HostHuman.Player = nil) or (HostHuman = LocalHuman) then
+    Exit;
+  Ship := HostHuman.Player;
+  BeginTalk(Ship, True);
+  EnterTalk(Ship);
+  LeaveTalk(Ship);
+  EndTalk(False);
+  Emit(
+      Format(
+          'net client remote talk ship=%d same-star=%d talking=%d human=%d',
+          [Ship.Id, Ord(Ship.CurrentStar = LocalPlayer.CurrentStar), Ord(LocalHuman.TalkShip <> nil),
+              LocalHuman.Id]
+      )
+  );
+end;
+
 function RunNetHost(const Options: TSimulationOptions): Integer;
 var
   Host: TNetHost;
@@ -1365,7 +1946,16 @@ begin
     ShopRun := Options.NetShop;
     HostTriedFirst := False;
     ShopNotifications := 0;
-    if Options.NetShop then
+    // CHANGE: ENHANCEMENT - --sim-net-shared-quest: the clients join at the host's planet too.
+    if Options.NetSharedQuest then
+      RegisterNetSharedQuestProbe;
+    // CHANGE: ENHANCEMENT - --sim-net-transfer: every transfer the host applies is printed.
+    if Options.NetTransfer then
+    begin
+      TransferSide := 'host';
+      MoneyTransferHandler := @EmitTransfer;
+    end;
+    if Options.NetShop or Options.NetStorage or Options.NetSharedQuest then
     begin
       if not LandHostForShop then
       begin
@@ -1376,6 +1966,16 @@ begin
       Host.JoinedHook := @ShopJoined;
       PreviousShopHandler := ShopStockChangedHandler;
       ShopStockChangedHandler := @CountShopNotification;
+    end;
+    // CHANGE: ENHANCEMENT - --sim-net-storage: the host's human stays at the planet, and the
+    // notifications its screen would get of the clients' storage changes are counted.
+    StorageNotifications := 0;
+    StoragePlanet := nil;
+    if Options.NetStorage then
+    begin
+      StoragePlanet := LocalPlayer.CurrentPlanet;
+      PreviousStorageHandler := StorageChangedHandler;
+      StorageChangedHandler := @CountStorageNotification;
     end;
     Emit(Format('net host port=%d clients=%d', [Host.Thread.ListenPort, Options.NetClients]));
     // Every client first, then the joins by name, so that the humans are the same each run.
@@ -1399,6 +1999,10 @@ begin
     for Day := 1 to Options.Turns do
     begin
       Plan := '';
+      // CHANGE: ENHANCEMENT - --sim-net-transfer: the host's human gives the last client money
+      // on the first day, before its turn, and is refused more than it has.
+      if Options.NetTransfer and (Day = 1) then
+        ProbeTransfer(50);
       if not HumanHoldsDay(LocalHuman) then
         Plan := '.'
       // --sim-net-shop: the host's human opens the shop on the first day and stays.
@@ -1408,6 +2012,24 @@ begin
         EndTurnFor(LocalHuman);
         OpenHostDialogue;
         Plan := 'o';
+      end
+      else if Options.NetStorage and (Day = 1) then
+      begin
+        EndTurnFor(LocalHuman);
+        Plan := 's';
+      end
+      // CHANGE: ENHANCEMENT - --sim-net-shared-quest: the host's human waits at its planet on
+      // the first day and delivers Net1's letter on the second.
+      else if Options.NetSharedQuest and (Day = 1) then
+      begin
+        EndTurnFor(LocalHuman);
+        Plan := 'q';
+      end
+      else if Options.NetSharedQuest and (Day = 2) then
+      begin
+        TurnInSharedQuest;
+        EndTurnFor(LocalHuman);
+        Plan := 't';
       end
       // CHANGE: ENHANCEMENT - --sim-net-quest with --sim-text-quest: the host's own human plays
       // the quest; its pages go to every client (TNetHost.PublishQuestPage).
@@ -1576,6 +2198,8 @@ begin
       Emit(Format('net host trades remote=%d host=%d', [RemoteTrades, LocalHuman.Id]));
     if Options.NetShop then
       Emit(Format('net host shop notified=%d host=%d', [ShopNotifications, LocalHuman.Id]));
+    if Options.NetStorage then
+      EmitHostStorage;
     if Options.NetQuestDay > 0 then
     begin
       Emit(
@@ -1590,6 +2214,7 @@ begin
     begin
       Emit(Format('net host nested outer=%d inner=%d', [NestedOuterRuns, NestedInnerRuns]));
       Emit(Format('net host session flag friendly-fire=%d', [Ord(Session.FriendlyFireEnabled)]));
+      EmitHostCheats;
     end;
     Emit(
         Format(
@@ -1607,6 +2232,10 @@ begin
     PreviousAfterCommand := nil;
     if @ShopStockChangedHandler = @CountShopNotification then
       ShopStockChangedHandler := PreviousShopHandler;
+    if @StorageChangedHandler = @CountStorageNotification then
+      StorageChangedHandler := PreviousStorageHandler;
+    if @MoneyTransferHandler = @EmitTransfer then
+      MoneyTransferHandler := nil;
     TradeWindow := False;
     RaceArmed := False;
     ShopRun := False;
@@ -1784,6 +2413,23 @@ begin
   BuyWholeStockGood := Options.NetBuyRace;
   if Options.NetNested then
     RegisterNestedProbe;
+  // CHANGE: ENHANCEMENT - --sim-net-storage: the notifications this client's screen would get.
+  StorageNotifications := 0;
+  // CHANGE: ENHANCEMENT - --sim-net-shared-quest: the probe's commands.
+  SharedQuestKey := '';
+  if Options.NetSharedQuest then
+    RegisterNetSharedQuestProbe;
+  // CHANGE: ENHANCEMENT - --sim-net-transfer: every transfer this client applies is printed.
+  if Options.NetTransfer then
+  begin
+    TransferSide := 'client';
+    MoneyTransferHandler := @EmitTransfer;
+  end;
+  if Options.NetStorage then
+  begin
+    PreviousStorageHandler := StorageChangedHandler;
+    StorageChangedHandler := @CountStorageNotification;
+  end;
   try
     // The connect runs on its own thread, as the game's join does; each phase is printed.
     Client := JoinGame(Address, Port, WideString(Options.NetName), False);
@@ -1916,6 +2562,8 @@ begin
                   FilmBytes, FilmCount, Report.LoadMs, Ord(Report.Rejoin), LocalHuman.QuestDaysOwed]
           )
       );
+      if Options.NetSharedQuest then
+        EmitClientSharedQuest(Report.Day);
       // CHANGE: ENHANCEMENT - --sim-net-quest: the quest abandoned in the reconnect is still
       // there: the host never got it.
       if AbandonedPlanetId >= 0 then
@@ -2008,7 +2656,16 @@ begin
           // (NetHost.IsHostOnlyCommand), and the next state undoes this prediction.
           SetSessionFlagValue(SessionFlagFriendlyFire, not Session.FriendlyFireEnabled);
           Emit(Format('net client session flag friendly-fire=%d', [Ord(Session.FriendlyFireEnabled)]));
+          // CHANGE: ENHANCEMENT - A client's cheat is a command (CheatCode): it runs here at
+          // once and on the host at the barrier, for this client's human.
+          ProbeClientCheat;
         end;
+        // CHANGE: ENHANCEMENT - --sim-net-transfer: Net1 gives the other client money on its
+        // first turn (a trade: it waits for the host's answer), and is refused more than it has.
+        if Options.NetTransfer and (LastPlayedDay < 0) and (Options.NetName = 'Net1') then
+          ProbeTransfer(100);
+        if Options.NetTransfer and (LastPlayedDay < 0) and (Options.NetName = 'Net2') then
+          ProbeRemoteTalk;
         // CHANGE: ENHANCEMENT - --sim-net-shop: the first day is the shop turn.
         if Options.NetShop and (LastPlayedDay < 0) then
         begin
@@ -2017,6 +2674,24 @@ begin
             Emit('net client failed: the shop turn');
             Exit(1);
           end;
+        end
+        // CHANGE: ENHANCEMENT - --sim-net-storage: the first day is the storage turn.
+        else if Options.NetStorage and (LastPlayedDay < 0) then
+        begin
+          if not PlayStorageTurn(Client, Options.NetName) then
+          begin
+            Emit('net client failed: the storage turn');
+            Exit(1);
+          end;
+        end
+        // CHANGE: ENHANCEMENT - --sim-net-shared-quest: Net1's first day takes the quest; the
+        // other clients wait at the planet.
+        else if Options.NetSharedQuest and (LastPlayedDay < 0) then
+        begin
+          if Options.NetName = 'Net1' then
+            PlaySharedQuestTurn
+          else
+            EndTurnFor(LocalHuman);
         end
         // CHANGE: ENHANCEMENT - --sim-net-quest: the quest turn, landed for a planet quest.
         else if (Options.NetQuestDay > 0) and not QuestPlayed and (Days + 1 >= Options.NetQuestDay)
@@ -2100,6 +2775,10 @@ begin
         )
     );
   finally
+    if @StorageChangedHandler = @CountStorageNotification then
+      StorageChangedHandler := PreviousStorageHandler;
+    if @MoneyTransferHandler = @EmitTransfer then
+      MoneyTransferHandler := nil;
     BuyWholeStockGood := False;
     EndTurnContinues := False;
     ClientStatusHook := nil;

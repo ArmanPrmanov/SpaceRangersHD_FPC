@@ -20,6 +20,8 @@ type
   TfCfgSettings = class(TMessageLoopGI)
     // CHANGE: PORTABILITY - Let native startup recreate the window after resolution changes.
     RestartRequested: Boolean;
+    // CHANGE: FIX - Volumes in effect when the screen opened, restored by Cancel.
+    OriginalSoundVolume, OriginalMusicVolume: Single;
     ActiveGroupIndex: Integer;
     BuildGroupIndex: Integer;
     CurrentOptionName: WideString;
@@ -77,6 +79,10 @@ type
     procedure PreviewBrightness(Sender: TCountBarGI);
     procedure PreviewContrast(Sender: TCountBarGI);
     procedure FormatInteger(Sender: TCountBarGI);
+    // CHANGE: FIX - Apply the sound and music sliders live instead of only on OK.
+    procedure PreviewSoundVolume(Sender: TCountBarGI);
+    procedure PreviewMusicVolume(Sender: TCountBarGI);
+    procedure ApplyVolumes;
     procedure FormatTurnSaveStep(Sender: TCountBarGI);
     procedure FormatForsageDeactivatePercent(Sender: TCountBarGI);
     procedure HighPresetClicked(Sender: TObjectGI);
@@ -131,7 +137,25 @@ uses
   EC_File,
   GR_DX,
   GR_Sound,
-  fStarMap;
+  fStarMap,
+  aSession,
+  aPlayerActions,
+  NetSession;
+
+// CHANGE: ENHANCEMENT - Whether the settings show the session's cheats switch: in a running
+// multiplayer game, or one this machine hosts or has joined.
+function CheatsOptionShown: Boolean;
+begin
+  Result := (Galaxy <> nil) and (IsMultiplayer or (NetRole <> nrNone));
+end;
+
+// The switch's caption; the game's texts have none, so English stands in for it.
+function CheatsOptionCaption: WideString;
+begin
+  Result := LocalizedText('FormCfgSettings.CheatsAllowed');
+  if Result = '' then
+    Result := 'Cheats in multiplayer (set by the host)';
+end;
 
 // CHANGE: LIMITATION - Keep settings aligned with the native renderer and available media.
 procedure TfCfgSettings.ConstrainNativeOptions;
@@ -310,6 +334,8 @@ var
   Block: TBlockParEC;
 begin
   RestartRequested := False;
+  OriginalSoundVolume := SoundVolume;
+  OriginalMusicVolume := MusicVolume;
   if IsInstallFeatureEnabled('Robot') then
   begin
     RobotAvailability := 1;
@@ -458,6 +484,24 @@ begin
   AddOptionLabel('DisableAutoPilot', LocalizedText('FormCfgSettings.DisableAutoPilot'), False);
   AddOptionChoice(1, LocalizedText('FormCfgSettings.Yes'), DisableAutoPilot, False);
   AddOptionChoice(0, LocalizedText('FormCfgSettings.No'), not DisableAutoPilot, False);
+  // CHANGE: ENHANCEMENT - The session's cheats switch (Session.CheatsAllowed), in a multiplayer
+  // game only. It is the host's: a client sees it and cannot change it.
+  if CheatsOptionShown then
+  begin
+    AddOptionLabel('CheatsAllowed', CheatsOptionCaption, False);
+    AddOptionChoice(
+        1,
+        LocalizedText('FormCfgSettings.Yes'),
+        Session.CheatsAllowed,
+        NetRole = nrClient
+    );
+    AddOptionChoice(
+        0,
+        LocalizedText('FormCfgSettings.No'),
+        not Session.CheatsAllowed,
+        NetRole = nrClient
+    );
+  end;
   BuildGroupIndex := 1;
   if AltResolutionSwitch then
   begin
@@ -756,7 +800,7 @@ begin
   AddOptionChoice(0, LocalizedText('FormCfgSettings.No'), not SoundInSpaceEnabled, False);
   ValueLabel := AddOptionLabel('SoundVolume', LocalizedText('FormCfgSettings.SoundVolume'), False);
 
-  AddOptionSlider(ValueLabel, 0, 100, Round(SoundVolume * 100.0), 1, FormatInteger);
+  AddOptionSlider(ValueLabel, 0, 100, Round(SoundVolume * 100.0), 1, PreviewSoundVolume);
   AddOptionLabel('Music', LocalizedText('FormCfgSettings.Music'), True);
 
   AddOptionChoice(
@@ -776,7 +820,7 @@ begin
   AddOptionChoice(0, LocalizedText('FormCfgSettings.No'), not MusicInSpaceEnabled, False);
   ValueLabel := AddOptionLabel('MusicVolume', LocalizedText('FormCfgSettings.MusicVolume'), False);
 
-  AddOptionSlider(ValueLabel, 0, 100, Round(MusicVolume * 100.0), 1, FormatInteger);
+  AddOptionSlider(ValueLabel, 0, 100, Round(MusicVolume * 100.0), 1, PreviewMusicVolume);
 
   AddOptionLabel('MusicInHyper', LocalizedText('FormCfgSettings.MusicInHyper'), False);
   AddOptionChoice(1, LocalizedText('FormCfgSettings.Yes'), MusicInHyperEnabled, False);
@@ -1501,6 +1545,44 @@ begin
     );
   end;
 end;
+// CHANGE: FIX - Push the current SoundVolume/MusicVolume to every live sound and the music track.
+procedure TfCfgSettings.ApplyVolumes;
+var
+  Buffer: TSoundBuffer;
+begin
+  if SoundManager <> nil then
+  begin
+    Buffer := SoundManager.FirstBuffer;
+    while Buffer <> nil do
+    begin
+      if Buffer.Streaming then
+        Buffer.SetVolume(MusicVolume * MusicVolumeScale)
+      else
+        Buffer.SetVolume(SoundVolume);
+      Buffer := Buffer.Next;
+    end;
+  end;
+  if MusicManager <> nil then
+    MusicManager.SetVolume(MusicVolume * MusicVolumeScale);
+end;
+procedure TfCfgSettings.PreviewSoundVolume(Sender: TCountBarGI);
+begin
+  FormatInteger(Sender);
+  if HasOptionValue('SoundVolume') then
+  begin
+    SoundVolume := Sender.Position / 100.0;
+    ApplyVolumes;
+  end;
+end;
+procedure TfCfgSettings.PreviewMusicVolume(Sender: TCountBarGI);
+begin
+  FormatInteger(Sender);
+  if HasOptionValue('MusicVolume') then
+  begin
+    MusicVolume := Sender.Position / 100.0;
+    ApplyVolumes;
+  end;
+end;
 procedure TfCfgSettings.FormatTurnSaveStep(Sender: TCountBarGI);
 var
   Value: Integer;
@@ -1894,6 +1976,10 @@ begin
 end;
 procedure TfCfgSettings.CancelClicked(Sender: TObjectGI);
 begin
+  // CHANGE: FIX - Undo the live volume preview.
+  SoundVolume := OriginalSoundVolume;
+  MusicVolume := OriginalMusicVolume;
+  ApplyVolumes;
   RequestedScreenId := SettingsReturnScreenId;
   RequestClose(1);
 end;
@@ -2221,6 +2307,12 @@ begin
   BeginCalcNextTurn := GetOptionValue('BeginCalcNextTurn') / 100.0;
   UserSettingsConfig
       .SetOrAddParam('BeginCalcNextTurn', WideString(IntToStr(Round(BeginCalcNextTurn * 100.0))));
+  // CHANGE: ENHANCEMENT - The cheats switch is the session's, not cfg.txt's: it changes by
+  // command, so every machine sees it (a client's choices are disabled, so it has none).
+  if CheatsOptionShown
+      and HasOptionValue('CheatsAllowed')
+      and (Boolean(GetOptionValue('CheatsAllowed')) <> Session.CheatsAllowed) then
+    SetSessionFlagValue(SessionFlagCheats, not Session.CheatsAllowed);
   ActiveGroupIndex := 1;
   Index := GetOptionValue('Resolution');
   if SelectedGameDisplayMode <> Index then
@@ -2470,6 +2562,9 @@ begin
       Buffer := Buffer.Next;
     end;
   end;
+
+  // CHANGE: FIX - The music track itself (MusicManager) was never updated by the old loop above.
+  ApplyVolumes;
 
   if ShowSystemMouse then
     while ShowCursor(True) < 0 do

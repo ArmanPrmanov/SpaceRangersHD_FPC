@@ -1179,6 +1179,16 @@ begin
   Galaxy.RefreshRangerWealthStats;
   Galaxy.RefreshRangerStrengthStats;
   Result := AddHuman(Player);
+  // CHANGE: ENHANCEMENT - The new human uses the other humans' storage pool, and its storage
+  // bubbles list it.
+  ShareHumanStorage;
+  if Player.StorageIsShared then
+  begin
+    Player.RefreshStorageBubbles;
+    // Each sharer's wealth counts its share of the pool (TShip.CalculateWealth), as a load
+    // computes it.
+    Galaxy.RefreshRangerWealthStats;
+  end;
   Result.PlayerStar := Planet.CurrentStar;
   if Result.PlayerOldQuests = nil then
     Result.PlayerOldQuests := aMyFunction.TObjectList.Create;

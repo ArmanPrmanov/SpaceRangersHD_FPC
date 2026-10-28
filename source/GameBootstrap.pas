@@ -11,6 +11,7 @@ implementation
 uses
   aHuman,
   aObjectRefs,
+  aPortText,
   aSession,
   RTLFileSystem,
   fIntroduction,
@@ -71,7 +72,8 @@ uses
   HotSeat,
   NetPlay,
   SimEventHandlers,
-  InterfaceOverrideViews;
+  InterfaceOverrideViews,
+  CheatCode;
 
 var
   ApplicationEvents: TAD;
@@ -308,6 +310,21 @@ begin
     // CHANGE: ENHANCEMENT - Two humans share one shop's stock (HeadlessSim.RunSharedShop).
     else if Argument = '--sim-shared-shop' then
       Simulation.SharedShop := True
+    // CHANGE: ENHANCEMENT - Two humans share one planet's storage (HeadlessSim.RunSharedStorage).
+    else if Argument = '--sim-shared-storage' then
+      Simulation.SharedStorage := True
+    // CHANGE: ENHANCEMENT - The humans share the government quests (HeadlessSim.RunSharedQuests).
+    else if Argument = '--sim-shared-quests' then
+      Simulation.SharedQuests := True
+    // CHANGE: ENHANCEMENT - The shared storage between networked humans (HeadlessNet).
+    else if Argument = '--sim-net-storage' then
+      Simulation.NetStorage := True
+    // CHANGE: ENHANCEMENT - The shared quests between networked humans (HeadlessNet).
+    else if Argument = '--sim-net-shared-quest' then
+      Simulation.NetSharedQuest := True
+    // CHANGE: ENHANCEMENT - Money transfers between networked humans (HeadlessNet).
+    else if Argument = '--sim-net-transfer' then
+      Simulation.NetTransfer := True
     // CHANGE: ENHANCEMENT - Script builtins act for the right human (HeadlessSim.RunScriptRouting).
     else if Argument = '--sim-script-routing' then
       Simulation.ScriptRouting := True
@@ -706,7 +723,9 @@ begin
       ApplicationEvents := TAD.Create;
       Application.OnActivate := ApplicationEvents.ApplicationActivated;
       Application.OnDeactivate := ApplicationEvents.ApplicationDeactivated;
-      DebugKeyCallback := nil;
+      // CHANGE: BUGFIX - Cheat codes (Ctrl+Shift and the code's letters) reach CheatCode again:
+      // nothing set the callback, so no cheat worked, in single player or multiplayer.
+      DebugKeyCallback := HandleDebugKey;
       RunningUnderWine := False;
       Stage('platform and window');
       InitializePlatformRuntimeAndMainWindow;
@@ -736,6 +755,8 @@ begin
       AvailableLanguageCodes := CollectInstallLanguageCodes;
       if AvailableLanguageCodes = '' then
         AvailableLanguageCodes := SelectedLanguage;
+      // CHANGE: ENHANCEMENT - The port's own texts fall back to Russian in a Russian game.
+      PortTextRussian := WideCompareText(SelectedLanguage, 'russian') = 0;
       InitializeScreens;
       InstallSimEventHandlers;
       TimerPeriodStarted := timeBeginPeriod(1) = 0;
@@ -746,6 +767,8 @@ begin
           InstallNetTalkProbe(Simulation.NetTalkDay);
         if Simulation.NetQuestDay > 0 then
           RegisterNetQuestProbe;
+        if Simulation.NetSharedQuest then
+          RegisterNetSharedQuestProbe;
         System.ExitCode := RunCommandReplay(Replay);
       end
       else if SimulationMode then

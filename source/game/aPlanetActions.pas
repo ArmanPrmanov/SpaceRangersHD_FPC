@@ -790,6 +790,11 @@ var
 begin
   H := ActorHuman(Command);
   P := Actor(Command);
+  // CHANGE: ENHANCEMENT - The quests are shared (docs/humans.md, Quests): a government gives
+  // the humans one quest at a time, so an offer another human's quest from the same
+  // government overtook (applied first at the barrier) is gone.
+  if QuestsShared(P) and HumanHoldsQuestFrom(H.GovernmentQuestOffer.Planet) then
+    raise ECommandRefused.CreateReason(rrOfferGone, 'AcceptQuest: the government gave its quest');
   New(Quest);
   Quest^ := H.GovernmentQuestOffer;
   Quest.Description := P.BuildQuestText(Quest^, qtkOffer);
@@ -813,7 +818,14 @@ end;
 
 procedure AcceptQuest;
 begin
-  SubmitSimple(ckAcceptQuest);
+  // CHANGE: ENHANCEMENT - A shared quest's offer can be gone (ExecuteAcceptQuest); the
+  // refusal changed nothing, and the screen goes on without the quest.
+  try
+    SubmitSimple(ckAcceptQuest);
+  except
+    on ECommandRefused do
+      ;
+  end;
 end;
 
 // Moved from TfGov.PermanentlyDeclineQuest.

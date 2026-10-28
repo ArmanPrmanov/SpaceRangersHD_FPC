@@ -18,7 +18,8 @@ unit aHumanSave;
 // - since version 3, the items of the open shop grids that do not write them (aShopStock:
 //   a second grid at a location writes its slots empty), by id, so that a load shows them
 //   again;
-// - since version 4, the game days each human owes for a text quest (THuman.QuestDaysOwed).
+// - since version 4, the game days each human owes for a text quest (THuman.QuestDaysOwed);
+// - since version 5, the cheats session flag (Session.CheatsAllowed).
 // It is written only when some of this differs from what a save without it loads as: more
 // than one human, a flag that is not its default, a cheat on record, or a script or event
 // bound to a human other than the first. A single-player save is therefore byte for byte as
@@ -63,7 +64,8 @@ const
   // 2: whether each human's game has ended.
   // 3: the items of the shop grids that write their slots empty.
   // 4: the days each human owes for a text quest.
-  HumanBlockVersion = 4;
+  // 5: whether cheats work in multiplayer (Session.CheatsAllowed).
+  HumanBlockVersion = 5;
 
 procedure ResetHumanSessionState;
 begin
@@ -418,6 +420,8 @@ begin
     Buffer.AddDWord(Cardinal(Session.Humans[I].Id));
     Buffer.AddIntegerValue(Session.Humans[I].QuestDaysOwed);
   end;
+  // Version 5.
+  Buffer.AddBoolean(Session.CheatsAllowed);
   Buffer.SetInt32At(SizeOffset, Buffer.Position - SizeOffset - 4);
 end;
 
@@ -544,6 +548,11 @@ begin
         Human.QuestDaysOwed := Days;
     end;
   end;
+  // Version 4 and older allow cheats, the flag's default.
+  if Version >= 5 then
+    Session.CheatsAllowed := Buffer.GetBoolean
+  else
+    Session.CheatsAllowed := True;
   Buffer.SetPosition(Start + Size);
 end;
 

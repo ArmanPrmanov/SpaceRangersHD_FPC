@@ -16,6 +16,7 @@ type
   TScreenQueryHandler = function: TGameScreenId;
   TObjectQueryHandler = function: TObject;
   TBooleanQueryHandler = function: Boolean;
+  TMoneyTransferHandler = procedure(FromId, ToId, Amount: Integer);
   // Questions the simulation asks the UI. Values are part of the command log format.
   // CHANGE: ENHANCEMENT - sqRemoteTalk: whether a remote human can be asked something, and
   // whether it answered (aHuman.CanAskHuman, TShip.OpenPlayerConversation; docs/network.md,
@@ -43,6 +44,12 @@ var
   PlayerShipReleaseHandler: TSimEventHandler;
   // The equipment shop's stock changed while the player had it open.
   ShopStockChangedHandler: TSimEventHandler;
+  // CHANGE: ENHANCEMENT - Another human changed the storage where the local human's ranger is
+  // (aPlayer.StorageChanged): an open ship screen shows it again.
+  StorageChangedHandler: TSimEventHandler;
+  // CHANGE: ENHANCEMENT - A human gave another human money (aPlayerActions.TransferMoney, its
+  // relay): the screens show the money and the bubbles again. Every machine hears every transfer.
+  MoneyTransferHandler: TMoneyTransferHandler;
   // Play a UI sound.
   SoundHandler: TSoundHandler;
   // The screen the human has open. The simulation holds back some actions while the human
@@ -62,6 +69,8 @@ procedure NotifyTurnFailed;
 procedure RecordPlayerResult(Victory: Boolean);
 procedure ReleasePlayerShip;
 procedure NotifyShopStockChanged;
+procedure NotifyStorageChanged;
+procedure NotifyMoneyTransfer(FromId, ToId, Amount: Integer);
 procedure PlaySound(const Name: WideString);
 function HumanScreen: TGameScreenId;
 function InspectedShip: TObject;
@@ -107,6 +116,18 @@ procedure NotifyShopStockChanged;
 begin
   if Assigned(ShopStockChangedHandler) then
     ShopStockChangedHandler;
+end;
+
+procedure NotifyStorageChanged;
+begin
+  if Assigned(StorageChangedHandler) then
+    StorageChangedHandler;
+end;
+
+procedure NotifyMoneyTransfer(FromId, ToId, Amount: Integer);
+begin
+  if Assigned(MoneyTransferHandler) then
+    MoneyTransferHandler(FromId, ToId, Amount);
 end;
 
 procedure PlaySound(const Name: WideString);

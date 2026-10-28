@@ -303,6 +303,8 @@ begin
         P.AddItemToPlayerStorage(Item, P.CurrentPlanet, -1)
       else
         P.AddItemToPlayerStorage(Item, P.DockedTo, -1);
+      // CHANGE: ENHANCEMENT - The storage is shared: the others' open ship screen there shows it.
+      StorageChanged(PlayerStorageLocation(P), ActorHuman(Command));
       TakeShopStockItem(ActorHuman(Command), Location, Item);
       // The screen tells the player where the hull went before the rest runs.
       EquipmentPurchase := epHullStored;

@@ -263,6 +263,10 @@ type
     procedure StorageUpClicked(Sender: TObjectGI);
     procedure SlideStorageTimer(Timer: PCallbackTimerGI; UserData: PtrInt);
     procedure RefreshStorageView;
+    // CHANGE: ENHANCEMENT - Another human changed the shared storage here
+    // (SimEvents.NotifyStorageChanged): the storage cells show it as it is now, scrolled back
+    // within what it holds.
+    procedure RefreshSharedStorage;
     procedure ScrollStorageUp(Sender: TObjectGI);
     procedure ScrollStorageDown(Sender: TObjectGI);
     procedure StorageItemMouseUp(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
@@ -7213,6 +7217,18 @@ begin
     );
     UpCallback := ScrollStorageDown;
   end;
+end;
+
+procedure TfShip2.RefreshSharedStorage;
+var
+  Limit: Integer;
+begin
+  if (LocalPlayer = nil) or not CanUseLocalStorage then
+    Exit;
+  Limit := Max(0, (LocalPlayer.GetStorageSlotExtent(GetLocalStorageOwner) div 3) * 3 - 3);
+  if StorageFirstSlot > Limit then
+    StorageFirstSlot := Limit;
+  RefreshStorageView;
 end;
 
 procedure TfShip2.ScrollStorageUp(Sender: TObjectGI);

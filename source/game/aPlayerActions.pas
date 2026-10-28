@@ -59,6 +59,11 @@ const
   // CHANGE: ENHANCEMENT - A human takes back its end turn before the day starts (docs/network.md,
   // Waiting).
   ckCancelEndTurn = 47;
+  // CHANGE: ENHANCEMENT - A human gives another human money, any amount it has, at any
+  // distance (a trade, docs/commands.md), and the host's relay of it (relay only,
+  // docs/network.md, Trades).
+  ckTransferMoney = 48;
+  ckRelayedTransfer = 49;
 type
   TSlotList = array of Integer;
 procedure AddWeaponSlot(var Slots: TSlotList; Slot: Integer);
@@ -161,7 +166,8 @@ procedure FinishTerronTransformation;
 // The jump screen or the arcade battle no longer shows the dead player's ship; the turn
 // thread, waiting in the player ship's release, goes on.
 procedure DismissScoreScreen;
-// Sets a session flag (aSession: SessionFlagFriendlyFire; SessionFlagTextQuestsRetired does nothing).
+// Sets a session flag (aSession: SessionFlagFriendlyFire, SessionFlagCheats;
+// SessionFlagTextQuestsRetired does nothing).
 procedure SetSessionFlagValue(Flag: Integer; Value: Boolean);
 // CHANGE: ENHANCEMENT - The end-turn barrier (ROADMAP.md, Phase 4, item 2; docs/humans.md, End
 // turn). The local human ends its turn when it holds the day (the EndTurn command); with
@@ -193,6 +199,15 @@ function JoinHumanAt(Planet: TObject; const Name: WideString; const Character: T
 // after the player-star job; this does it for the humans whose jump screen is not shown, before
 // the galaxy job. Only in multiplayer.
 procedure StepHumansInHyperspace;
+// CHANGE: ENHANCEMENT - The TransferMoney command of the local human: Amount of its money to
+// Recipient's ranger. A trade: submit it with SubmitTrade (or SubmitCommand, which raises the
+// refusal). The executor refuses (before any change) a recipient that is gone, the sender
+// itself or has finished (rrTargetGone), an amount below 1 or one the recipient cannot hold
+// (rrOther), and an amount above the sender's money (rrNoMoney).
+function TransferMoneyCommand(Recipient: THuman; Amount: Integer): TPlayerCommand;
+// The relay of an applied TransferMoney (NetHost): the same actor, recipient and amount, which a
+// client moves without the checks (the host made them).
+function RelayedTransferOf(const Command: TPlayerCommand): TPlayerCommand;
 var
   // The days to land that the last PreparePlayerPath found, for the star map.
   PreparedLandingTurns: Integer;
@@ -215,7 +230,9 @@ uses
   aGalaxyStruct,
   aKling,
   ThreadCalc,
-  Globals;
+  Globals,
+  aPortText,
+  SimEvents;
 
 procedure AddWeaponSlot(var Slots: TSlotList; Slot: Integer);
 begin
@@ -1315,6 +1332,82 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - Money transfers between humans (docs/commands.md, TransferMoney). Ints:
+// the recipient's human id, the amount.
+const
+  // TShip.SetMoney's cap: more is lost.
+  MoneyCap = 100000000;
+
+// Both humans hear of it (a bubble each), and the screens show the money again.
+procedure ReportMoneyTransfer(From, Target: THuman; Amount: Integer);
+var
+  Text: WideString;
+begin
+  Text := MoneySentText;
+  ReplaceTextToken(Text, '<Amount>', WideString(IntToStr(Amount)), '<color=255,240,100>');
+  ReplaceTextToken(Text, '<Name>', Target.Player.Name, '<color=255,240,100>');
+  From.AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
+  Text := MoneyReceivedText;
+  ReplaceTextToken(Text, '<Amount>', WideString(IntToStr(Amount)), '<color=255,240,100>');
+  ReplaceTextToken(Text, '<Name>', From.Player.Name, '<color=255,240,100>');
+  Target.AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
+  NotifyMoneyTransfer(From.Id, Target.Id, Amount);
+end;
+
+procedure ExecuteTransferMoney(const Command: TPlayerCommand);
+var
+  From, Target: THuman;
+  Amount: Integer;
+begin
+  From := ActorHuman(Command);
+  Target := FindHuman(IntArg(Command, 0));
+  Amount := IntArg(Command, 1);
+  if (Target = nil) or (Target = From) or (Target.Player = nil) or Target.Finished then
+    raise ECommandRefused.CreateReason(rrTargetGone, 'TransferMoney: the recipient is gone');
+  if (Amount < 1) or (Amount > MoneyCap - Target.Player.Money) then
+    raise ECommandRefused.CreateReason(rrOther, 'TransferMoney: amount ' + IntToStr(Amount));
+  if Amount > From.Player.Money then
+    raise ECommandRefused.CreateReason(
+        rrNoMoney,
+        Format('TransferMoney: %d of %d', [Amount, From.Player.Money])
+    );
+  From.Player.SetMoney(From.Player.Money - Amount);
+  Target.Player.SetMoney(Target.Player.Money + Amount);
+  ReportMoneyTransfer(From, Target, Amount);
+end;
+
+function TransferMoneyCommand(Recipient: THuman; Amount: Integer): TPlayerCommand;
+begin
+  Result := NewCommand(ckTransferMoney);
+  AddInt(Result, Recipient.Id);
+  AddInt(Result, Amount);
+end;
+
+// The host checked the transfer; the client moves the amount without the checks. Its copy may
+// hold other money for the two (commands that run only at the barrier, or its own transfer that
+// ran before this earlier relay), so it moves the amount rather than setting the host's money:
+// relays that come out of order still add up. The next state brings the host's money anyway.
+procedure ExecuteRelayedTransfer(const Command: TPlayerCommand);
+var
+  From, Target: THuman;
+  Amount: Integer;
+begin
+  From := ActorHuman(Command);
+  Target := FindHuman(IntArg(Command, 0));
+  Amount := IntArg(Command, 1);
+  if (Target = nil) or (Target.Player = nil) or (From.Player = nil) or (Target = From) then
+    raise ECommandRefused.CreateReason(rrTargetGone, 'RelayedTransfer: the recipient is gone');
+  From.Player.SetMoney(From.Player.Money - Amount);
+  Target.Player.SetMoney(Target.Player.Money + Amount);
+  ReportMoneyTransfer(From, Target, Amount);
+end;
+
+function RelayedTransferOf(const Command: TPlayerCommand): TPlayerCommand;
+begin
+  Result := Command;
+  Result.Kind := ckRelayedTransfer;
+end;
+
 initialization
   RegisterCommand(ckParkPlayer, 'ParkPlayer', @ExecuteParkPlayer);
   RegisterCommand(ckPruneMessages, 'PruneMessages', @ExecutePruneMessages);
@@ -1368,4 +1461,6 @@ initialization
   RegisterCommand(ckStopContinuing, 'StopContinuing', @ExecuteStopContinuing);
   RegisterCommand(ckHoldPosition, 'HoldPosition', @ExecuteHoldPosition);
   RegisterCommand(ckCancelEndTurn, 'CancelEndTurn', @ExecuteCancelEndTurn);
+  RegisterCommand(ckTransferMoney, 'TransferMoney', @ExecuteTransferMoney, True);
+  RegisterRelayCommand(ckRelayedTransfer, 'RelayedTransfer', @ExecuteRelayedTransfer);
 end.

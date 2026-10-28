@@ -87,6 +87,22 @@ type
     // CHANGE: ENHANCEMENT - Two humans land at one planet and share its equipment stock
     // (RunSharedShop; aShopStock).
     SharedShop: Boolean;
+    // CHANGE: ENHANCEMENT - Two humans land at one planet and share its storage
+    // (RunSharedStorage; docs/humans.md, Storage).
+    SharedStorage: Boolean;
+    // CHANGE: ENHANCEMENT - The humans share the government quests (RunSharedQuests;
+    // docs/humans.md, Quests).
+    SharedQuests: Boolean;
+    // CHANGE: ENHANCEMENT - The shared storage between networked humans (HeadlessNet): the
+    // host's clients join at its human's planet and on their first day play a scripted storage
+    // turn instead of PlayHumanTurn.
+    NetStorage: Boolean;
+    // CHANGE: ENHANCEMENT - The shared quests between networked humans (HeadlessNet): a client
+    // takes a quest and the host's human fulfils it (docs/humans.md, Quests).
+    NetSharedQuest: Boolean;
+    // CHANGE: ENHANCEMENT - Money transfers between networked humans (HeadlessNet): the host's
+    // human and a client each give another human money, and each tries more than it has.
+    NetTransfer: Boolean;
     // CHANGE: ENHANCEMENT - Script builtins act for the script's human, on that human's
     // machine (RunScriptRouting).
     ScriptRouting: Boolean;
@@ -130,6 +146,15 @@ procedure SellToShop(Human: THuman; Item: TItem);
 // CHANGE: ENHANCEMENT - Human puts Item from its hold into its storage and sells it from there,
 // as the ship screen does; the ship screen is open (SellToShop left it open).
 procedure SellFromStorage(Human: THuman; Item: TItem);
+// CHANGE: ENHANCEMENT - Shared with HeadlessNet's storage run (NetStorage). Human opens the ship
+// screen of its ranger; puts Item from its hold into the storage where it is, at the first free
+// cell, as the ship screen does, and returns the cell; takes the item Id from the storage cell
+// Slot into its hand, '' when it did, else the refusal's reason; puts what it holds back into
+// the storage cell Slot.
+procedure OpenOwnShipScreen(Human: THuman);
+function StoreFromHold(Human: THuman; Item: TItem): Integer;
+function TakeFromStorage(Human: THuman; Slot: Integer; Id: Integer): AnsiString;
+procedure StoreHeldAt(Human: THuman; Slot: Integer);
 function IsTradedBack(Item: TItem): Boolean;
 // CHANGE: ENHANCEMENT - Gives Human a government planet quest to Planet (a TPlanet whose
 // TextQuestId is set), as AcceptQuest gives the offer; shared with HeadlessNet's quest probe.
@@ -190,7 +215,8 @@ uses
   HeadlessQuest,
   QuestPage,
   QuestRun,
-  aQuestActions;
+  aQuestActions,
+  CheatCode;
 
 var
   // Where each object starts in the state being dumped (SaveTrace).
@@ -430,6 +456,7 @@ var
   Event: TGalaxyEvent;
 begin
   Lines.Add(Format('session friendly-fire=%d', [Ord(Session.FriendlyFireEnabled)]));
+  Lines.Add(Format('session cheats=%d', [Ord(Session.CheatsAllowed)]));
   for I := 0 to Session.Humans.Count - 1 do
   begin
     Human := Session.Humans[I];
@@ -531,6 +558,56 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - The cheat probe (docs/network.md, Tests): the last human enters EXPA by
+// command with cheats allowed, which must give its ranger the experience and put the cheat on
+// its record; then the session turns cheats off, and a second EXPA must be refused in
+// multiplayer (single player ignores the flag). The flag stays off.
+procedure ProbeCheats;
+var
+  Human: THuman;
+  Command: TPlayerCommand;
+  Before: Integer;
+  Outcome: AnsiString;
+begin
+  if Session.Humans.Count = 0 then
+    Exit;
+  Human := Session.Humans[Session.Humans.Count - 1];
+  if Human.Player = nil then
+    Exit;
+  SetSessionFlagValue(SessionFlagCheats, True);
+  Before := Human.Player.FreeExperience;
+  Command := NewCheatCommand('EXPA');
+  Command.Actor := Cardinal(Human.Id);
+  SubmitCommand(Command);
+  if (Human.Player.FreeExperience = Before + 1000000) and Human.HasUsedCheat('EXPA') then
+    Outcome := 'applied'
+  else
+    Outcome := 'failed';
+  SetSessionFlagValue(SessionFlagCheats, False);
+  Before := Human.Player.FreeExperience;
+  Command := NewCheatCommand('EXPA');
+  Command.Actor := Cardinal(Human.Id);
+  try
+    SubmitCommand(Command);
+    if Human.Player.FreeExperience = Before + 1000000 then
+      Outcome := Outcome + ' off=applied'
+    else
+      Outcome := Outcome + ' off=failed';
+  except
+    on E: ECommandRefused do
+      if Human.Player.FreeExperience = Before then
+        Outcome := Outcome + ' off=refused'
+      else
+        Outcome := Outcome + ' off=failed';
+  end;
+  Emit(
+      Format(
+          'probe cheat human=%d multiplayer=%d on=%s points=%d',
+          [Human.Id, Ord(IsMultiplayer), Outcome, Human.CheatPoints]
+      )
+  );
+end;
+
 // Gives the session, the humans, the scripts and an event state that a load without the
 // per-human save block would lose: the flags, set by command, a cheat and text-quest days
 // owed for every human, the other humans' THuman state with a shop for those who are landed,
@@ -546,6 +623,10 @@ var
   Command: TPlayerCommand;
 begin
   SetSessionFlagValue(SessionFlagFriendlyFire, False);
+  // CHANGE: ENHANCEMENT - A cheat command of the last human runs for that human while the
+  // session allows cheats, and is refused in multiplayer once the host turns them off; the
+  // flag stays off for the round trip.
+  ProbeCheats;
   for I := 0 to Session.Humans.Count - 1 do
   begin
     Human := Session.Humans[I];
@@ -1452,6 +1533,9 @@ begin
         Items.Add(Human.Player.Inventory[J]);
       for J := 0 to Human.Player.Artefacts.Count - 1 do
         Items.Add(Human.Player.Artefacts[J]);
+      // CHANGE: ENHANCEMENT - The humans share one storage pool: it is counted once.
+      if (I = 1) and (B.Player.StorageEntries = A.Player.StorageEntries) then
+        Continue;
       for J := 0 to Human.Player.StorageEntries.Count - 1 do
         if PStorageEntry(Human.Player.StorageEntries[J]).Item <> nil then
           Items.Add(PStorageEntry(Human.Player.StorageEntries[J]).Item);
@@ -1732,6 +1816,544 @@ begin
     if Problem <> '' then
       Fail('after the round trip: ' + Problem);
     Emit('shared shop ok');
+  except
+    on E: EAbort do
+      Result := 1;
+  end;
+end;
+
+procedure OpenOwnShipScreen(Human: THuman);
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckOpenShipScreen);
+  AddRef(Command, Human.Player);
+  AddInt(Command, 0);
+  SubmitFor(Human, Command);
+end;
+
+function StoreFromHold(Human: THuman; Item: TItem): Integer;
+var
+  Command: TPlayerCommand;
+  I, Index: Integer;
+  Owner: TObject;
+begin
+  SubmitKindFor(Human, ckRefreshHoldView);
+  Index := -1;
+  for I := 0 to Human.PlayerHoldEntries.Count - 1 do
+    if TPlayerHoldUnit(Human.PlayerHoldEntries[I]).Item = Item then
+      Index := I;
+  if Index < 0 then
+    raise Exception.Create('The item to store is not in the hold');
+  Command := NewCommand(ckTakeHoldEntry);
+  AddInt(Command, Index);
+  AddInt(Command, 0);
+  SubmitFor(Human, Command);
+  Owner := GetLocalStorageOwner(Human);
+  Result := 0;
+  while Human.Player.FindStorageIndexByLocationAndSlot(Owner, Result) >= 0 do
+    Inc(Result);
+  StoreHeldAt(Human, Result);
+end;
+
+function TakeFromStorage(Human: THuman; Slot: Integer; Id: Integer): AnsiString;
+var
+  Command: TPlayerCommand;
+begin
+  Result := '';
+  Command := NewCommand(ckTakeStored);
+  AddInt(Command, Slot);
+  AddInt(Command, Id);
+  try
+    SubmitFor(Human, Command);
+  except
+    on E: ECommandRefused do
+      Result := RefusalReasonName(E.Reason);
+  end;
+end;
+
+procedure StoreHeldAt(Human: THuman; Slot: Integer);
+var
+  Command: TPlayerCommand;
+begin
+  Command := NewCommand(ckStoreHeld);
+  AddInt(Command, Slot);
+  AddInt(Command, 1);
+  SubmitFor(Human, Command);
+end;
+
+// CHANGE: ENHANCEMENT - The storage at a planet is one pool for every human (docs/humans.md,
+// Storage). A loaded save's humans share one list. Two humans join at one planet: they share
+// it too. The first buys two items and stores them; the second sees both in its storage there
+// and takes the first; the first's take of it, by the cell and the id its copy showed, is
+// refused (item gone); the second puts it back. A save with a storage of its own for one human
+// (one made before the pool) loads with it merged into the pool, a cell taken twice moved to the
+// next free one. No item is lost or in two places, and a round trip keeps the pool.
+function RunSharedStorage(const Options: TSimulationOptions): Integer;
+var
+  I, J, SlotX, SlotY, AId, BId, PlanetId, XId, YId: Integer;
+  Star: TStar;
+  Planet, Candidate: TPlanet;
+  A, B: THuman;
+  X, Y: TItem;
+  Command: TPlayerCommand;
+  Reason, MergePath: AnsiString;
+  Own: TStorageList;
+  Pool: TList;
+  Entry: PStorageEntry;
+
+  procedure Fail(const Text: AnsiString);
+  begin
+    Emit('shared storage failed: ' + Text);
+    raise EAbort.Create(Text);
+  end;
+
+  // Every human's ranger uses the first one's storage list.
+  function AllShare: Boolean;
+  var
+    K: Integer;
+  begin
+    Result := True;
+    for K := 1 to Session.Humans.Count - 1 do
+      if (Session.Humans[K].Player <> nil)
+          and (Session.Humans[K].Player.StorageEntries <> Session.Humans[0].Player.StorageEntries) then
+        Exit(False);
+  end;
+
+  // The storage cell at Planet that holds the item with that id, -1 for none; twice is an error.
+  function StoredSlot(Id: Integer): Integer;
+  var
+    K: Integer;
+    Stored: PStorageEntry;
+  begin
+    Result := -1;
+    for K := 0 to Session.Humans[0].Player.StorageEntries.Count - 1 do
+    begin
+      Stored := Session.Humans[0].Player.StorageEntries[K];
+      if (Stored.Item <> nil) and (Integer(Stored.Item.Id) = Id) then
+      begin
+        if Result >= 0 then
+          Fail(Format('item %d is stored twice', [Id]));
+        if Stored.LocationOwner = Planet then
+          Result := Stored.SlotIndex
+        else
+          Result := -2;
+      end;
+    end;
+  end;
+
+  // Whether Human's storage cell Slot at Planet shows the item with that id.
+  function Shows(Human: THuman; Slot, Id: Integer): Boolean;
+  var
+    Index: Integer;
+  begin
+    Index := Human.Player.FindStorageIndexByLocationAndSlot(Planet, Slot);
+    Result := (Index >= 0)
+        and (Integer(PStorageEntry(Human.Player.StorageEntries[Index]).Item.Id) = Id);
+  end;
+
+  function FindPair: Boolean;
+  var
+    K, L, Space: Integer;
+    List: TList;
+  begin
+    Result := False;
+    List := Planet.EquipmentShop;
+    Space := A.Player.GetCargoFreeSpace;
+    for K := 0 to List.Count - 1 do
+      for L := K + 1 to List.Count - 1 do
+        if IsTradedBack(TItem(List[K]))
+            and IsTradedBack(TItem(List[L]))
+            and (TItem(List[K]).Weight + TItem(List[L]).Weight <= Space) then
+        begin
+          X := TItem(List[K]);
+          Y := TItem(List[L]);
+          Exit(True);
+        end;
+  end;
+
+begin
+  Result := 0;
+  try
+    if not AllShare then
+      Fail('the loaded humans do not share one storage');
+    Emit(Format('shared storage loaded humans=%d shared=1', [Session.Humans.Count]));
+    Planet := nil;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+    begin
+      Star := TStar(Galaxy.Stars[I]);
+      for J := 0 to Star.Planets.Count - 1 do
+      begin
+        Candidate := TPlanet(Star.Planets[J]);
+        if (Planet = nil)
+            and (Candidate.OwnerId <= Byte(oiGaal))
+            and (Candidate.EquipmentShop.Count >= 6) then
+          Planet := Candidate;
+      end;
+    end;
+    if Planet = nil then
+      Fail('no planet with a shop');
+    A := JoinHumanAt(Planet, 'StoreA', 1);
+    B := JoinHumanAt(Planet, 'StoreB', 2);
+    if (A = nil) or (B = nil) then
+      Fail('the humans did not join');
+    if not AllShare then
+      Fail('the joined humans do not share the storage');
+    A.Player.SetMoney(10000000);
+    Inc(A.Player.GetHull.Weight, 1000);
+    A.Player.RefreshDerivedStats(True);
+    Command := NewCommand(ckOpenShopStock);
+    AddInt(Command, ShopVisibleColumnCount);
+    SubmitFor(A, Command);
+    if not FindPair then
+      Fail('no two items to buy');
+    XId := X.Id;
+    YId := Y.Id;
+    Reason := BuyShopItem(A, ShopSlotIndexOf(A, X), X);
+    if Reason = '' then
+      Reason := BuyShopItem(A, ShopSlotIndexOf(A, Y), Y);
+    if Reason <> '' then
+      Fail('a purchase was refused: ' + Reason);
+    SubmitKindFor(A, ckReturnShopStock);
+    // (a) A stores both; B sees them in its storage there.
+    OpenOwnShipScreen(A);
+    OpenOwnShipScreen(B);
+    SlotX := StoreFromHold(A, X);
+    SlotY := StoreFromHold(A, Y);
+    if (StoredSlot(XId) <> SlotX) or (StoredSlot(YId) <> SlotY) then
+      Fail('the stored items are not in the storage');
+    if not Shows(B, SlotX, XId) or not Shows(B, SlotY, YId) then
+      Fail('the other human does not see the stored items');
+    Emit(Format('shared storage stored x=%d y=%d other-sees=1', [XId, YId]));
+    // (b) B takes X; A's take of it, by the cell its copy showed, is refused.
+    Reason := TakeFromStorage(B, SlotX, XId);
+    if Reason <> '' then
+      Fail('the take was refused: ' + Reason);
+    if (B.SelectedHoldItem = nil) or (Integer(B.SelectedHoldItem.Id) <> XId) or (StoredSlot(XId) <> -1) then
+      Fail('the taken item is not in the taker''s hand');
+    if Shows(A, SlotX, XId) then
+      Fail('the first human still sees the taken item');
+    Reason := TakeFromStorage(A, SlotX, XId);
+    if Reason <> RefusalReasonName(rrItemGone) then
+      Fail('the second take of the item was not refused as gone: ' + Reason);
+    if A.SelectedHoldKind <> phkEmpty then
+      Fail('the refused take changed the first human''s hand');
+    // A take of Y by X's old cell names the wrong item there: refused as well.
+    Reason := TakeFromStorage(A, SlotY, XId);
+    if Reason <> RefusalReasonName(rrItemGone) then
+      Fail('a take naming another item in the cell was not refused: ' + Reason);
+    StoreHeldAt(B, SlotX);
+    if (B.SelectedHoldKind <> phkEmpty) or (StoredSlot(XId) <> SlotX) or not Shows(A, SlotX, XId) then
+      Fail('the item put back is not in the storage');
+    Emit(Format('shared storage race taken=%d again=%s back=1', [XId, RefusalReasonName(rrItemGone)]));
+    for I := 0 to 1 do
+    begin
+      Command := NewCommand(ckCloseShipScreen);
+      AddInt(Command, 0);
+      if I = 0 then
+        SubmitFor(A, Command)
+      else
+        SubmitFor(B, Command);
+    end;
+    // (c) A save in which B has a storage of its own (made before the pool): X is in it, in Y's
+    // cell. It loads with X merged into the pool, in another cell.
+    AId := A.Id;
+    BId := B.Id;
+    PlanetId := Planet.Id;
+    Pool := B.Player.StorageEntries;
+    Own := TStorageList.Create;
+    Dec(TStorageList(Pool).Sharers);
+    B.Player.StorageEntries := Own;
+    for I := Pool.Count - 1 downto 0 do
+    begin
+      Entry := Pool[I];
+      if (Entry.Item <> nil) and (Integer(Entry.Item.Id) = XId) then
+      begin
+        Pool.Delete(I);
+        Entry.SlotIndex := SlotY;
+        Own.Add(Entry);
+      end;
+    end;
+    Galaxy.RefreshRangerWealthStats;
+    Galaxy.RefreshRangerRatingPlaces;
+    MergePath := GetTempDir(False) + 'rangers-storage-' + IntToStr(GetProcessID) + '.sav';
+    try
+      SaveUnchanged(MergePath);
+      LoadSave(MergePath, Options.Seed);
+    finally
+      DeleteFile(MergePath);
+    end;
+    A := FindHuman(AId);
+    B := FindHuman(BId);
+    Planet := TPlanet(Galaxy.IdToPlanet(PlanetId, False));
+    if (A = nil) or (B = nil) or (Planet = nil) then
+      Fail('a human or the planet is missing after the load');
+    if not AllShare then
+      Fail('the loaded humans do not share one storage');
+    SlotX := StoredSlot(XId);
+    SlotY := StoredSlot(YId);
+    if (SlotX < 0) or (SlotY < 0) or (SlotX = SlotY) then
+      Fail(Format('the merged storage holds x at %d and y at %d', [SlotX, SlotY]));
+    Emit(Format('shared storage merged x-slot=%d y-slot=%d', [SlotX, SlotY]));
+    // (d) The pool survives a round trip.
+    if not CheckRoundTrip(Options.DumpDirectory, Options.Seed) then
+      Fail('round trip');
+    A := FindHuman(AId);
+    if (A = nil) or not AllShare then
+      Fail('the humans do not share one storage after the round trip');
+    Emit('shared storage ok');
+  except
+    on E: EAbort do
+      Result := 1;
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - --sim-shared-quests (docs/humans.md, Quests). Human A joins at a
+// planet P and takes a letter quest to a planet Q of another star, where human B joined: every
+// human's journal shows it. A's letter goes to B (by the storage, in play) and B delivers it:
+// A's quest is done, the reward is split equally (B gets what does not divide), every human
+// gets the experience share, the journal's completion, the finished quest and the relation to
+// Q. A takes another quest from P: a third human at P is refused a quest there (the government
+// gave its quest), and so is its AcceptQuest of an earlier offer (offer-gone). The quest's
+// deadline passes: it fails once, for every human (journal, finished quest, relation to P). A
+// round trip keeps every human's finished quests.
+function RunSharedQuests(const Options: TSimulationOptions): Integer;
+var
+  I, J, Number, Reward, Share, Count, AId: Integer;
+  Star: TStar;
+  P, Q, Candidate: TPlanet;
+  A, B, C, Human: THuman;
+  Item, Letter: TItem;
+  Before, Experience, OldCounts: array of Integer;
+  Name, Key, Text, Expected: WideString;
+  Offer: TQuest;
+  Reason: AnsiString;
+  Quest: PPlayerOldQuest;
+
+  procedure Fail(const Text: AnsiString);
+  begin
+    Emit('shared quests failed: ' + Text);
+    raise EAbort.Create(Text);
+  end;
+
+  function LetterName(N: Integer): WideString;
+  begin
+    Result := LocalizedColorText('Quest.SendLetter.' + IntToStr(N) + '.SysName');
+  end;
+
+  procedure SetOffer(Human: THuman; N, Money: Integer);
+  begin
+    FillChar(Offer, SizeOf(Offer), 0);
+    Offer.QuestType := qtSendLetter;
+    Offer.QuestNumber := N;
+    Offer.Planet := P;
+    Offer.DeadlineTurn := Galaxy.CurrentTurn + 50;
+    Offer.RewardMoney := Money;
+    Offer.ObjectiveTarget := Q;
+    Offer.Successful := False;
+    Human.GovernmentQuestOffer := Offer;
+  end;
+
+  // Whether every human's journal has the entry Key of that kind.
+  function AllHaveEntry(Kind: Byte): Boolean;
+  var
+    K: Integer;
+    Message: TMessagePlayer;
+  begin
+    Result := True;
+    for K := 0 to Session.Humans.Count - 1 do
+    begin
+      Message := Session.Humans[K].FindBubbleByKey(Key, False);
+      if (Message = nil) or (Message.Kind <> Kind) then
+        Exit(False);
+    end;
+  end;
+
+  // Whether every human's last finished quest is letter N with that outcome.
+  function AllFinished(N: Integer; Successful: Boolean): Boolean;
+  var
+    K: Integer;
+    List: TList;
+  begin
+    Result := True;
+    for K := 0 to Session.Humans.Count - 1 do
+    begin
+      List := Session.Humans[K].PlayerOldQuests;
+      if (List = nil) or (List.Count = 0) then
+        Exit(False);
+      Quest := List[List.Count - 1];
+      if (Quest.QuestType <> qtSendLetter) or (Quest.QuestNumber <> N)
+          or (Quest.Successful <> Successful) then
+        Exit(False);
+    end;
+  end;
+
+  function NextLetter(After: Integer): Integer;
+  var
+    K: Integer;
+  begin
+    for K := After + 1 to 500 do
+    begin
+      Name := LetterName(K);
+      if (Name <> '') and (Pos('Quest.', Name) <> 1) then
+        Exit(K);
+    end;
+    Result := -1;
+  end;
+
+begin
+  Result := 0;
+  try
+    P := nil;
+    Q := nil;
+    for I := 0 to Galaxy.Stars.Count - 1 do
+    begin
+      Star := TStar(Galaxy.Stars[I]);
+      for J := 0 to Star.Planets.Count - 1 do
+      begin
+        Candidate := TPlanet(Star.Planets[J]);
+        if Candidate.OwnerId > Byte(oiGaal) then
+          Continue;
+        if P = nil then
+          P := Candidate
+        else if (Q = nil) and (Candidate.CurrentStar <> P.CurrentStar) then
+          Q := Candidate;
+      end;
+    end;
+    if (P = nil) or (Q = nil) then
+      Fail('no two coalition planets');
+    A := JoinHumanAt(P, 'QuestA', 1);
+    B := JoinHumanAt(Q, 'QuestB', 2);
+    if (A = nil) or (B = nil) then
+      Fail('the humans did not join');
+    AId := A.Id;
+    // (a) A takes a letter quest to Q: every human's journal shows it.
+    Number := NextLetter(0);
+    if Number < 0 then
+      Fail('no letter quest in the texts');
+    Reward := 3001;
+    SetOffer(A, Number, Reward);
+    SubmitKindFor(A, ckAcceptQuest);
+    if A.Player.Quests.Count <> 1 then
+      Fail('the quest was not accepted');
+    Key := 'ZP_' + IntToStr(Cardinal(P.Id)) + '_' + IntToStr(Number);
+    if not AllHaveEntry(3) then
+      Fail('a human''s journal lacks the accepted quest');
+    Emit(Format('shared quests accepted humans=%d number=%d journal=all',
+        [Session.Humans.Count, Number]));
+    // (b) A's letter goes to B, who delivers it at Q.
+    Letter := nil;
+    for I := A.Player.Inventory.Count - 1 downto 1 do
+    begin
+      Item := A.Player.Inventory[I];
+      if (Item is TUselessItem) and (TUselessItem(Item).ConfigBlockName = LetterName(Number)) then
+      begin
+        Letter := Item;
+        A.Player.Inventory.Delete(I);
+        Break;
+      end;
+    end;
+    if Letter = nil then
+      Fail('A has no letter');
+    B.Player.Inventory.Add(Letter);
+    A.Player.RefreshDerivedStats(True);
+    B.Player.RefreshDerivedStats(True);
+    Count := Session.Humans.Count;
+    SetLength(Before, Count);
+    SetLength(Experience, Count);
+    for I := 0 to Count - 1 do
+    begin
+      Before[I] := Session.Humans[I].Player.Money;
+      Experience[I] := Session.Humans[I].Player.TotalExperience;
+    end;
+    SubmitKindFor(B, ckBeginGovernmentDialog);
+    if not GovernmentQuestTurnedIn then
+      Fail('B did not turn in A''s quest');
+    if A.Player.Quests.Count <> 0 then
+      Fail('A still holds the delivered quest');
+    Share := Reward div Count;
+    for I := 0 to Count - 1 do
+    begin
+      Human := Session.Humans[I];
+      if Human = B then
+        J := Reward - Share * (Count - 1)
+      else
+        J := Share;
+      if Human.Player.Money - Before[I] <> J then
+        Fail(Format('human %d got %d of the reward, not %d',
+            [Human.Id, Human.Player.Money - Before[I], J]));
+      if Human.Player.TotalExperience <= Experience[I] then
+        Fail(Format('human %d got no experience', [Human.Id]));
+      if (Integer(Q.RelationToShip(Human.Player)) and $7F) < 70 then
+        Fail(Format('human %d''s relation to Q did not rise', [Human.Id]));
+    end;
+    if not AllHaveEntry(4) then
+      Fail('a human''s journal lacks the completed quest');
+    if not AllFinished(Number, True) then
+      Fail('a human''s finished quests lack the completed quest');
+    Emit(Format('shared quests delivered by=other share=%d actor=%d journal=all finished=all',
+        [Share, Reward - Share * (Count - 1)]));
+    // (c) A takes another quest from P: P gives no other human a quest meanwhile.
+    Number := NextLetter(Number);
+    if Number < 0 then
+      Fail('no second letter quest in the texts');
+    SetOffer(A, Number, 2000);
+    SubmitKindFor(A, ckAcceptQuest);
+    if A.Player.Quests.Count <> 1 then
+      Fail('the second quest was not accepted');
+    C := JoinHumanAt(P, 'QuestC', 3);
+    if C = nil then
+      Fail('the third human did not join');
+    P.SetRelationLevelToRanger(C.Player, rlExcellent);
+    if C.Player.GenerateQuestOffer(Offer, Text) then
+      Fail('P offered another human a quest while its quest is held');
+    Expected :=
+        PickLocalizedTextVariant(
+            'FormGov.DontQuest.YouHaveQuest',
+            P.GenerationSeed * (Galaxy.CurrentTurn div 5) + 165856
+        );
+    if Text <> Expected then
+      Fail('P''s refusal is not that the humans have its quest');
+    SetOffer(C, Number + 1000, 2000);
+    Reason := 'applied';
+    try
+      SubmitKindFor(C, ckAcceptQuest);
+    except
+      on E: ECommandRefused do
+        Reason := RefusalReasonName(E.Reason);
+    end;
+    if Reason <> RefusalReasonName(rrOfferGone) then
+      Fail('a stale offer from P was accepted: ' + Reason);
+    if C.Player.Quests.Count <> 0 then
+      Fail('the refused offer left a quest');
+    Emit(Format('shared quests offer refused=1 accept=%s', [Reason]));
+    // (d) The quest's deadline passes: it fails once, for every human.
+    Key := 'ZP_' + IntToStr(Cardinal(P.Id)) + '_' + IntToStr(Number);
+    PQuest(A.Player.Quests[0]).DeadlineTurn := Galaxy.CurrentTurn;
+    A.Player.ProcessQuestTimersAndOutcomes;
+    if A.Player.Quests.Count <> 0 then
+      Fail('the failed quest is still held');
+    if not AllHaveEntry(5) then
+      Fail('a human''s journal lacks the failed quest');
+    if not AllFinished(Number, False) then
+      Fail('a human''s finished quests lack the failed quest');
+    for I := 0 to Session.Humans.Count - 1 do
+      if P.GetRelationLevelToShip(Session.Humans[I].Player) > rlBad then
+        Fail(Format('human %d''s relation to P did not drop', [Session.Humans[I].Id]));
+    Emit('shared quests failed-once journal=all finished=all relation=all');
+    // (e) A round trip keeps every human's finished quests.
+    SetLength(OldCounts, Session.Humans.Count);
+    for I := 0 to Session.Humans.Count - 1 do
+      OldCounts[I] := Session.Humans[I].PlayerOldQuests.Count;
+    if not CheckRoundTrip(Options.DumpDirectory, Options.Seed) then
+      Fail('round trip');
+    if FindHuman(AId) = nil then
+      Fail('A is missing after the round trip');
+    for I := 0 to Session.Humans.Count - 1 do
+      if Session.Humans[I].PlayerOldQuests.Count <> OldCounts[I] then
+        Fail(Format('human %d''s finished quests changed in the round trip',
+            [Session.Humans[I].Id]));
+    Emit('shared quests ok');
   except
     on E: EAbort do
       Result := 1;
@@ -2491,6 +3113,10 @@ var
           Items.Add(P.Inventory[J]);
         for J := 0 to P.Artefacts.Count - 1 do
           Items.Add(P.Artefacts[J]);
+        // CHANGE: ENHANCEMENT - The humans share one storage pool (docs/humans.md, Storage):
+        // it is counted once.
+        if (I > 0) and (Humans[0].Player.StorageEntries = P.StorageEntries) then
+          Continue;
         for J := 0 to P.StorageEntries.Count - 1 do
           if PStorageEntry(P.StorageEntries[J]).Item <> nil then
             Items.Add(PStorageEntry(P.StorageEntries[J]).Item);
@@ -3591,6 +4217,16 @@ begin
   if Options.SharedShop then
   begin
     Result := RunSharedShop(Options);
+    Exit;
+  end;
+  if Options.SharedStorage then
+  begin
+    Result := RunSharedStorage(Options);
+    Exit;
+  end;
+  if Options.SharedQuests then
+  begin
+    Result := RunSharedQuests(Options);
     Exit;
   end;
   if Options.ScriptRouting then

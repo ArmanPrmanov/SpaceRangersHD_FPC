@@ -2481,6 +2481,12 @@ begin
     ResolveLoadedObjectReferences(Buffer);
     // CHANGE: ENHANCEMENT - The other humans, the session flags and the script bindings.
     LoadHumanBlock(Self, Buffer);
+    // CHANGE: ENHANCEMENT - The humans share one storage pool; a save's per-human storages
+    // (one written before the pool) merge into it here, in the loaded humans' order. The
+    // rangers' wealth counts each one's share of it (TShip.CalculateWealth), so it is computed
+    // again, as the host computes it once the humans share the pool.
+    if ShareHumanStorage then
+      RefreshRangerWealthStats;
     for I := 0 to LoadedShips.Count - 1 do
     begin
       Ship := TShip(LoadedShips[I]);
@@ -2502,7 +2508,11 @@ begin
     LoadedShips.Clear;
     // CHANGE: CLEANUP - The storage bubbles are the local human's: TPlayer.BuildStorageBubbles
     // writes to the local human's bubbles whichever ranger it lists.
-    LocalPlayer.RefreshStorageBubbles;
+    // CHANGE: ENHANCEMENT - A shared pool's bubbles are kept up to date where it changes
+    // (TPlayer.RefreshStorageBubbles builds every sharer's), so a load keeps the saved ones: a
+    // client that built its own here, from a pool another human changed, differed from its host.
+    if not LocalPlayer.StorageIsShared then
+      LocalPlayer.RefreshStorageBubbles;
     WaitForTurnCalculationUI;
   except
     on E: Exception do
@@ -8644,6 +8654,13 @@ begin
   Human := HumanOf(Ranger);
   if (Human = nil) or (Human.PlayerOldQuests = nil) then
     Exit;
+  // CHANGE: ENHANCEMENT - With shared quests (docs/humans.md, Quests) a quest that some human
+  // holds is not offered again either, so no two humans carry the same letter or story.
+  if QuestsShared(Ranger) and HumanHoldsQuestNumber(QuestType, QuestNumber) then
+  begin
+    Result := True;
+    Exit;
+  end;
   for I := Human.PlayerOldQuests.Count - 1 downto 0 do
   begin
     Quest := Human.PlayerOldQuests[I];

@@ -95,7 +95,14 @@ TRADE_KINDS = {
 # The ship screen's sales: a host relays their effect (RelayedSale), never the sale itself
 # (docs/network.md, Trades).
 SHIP_SCREEN_SALES = {"SellHeld", "SellHoldInventory", "SellHoldArtefact", "SellHoldGoods", "SellStoredItem"}
-RELAYED_KINDS = (TRADE_KINDS - SHIP_SCREEN_SALES) | {"RelayedSale", "RelayedTextQuest"}
+# The commands that change the shared storage (docs/humans.md, Storage): trades whose effect a
+# host relays (RelayedStorage), never the command itself.
+STORAGE_COMMANDS = {
+    "TakeStored", "TakeStoredHull", "StoreHeld", "CloseVacantStorageSlot", "ChangeHull",
+    "TakeAllFromStorage", "PutAllIntoStorage", "SortStorage",
+}  # fmt: skip
+TRADE_KINDS |= STORAGE_COMMANDS
+RELAYED_KINDS = (TRADE_KINDS - SHIP_SCREEN_SALES - STORAGE_COMMANDS) | {"RelayedSale", "RelayedTextQuest", "RelayedStorage"}
 NET_SHOP_DAYS = 3
 # Text quests in a session (docs/progress/2026-10-19-text-quests-plan.md, Phase C): a client plays
 # a text quest on its NET_QUEST_DAY-th turn (--sim-net-quest). With two clients, both at one
@@ -229,11 +236,16 @@ def check_session(args, binary: Path, save: Path) -> tuple[bool, str]:
         binary, args.game_dir, save, ["--sim-roundtrip", "--sim-session-probe", "--sim-humans-dump"]
     )
     roundtrip = [line for line in output.splitlines() if line.startswith("roundtrip ")]
-    flags = "state session friendly-fire=0" in output.splitlines()
+    flags = "state session friendly-fire=0" in output.splitlines() and "state session cheats=0" in output.splitlines()
     owed = any(line.startswith("state human 0 ") and " quest-days=1" in line for line in output.splitlines())
+    # One human: a cheat command applies, and the cheats flag does not stop it (single player).
+    cheats = [line for line in output.splitlines() if line.startswith("probe cheat ")]
+    cheated = bool(cheats) and all(" on=applied off=applied " in line + " " for line in cheats)
     if code != 0 or not roundtrip or any("=ok" not in line for line in roundtrip) or not flags or not owed:
         return False, "session flags failed:" + output_tail(output)
-    return True, "session flags, cheats and text-quest days owed survive a save"
+    if not cheated:
+        return False, f"single-player cheat command failed: {cheats}"
+    return True, "session flags, cheats and text-quest days owed survive a save; a cheat command applies"
 
 
 def check_shared_shop(args, binary: Path, save: Path) -> tuple[bool, str]:
@@ -250,6 +262,39 @@ def check_shared_shop(args, binary: Path, save: Path) -> tuple[bool, str]:
         return False, "shared shop failed:" + output_tail(output)
     loaded = last_line(output, "shared shop loaded ")
     return True, f"two humans share a shop's stock ({loaded})"
+
+
+def check_shared_storage(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """Two humans at one planet share its storage (--sim-shared-storage; docs/humans.md, Storage).
+
+    The save's humans share one pool. Two humans join at a planet: one stores two items, the
+    other sees them and takes one; the first's take of it, by the cell and id its copy showed, is
+    refused (item-gone), and so is a take naming another item in a cell. A save in which one human
+    has a storage of its own (made before the pool) loads with it merged into the pool, a cell
+    taken twice moved, and a round trip keeps the pool."""
+    code, output = simulate(binary, args.game_dir, save, ["--sim-shared-storage", f"--sim-seed={args.seed}"])
+    lines = [line.strip() for line in output.splitlines()]
+    if code != 0 or "shared storage ok" not in lines:
+        return False, "shared storage failed:" + output_tail(output)
+    merged = last_line(output, "shared storage merged ")
+    return True, f"two humans share a planet's storage, a second take is refused, per-human storages merge ({merged})"
+
+
+def check_shared_quests(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """The humans share the government quests (--sim-shared-quests; docs/humans.md, Quests).
+
+    Human A takes a letter quest and every human's journal shows it; human B, in another star,
+    delivers A's letter: the reward is split equally (B gets what does not divide), every human
+    gets experience, the completion, the finished quest and the relation. While A holds a quest
+    from a planet, another human there is offered none and its stale offer is refused
+    (offer-gone). A quest's deadline fails it once for every human, and a round trip keeps
+    every human's finished quests."""
+    code, output = simulate(binary, args.game_dir, save, ["--sim-shared-quests", f"--sim-seed={args.seed}"])
+    lines = [line.strip() for line in output.splitlines()]
+    if code != 0 or "shared quests ok" not in lines:
+        return False, "shared quests failed:" + output_tail(output)
+    delivered = last_line(output, "shared quests delivered ")
+    return True, f"the humans share the quests: another human delivers, the reward splits ({delivered})"
 
 
 def check_script_routing(args, binary: Path, save: Path) -> tuple[bool, str]:
@@ -601,7 +646,8 @@ def net_lines(output: str, prefix: str) -> list[dict[str, str]]:
 def run_network(
     args, binary: Path, save: Path | None, count: int, log: Path | None = None, leave: str = "",
     race: bool = False, nested: bool = False, shop: bool = False, cancel: bool = False,
-    quest: str = "", host_quest: str = "",
+    quest: str = "", host_quest: str = "", storage: bool = False, shared_quest: bool = False,
+    transfer: bool = False,
 ):
     """One networked session: a host with `count` clients (Net1..NetN) for NET_DAYS days. Without
     a save the host plays a new game (--sim-new-game).
@@ -629,10 +675,16 @@ def run_network(
     client plays a text quest on its NET_QUEST_DAY-th turn (--sim-net-quest): "planet" for the
     planet quest the probe gives it, else the quest of that name (--sim-text-quest); the host
     lands every client at the first one's planet. With host_quest the host's own human plays the
-    quest of that name on its NET_QUEST_DAY-th day instead, and the clients play none. Returns
+    quest of that name on its NET_QUEST_DAY-th day instead, and the clients play none. With
+    storage, the clients join at the host's human's planet and use its shared storage on their
+    first day (--sim-net-storage), for NET_SHOP_DAYS days. With shared_quest, the clients join
+    there too, Net1 takes a quest on its first day and the host's human fulfils it on its second
+    (--sim-net-shared-quest), for NET_SHOP_DAYS days. With transfer, the host's human gives the
+    last client money on its first day and Net1 gives Net2 money on its first turn, each also
+    trying more than it has (--sim-net-transfer), for NET_SHOP_DAYS days. Returns
     (problem, host output, client outputs); problem is '' when every process ended cleanly.
     """
-    days = NET_SHOP_DAYS if shop else NET_DAYS
+    days = NET_SHOP_DAYS if shop or storage or shared_quest or transfer else NET_DAYS
     host_options = [
         f"--sim-save={save}" if save is not None else "--sim-new-game", "--sim-net-host=0", f"--sim-net-clients={count}",
         f"--sim-turns={days}", f"--sim-seed={args.seed}", f"--sim-net-talk={NET_TALK_DAY}",
@@ -653,6 +705,12 @@ def run_network(
         host_options.append("--sim-net-nested")
     if shop:
         host_options.append("--sim-net-shop")
+    if storage:
+        host_options.append("--sim-net-storage")
+    if shared_quest:
+        host_options.append("--sim-net-shared-quest")
+    if transfer:
+        host_options.append("--sim-net-transfer")
     if cancel:
         host_options.append("--sim-net-cancel-end-turn")
     quest_options = []
@@ -690,6 +748,12 @@ def run_network(
             options.append("--sim-net-nested")
         if shop:
             options.append("--sim-net-shop")
+        if storage:
+            options.append("--sim-net-storage")
+        if shared_quest:
+            options.append("--sim-net-shared-quest")
+        if transfer:
+            options.append("--sim-net-transfer")
         if cancel:
             options.append("--sim-net-cancel-end-turn")
         options.extend(quest_options)
@@ -1513,6 +1577,17 @@ def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
         return False, [f"{label}: a client's session flag changed the host's"]
     if not flag_failed or not flag_refused:
         return False, [f"{label}: the host did not refuse a client's session flag: {flag_failed} {flag_refused}"]
+    # The client's cheat (a Cheat command): its prediction gave its ranger the experience, and
+    # the host applied it for that human; the hashes compared above show both agree after it.
+    cheat_sent = [line for output in outputs for line in net_lines(output, "net client cheat ")]
+    cheat_host = net_lines(host_output, "net host cheat ")
+    if not cheat_sent or cheat_sent[0]["gained"] != "1000000" or cheat_sent[0]["used"] != "1":
+        return False, [f"{label}: the client's cheat did not run there: {cheat_sent}"]
+    applied = [line for line in cheat_host if line["human"] == cheat_sent[0]["human"]]
+    if not applied or applied[0]["used"] != "1" or applied[0]["cheats"] != "1":
+        return False, [f"{label}: the host did not apply the client's cheat: {cheat_host}"]
+    if any(line["used"] != "0" for line in cheat_host if line["human"] != cheat_sent[0]["human"]):
+        return False, [f"{label}: the client's cheat went to another human: {cheat_host}"]
     problem, cancel_note = check_cancel_end_turn(host_output, outputs)
     if problem:
         return False, [f"{label}: {problem}"]
@@ -1521,6 +1596,7 @@ def check_new_game_network(args, binary: Path) -> tuple[bool, list[str]]:
         f"{label}: {note}",
         f"{label}: a command a client submits from inside another reaches the host once",
         f"{label}: a client's session flag is refused, and the host's stays",
+        f"{label}: a client's cheat runs on the client and on the host, for its human",
         f"{label}: {cancel_note}",
     ]
 
@@ -1698,6 +1774,184 @@ def check_network_shop(args, binary: Path) -> tuple[bool, list[str]]:
     ]
 
 
+def check_network_storage(args, binary: Path) -> tuple[bool, list[str]]:
+    """The shared storage between networked humans (docs/humans.md, Storage; --sim-net-storage):
+    a new game whose host's human stays at its planet, and two clients that join there.
+
+    Net1 buys two items X and Y, stores them, takes X back and puts it into its hold; the host
+    applies each store and the take as they arrive and relays their effect (RelayedStorage) to
+    Net2, whose copy shows both stored, then X gone, before any state; the host's own screen is
+    told. Net2's take of X, by the cell and id it had, is refused (item-gone) while it waits (the
+    host applies a client's trades once the clients before it have ended their turns, so the
+    later client is the one refused); then it takes Y. At the end every human shares one pool on
+    the host, X is Net1's and Y Net2's. Only trades are relayed, a storage command only as its
+    effect, and every client state has the host's hash."""
+    label = "new game, 3 humans sharing a planet's storage"
+    problem, host_output, outputs = run_network(args, binary, None, 2, storage=True)
+    if not problem:
+        problem = compare_client_hashes(host_output, outputs)
+    if problem:
+        return False, [f"{label}: {problem}"]
+    net1, net2 = outputs[0], outputs[1]
+    id1 = fields(last_line(net1, "done net client ")).get("human")
+    id2 = fields(last_line(net2, "done net client ")).get("human")
+    stored = net_lines(net1, "net client storage stored ")
+    if not stored:
+        return False, [f"{label}: Net1 stored nothing:" + output_tail(net1)]
+    x, y = stored[0]["x"], stored[0]["y"]
+    took1 = net_lines(net1, "net client storage took ")
+    if not took1 or took1[0]["item"] != x or took1[0]["reason"] or took1[0]["held"] != "1" or took1[0]["stored"] != "0":
+        return False, [f"{label}: Net1 did not take X back: {took1}" + output_tail(net1)]
+    applied = net_lines(host_output, "net trade applied ")
+    kinds1 = [line["kind"] for line in applied if line["human"] == id1]
+    if kinds1.count("StoreHeld") < 2 or "TakeStored" not in kinds1:
+        return False, [f"{label}: the host did not apply Net1's stores and take as they came: {kinds1}"]
+    relay = net_lines(net2, "net client storage relay ")
+    if not relay or relay[0]["x"] != x or relay[0]["y"] != y or int(relay[0]["notified"]) < 1:
+        return False, [f"{label}: Net2's copy did not show Net1's stores before the state: {relay}" + output_tail(net2)]
+    saw = net_lines(net2, "net client storage saw take ")
+    if not saw or saw[0]["y-stored"] != "1" or int(saw[0]["notified"]) <= int(relay[0]["notified"]):
+        return False, [f"{label}: Net2's copy did not follow Net1's take: {saw}" + output_tail(net2)]
+    gone = net_lines(net2, "net client storage take-gone ")
+    if not gone or gone[0]["reason"] != "item-gone" or gone[0]["held"] != "0":
+        return False, [f"{label}: Net2's second take of X was not refused: {gone}"]
+    answered = [line for line in net_lines(net2, "net trade answered ") if line["kind"] == "TakeStored"]
+    if not answered or answered[0]["ok"] != "0" or answered[0]["reason"] != "item-gone":
+        return False, [f"{label}: Net2 did not get the refusal while it waited: {answered}"]
+    took2 = net_lines(net2, "net client storage took ")
+    if not took2 or took2[0]["item"] != y or took2[0]["reason"] or took2[0]["held"] != "1" or took2[0]["stored"] != "0":
+        return False, [f"{label}: Net2 did not take Y: {took2}" + output_tail(net2)]
+    relayed = net_lines(host_output, "net relayed ")
+    ran = net_lines(net1, "net relayed command ran ") + net_lines(net2, "net relayed command ran ")
+    kinds = {line["kind"] for line in relayed} | {line["kind"] for line in ran}
+    if not kinds <= RELAYED_KINDS or "RelayedStorage" not in kinds:
+        return False, [f"{label}: the host relayed {sorted(kinds - RELAYED_KINDS) or sorted(kinds)}, not trades and storage effects"]
+    failed = [line for line in ran if line["ok"] != "1"]
+    if failed:
+        return False, [f"{label}: a relay failed on a client: {failed}"]
+    host = net_lines(host_output, "net host storage notified=")
+    if not host or host[0]["shared"] != "1" or int(host[0]["notified"]) < 4:
+        return False, [f"{label}: the host's pool or screen did not follow: {host}"]
+    stored_ids = host[0]["stored"].split(",") if host[0]["stored"] else []
+    owns = {line["human"]: line["owns"].split(",") for line in net_lines(host_output, "net host storage human=")}
+    if x in stored_ids or y in stored_ids or x not in owns.get(id1, []) or y not in owns.get(id2, []):
+        return False, [f"{label}: the host ends with stored {stored_ids}, Net1 owning {owns.get(id1)}, Net2 {owns.get(id2)} (x={x} y={y})"]
+    return True, [
+        f"{label}: {NET_SHOP_DAYS} days, client hashes match the host's",
+        f"{label}: stores and takes apply on the host as they come and reach the other client as their effect "
+        "(RelayedStorage) before the next state; the host's screen is told",
+        f"{label}: a second take of the same item is refused (item-gone) while the client waits; each taken item ends "
+        "in its taker's hold",
+    ]
+
+
+def check_network_shared_quest(args, binary: Path) -> tuple[bool, list[str]]:
+    """The shared quests between networked humans (docs/humans.md, Quests; --sim-net-shared-quest):
+    a new game whose host's human stays at its planet, and two clients that join there.
+
+    Net1 takes a letter quest on its first day (predicted, applied by the host at the barrier)
+    and hands the letter to the host's human, who delivers it on its second day. The host's own
+    journal shows the quest before it delivers it; the reward is split equally among the three
+    humans (the deliverer gets what does not divide), and every human's journal has the
+    completion. Each client's journal shows the accepted quest after the first day's state and
+    the completed one after the second's: Net2 never ran Net1's command, so it has them from the
+    host. Every client state has the host's hash."""
+    label = "new game, 3 humans sharing a quest"
+    problem, host_output, outputs = run_network(args, binary, None, 2, shared_quest=True)
+    if not problem:
+        problem = compare_client_hashes(host_output, outputs)
+    if problem:
+        return False, [f"{label}: {problem}"]
+    accepted = net_lines(outputs[0], "net client shared-quest accepted ")
+    if not accepted or accepted[0]["held"] != "1" or accepted[0]["entry"] != "3":
+        return False, [f"{label}: Net1 did not take the quest: {accepted}" + output_tail(outputs[0])]
+    before = net_lines(host_output, "net host shared-quest before ")
+    if not before or before[0]["entry"] != "3":
+        return False, [f"{label}: the host's journal lacks Net1's quest: {before}" + output_tail(host_output)]
+    turned = net_lines(host_output, "net host shared-quest turned-in=")
+    if not turned or turned[0]["turned-in"] != "1":
+        return False, [f"{label}: the host's human did not deliver Net1's quest: {turned}" + output_tail(host_output)]
+    reward = int(turned[0]["reward"])
+    gains = net_lines(host_output, "net host shared-quest human=")
+    share = reward // len(gains) if gains else 0
+    expected = sorted([share] * (len(gains) - 1) + [reward - share * (len(gains) - 1)])
+    if len(gains) != 3 or sorted(int(line["gain"]) for line in gains) != expected or any(
+        line["entry"] != "4" for line in gains
+    ):
+        return False, [f"{label}: the reward or the journal did not reach every human: {gains}"]
+    for name, output in zip(("Net1", "Net2"), outputs):
+        entries = [line["entry"] for line in net_lines(output, "net client shared-quest day=")]
+        if "3" not in entries or "4" not in entries or entries.index("3") > entries.index("4"):
+            return False, [f"{label}: {name}'s journal after each state was {entries}"]
+    return True, [
+        f"{label}: {NET_SHOP_DAYS} days, client hashes match the host's",
+        f"{label}: a client's accepted quest shows in every journal (host and both clients, after the state); "
+        f"the host's human delivers it and the reward splits {expected}",
+    ]
+
+
+def check_network_transfer(args, binary: Path) -> tuple[bool, list[str]]:
+    """Money transfers between networked humans (docs/commands.md, TransferMoney;
+    --sim-net-transfer): a new game with two clients.
+
+    The host's human gives Net2 50 on its first day; Net1 gives Net2 100 on its first turn, a trade
+    the host applies as it comes. Each transfer moves exactly its amount on the host, and the host
+    relays it (RelayedTransfer) to every other client: Net1 and Net2 apply the host's transfer,
+    Net2 applies Net1's, and Net1 applies its own once the host has answered, each leaving the
+    sender the host's money and the recipient a bubble. A transfer of more than the sender has is refused
+    (no-money) on the host and, through the host's answer, on Net1, and changes nothing. Net2
+    also talks with the host's human's ranger, wherever it is (the players' buttons' talk: the
+    talk's commands, applied by the host at the barrier). Every client state has the host's
+    hash."""
+    label = "new game, 3 humans transferring money"
+    problem, host_output, outputs = run_network(args, binary, None, 2, transfer=True)
+    if not problem:
+        problem = compare_client_hashes(host_output, outputs)
+    if problem:
+        return False, [f"{label}: {problem}"]
+    net1, net2 = outputs
+    id1 = fields(last_line(net1, "done net client ")).get("human")
+    id2 = fields(last_line(net2, "done net client ")).get("human")
+    host_id = fields(last_line(host_output, "net host transfer sent ")).get("human")
+    expected = {(host_id, id2, "50"), (id1, id2, "100")}
+    for side, output in (("host", host_output), ("Net1", net1), ("Net2", net2)):
+        prefix = "net host transfer from=" if side == "host" else "net client transfer from="
+        seen = net_lines(output, prefix)
+        if {(line["from"], line["to"], line["amount"]) for line in seen} != expected or any(
+            line["bubble"] != "1" for line in seen
+        ):
+            return False, [f"{label}: {side} applied the transfers {seen}, expected {sorted(expected)}"]
+    host_seen = {(line["from"], line["amount"]): line for line in net_lines(host_output, "net host transfer from=")}
+    for output, name in ((net1, "Net1"), (net2, "Net2")):
+        for line in net_lines(output, "net client transfer from="):
+            host_line = host_seen[(line["from"], line["amount"])]
+            # Only the sender gives its own money away, so its money after the transfer is the
+            # host's everywhere; the recipient's may still lack another relay that came later.
+            if line["from-money"] != host_line["from-money"]:
+                return False, [f"{label}: {name}'s money after a transfer {line} is not the host's {host_line}"]
+    for side, output, prefix in (("host", host_output, "net host transfer "), ("Net1", net1, "net client transfer ")):
+        sent = net_lines(output, prefix + "sent ")
+        over = net_lines(output, prefix + "over ")
+        if not sent or int(sent[0]["before"]) - int(sent[0]["after"]) != int(sent[0]["amount"]):
+            return False, [f"{label}: {side}'s transfer did not move its amount: {sent}"]
+        if not over or over[0]["reason"] != "no-money" or over[0]["before"] != over[0]["after"]:
+            return False, [f"{label}: {side}'s transfer of more than it has was not refused: {over}"]
+    talk = net_lines(net2, "net client remote talk ")
+    if not talk or talk[0]["ship"] != host_id or talk[0]["talking"] != "0":
+        return False, [f"{label}: Net2's talk with the host's human's ranger did not run: {talk}" + output_tail(net2)]
+    relays = net_lines(host_output, "net relayed human=")
+    to_clients = {(line["human"], line["to"]) for line in relays if line.get("kind") == "RelayedTransfer"}
+    if to_clients != {(host_id, id1), (host_id, id2), (id1, id2)}:
+        return False, [f"{label}: the host relayed the transfers to {sorted(to_clients)}"]
+    return True, [
+        f"{label}: {NET_SHOP_DAYS} days, client hashes match the host's",
+        f"{label}: the host's and a client's transfers move their amounts on every machine, with the "
+        "recipient's bubble; more than the sender has is refused (no-money)",
+        f"{label}: a client's talk with another human's ranger at any distance keeps the hashes "
+        f"(same star: {talk[0]['same-star']})",
+    ]
+
+
 def check_humans(args, binary: Path, save: Path, count: int) -> tuple[bool, str]:
     """Play with extra humans: no crash, a clean round trip, the same hashes twice.
 
@@ -1726,12 +1980,17 @@ def check_humans(args, binary: Path, save: Path, count: int) -> tuple[bool, str]
         probes = [line for line in output.splitlines() if line.startswith("probe finished ")]
         if not probes or any(not line.endswith("command=refused") for line in probes):
             return False, f"{count} humans: a finished human's command was not refused"
+        # A human's cheat command runs for it while cheats are allowed, and is refused once the
+        # session turns them off (--sim-session-probe, ProbeCheats).
+        cheats = [line for line in output.splitlines() if line.startswith("probe cheat ")]
+        if not cheats or any(" on=applied off=refused " not in line + " " for line in cheats):
+            return False, f"{count} humans: the cheat probe failed: {cheats}"
         runs.append(turn_lines(output))
     if runs[0] != runs[1]:
         return False, f"{count} humans nondeterministic: " + first_divergence(runs[0], runs[1])
     return True, (
         f"{count} humans: {HUMAN_TURNS} turns, round trip ok, deterministic, respawn ok, "
-        "script game end ok"
+        "script game end ok, cheats follow the session flag"
     )
 
 
@@ -1824,6 +2083,14 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     passed_shop, note = check_shared_shop(args, binary, save)
     notes.append(note)
     passed = passed and passed_shop
+
+    passed_storage, note = check_shared_storage(args, binary, save)
+    notes.append(note)
+    passed = passed and passed_storage
+
+    passed_quests, note = check_shared_quests(args, binary, save)
+    notes.append(note)
+    passed = passed and passed_quests
 
     passed_routing, note = check_script_routing(args, binary, save)
     notes.append(note)
@@ -1935,6 +2202,9 @@ def main() -> None:
         futures.update({log: pool.submit(check_replay, args, binary, log) for log in replays})
         futures[Path("new game")] = pool.submit(check_new_game_network, args, binary)
         futures[Path("new game shop")] = pool.submit(check_network_shop, args, binary)
+        futures[Path("new game storage")] = pool.submit(check_network_storage, args, binary)
+        futures[Path("new game shared quest")] = pool.submit(check_network_shared_quest, args, binary)
+        futures[Path("new game transfer")] = pool.submit(check_network_transfer, args, binary)
         for path, future in futures.items():
             passed, notes = future.result()
             failed += not passed

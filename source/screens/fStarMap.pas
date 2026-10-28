@@ -225,6 +225,12 @@ type
     procedure PartnerRightButtonDown(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
     procedure PartnerMouseEnter(Sender: TObjectGI);
     procedure PartnerMouseLeave(Sender: TObjectGI);
+    // CHANGE: ENHANCEMENT - The other humans' buttons beside the partners' (multiplayer).
+    procedure PlayerButtonClicked(Sender: TObjectGI);
+    procedure PlayerButtonRightDown(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
+    procedure ShowPlayerShip(Ship: TShip);
+    procedure TalkWithPlayer(Ship: TShip);
+    procedure TransferMoneyTo(HumanId: Integer);
     procedure AddMapAnimation(Position: TPointF; ImagePath: WideString; DelayMs: Integer);
     procedure ClearMapAnimations;
     procedure MapAnimationFinished(Sender: TObjectGI);
@@ -394,7 +400,11 @@ uses
   fGoodsShop2,
   aTranclucator,
   HotSeat,
-  ab_MainForm;
+  ab_MainForm,
+  aCommands,
+  aPortText,
+  fListBox,
+  fCount1;
 
 // Cache only images. Rebuild names, ownership, relations and script-provided
 // information on every opening. Buffers copied into controls remain owned by
@@ -2143,10 +2153,141 @@ begin
 end;
 procedure TfStarMap.RebuildPartnerButtons;
 var
-  StarIndex, ShipIndex, PlacedCount, PartnerCount: Integer;
+  StarIndex, ShipIndex, PlacedCount, PartnerCount, HumanIndex: Integer;
   Star: TStar;
   Ship: TShip;
-  Portrait: WideString;
+  Human: THuman;
+
+  // CHANGE: ENHANCEMENT - One button, a partner's or (IsPlayer) another human's ranger's; the
+  // body is the partner loop's, moved here so that the humans' buttons follow the partners'.
+  procedure PlaceButton(Ship: TShip; IsPlayer: Boolean);
+  var
+    Portrait, Location: WideString;
+  begin
+    with TGraphButtonGI.Create(SecondaryPartnerPanel) do
+    begin
+      SetKind(gbkDisable);
+      Portrait := '';
+      if (Ship.Graphic <> nil)
+          and (Ship.Graphic is TShip2SE)
+          and (TShip2SE(Ship.Graphic).PanelPartnerImage <> '') then
+        Portrait := TShip2SE(Ship.Graphic).PanelPartnerImage
+      else if (Ship.Graphic <> nil)
+          and (Ship.Graphic is TRuinsSE)
+          and (TRuinsSE(Ship.Graphic).PanelPartnerImage <> '') then
+        Portrait := TRuinsSE(Ship.Graphic).PanelPartnerImage
+      else if Ship.IsFemaleHumanPilot
+          and (Ship.TypeId = stRanger)
+          and (Ship.GetHull.HullType = htSpecial)
+          and (Ship.GetHull.GetSpecialKindGraph = 'J') then
+        Portrait := 'Female'
+      else if (Ship.TypeId = stRanger) and Ship.UsesVeteranHumanRangerAppearance then
+        Portrait := 'PeopleO'
+      else if Ship is TPirate then
+      begin
+        Portrait := Portrait + 'P';
+        if (Ship.OwnerId = Byte(oiPirate)) and (TPirate(Ship).PirateType <> 0) then
+          Portrait :=
+              OwnerInfo[Integer(RaceToOwner(Ship.PilotRace)) and $7F].InternalName
+                  + Portrait
+                  + 'C'
+        else
+          Portrait :=
+              OwnerInfo[Integer(RaceToOwner(Ship.PilotRace)) and $7F].InternalName + Portrait;
+      end
+      else
+        Portrait := OwnerInfo[Integer(RaceToOwner(Ship.PilotRace)) and $7F].InternalName;
+      SetImageNormalPath('GI,Bm.PanelSpace2.' + GiResourceSuffix + Portrait + 'N');
+      SetImageNormalActivePath('GI,Bm.PanelSpace2.' + GiResourceSuffix + Portrait + 'A');
+      SetImageDownPath('GI,Bm.PanelSpace2.' + GiResourceSuffix + Portrait + 'D');
+      SetImageDisabledPath('GI,Bm.PanelSpace2.' + GiResourceSuffix + Portrait + 'H');
+      EnterSound := 'Sound.ButtonEnter';
+      LeaveSound := 'Sound.ButtonLeave';
+      ClickSound := 'Sound.ButtonClick';
+      UserValue := Ship.Id;
+      HitKind := gbhRect;
+      SetSize(GetMaxStateImageSize);
+      if PartnerCount <= 5 then
+        SetPosition(
+            Classes.Point(
+                GiScalePixelsEx(23, 20)
+                    + PlacedCount * GiScalePixels(25)
+                    - ClientSize.X div 2,
+                GiScalePixels(20) - ClientSize.Y div 2
+            )
+        )
+      else
+        SetPosition(
+            Classes.Point(
+                GiScalePixelsEx(23, 20)
+                    + PlacedCount * GiScalePixels(21)
+                    - 5
+                    - ClientSize.X div 2,
+                GiScalePixels(20) - ClientSize.Y div 2
+            )
+        );
+      UpdateStateImagePlacement;
+      UpdateStateVisuals;
+      MouseEnterCallback := PartnerMouseEnter;
+      MouseLeaveCallback := PartnerMouseLeave;
+      HelpCallback := MainPanel.ShowControlHelp;
+      if IsPlayer then
+      begin
+        // Another human: always enabled, whatever star it is in. A click opens its menu
+        // (PlayerButtonClicked), a right click talks with it at once.
+        DownCallback := PlayerButtonClicked;
+        RightButtonDownCallback := PlayerButtonRightDown;
+        if Ship.InHyperspace or (Ship.CurrentStar = nil) then
+          Location := PlayerInHyperspaceText
+        else
+        begin
+          Location := PlayerInStarText;
+          ReplaceTextToken(Location, '<Star>', Ship.CurrentStar.Name, '');
+        end;
+        ReplaceTextToken(Location, '<Name>', Ship.GetFullName(' '), '');
+        HelpText := Location;
+      end
+      else
+      begin
+        DownCallback := PartnerClicked;
+        RightButtonDownCallback := PartnerRightButtonDown;
+        SetDisabled(Ship.InHyperspace or (Ship.CurrentStar <> LocalPlayer.CurrentStar));
+        HelpText := Ship.GetFullName(' ');
+      end;
+      Inc(PlacedCount);
+      PartnerPanel.Parent.SetActive(PlacedCount > 0);
+      PartnerPanel.SetSize(
+          Classes.Point(
+              Math.Min(
+                  GiScalePixelsEx(12, 10)
+                      + PlacedCount * GiScalePixels(25)
+                      + GiScalePixelsEx(22, 18),
+                  PartnerPanel.Parent.ClientSize.X - 10
+              ),
+              PartnerPanel.ClientSize.Y
+          )
+      );
+      PartnerPanel.SetPosition(
+          Classes.Point(PartnerPanel.Parent.ClientSize.X - PartnerPanel.ClientSize.X, 0)
+      );
+      with GetByName('MapPartnerBG2') do
+        SetPosition(Classes.Point(PartnerPanel.ClientSize.X - ClientSize.X, 0));
+      with GetByName('MapPartnerDuty') do
+        SetPosition(Classes.Point(PartnerPanel.LocalPosition.X - 5, LocalPosition.Y));
+    end;
+  end;
+
+  // CHANGE: ENHANCEMENT - Whether Human gets a button: another human with a ranger, in a
+  // multiplayer game.
+  function HasPlayerButton(Human: THuman): Boolean;
+  begin
+    Result :=
+        IsMultiplayer
+            and (Human <> LocalHuman)
+            and (Human.Player <> nil)
+            and not Human.Finished;
+  end;
+
 begin
   ClearPartnerButtons;
   if LocalPlayer <> nil then
@@ -2163,6 +2304,10 @@ begin
           Inc(PartnerCount);
       end;
     end;
+    // CHANGE: ENHANCEMENT - The humans' buttons share the row, so they count for its spacing.
+    for HumanIndex := 0 to Session.Humans.Count - 1 do
+      if HasPlayerButton(Session.Humans[HumanIndex]) then
+        Inc(PartnerCount);
     for StarIndex := 0 to Galaxy.Stars.Count - 1 do
     begin
       Star := TStar(Galaxy.Stars[StarIndex]);
@@ -2170,101 +2315,15 @@ begin
       begin
         Ship := TShip(Star.Ships[ShipIndex]);
         if Ship.PartnerShip = LocalPlayer then
-        begin
-          with TGraphButtonGI.Create(SecondaryPartnerPanel) do
-          begin
-            SetKind(gbkDisable);
-            Portrait := '';
-            if (Ship.Graphic <> nil)
-                and (Ship.Graphic is TShip2SE)
-                and (TShip2SE(Ship.Graphic).PanelPartnerImage <> '') then
-              Portrait := TShip2SE(Ship.Graphic).PanelPartnerImage
-            else if (Ship.Graphic <> nil)
-                and (Ship.Graphic is TRuinsSE)
-                and (TRuinsSE(Ship.Graphic).PanelPartnerImage <> '') then
-              Portrait := TRuinsSE(Ship.Graphic).PanelPartnerImage
-            else if Ship.IsFemaleHumanPilot
-                and (Ship.TypeId = stRanger)
-                and (Ship.GetHull.HullType = htSpecial)
-                and (Ship.GetHull.GetSpecialKindGraph = 'J') then
-              Portrait := 'Female'
-            else if (Ship.TypeId = stRanger) and Ship.UsesVeteranHumanRangerAppearance then
-              Portrait := 'PeopleO'
-            else if Ship is TPirate then
-            begin
-              Portrait := Portrait + 'P';
-              if (Ship.OwnerId = Byte(oiPirate)) and (TPirate(Ship).PirateType <> 0) then
-                Portrait :=
-                    OwnerInfo[Integer(RaceToOwner(Ship.PilotRace)) and $7F].InternalName
-                        + Portrait
-                        + 'C'
-              else
-                Portrait :=
-                    OwnerInfo[Integer(RaceToOwner(Ship.PilotRace)) and $7F].InternalName + Portrait;
-            end
-            else
-              Portrait := OwnerInfo[Integer(RaceToOwner(Ship.PilotRace)) and $7F].InternalName;
-            SetImageNormalPath('GI,Bm.PanelSpace2.' + GiResourceSuffix + Portrait + 'N');
-            SetImageNormalActivePath('GI,Bm.PanelSpace2.' + GiResourceSuffix + Portrait + 'A');
-            SetImageDownPath('GI,Bm.PanelSpace2.' + GiResourceSuffix + Portrait + 'D');
-            SetImageDisabledPath('GI,Bm.PanelSpace2.' + GiResourceSuffix + Portrait + 'H');
-            EnterSound := 'Sound.ButtonEnter';
-            LeaveSound := 'Sound.ButtonLeave';
-            ClickSound := 'Sound.ButtonClick';
-            UserValue := Ship.Id;
-            HitKind := gbhRect;
-            SetSize(GetMaxStateImageSize);
-            if PartnerCount <= 5 then
-              SetPosition(
-                  Classes.Point(
-                      GiScalePixelsEx(23, 20)
-                          + PlacedCount * GiScalePixels(25)
-                          - ClientSize.X div 2,
-                      GiScalePixels(20) - ClientSize.Y div 2
-                  )
-              )
-            else
-              SetPosition(
-                  Classes.Point(
-                      GiScalePixelsEx(23, 20)
-                          + PlacedCount * GiScalePixels(21)
-                          - 5
-                          - ClientSize.X div 2,
-                      GiScalePixels(20) - ClientSize.Y div 2
-                  )
-              );
-            UpdateStateImagePlacement;
-            UpdateStateVisuals;
-            DownCallback := PartnerClicked;
-            RightButtonDownCallback := PartnerRightButtonDown;
-            MouseEnterCallback := PartnerMouseEnter;
-            MouseLeaveCallback := PartnerMouseLeave;
-            SetDisabled(Ship.InHyperspace or (Ship.CurrentStar <> LocalPlayer.CurrentStar));
-            HelpCallback := MainPanel.ShowControlHelp;
-            HelpText := Ship.GetFullName(' ');
-            Inc(PlacedCount);
-            PartnerPanel.Parent.SetActive(PlacedCount > 0);
-            PartnerPanel.SetSize(
-                Classes.Point(
-                    Math.Min(
-                        GiScalePixelsEx(12, 10)
-                            + PlacedCount * GiScalePixels(25)
-                            + GiScalePixelsEx(22, 18),
-                        PartnerPanel.Parent.ClientSize.X - 10
-                    ),
-                    PartnerPanel.ClientSize.Y
-                )
-            );
-            PartnerPanel.SetPosition(
-                Classes.Point(PartnerPanel.Parent.ClientSize.X - PartnerPanel.ClientSize.X, 0)
-            );
-            with GetByName('MapPartnerBG2') do
-              SetPosition(Classes.Point(PartnerPanel.ClientSize.X - ClientSize.X, 0));
-            with GetByName('MapPartnerDuty') do
-              SetPosition(Classes.Point(PartnerPanel.LocalPosition.X - 5, LocalPosition.Y));
-          end;
-        end;
+          PlaceButton(Ship, False);
       end;
+    end;
+    // CHANGE: ENHANCEMENT - Then one button per other human, in Session.Humans order.
+    for HumanIndex := 0 to Session.Humans.Count - 1 do
+    begin
+      Human := Session.Humans[HumanIndex];
+      if HasPlayerButton(Human) then
+        PlaceButton(Human.Player, True);
     end;
   end;
 end;
@@ -2344,6 +2403,176 @@ end;
 procedure TfStarMap.PartnerMouseLeave(Sender: TObjectGI);
 begin
   ShowObjectInfo(nil);
+end;
+
+// CHANGE: ENHANCEMENT - Another human's button (RebuildPartnerButtons): the map centres on its
+// ranger as on a partner's when it is in this star, else the hint says where it is; then a
+// menu: its ship and hold (the scanner screen), a talk at any distance, a money transfer.
+procedure TfStarMap.PlayerButtonClicked(Sender: TObjectGI);
+const
+  ChoiceShip = 0;
+  ChoiceTalk = 1;
+  ChoiceTransfer = 2;
+var
+  Human: THuman;
+  Ship: TShip;
+  Items: TList;
+  Entry: PWideString;
+  Choice: Integer;
+  Text: WideString;
+begin
+  if Mode = smmTurnFilm then
+  begin
+    PartnerClicked(Sender);
+    Exit;
+  end;
+  if (Mode <> smmOrders) or (LocalPlayer = nil) then
+    Exit;
+  Human := FindHuman(Sender.UserValue);
+  if (Human = nil) or (Human.Player = nil) or (Human = LocalHuman) then
+    Exit;
+  Ship := Human.Player;
+  if (Ship.CurrentStar = LocalPlayer.CurrentStar) and not Ship.InHyperspace then
+    PartnerClicked(Sender)
+  else
+  begin
+    if Ship.InHyperspace or (Ship.CurrentStar = nil) then
+      Text := PlayerInHyperspaceText
+    else
+    begin
+      Text := PlayerInStarText;
+      ReplaceTextToken(Text, '<Star>', Ship.CurrentStar.Name, '<color=255,240,100>');
+    end;
+    ReplaceTextToken(Text, '<Name>', Ship.GetFullName(' '), '<color=255,240,100>');
+    ShowLargeHelp(Text);
+  end;
+  Items := TList.Create;
+  try
+    New(Entry);
+    Entry^ := PlayerShipText;
+    Items.Add(Entry);
+    New(Entry);
+    Entry^ := PlayerTalkText;
+    Items.Add(Entry);
+    New(Entry);
+    Entry^ := PlayerTransferText;
+    Items.Add(Entry);
+    Choice := -1;
+    if ShowListDialog(Self, Choice, Ship.GetFullName(' '), Items, 0, 0) <> 1 then
+      Choice := -1;
+  finally
+    while Items.Count > 0 do
+    begin
+      Dispose(PWideString(Items[0]));
+      Items.Delete(0);
+    end;
+    Items.Free;
+  end;
+  HideLargeHelp;
+  // The menu was modal: the human may have gone meanwhile (a state, a leave).
+  Human := FindHuman(Sender.UserValue);
+  if (Human = nil) or (Human.Player = nil) or (Mode <> smmOrders) then
+    Exit;
+  case Choice of
+    ChoiceShip:
+      ShowPlayerShip(Human.Player);
+    ChoiceTalk:
+      TalkWithPlayer(Human.Player);
+    ChoiceTransfer:
+      TransferMoneyTo(Human.Id);
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - A right click on another human's button talks with it at once, as on a
+// partner's, but at any distance.
+procedure TfStarMap.PlayerButtonRightDown(Sender: TObjectGI; KeyState: Cardinal; Point: TPoint);
+var
+  Human: THuman;
+begin
+  if Mode <> smmOrders then
+    Exit;
+  Human := FindHuman(Sender.UserValue);
+  if (Human <> nil) and (Human.Player <> nil) and (Human <> LocalHuman) then
+    TalkWithPlayer(Human.Player);
+end;
+
+// CHANGE: ENHANCEMENT - The other human's ship, equipment and hold on the scanner screen, as a
+// scan of a ship in range shows them, wherever it is (read-only).
+procedure TfStarMap.ShowPlayerShip(Ship: TShip);
+begin
+  HideLargeHelp;
+  ScannerSelectionActive := False;
+  TalkSelectionActive := False;
+  HideActionRanges;
+  ShowObjectInfo(nil);
+  SoundManager.PlaySound('Sound.Scan');
+  SetCursorActive(False);
+  Present;
+  CaptureScreenBackground(True, 0);
+  SetCursorActive(True);
+  ScannerTarget := Ship;
+  ScannerReturnScreenId := FormToId(Self);
+  RequestedScreenId := screenScanner;
+  RequestClose(1);
+end;
+
+// CHANGE: ENHANCEMENT - The ranger-to-ranger talk with another human's ranger, as a click with
+// the talk cursor starts it, at any distance and in any star: the same commands (BeginTalk and
+// the talk's own), so the host and the clients see the same talk.
+procedure TfStarMap.TalkWithPlayer(Ship: TShip);
+begin
+  if (Mode <> smmOrders) or (LocalPlayer = nil) or not LocalPlayer.InNormalSpace then
+    Exit;
+  HideLargeHelp;
+  ShowObjectInfo(nil);
+  aCalc.WaitForTurnCalculationUI;
+  BeginTalk(Ship, True);
+  RunTalkDialogs;
+  ClearPathOverlay(True);
+  BuildPlayerPath;
+  aCalc.WaitForTurnCalculationUI;
+  BuildShipPathOverlay(LocalPlayer, False, '');
+  BreakUiMessage;
+end;
+
+// CHANGE: ENHANCEMENT - Gives another human money: the amount (1 to all the money the human has)
+// is chosen on the number dialog scripts use (fCount1), then sent as TransferMoney, a trade the
+// host checks again (docs/commands.md). Both humans get a bubble.
+procedure TfStarMap.TransferMoneyTo(HumanId: Integer);
+var
+  Human: THuman;
+  Value: Integer;
+  Caption: WideString;
+begin
+  Human := FindHuman(HumanId);
+  if (Human = nil) or (Human.Player = nil) or (LocalPlayer = nil) then
+    Exit;
+  if LocalPlayer.Money < 1 then
+  begin
+    ShowLargeHelp(TransferNoMoneyText);
+    Exit;
+  end;
+  Caption := TransferCaptionText;
+  ReplaceTextToken(Caption, '<Name>', Human.Player.GetFullName(' '), '');
+  Value := 1;
+  if ShowNumberDialog(Self, '', '', Caption, 1, LocalPlayer.Money, LocalPlayer.Money, nil, Value) <> 1 then
+    Exit;
+  Human := FindHuman(HumanId);
+  if (Human = nil) or (Human.Player = nil) or (Value < 1) or (Value > LocalPlayer.Money) then
+    Exit;
+  aCalc.WaitForTurnCalculationUI;
+  try
+    SubmitTrade(TransferMoneyCommand(Human, Value));
+  except
+    // Without a session SubmitTrade raises the refusal (the screen checked what it could).
+    on E: ECommandRefused do
+    begin
+      ShowLargeHelp(WideString(E.Message));
+      Exit;
+    end;
+  end;
+  MainPanel.RefreshMoneyAndCargo;
+  MainPanel.RebuildMessageButtons(False);
 end;
 procedure TfStarMap.AddMapAnimation(Position: TPointF; ImagePath: WideString; DelayMs: Integer);
 var

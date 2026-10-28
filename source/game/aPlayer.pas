@@ -37,6 +37,14 @@ type
     Item: TItem;
   end;
   PStorageEntry = PointerToTStorageEntry;
+  // CHANGE: ENHANCEMENT - A planet's or station's storage is one pool for every human
+  // (docs/humans.md, Storage): the humans' rangers share one list (ShareHumanStorage), and
+  // Sharers counts them, so the last one to go frees it. A ranger alone has its own, as before.
+  TStorageList = class(TList)
+  public
+    Sharers: Integer;
+    constructor Create;
+  end;
   TEquipmentConfiguration = packed record
     EquipmentIds: array[0..11] of Integer;
     ArtefactIds: array[0..31] of Integer;
@@ -212,6 +220,11 @@ type
     procedure SortStorageEntries;
     procedure RefreshStorageBubbles;
     procedure BuildStorageBubbles;
+    // CHANGE: ENHANCEMENT - Whether another human's ranger shares this ranger's storage list
+    // (ShareHumanStorage), and whether one of them, earlier in Session.Humans, writes it in a
+    // save: only the first sharer writes the pool, the others write none.
+    function StorageIsShared: Boolean;
+    function StorageSavedByAnother: Boolean;
     function SelectPlanetBattleMap: Integer;
     procedure SaveEquipmentConfiguration(Index: Integer);
     procedure ApplyEquipmentConfiguration(Index: Integer);
@@ -268,6 +281,22 @@ procedure ClearLocalPlayer(Galaxy: TGalaxy);
 // Makes Player the local ranger without rebuilding Session.Humans (aHuman.SetLocalHuman).
 procedure SetLocalRanger(Player: TPlayer; Galaxy: TGalaxy);
 procedure LinkRecoveredTypes;
+// CHANGE: ENHANCEMENT - Makes every human's ranger use one storage list, the first human's in
+// Session.Humans (docs/humans.md, Storage): the entries of another human's own list move into
+// it, an entry whose slot is taken at its location going to the next free slot there, and the
+// emptied list is released. With one human, or once shared, it changes nothing. A load calls
+// it once the references resolved (a save made before the pool, or by per-human storages, is
+// merged then), and so does a join. When entries moved, every sharer's storage bubbles are
+// built again. Returns whether a ranger's list changed, so that a caller computes again what
+// counts the storage (the rangers' wealth).
+function ShareHumanStorage: Boolean;
+// CHANGE: ENHANCEMENT - Another human changed the storage at Location (nil: anywhere): the
+// local screen is told (SimEvents.NotifyStorageChanged) when the local human is not Actor and
+// its storage is there. Presentation only.
+procedure StorageChanged(Location: TObject; Actor: TObject);
+// CHANGE: ENHANCEMENT - Where the human's ranger reaches its storage: its planet, the ship it is
+// docked to, else nil (aHoldActions.GetLocalStorageOwner's rule).
+function PlayerStorageLocation(P: TPlayer): TObject;
 implementation
 uses
   aSession,
@@ -286,6 +315,12 @@ uses
   aConst,
   aShopStock,
   aTranclucator;
+
+constructor TStorageList.Create;
+begin
+  inherited Create;
+  Sharers := 1;
+end;
 
 constructor TJournalRecord.Create;
 begin
@@ -361,7 +396,7 @@ var
   RewardIndex, KillIndex, LogicIndex: Byte;
 begin
   inherited Create;
-  StorageEntries := TList.Create;
+  StorageEntries := TStorageList.Create;
   TalkLocked := False;
   ScanLocked := False;
   ScriptShipBindings := TList.Create;
@@ -447,6 +482,14 @@ begin
     if I >= 0 then
       CurrentStar.Ships.Delete(I);
   end;
+  // CHANGE: ENHANCEMENT - A pool other humans' rangers still share stays with them.
+  if (StorageEntries <> nil)
+      and (StorageEntries is TStorageList)
+      and (TStorageList(StorageEntries).Sharers > 1) then
+  begin
+    Dec(TStorageList(StorageEntries).Sharers);
+    StorageEntries := nil;
+  end;
   if StorageEntries <> nil then
   begin
     for I := 0 to StorageEntries.Count - 1 do
@@ -503,6 +546,7 @@ var
   ServiceIndex, RewardIndex: Byte;
   News: PPlanetNewsEntry;
   KillIndex, LogicIndex: Byte;
+  SavedByAnother: Boolean;
 begin
   inherited SaveToBuffer(Buffer);
   Buffer.AddBoolean(InPrison);
@@ -514,9 +558,17 @@ begin
     Buffer.AddIntegerValue(DominatorKillsByType[KillIndex]);
   for LogicIndex := 0 to 2 do
     Buffer.AddAnsiChar(AnsiChar(ChameleonLogic[LogicIndex]));
-  Buffer.AddIntegerValue(StorageEntries.Count);
+  // CHANGE: ENHANCEMENT - The shared pool is written once, by its first human; a load gives it
+  // to the others again (ShareHumanStorage). A ranger alone writes its own, as before.
+  SavedByAnother := StorageSavedByAnother;
+  if SavedByAnother then
+    Buffer.AddIntegerValue(0)
+  else
+    Buffer.AddIntegerValue(StorageEntries.Count);
   for I := 0 to StorageEntries.Count - 1 do
   begin
+    if SavedByAnother then
+      Break;
     Entry := PStorageEntry(StorageEntries[I]);
     if Entry.LocationOwner is TPlanet then
     begin
@@ -3553,8 +3605,114 @@ begin
 end;
 
 procedure TPlayer.RefreshStorageBubbles;
+var
+  I: Integer;
+  Other: TPlayer;
 begin
   BuildStorageBubbles;
+  // CHANGE: ENHANCEMENT - The humans that share the pool list it in their bubbles too. With
+  // one human nothing else is built.
+  if not StorageIsShared then
+    Exit;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Other := Session.Humans[I].Player;
+    if (Other <> nil) and (Other <> Self) and (Other.StorageEntries = StorageEntries) then
+      Other.BuildStorageBubbles;
+  end;
+end;
+
+function TPlayer.StorageIsShared: Boolean;
+begin
+  Result := (StorageEntries is TStorageList) and (TStorageList(StorageEntries).Sharers > 1);
+end;
+
+function TPlayer.StorageSavedByAnother: Boolean;
+var
+  I: Integer;
+  Other: TPlayer;
+begin
+  Result := False;
+  if not StorageIsShared then
+    Exit;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Other := Session.Humans[I].Player;
+    if (Other <> nil) and (Other.StorageEntries = StorageEntries) then
+      Exit(Other <> Self);
+  end;
+end;
+
+function PlayerStorageLocation(P: TPlayer): TObject;
+begin
+  Result := nil;
+  if P = nil then
+    Exit;
+  if P.IsOnPlanet then
+    Result := P.CurrentPlanet
+  else if P.IsDockedToShip then
+    Result := P.DockedTo;
+end;
+
+function ShareHumanStorage: Boolean;
+var
+  I, J, K: Integer;
+  Pool, Other: TPlayer;
+  Old: TList;
+  Entry: PStorageEntry;
+  Moved: Boolean;
+begin
+  Result := False;
+  Pool := nil;
+  Moved := False;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Other := Session.Humans[I].Player;
+    if (Other = nil) or (Other.StorageEntries = nil) then
+      Continue;
+    if Pool = nil then
+    begin
+      Pool := Other;
+      Continue;
+    end;
+    if Other.StorageEntries = Pool.StorageEntries then
+      Continue;
+    Result := True;
+    Old := Other.StorageEntries;
+    for K := 0 to Old.Count - 1 do
+    begin
+      Entry := PStorageEntry(Old[K]);
+      if Pool.FindStorageIndexByLocationAndSlot(Entry.LocationOwner, Entry.SlotIndex) >= 0 then
+        Entry.SlotIndex := Pool.FindNextStorageSlot(Entry.LocationOwner);
+      Pool.StorageEntries.Add(Entry);
+      Moved := True;
+    end;
+    Old.Clear;
+    // Every ranger that had the old list (only this one, unless a list was shared before) now
+    // has the pool.
+    for J := I to Session.Humans.Count - 1 do
+      if (Session.Humans[J].Player <> nil) and (Session.Humans[J].Player.StorageEntries = Old) then
+      begin
+        Session.Humans[J].Player.StorageEntries := Pool.StorageEntries;
+        Inc(TStorageList(Pool.StorageEntries).Sharers);
+        if Old is TStorageList then
+          Dec(TStorageList(Old).Sharers);
+      end;
+    if not (Old is TStorageList) or (TStorageList(Old).Sharers <= 0) then
+      Old.Free;
+  end;
+  // The sharers' bubbles list the whole pool (a load keeps a shared pool's saved bubbles).
+  if Moved then
+    Pool.RefreshStorageBubbles;
+end;
+
+procedure StorageChanged(Location: TObject; Actor: TObject);
+begin
+  if (LocalHuman = nil) or (LocalHuman = Actor) or (LocalHuman.Player = nil) then
+    Exit;
+  if (Location <> nil) and (PlayerStorageLocation(LocalHuman.Player) <> Location) then
+    Exit;
+  NotifyStorageChanged;
 end;
 
 procedure TPlayer.BuildStorageBubbles;

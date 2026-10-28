@@ -83,6 +83,9 @@ const
   // CHANGE: ENHANCEMENT - The self-contained form of a sale a host relays (RelayedSaleOf);
   // relay only (aCommands.RegisterRelayCommand).
   ckRelayedSale = 254;
+  // CHANGE: ENHANCEMENT - The self-contained form of a change to the shared storage a host relays
+  // (RelayedStorageOf); relay only.
+  ckRelayedStorage = 255;
 const
   // Where a held item is used or installed (UseHeldGoodsOn, UseHeldItemOn,
   // InstallHeldMicroModule, TransferHeldFuel). A and B name the target: an equipment slot's
@@ -230,11 +233,22 @@ procedure ChangeAwardVisibleCount(Ship: TShip; Delta: Integer);
 // sold to Location's market; its Kind is ckNone when the sale put nothing there.
 function IsShipScreenSale(Kind: TCommandKind): Boolean;
 function RelayedSaleOf(const Command: TPlayerCommand; Location: TObject): TPlayerCommand;
+// CHANGE: ENHANCEMENT - The storage at a planet or station is one pool for every human
+// (docs/humans.md, Storage). The commands that change it from the ship screen (TakeStored,
+// TakeStoredHull, StoreHeld, CloseVacantStorageSlot, ChangeHull, TakeAllFromStorage,
+// PutAllIntoStorage, SortStorage) are trades: the host decides between two humans as they
+// arrive. Like a sale they run on what the actor holds, so a host relays their effect:
+// RelayedStorageOf, right after the command ran, gives a RelayedStorage of the same actor with
+// the location (where the actor reaches its storage) and every entry of the pool there, its
+// slot and its item as a save writes it; its Kind is ckNone when the actor reaches no storage.
+function IsStorageCommand(Kind: TCommandKind): Boolean;
+function RelayedStorageOf(const Command: TPlayerCommand): TPlayerCommand;
 implementation
 uses
   Classes,
   SysUtils,
   Math,
+  EC_Buf,
   EC_Str,
   GR_Main,
   Globals,
@@ -1078,14 +1092,59 @@ begin
   SubmitCommand(NewCommand(ckTakeHull));
 end;
 
-function StorageSlotIndex(const Command: TPlayerCommand; Slot: Integer): Integer;
+// CHANGE: ENHANCEMENT - IdAt: where the command carries the id of the item the sender's cell
+// showed (-1, or a command without it from an old log: not checked). The pool is shared, so
+// another human may have taken that item or put another one there since: refused (rrItemGone)
+// before anything changes.
+function StorageSlotIndex(const Command: TPlayerCommand; Slot: Integer; IdAt: Integer = -1): Integer;
 var
   H: THuman;
+  Item: TItem;
 begin
   H := ActorHuman(Command);
   Result := H.Player.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner(H), Slot);
+  if (IdAt >= 0) and (Length(Command.Ints) > IdAt) then
+  begin
+    Item := nil;
+    if Result >= 0 then
+      Item := PStorageEntry(H.Player.StorageEntries[Result]).Item;
+    if (Item = nil) or (Integer(Item.Id) <> IntArg(Command, IdAt)) then
+      raise ECommandRefused.CreateReason(
+          rrItemGone,
+          Format(
+              '%s: storage cell %d no longer holds item %d',
+              [CommandKindName(Command.Kind), Slot, IntArg(Command, IdAt)]
+          )
+      );
+  end;
   if Result < 0 then
     raise Exception.Create(CommandKindName(Command.Kind) + ' names an empty storage cell');
+end;
+
+// CHANGE: ENHANCEMENT - The id of the item the local human's storage cell shows, for the
+// commands that take it (StorageSlotIndex); 0 for an empty cell.
+function LocalStoredItemId(Slot: Integer): Integer;
+var
+  Index: Integer;
+begin
+  Result := 0;
+  Index := LocalPlayer.FindStorageIndexByLocationAndSlot(GetLocalStorageOwner(LocalHuman), Slot);
+  if (Index >= 0) and (PStorageEntry(LocalPlayer.StorageEntries[Index]).Item <> nil) then
+    Result := Integer(PStorageEntry(LocalPlayer.StorageEntries[Index]).Item.Id);
+end;
+
+// CHANGE: ENHANCEMENT - After a command changed the shared storage where the actor is: the
+// humans that share the pool list it in their bubbles (only when it is shared, so a
+// single-player game is as before), and the local screen is told when the change was another
+// human's.
+procedure SharedStorageChanged(const Command: TPlayerCommand);
+var
+  P: TPlayer;
+begin
+  P := Actor(Command);
+  if P.StorageIsShared then
+    P.RefreshStorageBubbles;
+  StorageChanged(PlayerStorageLocation(P), ActorHuman(Command));
 end;
 
 // Moved from TfShip2.StorageItemMouseUp.
@@ -1099,7 +1158,7 @@ begin
   H := ActorHuman(Command);
   P := Actor(Command);
   Slot := IntArg(Command, 0);
-  Index := StorageSlotIndex(Command, Slot);
+  Index := StorageSlotIndex(Command, Slot, 1);
   Entry := P.StorageEntries[Index];
   P.StorageEntries.Delete(Index);
   if Entry.Item is TGoods then
@@ -1133,6 +1192,7 @@ begin
   Entry.Item := nil;
   Dispose(Entry);
   H.PlayerHoldShip.ScriptItemsAct(satOnReEnteringForm, nil, nil, 0);
+  SharedStorageChanged(Command);
 end;
 
 procedure TakeStored(Slot: Integer);
@@ -1141,7 +1201,9 @@ var
 begin
   Command := NewCommand(ckTakeStored);
   AddInt(Command, Slot);
-  SubmitCommand(Command);
+  // CHANGE: ENHANCEMENT - The item the cell shows (StorageSlotIndex).
+  AddInt(Command, LocalStoredItemId(Slot));
+  SubmitTrade(Command);
 end;
 
 // Moved from TfShip2.StorageItemMouseUp.
@@ -1155,7 +1217,7 @@ begin
   H := ActorHuman(Command);
   P := Actor(Command);
   Slot := IntArg(Command, 0);
-  Index := StorageSlotIndex(Command, Slot);
+  Index := StorageSlotIndex(Command, Slot, 1);
   Entry := P.StorageEntries[Index];
   if not (Entry.Item is THull) then
     raise Exception.Create('TakeStoredHull names another item');
@@ -1168,6 +1230,7 @@ begin
   Entry.LocationOwner := nil;
   Entry.Item := nil;
   Dispose(Entry);
+  SharedStorageChanged(Command);
 end;
 
 procedure TakeStoredHull(Slot: Integer);
@@ -1176,7 +1239,8 @@ var
 begin
   Command := NewCommand(ckTakeStoredHull);
   AddInt(Command, Slot);
-  SubmitCommand(Command);
+  AddInt(Command, LocalStoredItemId(Slot));
+  SubmitTrade(Command);
 end;
 
 var
@@ -1862,6 +1926,7 @@ begin
     if H.SelectedGoodsQuantity < 1 then
       H.SelectedHoldKind := phkEmpty;
   end;
+  SharedStorageChanged(Command);
 end;
 
 procedure StoreHeld(Slot: Integer; Count: Integer);
@@ -1871,7 +1936,7 @@ begin
   Command := NewCommand(ckStoreHeld);
   AddInt(Command, Slot);
   AddInt(Command, Count);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 procedure ExecuteCloseVacantStorageSlot(const Command: TPlayerCommand);
@@ -1880,6 +1945,7 @@ var
 begin
   H := ActorHuman(Command);
   Actor(Command).CloseVacantStorageSlot(GetLocalStorageOwner(H), IntArg(Command, 0));
+  SharedStorageChanged(Command);
 end;
 
 procedure CloseVacantStorageSlot(Slot: Integer);
@@ -1888,7 +1954,7 @@ var
 begin
   Command := NewCommand(ckCloseVacantStorageSlot);
   AddInt(Command, Slot);
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 // Moved from TfShip2.EquipmentSlotMouseDown, ArtefactSlotMouseDown (UseOnArtefactSlot) and
@@ -2361,11 +2427,13 @@ begin
     ReleaseSpaceObject(H.PlayerHoldShip.Graphic);
     H.PlayerHoldShip.RefreshGraphic;
   end;
+  if OldHull <> nil then
+    SharedStorageChanged(Command);
 end;
 
 procedure ChangeHull;
 begin
-  SubmitCommand(NewCommand(ckChangeHull));
+  SubmitTrade(NewCommand(ckChangeHull));
 end;
 
 var
@@ -3323,15 +3391,32 @@ end;
 procedure ExecuteSellStoredItem(const Command: TPlayerCommand);
 var
   P: TPlayer;
-  Index: Integer;
+  I, Index: Integer;
   Entry: PStorageEntry;
   Item: TItem;
 begin
   P := Actor(Command);
   BeginSaleRecord;
   Index := IntArg(Command, 0);
-  if (Index < 0) or (Index >= P.StorageEntries.Count) then
-    raise Exception.Create('SellStoredItem names a missing storage entry');
+  // CHANGE: ENHANCEMENT - The pool is shared and its order is each copy's: an entry no longer at
+  // the index is found by its item's id, and an item another human took is refused (rrItemGone)
+  // before anything changes.
+  if (Index < 0)
+      or (Index >= P.StorageEntries.Count)
+      or (PStorageEntry(P.StorageEntries[Index]).Item = nil)
+      or (Integer(PStorageEntry(P.StorageEntries[Index]).Item.Id) <> IntArg(Command, 1)) then
+  begin
+    Index := -1;
+    for I := 0 to P.StorageEntries.Count - 1 do
+      if (PStorageEntry(P.StorageEntries[I]).Item <> nil)
+          and (Integer(PStorageEntry(P.StorageEntries[I]).Item.Id) = IntArg(Command, 1)) then
+        Index := I;
+    if Index < 0 then
+      raise ECommandRefused.CreateReason(
+          rrItemGone,
+          Format('SellStoredItem: no storage holds item %d', [IntArg(Command, 1)])
+      );
+  end;
   Entry := P.StorageEntries[Index];
   Item := Entry.Item;
   if (Item = nil) or (Item.Id <> IntArg(Command, 1)) then
@@ -3340,6 +3425,7 @@ begin
   P.StorageEntries.Delete(Index);
   Dispose(Entry);
   SellItem(P, Item, True, IntArg(Command, 2));
+  SharedStorageChanged(Command);
 end;
 
 procedure SellStoredItem(StorageIndex: Integer);
@@ -3513,6 +3599,294 @@ begin
   ShopStockChanged(Location);
   if (GoodsCount > 0) and (LocalHuman <> nil) and (HumanShopLocation(LocalHuman) = Location) then
     NotifyShopStockChanged;
+  // CHANGE: ENHANCEMENT - A sale from the shared storage leaves it here too.
+  SharedStorageChanged(Command);
+end;
+
+function IsStorageCommand(Kind: TCommandKind): Boolean;
+begin
+  Result := (Kind = ckTakeStored)
+      or (Kind = ckTakeStoredHull)
+      or (Kind = ckStoreHeld)
+      or (Kind = ckCloseVacantStorageSlot)
+      or (Kind = ckChangeHull)
+      or (Kind = ckTakeAllFromStorage)
+      or (Kind = ckPutAllIntoStorage)
+      or (Kind = ckSortStorage);
+end;
+
+type
+  TStoredBytes = array of Byte;
+
+// A stored item as TPlayer.SaveToBuffer writes it: its type, then the item.
+function StoredItemBytes(Item: TItem): TStoredBytes;
+var
+  Buffer: TBufEC;
+  I: Integer;
+begin
+  Buffer := TBufEC.Create;
+  try
+    Buffer.AddAnsiChar(AnsiChar(Item.ItemType));
+    Item.SaveToBuffer(Buffer);
+    SetLength(Result, Buffer.DataSize);
+    for I := 0 to Buffer.DataSize - 1 do
+      Result[I] := Buffer.GetByteAt(I);
+  finally
+    Buffer.Free;
+  end;
+end;
+
+// The item StoredItemBytes wrote, as TPlayer.LoadFromBuffer and ResolveLoadedReferences read it.
+function LoadStoredItem(const Bytes: TStoredBytes): TItem;
+var
+  Buffer: TBufEC;
+begin
+  Buffer := TBufEC.Create;
+  try
+    if Length(Bytes) > 0 then
+      Buffer.AddBytes(@Bytes[0], Length(Bytes));
+    Buffer.SetPosition(0);
+    Result := CreateItemByType(MigrateSavedItemType(Buffer.GetByte));
+    try
+      Result.LoadFromBuffer(Buffer, Galaxy);
+      Result.ResolveLoadedReferences(Galaxy);
+    except
+      Result.Free;
+      raise;
+    end;
+  finally
+    Buffer.Free;
+  end;
+end;
+
+function SameStoredBytes(const Left, Right: TStoredBytes): Boolean;
+var
+  I: Integer;
+begin
+  Result := Length(Left) = Length(Right);
+  if Result then
+    for I := 0 to High(Left) do
+      if Left[I] <> Right[I] then
+        Exit(False);
+end;
+
+// RelayedStorage: the location; the count of entries there, then for each its slot, the byte
+// length of its item (StoredItemBytes) and the bytes, four to an integer, low byte first.
+function RelayedStorageOf(const Command: TPlayerCommand): TPlayerCommand;
+const
+  // The integers a command carries are counted in a word.
+  MaximumInts = 60000;
+var
+  P: TPlayer;
+  Location: TObject;
+  I, J, Count, Quad: Integer;
+  Entry: PStorageEntry;
+  Bytes: TStoredBytes;
+begin
+  Result := Default(TPlayerCommand);
+  if not IsStorageCommand(Command.Kind) then
+    Exit;
+  P := Actor(Command);
+  Location := PlayerStorageLocation(P);
+  if (Location = nil) or not CanNameObject(Location) then
+    Exit;
+  Result.Kind := ckRelayedStorage;
+  Result.Actor := Command.Actor;
+  AddRef(Result, Location);
+  Count := 0;
+  for I := 0 to P.StorageEntries.Count - 1 do
+    if (PStorageEntry(P.StorageEntries[I]).LocationOwner = Location)
+        and (PStorageEntry(P.StorageEntries[I]).Item <> nil) then
+      Inc(Count);
+  AddInt(Result, Count);
+  for I := 0 to P.StorageEntries.Count - 1 do
+  begin
+    Entry := P.StorageEntries[I];
+    if (Entry.LocationOwner <> Location) or (Entry.Item = nil) then
+      Continue;
+    Bytes := StoredItemBytes(Entry.Item);
+    AddInt(Result, Entry.SlotIndex);
+    AddInt(Result, Length(Bytes));
+    J := 0;
+    while J < Length(Bytes) do
+    begin
+      Quad := 0;
+      if J < Length(Bytes) then
+        Quad := Quad or Bytes[J];
+      if J + 1 < Length(Bytes) then
+        Quad := Quad or (Integer(Bytes[J + 1]) shl 8);
+      if J + 2 < Length(Bytes) then
+        Quad := Quad or (Integer(Bytes[J + 2]) shl 16);
+      if J + 3 < Length(Bytes) then
+        Quad := Quad or Integer(Cardinal(Bytes[J + 3]) shl 24);
+      AddInt(Result, Quad);
+      Inc(J, 4);
+    end;
+    if Length(Result.Ints) > MaximumInts then
+      Exit(Default(TPlayerCommand));
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - An item another human took out of the shared storage, on a copy where it
+// is still there: it goes to that human's ranger as TakeAllFromStorage would put it, so that no
+// item is freed under a script that knows it; the host's next state says where it really is.
+procedure GiveRelayedItemToActor(P: TPlayer; Item: TItem);
+var
+  J: Integer;
+begin
+  if (Item is TEquipment) and (TEquipment(Item).EquippedFlag <> 0) then
+    TEquipment(Item).EquippedFlag := 0;
+  if Item is TGoods then
+  begin
+    if Ord(Item.ItemType) <= High(P.CargoGoods) then
+    begin
+      Inc(P.CargoGoods[Ord(Item.ItemType)].Count, TGoods(Item).Quantity);
+      Inc(P.CargoGoods[Ord(Item.ItemType)].TotalCost, Item.Cost);
+    end;
+    Item.Free;
+  end
+  else if Item is TArtefact then
+    P.Artefacts.Add(Item)
+  else if Item is TCountableItem then
+  begin
+    for J := 0 to P.Inventory.Count - 1 do
+      if TCountableItem(Item).CanMerge(TItem(P.Inventory[J])) then
+      begin
+        TCountableItem(P.Inventory[J]).Merge(TCountableItem(Item));
+        Item.Free;
+        Exit;
+      end;
+    P.Inventory.Add(Item);
+  end
+  else if (Item is THull) and (Item.ScriptItem = nil) then
+    Item.Free
+  else
+    P.Inventory.Add(Item);
+end;
+
+// CHANGE: ENHANCEMENT - Runs a host's relay of another human's change to the shared storage
+// (RelayedStorageOf, docs/network.md, Trades) on this copy: the pool's entries at the location
+// become the host's. An item this copy already has there, or that the actor has here (moved in,
+// as a sale's relay moves it), stays the same object; one stored there that changed (a stack
+// that merged) and that no script knows is read again from the host's bytes, and an item this
+// copy does not have at all is read from them. What the actor took out goes to its ranger here
+// (GiveRelayedItemToActor). A copy where the actor is not at the location, or whose bytes do not
+// read, changes nothing: the relay raises, the client logs it and drops it, and the next state
+// fixes the copy.
+procedure ExecuteRelayedStorage(const Command: TPlayerCommand);
+var
+  H: THuman;
+  P: TPlayer;
+  Location: TObject;
+  Count, I, J, K, At, Len: Integer;
+  Slots: array of Integer;
+  Fresh, Items: array of TItem;
+  Bytes: array of TStoredBytes;
+  Old: TList;
+  Entry: PStorageEntry;
+  Existing: TItem;
+  FromPool: Boolean;
+begin
+  H := ActorHuman(Command);
+  P := Actor(Command);
+  Location := RefObject(Command, 0);
+  if (Location = nil) or (PlayerStorageLocation(P) <> Location) then
+    raise Exception.Create('RelayedStorage: the actor is not at the location here');
+  Count := IntArg(Command, 0);
+  SetLength(Slots, Count);
+  SetLength(Fresh, Count);
+  SetLength(Items, Count);
+  SetLength(Bytes, Count);
+  for I := 0 to Count - 1 do
+  begin
+    Fresh[I] := nil;
+    Items[I] := nil;
+  end;
+  // Everything is read before anything changes.
+  At := 1;
+  try
+    for I := 0 to Count - 1 do
+    begin
+      Slots[I] := IntArg(Command, At);
+      Len := IntArg(Command, At + 1);
+      Inc(At, 2);
+      SetLength(Bytes[I], Len);
+      for J := 0 to Len - 1 do
+        Bytes[I][J] := Byte(Cardinal(IntArg(Command, At + J div 4)) shr (8 * (J mod 4)));
+      Inc(At, (Len + 3) div 4);
+      Fresh[I] := LoadStoredItem(Bytes[I]);
+    end;
+  except
+    for I := 0 to Count - 1 do
+      Fresh[I].Free;
+    raise;
+  end;
+  Old := TList.Create;
+  try
+    for I := P.StorageEntries.Count - 1 downto 0 do
+      if PStorageEntry(P.StorageEntries[I]).LocationOwner = Location then
+      begin
+        Old.Insert(0, P.StorageEntries[I]);
+        P.StorageEntries.Delete(I);
+      end;
+    for I := 0 to Count - 1 do
+    begin
+      Existing := nil;
+      FromPool := False;
+      for K := 0 to Old.Count - 1 do
+      begin
+        Entry := Old[K];
+        if (Entry.Item <> nil) and (Entry.Item.Id = Fresh[I].Id) then
+        begin
+          Existing := Entry.Item;
+          Entry.Item := nil;
+          FromPool := True;
+          Break;
+        end;
+      end;
+      if Existing = nil then
+        Existing := HumanSaleItem(H, P, Integer(Fresh[I].Id), True);
+      if Existing = nil then
+      begin
+        Items[I] := Fresh[I];
+        Fresh[I] := nil;
+      end
+      else if FromPool
+          and (Existing.ScriptItem = nil)
+          and not SameStoredBytes(StoredItemBytes(Existing), Bytes[I]) then
+      begin
+        Existing.Free;
+        Items[I] := Fresh[I];
+        Fresh[I] := nil;
+      end
+      else
+        Items[I] := Existing;
+    end;
+    for K := 0 to Old.Count - 1 do
+    begin
+      Entry := Old[K];
+      if Entry.Item <> nil then
+        GiveRelayedItemToActor(P, Entry.Item);
+      Entry.Item := nil;
+      Entry.LocationOwner := nil;
+      Dispose(Entry);
+    end;
+  finally
+    Old.Free;
+  end;
+  for I := 0 to Count - 1 do
+  begin
+    New(Entry);
+    Entry.LocationOwner := Location;
+    Entry.SlotIndex := Slots[I];
+    Entry.Item := Items[I];
+    if Entry.Item is TWeapon then
+      TWeapon(Entry.Item).Target := nil;
+    P.StorageEntries.Add(Entry);
+    Fresh[I].Free;
+  end;
+  P.RefreshDerivedStats(True);
+  SharedStorageChanged(Command);
 end;
 
 var
@@ -3525,11 +3899,13 @@ var
 begin
   H := ActorHuman(Command);
   StorageMoved := H.PlayerHoldShip.RetrieveStoredItems(GetLocalStorageOwner(H), Actor(Command));
+  SharedStorageChanged(Command);
 end;
 
 function TakeAllFromStorage: Boolean;
 begin
-  SubmitCommand(NewCommand(ckTakeAllFromStorage));
+  StorageMoved := False;
+  SubmitTrade(NewCommand(ckTakeAllFromStorage));
   Result := StorageMoved;
 end;
 
@@ -3540,11 +3916,13 @@ var
 begin
   H := ActorHuman(Command);
   StorageMoved := H.PlayerHoldShip.StoreLooseInventoryAt(GetLocalStorageOwner(H), Actor(Command));
+  SharedStorageChanged(Command);
 end;
 
 function PutAllIntoStorage: Boolean;
 begin
-  SubmitCommand(NewCommand(ckPutAllIntoStorage));
+  StorageMoved := False;
+  SubmitTrade(NewCommand(ckPutAllIntoStorage));
   Result := StorageMoved;
 end;
 
@@ -3600,6 +3978,7 @@ begin
           Entry.SlotIndex := I;
         end;
     end;
+  SharedStorageChanged(Command);
 end;
 
 procedure SortStorageEntries(Sort: TPlayerHoldSort);
@@ -3608,7 +3987,7 @@ var
 begin
   Command := NewCommand(ckSortStorage);
   AddInt(Command, Ord(Sort));
-  SubmitCommand(Command);
+  SubmitTrade(Command);
 end;
 
 procedure ExecuteSortHold(const Command: TPlayerCommand);
@@ -4145,21 +4524,23 @@ initialization
   RegisterCommand(ckTakeArtefact, 'TakeArtefact', @ExecuteTakeArtefact);
   RegisterCommand(ckTakeHoldEntry, 'TakeHoldEntry', @ExecuteTakeHoldEntry);
   RegisterCommand(ckTakeHull, 'TakeHull', @ExecuteTakeHull);
-  RegisterCommand(ckTakeStored, 'TakeStored', @ExecuteTakeStored);
-  RegisterCommand(ckTakeStoredHull, 'TakeStoredHull', @ExecuteTakeStoredHull);
+  // CHANGE: ENHANCEMENT - The commands that change the shared storage are trades
+  // (IsStorageCommand).
+  RegisterCommand(ckTakeStored, 'TakeStored', @ExecuteTakeStored, True);
+  RegisterCommand(ckTakeStoredHull, 'TakeStoredHull', @ExecuteTakeStoredHull, True);
   RegisterCommand(ckEquipHeld, 'EquipHeld', @ExecuteEquipHeld);
   RegisterCommand(ckEquipHeldArtefact, 'EquipHeldArtefact', @ExecuteEquipHeldArtefact);
   RegisterCommand(ckPutHeldGoods, 'PutHeldGoods', @ExecutePutHeldGoods);
   RegisterCommand(ckPutHeldStack, 'PutHeldStack', @ExecutePutHeldStack);
   RegisterCommand(ckPutHeldEquipment, 'PutHeldEquipment', @ExecutePutHeldEquipment);
   RegisterCommand(ckPutHeldArtefact, 'PutHeldArtefact', @ExecutePutHeldArtefact);
-  RegisterCommand(ckStoreHeld, 'StoreHeld', @ExecuteStoreHeld);
-  RegisterCommand(ckCloseVacantStorageSlot, 'CloseVacantStorageSlot', @ExecuteCloseVacantStorageSlot);
+  RegisterCommand(ckStoreHeld, 'StoreHeld', @ExecuteStoreHeld, True);
+  RegisterCommand(ckCloseVacantStorageSlot, 'CloseVacantStorageSlot', @ExecuteCloseVacantStorageSlot, True);
   RegisterCommand(ckUseHeldGoodsOn, 'UseHeldGoodsOn', @ExecuteUseHeldGoodsOn);
   RegisterCommand(ckUseHeldItemOn, 'UseHeldItemOn', @ExecuteUseHeldItemOn);
   RegisterCommand(ckInstallHeldMicroModule, 'InstallHeldMicroModule', @ExecuteInstallHeldMicroModule);
   RegisterCommand(ckTransferHeldFuel, 'TransferHeldFuel', @ExecuteTransferHeldFuel);
-  RegisterCommand(ckChangeHull, 'ChangeHull', @ExecuteChangeHull);
+  RegisterCommand(ckChangeHull, 'ChangeHull', @ExecuteChangeHull, True);
   RegisterCommand(ckDropHeld, 'DropHeld', @ExecuteDropHeld);
   RegisterCommand(ckSellHeld, 'SellHeld', @ExecuteSellHeld, True);
   RegisterCommand(ckRepairHeld, 'RepairHeld', @ExecuteRepairHeld, True);
@@ -4174,9 +4555,10 @@ initialization
   RegisterCommand(ckSellHoldGoods, 'SellHoldGoods', @ExecuteSellHoldGoods, True);
   RegisterCommand(ckSellStoredItem, 'SellStoredItem', @ExecuteSellStoredItem, True);
   RegisterRelayCommand(ckRelayedSale, 'RelayedSale', @ExecuteRelayedSale);
-  RegisterCommand(ckTakeAllFromStorage, 'TakeAllFromStorage', @ExecuteTakeAllFromStorage);
-  RegisterCommand(ckPutAllIntoStorage, 'PutAllIntoStorage', @ExecutePutAllIntoStorage);
-  RegisterCommand(ckSortStorage, 'SortStorage', @ExecuteSortStorage);
+  RegisterCommand(ckTakeAllFromStorage, 'TakeAllFromStorage', @ExecuteTakeAllFromStorage, True);
+  RegisterCommand(ckPutAllIntoStorage, 'PutAllIntoStorage', @ExecutePutAllIntoStorage, True);
+  RegisterCommand(ckSortStorage, 'SortStorage', @ExecuteSortStorage, True);
+  RegisterRelayCommand(ckRelayedStorage, 'RelayedStorage', @ExecuteRelayedStorage);
   RegisterCommand(ckSortHold, 'SortHold', @ExecuteSortHold);
   RegisterCommand(ckRemoveEmptyHoldSlots, 'RemoveEmptyHoldSlots', @ExecuteRemoveEmptyHoldSlots);
   RegisterCommand(ckTrainSkill, 'TrainSkill', @ExecuteTrainSkill);

@@ -1028,21 +1028,10 @@ begin
 end;
 
 function TfRuinsTalk.IsResearchItemQuestLetter(Item: TItem): Boolean;
-var
-  I: Integer;
-  Quest: PQuest;
 begin
-  Result := False;
-  if (Item is TUselessItem) and (Item.ScriptItem = nil) then
-    for I := 0 to LocalPlayer.Quests.Count - 1 do
-    begin
-      Quest := LocalPlayer.Quests[I];
-      if Quest.QuestType = qtSendLetter then
-        if LocalizedColorText(
-                WideString('Quest.SendLetter.' + IntToStr(Quest.QuestNumber) + '.SysName'))
-            = (Item as TUselessItem).ConfigBlockName then
-          Result := True;
-    end;
+  // CHANGE: ENHANCEMENT - The same test as the talk's (aTalkActions), which also counts the
+  // letters of the other humans' quests: the quests are shared (docs/humans.md, Quests).
+  Result := IsMilitaryProtectedQuestItem(LocalPlayer, Item);
 end;
 
 function TfRuinsTalk.CountResearchRemains(Series: Byte; Count: Integer): Integer;

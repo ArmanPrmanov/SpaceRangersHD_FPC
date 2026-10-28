@@ -64,13 +64,13 @@ renumber a kind: the numbers are part of the log format.
 
 | Range | Unit |
 | --- | --- |
-| 0–99 | `aPlayerActions`: travel, orders, the day, session flags (42 `SetSessionFlag`), end turn (43 `EndTurn`, 45 `StopContinuing`, 47 `CancelEndTurn`), joining (44 `JoinHuman`), a disconnected human holding position (46 `HoldPosition`) |
+| 0–99 | `aPlayerActions`: travel, orders, the day, session flags (42 `SetSessionFlag`), end turn (43 `EndTurn`, 45 `StopContinuing`, 47 `CancelEndTurn`), joining (44 `JoinHuman`), a disconnected human holding position (46 `HoldPosition`), money transfers (48 `TransferMoney`, 49 `RelayedTransfer`) |
 | 100–199 | shops: equipment, goods, hangar |
 | 200–299 | the ship and hold screen (`fShip2`), awards (`fRewards`, 250–252) |
 | 300–399 | conversations (`fTalk`, script dialogs) |
 | 400–499 | planets and the government (`fGov`, `fPlanet`, `fPlanetNO`, `fInfo`, `fJournal`) |
 | 500–599 | stations (`fRuinsTalk`) |
-| 600–699 | text quests, arcade battles, cheats, UI scripts |
+| 600–699 | text quests, arcade battles, cheats (`CheatCode`: 675 `Cheat`, 676 `CheatScript`), UI scripts |
 
 Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
 
@@ -126,6 +126,15 @@ Behaviour stays identical. Tag deliberate changes `CHANGE:` (BUILDING.md).
     window, the count is the same again and the shifted ordinal names the
     wrong instance. Nothing saved tells instances of one file apart; closing
     it needs a per-instance serial in the save.
+  - `TakeStored` (209) and `TakeStoredHull` (210) carry the id of the item
+    the storage cell showed after the cell. The storage is one pool for every
+    human ([humans.md](humans.md), Storage), so another human may have taken
+    that item, or put another one in the cell, since: refused (`rrItemGone`)
+    before anything changes. Without the id, only the cell must hold
+    something, as before. `SellStoredItem` (236) finds its entry by the item's
+    id when the index it carries (an index into this copy's pool, whose order
+    each copy keeps) names another one, and refuses (`rrItemGone`) when no
+    storage holds the item.
   - The text quest commands ([humans.md](humans.md), Text quests):
     `CloseQuest` (608) carries the days the quest owes after the money limit
     (absent: none); `DieInQuest` (606) carries whether a government quest
@@ -151,9 +160,10 @@ the screen.
 | Unit | Trades |
 | --- | --- |
 | `aShopActions` | `BuyEquipment` (102: equipment, and the hangar's hulls), `FinishStoredHullPurchase` (103), `TradeGoods` (110), `RepairHull` (120), `Refuel` (121) |
-| `aHoldActions` (the ship screen) | `SellHeld` (225), `RepairHeld`, `RefuelHeld`, `ReloadHeld`, `RepairAll`, `BuyRockets`, `SellHoldInventory`, `SellHoldArtefact`, `SellHoldGoods`, `SellStoredItem` |
+| `aHoldActions` (the ship screen) | `SellHeld` (225), `RepairHeld`, `RefuelHeld`, `ReloadHeld`, `RepairAll`, `BuyRockets`, `SellHoldInventory`, `SellHoldArtefact`, `SellHoldGoods`, `SellStoredItem`; the commands that change the shared storage ([humans.md](humans.md), Storage; `IsStorageCommand`): `TakeStored` (209), `TakeStoredHull` (210), `StoreHeld` (217), `CloseVacantStorageSlot` (218), `ChangeHull` (223), `TakeAllFromStorage` (237), `PutAllIntoStorage` (238), `SortStorage` (239) |
 | `aStationActions` | `PayForModernization` (520), `BuyPirateNodes` (532), `BuySatellite` (552), `Invest` (565), `BuySpecialShip` (574), `BuildPirateShip` (580) |
 | `aPlanetActions` | `BuyMap` (413) |
+| `aPlayerActions` | `TransferMoney` (48): a human gives another human money, at any distance (the star map's players' buttons, [humans.md](humans.md), Players). Ints: the recipient's human id, the amount. Refused before any change: a recipient who is gone, has finished or is the sender (`rrTargetGone`), an amount below 1 or one that would take the recipient past the money cap, 100000000 (`rrOther`), and an amount above the sender's money at apply time (`rrNoMoney`). Both humans get a bubble (`Multiplayer.MoneySent`, `Multiplayer.MoneyReceived`). Relayed to every client, not only those at the actor's location (`RelayedTransfer`, below) |
 | `aQuestActions` | `BeginTextQuest` (609): the start of a text quest, which one human at a time may play per planet ([humans.md](humans.md), Text quests); its wrapper catches the refusal itself, and the quest does not start. Only a planet quest is refused by the game: a prison, queued or named quest that a networked client's host did not answer starts all the same (`TQuestRun.BeginRun`) |
 
 `RelayedSale` (254, `aHoldActions`) is no player's command: a host relays a
@@ -165,7 +175,12 @@ actor's hand. It is registered with `RegisterRelayCommand`: only
 log never records it), and a host refuses it from a peer. So is
 `RelayedTextQuest` (610, `aQuestActions`): the relay of a `BeginTextQuest`, with
 its arguments, which only sets the actor's lock (the host made the checks;
-[network.md](network.md), Trades).
+[network.md](network.md), Trades). And `RelayedTransfer` (49, `aPlayerActions`): the relay of a `TransferMoney`, with its
+arguments, which moves the amount without the checks (the host made them;
+[network.md](network.md), Trades). And `RelayedStorage` (255, `aHoldActions`):
+a host relays a storage command as the pool's entries at the location after it
+ran, each item as a save writes it, because the command runs on what the actor
+holds ([network.md](network.md), Trades).
 
 `CancelEndTurn` (47, `aPlayerActions`) takes an end turn back while the day
 waits for others: its executor clears the actor's `EndedTurn` and
@@ -201,8 +216,19 @@ Not trades, though close:
   only the actor's own state and money.
 - Surface loot (`PickUpSurfaceLoot`): a pickup, not a purchase; refused by id
   (`rrItemGone`) at the barrier.
+- The government quests (`RequestQuest`, `AcceptQuest`): the quests are shared
+  ([humans.md](humans.md), Quests), and a government gives the humans one at a
+  time. Both run at the barrier: a `RequestQuest` after another human's
+  acceptance is answered "you have our quest", and an `AcceptQuest` of an offer
+  whose government's quest another human accepted first is refused
+  (`rrOfferGone`); the client's prediction is undone by the next state. Two
+  humans rarely ask one government on the same day, so the wait of a trade
+  would cost more than it saves.
 - The ship screen's hold commands (`TakeHoldEntry` and the like): the actor's
-  own ship. A trade after them applies them with it, in order.
+  own ship. A trade after them applies them with it, in order. Only the
+  commands that change the storage are trades; `ReturnHeldEntry`, and the
+  return of a held storage item inside another command (closing the screen),
+  put it back at the barrier, and the other humans see it with the next state.
 
 ## Threads
 

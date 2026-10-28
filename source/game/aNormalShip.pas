@@ -661,7 +661,7 @@ end;
 
 procedure TNormalShip.ProcessShipKill(Victim: TShip);
 var
-  I, SharedExperience, ExperienceDelta, ActivityAmount: Integer;
+  I, J, SharedExperience, ExperienceDelta, ActivityAmount: Integer;
   Experience, RankReward, PirateReward: Integer;
   SourceKind: Byte;
   OtherShip: TShip;
@@ -733,6 +733,19 @@ begin
           and (Quest.ObjectiveTarget = Victim) then
         QuestTargetKill := True;
     end;
+    // CHANGE: ENHANCEMENT - Or another human's kill quest: the quests are shared
+    // (docs/humans.md, Quests), so its target is this human's target too.
+    if QuestsShared(Self) then
+      for J := 0 to Session.Humans.Count - 1 do
+        if Session.Humans[J].Player <> nil then
+          for I := 0 to Session.Humans[J].Player.Quests.Count - 1 do
+          begin
+            Quest := Session.Humans[J].Player.Quests[I];
+            if not Quest.Successful
+                and (Quest.QuestType = qtKillShip)
+                and (Quest.ObjectiveTarget = Victim) then
+              QuestTargetKill := True;
+          end;
   end;
   if IsHuman(PartnerShip) then
   begin

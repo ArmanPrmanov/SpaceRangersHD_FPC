@@ -215,6 +215,13 @@ type
     procedure ArchiveQuest(Index: Integer);
     function TryTurnInAnyQuest(var ResponseText: WideString): Boolean;
     function TryTurnInQuest(Index: Integer; var ResponseText: WideString): Boolean;
+    // CHANGE: ENHANCEMENT - TryTurnInQuest for the quest at Index in Holder's quests, which in
+    // multiplayer can be another human's (docs/humans.md, Quests): this ranger fulfils it.
+    function TryTurnInQuestOf(
+        Holder: TRanger;
+        Index: Integer;
+        var ResponseText: WideString
+    ): Boolean;
     function GrantPlanetQuestReward(
         Difficulty: Integer;
         var ExperienceAwarded: Integer
@@ -236,6 +243,16 @@ var
       (120, 120, 200, 500, 200, 100, 30, 30)
   );
 procedure LinkRecoveredTypes;
+// CHANGE: ENHANCEMENT - Shared quests (docs/humans.md, Quests). Whether Ranger's quests are
+// every human's: in multiplayer, for a human's ranger.
+function QuestsShared(Ranger: TObject): Boolean;
+// A quest's news for Ranger: every human gets it when the quests are shared, else Ranger's
+// human (nobody when Ranger is not a human's).
+procedure AddQuestBubble(Ranger: TObject; const Text: WideString);
+// Whether some human's ranger holds a quest that Planet's government gave.
+function HumanHoldsQuestFrom(Planet: TObject): Boolean;
+// Whether some human's ranger holds a quest of that type and number.
+function HumanHoldsQuestNumber(QuestType: TQuestType; QuestNumber: Word): Boolean;
 implementation
 uses
   aSession,
@@ -294,6 +311,133 @@ begin
   Human := HumanOf(Ranger);
   if Human <> nil then
     Human.AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '');
+end;
+
+function QuestsShared(Ranger: TObject): Boolean;
+begin
+  Result := IsMultiplayer and IsHuman(Ranger);
+end;
+
+procedure AddQuestBubble(Ranger: TObject; const Text: WideString);
+var
+  I: Integer;
+begin
+  if QuestsShared(Ranger) then
+    for I := 0 to Session.Humans.Count - 1 do
+      Session.Humans[I].AddOrUpdateBubble(0, Galaxy.CurrentTurn, Text, '')
+  else
+    AddHumanBubble(Ranger, Text);
+end;
+
+function HumanHoldsQuestFrom(Planet: TObject): Boolean;
+var
+  I, J: Integer;
+  Player: TPlayer;
+begin
+  Result := False;
+  if Planet = nil then
+    Exit;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Player := Session.Humans[I].Player;
+    if Player <> nil then
+      for J := 0 to Player.Quests.Count - 1 do
+        if TObject(PQuest(Player.Quests[J]).Planet) = Planet then
+          Exit(True);
+  end;
+end;
+
+function HumanHoldsQuestNumber(QuestType: TQuestType; QuestNumber: Word): Boolean;
+var
+  I, J: Integer;
+  Player: TPlayer;
+  Quest: PQuest;
+begin
+  Result := False;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Player := Session.Humans[I].Player;
+    if Player <> nil then
+      for J := 0 to Player.Quests.Count - 1 do
+      begin
+        Quest := Player.Quests[J];
+        if (Quest.QuestType = QuestType) and (Quest.QuestNumber = QuestNumber) then
+          Exit(True);
+      end;
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - The rangers who share Ranger's quest rewards and penalties
+// (docs/humans.md, Quests), in Session.Humans order: when the quests are shared, every human's
+// ranger whose game has not ended; Ranger is always one of them. Otherwise Ranger alone.
+procedure CollectQuestSharers(Ranger: TRanger; Sharers: TList);
+var
+  I: Integer;
+  Human: THuman;
+begin
+  Sharers.Clear;
+  if QuestsShared(Ranger) then
+    for I := 0 to Session.Humans.Count - 1 do
+    begin
+      Human := Session.Humans[I];
+      if (Human.Player <> nil) and ((Human.Player = Ranger) or not Human.Finished) then
+        Sharers.Add(Human.Player);
+    end;
+  if Sharers.IndexOf(Ranger) < 0 then
+    Sharers.Add(Ranger);
+end;
+
+// CHANGE: ENHANCEMENT - Amount split equally among Ranger's quest sharers; Ranger, who
+// fulfilled the quest, also gets what does not divide. Returns Ranger's part. With one sharer
+// it is SetMoney(Money + Amount) as native.
+function GrantSharedQuestMoney(Ranger: TRanger; Amount: Integer): Integer;
+var
+  Sharers: TList;
+  I, Share: Integer;
+  Sharer: TRanger;
+begin
+  Sharers := TList.Create;
+  try
+    CollectQuestSharers(Ranger, Sharers);
+    Share := Amount div Sharers.Count;
+    Result := Amount - Share * (Sharers.Count - 1);
+    for I := 0 to Sharers.Count - 1 do
+    begin
+      Sharer := TRanger(Sharers[I]);
+      if Sharer = Ranger then
+        Sharer.SetMoney(Sharer.Money + Result)
+      else
+        Sharer.SetMoney(Sharer.Money + Share);
+    end;
+  finally
+    Sharers.Free;
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - The quest experience split as GrantSharedQuestMoney splits money;
+// returns Ranger's part.
+function GrantSharedQuestExperience(Ranger: TRanger; Amount: Integer): Integer;
+var
+  Sharers: TList;
+  I, Share: Integer;
+  Sharer: TRanger;
+begin
+  Sharers := TList.Create;
+  try
+    CollectQuestSharers(Ranger, Sharers);
+    Share := Amount div Sharers.Count;
+    Result := Amount - Share * (Sharers.Count - 1);
+    for I := 0 to Sharers.Count - 1 do
+    begin
+      Sharer := TRanger(Sharers[I]);
+      if Sharer = Ranger then
+        Sharer.GainExperience(Result, 0)
+      else
+        Sharer.GainExperience(Share, 0);
+    end;
+  finally
+    Sharers.Free;
+  end;
 end;
 
 destructor TRanger.Destroy;
@@ -4654,10 +4798,14 @@ begin
 end;
 procedure TRanger.ProcessQuestTimersAndOutcomes;
 var
-  I: Integer;
+  I, J: Integer;
   Quest: PQuest;
   Text: WideString;
+  Sharers: TList;
+  Sharer: TRanger;
 begin
+  Sharers := TList.Create;
+  try
   for I := Quests.Count - 1 downto 0 do
   begin
     { The neutral index expression preserves DCC32's native argument evaluation order. }
@@ -4672,19 +4820,26 @@ begin
             or not InTextQuestAt(Self, Quest.ObjectiveTarget as TPlanet) then
         begin
           PublishQuestStatus(Quest, -1);
-          if (Quest.Planet.OwnerId = Byte(oiPirate))
-              and (MainPiratePlanet <> nil)
-              and (MainPiratePlanet.GetRelationLevelToShip(Self) > rlBad) then
+          // CHANGE: ENHANCEMENT - A shared quest fails once, for every sharer (docs/humans.md,
+          // Quests): each one's relations drop. With one human, Self's alone, as native.
+          CollectQuestSharers(Self, Sharers);
+          for J := 0 to Sharers.Count - 1 do
           begin
-            if MainPiratePlanet.GetRelationLevelToShip(Self) = rlNormal then
-              MainPiratePlanet.SetRelationLevelToRanger(Self, rlBad);
-            if MainPiratePlanet.GetRelationLevelToShip(Self) = rlGood then
-              MainPiratePlanet.SetRelationLevelToRanger(Self, rlNormal);
-            if MainPiratePlanet.GetRelationLevelToShip(Self) >= rlExcellent then
-              MainPiratePlanet.SetRelationLevelToRanger(Self, rlGood);
+            Sharer := TRanger(Sharers[J]);
+            if (Quest.Planet.OwnerId = Byte(oiPirate))
+                and (MainPiratePlanet <> nil)
+                and (MainPiratePlanet.GetRelationLevelToShip(Sharer) > rlBad) then
+            begin
+              if MainPiratePlanet.GetRelationLevelToShip(Sharer) = rlNormal then
+                MainPiratePlanet.SetRelationLevelToRanger(Sharer, rlBad);
+              if MainPiratePlanet.GetRelationLevelToShip(Sharer) = rlGood then
+                MainPiratePlanet.SetRelationLevelToRanger(Sharer, rlNormal);
+              if MainPiratePlanet.GetRelationLevelToShip(Sharer) >= rlExcellent then
+                MainPiratePlanet.SetRelationLevelToRanger(Sharer, rlGood);
+            end;
+            if Quest.Planet.GetRelationLevelToShip(Sharer) > rlBad then
+              Quest.Planet.SetRelationLevelToRanger(Sharer, rlBad);
           end;
-          if Quest.Planet.GetRelationLevelToShip(Self) > rlBad then
-            Quest.Planet.SetRelationLevelToRanger(Self, rlBad);
           Text :=
               PickLocalizedTextVariant(
                   'GalaxyNews.Quest.Failure.Time',
@@ -4702,8 +4857,12 @@ begin
           // CHANGE: CLEANUP - Achievements belong to the human at this machine.
           if (Quest.QuestType = qtSendLetter) and (Self = LocalPlayer) then
             TryAddAchievementProgress('POSTMAN', 1);
-          AddHumanBubble(Self, Text);
-          CheckQuestFailureAward(Quest, [qtSendLetter, qtKillShip, qtPlanetQuest]);
+          AddQuestBubble(Self, Text);
+          for J := 0 to Sharers.Count - 1 do
+            TRanger(Sharers[J]).CheckQuestFailureAward(
+                Quest,
+                [qtSendLetter, qtKillShip, qtPlanetQuest]
+            );
           ArchiveQuest(I);
         end;
       end
@@ -4766,7 +4925,7 @@ begin
         ReplaceTextToken(Text, '<Player>', Name, '<color=255,240,100>');
         { Native code still dereferences Planet after the nil-planet text branches. }
         ReplaceTextToken(Text, '<Planet>', Quest.Planet.Name, '<color=255,240,100>');
-        AddHumanBubble(Self, Text);
+        AddQuestBubble(Self, Text);
         Quest.Successful := True;
         PublishQuestStatus(Quest, 0);
       end
@@ -4775,6 +4934,9 @@ begin
     end
     else
       PublishQuestStatus(Quest, 0);
+  end;
+  finally
+    Sharers.Free;
   end;
 end;
 function TRanger.CountFailedQuests(OwnerId: Byte; QuestTypes: TQuestTypes): Integer;
@@ -4855,19 +5017,32 @@ var
   OldQuest: PPlayerOldQuest;
   OldQuests: TList;
   Quest: PQuest;
+  I, Count: Integer;
 begin
   Quest := PQuest(Quests[Index]);
-  OldQuests := OldQuestsOf(Self);
-  if OldQuests <> nil then
+  // CHANGE: ENHANCEMENT - A shared quest goes into every human's finished quests
+  // (docs/humans.md, Quests); otherwise into Self's human's, as native.
+  if QuestsShared(Self) then
+    Count := Session.Humans.Count
+  else
+    Count := 1;
+  for I := 0 to Count - 1 do
   begin
-    New(OldQuest);
-    OldQuest.QuestType := Quest.QuestType;
-    OldQuest.QuestNumber := Quest.QuestNumber;
-    OldQuest.Planet := Quest.Planet;
-    OldQuest.Description := Quest.Description;
-    OldQuest.Successful := Quest.Successful;
-    OldQuest.Declined := False;
-    OldQuests.Add(OldQuest);
+    if QuestsShared(Self) then
+      OldQuests := Session.Humans[I].PlayerOldQuests
+    else
+      OldQuests := OldQuestsOf(Self);
+    if OldQuests <> nil then
+    begin
+      New(OldQuest);
+      OldQuest.QuestType := Quest.QuestType;
+      OldQuest.QuestNumber := Quest.QuestNumber;
+      OldQuest.Planet := Quest.Planet;
+      OldQuest.Description := Quest.Description;
+      OldQuest.Successful := Quest.Successful;
+      OldQuest.Declined := False;
+      OldQuests.Add(OldQuest);
+    end;
   end;
   Quests.Delete(Index);
   Dispose(Quest);
@@ -4875,7 +5050,8 @@ begin
 end;
 function TRanger.TryTurnInAnyQuest(var ResponseText: WideString): Boolean;
 var
-  I: Integer;
+  I, H: Integer;
+  Holder: TRanger;
 begin
   Result := False;
   ResponseText := '';
@@ -4885,8 +5061,31 @@ begin
       Result := True;
       Exit;
     end;
+  // CHANGE: ENHANCEMENT - Any human may fulfil a shared quest (docs/humans.md, Quests): after
+  // its own, the other humans' quests, in Session.Humans order.
+  if QuestsShared(Self) then
+    for H := 0 to Session.Humans.Count - 1 do
+    begin
+      Holder := Session.Humans[H].Player;
+      if (Holder = nil) or (Holder = Self) then
+        Continue;
+      for I := 0 to Holder.Quests.Count - 1 do
+        if TryTurnInQuestOf(Holder, I, ResponseText) then
+        begin
+          Result := True;
+          Exit;
+        end;
+    end;
 end;
 function TRanger.TryTurnInQuest(Index: Integer; var ResponseText: WideString): Boolean;
+begin
+  Result := TryTurnInQuestOf(Self, Index, ResponseText);
+end;
+function TRanger.TryTurnInQuestOf(
+    Holder: TRanger;
+    Index: Integer;
+    var ResponseText: WideString
+): Boolean;
 const
   RewardPrograms = [prgShipwreck..prgDisconnection];
 var
@@ -4901,6 +5100,7 @@ var
   ProgramIndex: Byte;
   ModuleItem: TMicroModule;
   Factions: WideString;
+  ActorExperience: Integer;
   function ConsumeQuestDeliveryItem: Boolean; // @addr 0x734A44 @ida "bool __cdecl $name(void *ParentFrame);" @note "Caller-popped static link; ranger -4, quest -8. Removes/frees matching delivery cargo; true also when this planet quest requires no item."
   var
     I: Integer;
@@ -4940,6 +5140,10 @@ var
       Result := False;
   end;
   procedure FinalizeSuccessfulQuestTurnIn; // @addr 0x734D44 @ida "void __cdecl $name(void *ParentFrame);" @note "Caller-popped static link; ranger -4, quest -8, seed input -12, experience -16, response output -20, event -24, quest index -28. Grants experience, archives the quest and updates relations."
+  var
+    SharerIndex: Integer;
+    Sharers: TList;
+    Sharer: TRanger;
   begin
     Experience :=
         RoundAndTruncateToTens(
@@ -4950,7 +5154,9 @@ var
                     / GalaxyDifficultyTuning[Galaxy.DifficultyLevels[7]]
                         .QuestTimeAndExperienceFactor)
         );
-    GainExperience(Experience, 0);
+    // CHANGE: ENHANCEMENT - Split among the quest's sharers (docs/humans.md, Quests); the text
+    // says this ranger's part.
+    ActorExperience := GrantSharedQuestExperience(Self, Experience);
     if IsHuman(Self) then
     begin
       ResponseText :=
@@ -4961,7 +5167,7 @@ var
               + WrapTextInColor(
                   LocalizedColorText('PlanetCongratulations.Quest.AddPoints'),
                   '<color=45,105,45>');
-      ReplaceTextToken(ResponseText, '<Points>', IntToStr(Experience), '');
+      ReplaceTextToken(ResponseText, '<Points>', IntToStr(ActorExperience), '');
     end
     else
       ResponseText := '';
@@ -4995,29 +5201,51 @@ var
       TryAddAchievementProgress('GUARD', 1);
     if (Quest.QuestType = qtSendLetter) and (Self = LocalPlayer) then
       TryAddAchievementProgress('DELIVERY', 1);
-    ArchiveQuest(Index);
+    // CHANGE: ENHANCEMENT - The quest may be another human's (docs/humans.md, Quests): it
+    // leaves its holder's list.
+    Holder.ArchiveQuest(Index);
     RefreshPlayerQuestTargets;
-    if CurrentPlanet <> nil then
-      CurrentPlanet.ChangeRelationToRanger(
-          Self,
-          Max(0, 70 - (Integer(CurrentPlanet.RelationToShip(Self)) and $7F))
-      );
-    if (CurrentPlanet.OwnerId = Byte(oiPirate)) and (MainPiratePlanet <> nil) then
-    begin
-      if MainPiratePlanet.GetRelationLevelToShip(Self) = rlHostile then
-        MainPiratePlanet.SetRelationLevelToRanger(Self, rlBad);
-      if MainPiratePlanet.GetRelationLevelToShip(Self) = rlBad then
-        MainPiratePlanet.SetRelationLevelToRanger(Self, rlNormal);
-      if MainPiratePlanet.GetRelationLevelToShip(Self) = rlNormal then
-        MainPiratePlanet.SetRelationLevelToRanger(Self, rlGood);
-      if MainPiratePlanet.GetRelationLevelToShip(Self) = rlGood then
-        MainPiratePlanet.SetRelationLevelToRanger(Self, rlExcellent);
-      // Native calls the ranger's own virtual method here, after upgrading the planet relation.
-      if MainPiratePlanet.GetRelationLevelToShip(Self) >= rlExcellent then
-        ChangeRelationToRanger(
-            Self,
-            Max(0, 100 - (Integer(MainPiratePlanet.RelationToShip(Self)) and $7F))
-        );
+    if Holder <> Self then
+      Holder.RefreshPlayerQuestTargets;
+    // CHANGE: ENHANCEMENT - Every sharer's relations rise, this ranger's first, as native
+    // raised this ranger's (docs/humans.md, Quests).
+    Sharers := TList.Create;
+    try
+      CollectQuestSharers(Self, Sharers);
+      for SharerIndex := 0 to Sharers.Count - 1 do
+      begin
+        if SharerIndex = 0 then
+          Sharer := Self
+        else if Sharers[SharerIndex] = Pointer(Self) then
+          Sharer := TRanger(Sharers[0])
+        else
+          Sharer := TRanger(Sharers[SharerIndex]);
+        if CurrentPlanet <> nil then
+          CurrentPlanet.ChangeRelationToRanger(
+              Sharer,
+              Max(0, 70 - (Integer(CurrentPlanet.RelationToShip(Sharer)) and $7F))
+          );
+        if (CurrentPlanet.OwnerId = Byte(oiPirate)) and (MainPiratePlanet <> nil) then
+        begin
+          if MainPiratePlanet.GetRelationLevelToShip(Sharer) = rlHostile then
+            MainPiratePlanet.SetRelationLevelToRanger(Sharer, rlBad);
+          if MainPiratePlanet.GetRelationLevelToShip(Sharer) = rlBad then
+            MainPiratePlanet.SetRelationLevelToRanger(Sharer, rlNormal);
+          if MainPiratePlanet.GetRelationLevelToShip(Sharer) = rlNormal then
+            MainPiratePlanet.SetRelationLevelToRanger(Sharer, rlGood);
+          if MainPiratePlanet.GetRelationLevelToShip(Sharer) = rlGood then
+            MainPiratePlanet.SetRelationLevelToRanger(Sharer, rlExcellent);
+          // Native calls the ranger's own virtual method here, after upgrading the planet
+          // relation.
+          if MainPiratePlanet.GetRelationLevelToShip(Sharer) >= rlExcellent then
+            Sharer.ChangeRelationToRanger(
+                Sharer,
+                Max(0, 100 - (Integer(MainPiratePlanet.RelationToShip(Sharer)) and $7F))
+            );
+        end;
+      end;
+    finally
+      Sharers.Free;
     end;
     TryAddAchievementProgress('AGENT', 1);
   end;
@@ -5028,14 +5256,15 @@ begin
   if DockedTo <> nil then
     GenerationSeed := DockedTo.Seed;
   Result := False;
-  Quest := Quests[Index];
+  Quest := Holder.Quests[Index];
   case Quest.QuestType of
     qtSendLetter:
       if ((Quest.ObjectiveTarget as TPlanet) = CurrentPlanet) and ConsumeQuestDeliveryItem then
       begin
         Result := True;
         Quest.Successful := True;
-        SetMoney(Money + Quest.RewardMoney);
+        // CHANGE: ENHANCEMENT - Split among the quest's sharers (docs/humans.md, Quests).
+        GrantSharedQuestMoney(Self, Quest.RewardMoney);
         ResponseText := Quest.CompletionText;
         Factions :=
             LookupLocalizedTextByKey('Quest.SendLetter.' + IntToStr(Quest.QuestNumber) + '.ToRace');
@@ -5070,7 +5299,8 @@ begin
       if (Quest.Planet <> nil) and (Quest.Planet = CurrentPlanet) and Quest.Successful then
       begin
         Result := True;
-        SetMoney(Money + Quest.RewardMoney);
+        // CHANGE: ENHANCEMENT - Split among the quest's sharers (docs/humans.md, Quests).
+        GrantSharedQuestMoney(Self, Quest.RewardMoney);
         ResponseText := Quest.CompletionText;
         Factions :=
             LookupLocalizedTextByKey(
@@ -5108,7 +5338,8 @@ begin
       begin
         Result := True;
         Quest.Successful := True;
-        SetMoney(Money + Quest.RewardMoney);
+        // CHANGE: ENHANCEMENT - Split among the quest's sharers (docs/humans.md, Quests).
+        GrantSharedQuestMoney(Self, Quest.RewardMoney);
         ResponseText := Quest.CompletionText;
         RewardText := 'Reward,Programms,Artefact';
       end;
@@ -5116,7 +5347,8 @@ begin
       if (Quest.Planet <> nil) and (Quest.Planet = CurrentPlanet) and Quest.Successful then
       begin
         Result := True;
-        SetMoney(Money + Quest.RewardMoney);
+        // CHANGE: ENHANCEMENT - Split among the quest's sharers (docs/humans.md, Quests).
+        GrantSharedQuestMoney(Self, Quest.RewardMoney);
         ResponseText := Quest.CompletionText;
         Factions :=
             LookupLocalizedTextByKey(
@@ -5153,7 +5385,8 @@ begin
       if (Quest.Planet <> nil) and (Quest.Planet = CurrentPlanet) and Quest.Successful then
       begin
         Result := True;
-        SetMoney(Money + Quest.RewardMoney);
+        // CHANGE: ENHANCEMENT - Split among the quest's sharers (docs/humans.md, Quests).
+        GrantSharedQuestMoney(Self, Quest.RewardMoney);
         if Quest.ObjectiveTarget = nil then
           ResponseText := Quest.SpecialCompletionText
         else
@@ -5740,6 +5973,17 @@ begin
           );
       Exit;
     end;
+  end;
+  // CHANGE: ENHANCEMENT - Or another human holds one, as the quests are shared
+  // (docs/humans.md, Quests): a government gives the humans one quest at a time together.
+  if QuestsShared(Self) and HumanHoldsQuestFrom(CurrentPlanet) then
+  begin
+    ResponseText :=
+        PickLocalizedTextVariant(
+            'FormGov.DontQuest.YouHaveQuest',
+            CurrentPlanet.GenerationSeed * (Galaxy.CurrentTurn div 5) + 165856
+        );
+    Exit;
   end;
   if CurrentPlanet.GetRelationLevelToShip(Self) < rlGood then
   begin
@@ -6895,8 +7139,10 @@ begin
 end;
 procedure TRanger.PublishQuestStatus(Quest: PQuest; Outcome: Integer);
 var
-  Text: WideString;
+  Text, Key: WideString;
   Message: TMessagePlayer;
+  Kind: Byte;
+  I, Count: Integer;
 begin
   Text := '';
   if Outcome = 0 then
@@ -6951,43 +7197,72 @@ begin
               Quest.Planet.CurrentStar.Name)
           + #13#10;
   Text := Text + #13#10 + ' ' + #13#10 + Quest.Description;
+  if Quest.Planet = nil then
+    Exit;
   if Outcome = 0 then
-  begin
-    if Quest.Planet <> nil then
-    begin
-      Message :=
-          AddOrUpdatePlayerBubble(
-              3,
-              Galaxy.CurrentTurn,
-              Text,
-              'ZP_' + IntToStr(Cardinal(Quest.Planet.Id)) + '_' + IntToStr(Quest.QuestNumber)
-          );
-      if Quest.ObjectiveTarget <> nil then
-        if Quest.ObjectiveTarget is TShip then
-          Message.Targets[0].ShipId := TShip(Quest.ObjectiveTarget).Id
-        else if Quest.ObjectiveTarget is TPlanet then
-          Message.Targets[0].PlanetId := TPlanet(Quest.ObjectiveTarget).Id
-        else if Quest.ObjectiveTarget is TStar then
-          Message.Targets[0].PlanetId := Quest.Planet.Id;
-    end;
-  end
+    Kind := 3
   else if Outcome > 0 then
+    Kind := 4
+  else
+    Kind := 5;
+  Key := 'ZP_' + IntToStr(Cardinal(Quest.Planet.Id)) + '_' + IntToStr(Quest.QuestNumber);
+  // CHANGE: FIX - The quest journal entry went to the local human (AddOrUpdatePlayerBubble),
+  // so on a host every client's quest showed in the host's journal and never in the
+  // client's: the client's own copy of the entry was replaced by the host's next state.
+  // CHANGE: ENHANCEMENT - In multiplayer the quests are shared (docs/humans.md, Quests):
+  // every human gets the entry. With one human it goes to the local human, as native.
+  if QuestsShared(Self) then
+    Count := Session.Humans.Count
+  else
+    Count := 1;
+  for I := 0 to Count - 1 do
   begin
-    if Quest.Planet <> nil then
-      AddOrUpdatePlayerBubble(
-          4,
-          Galaxy.CurrentTurn,
-          Text,
-          'ZP_' + IntToStr(Cardinal(Quest.Planet.Id)) + '_' + IntToStr(Quest.QuestNumber)
-      );
-  end
-  else if Quest.Planet <> nil then
-    AddOrUpdatePlayerBubble(
-        5,
-        Galaxy.CurrentTurn,
-        Text,
-        'ZP_' + IntToStr(Cardinal(Quest.Planet.Id)) + '_' + IntToStr(Quest.QuestNumber)
-    );
+    if QuestsShared(Self) then
+      Message := Session.Humans[I].AddOrUpdateBubble(Kind, Galaxy.CurrentTurn, Text, Key)
+    else
+      Message := AddOrUpdatePlayerBubble(Kind, Galaxy.CurrentTurn, Text, Key);
+    if (Kind = 3) and (Quest.ObjectiveTarget <> nil) then
+      if Quest.ObjectiveTarget is TShip then
+        Message.Targets[0].ShipId := TShip(Quest.ObjectiveTarget).Id
+      else if Quest.ObjectiveTarget is TPlanet then
+        Message.Targets[0].PlanetId := TPlanet(Quest.ObjectiveTarget).Id
+      else if Quest.ObjectiveTarget is TStar then
+        Message.Targets[0].PlanetId := Quest.Planet.Id;
+  end;
+end;
+// CHANGE: ENHANCEMENT - The relation drops of a kill or defend quest that failed with a
+// destroyed ship (ProcessShipDestructionQuests), for every sharer of Holder's quest
+// (docs/humans.md, Quests); with one human for Holder alone, as native.
+procedure LowerSharedQuestRelations(Quest: PQuest; Holder: TRanger);
+var
+  I: Integer;
+  Sharers: TList;
+  Ranger: TRanger;
+begin
+  Sharers := TList.Create;
+  try
+    CollectQuestSharers(Holder, Sharers);
+    for I := 0 to Sharers.Count - 1 do
+    begin
+      Ranger := TRanger(Sharers[I]);
+      if (Quest.Planet <> nil) and (Quest.Planet.GetRelationLevelToShip(Ranger) > rlBad) then
+        Quest.Planet.SetRelationLevelToRanger(Ranger, rlBad);
+      { Native assumes Planet is present after the guarded update above. }
+      if (Quest.Planet.OwnerId = Byte(oiPirate))
+          and (MainPiratePlanet <> nil)
+          and (MainPiratePlanet.GetRelationLevelToShip(Ranger) > rlBad) then
+      begin
+        if MainPiratePlanet.GetRelationLevelToShip(Ranger) = rlNormal then
+          MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlBad);
+        if MainPiratePlanet.GetRelationLevelToShip(Ranger) = rlGood then
+          MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlNormal);
+        if MainPiratePlanet.GetRelationLevelToShip(Ranger) >= rlExcellent then
+          MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlGood);
+      end;
+    end;
+  finally
+    Sharers.Free;
+  end;
 end;
 procedure TRanger.ProcessShipDestructionQuests(Ship: TShip);
 var
@@ -7009,20 +7284,8 @@ begin
           and (Quest.QuestType = qtDefendSystem)
           and ((Quest.ObjectiveTarget as TStar) = Ship.CurrentStar) then
       begin
-        if (Quest.Planet <> nil) and (Quest.Planet.GetRelationLevelToShip(Ranger) > rlBad) then
-          Quest.Planet.SetRelationLevelToRanger(Ranger, rlBad);
-        { Native assumes Planet is present after the guarded update above. }
-        if (Quest.Planet.OwnerId = Byte(oiPirate))
-            and (MainPiratePlanet <> nil)
-            and (MainPiratePlanet.GetRelationLevelToShip(Ranger) > rlBad) then
-        begin
-          if MainPiratePlanet.GetRelationLevelToShip(Ranger) = rlNormal then
-            MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlBad);
-          if MainPiratePlanet.GetRelationLevelToShip(Ranger) = rlGood then
-            MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlNormal);
-          if MainPiratePlanet.GetRelationLevelToShip(Ranger) >= rlExcellent then
-            MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlGood);
-        end;
+        // CHANGE: ENHANCEMENT - A shared quest fails for every sharer (docs/humans.md, Quests).
+        LowerSharedQuestRelations(Quest, Ranger);
         if IsHuman(Ranger) then
         begin
           Text :=
@@ -7044,7 +7307,7 @@ begin
               (Quest.ObjectiveTarget as TStar).Name,
               '<color=255,240,100>'
           );
-          AddHumanBubble(Ranger, Text);
+          AddQuestBubble(Ranger, Text);
         end;
         // CHANGE: BUGFIX - Native called these on Self while iterating another ranger's
         // quests; harmless with one player (Self was always Ranger), wrong once several
@@ -7060,20 +7323,9 @@ begin
       begin
         if not Quest.Successful then
         begin
-          if (Quest.Planet <> nil) and (Quest.Planet.GetRelationLevelToShip(Ranger) > rlBad) then
-            Quest.Planet.SetRelationLevelToRanger(Ranger, rlBad);
-          { Native assumes Planet is present after the guarded update above. }
-          if (Quest.Planet.OwnerId = Byte(oiPirate))
-              and (MainPiratePlanet <> nil)
-              and (MainPiratePlanet.GetRelationLevelToShip(Ranger) > rlBad) then
-          begin
-            if MainPiratePlanet.GetRelationLevelToShip(Ranger) = rlNormal then
-              MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlBad);
-            if MainPiratePlanet.GetRelationLevelToShip(Ranger) = rlGood then
-              MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlNormal);
-            if MainPiratePlanet.GetRelationLevelToShip(Ranger) >= rlExcellent then
-              MainPiratePlanet.SetRelationLevelToRanger(Ranger, rlGood);
-          end;
+          // CHANGE: ENHANCEMENT - A shared quest fails for every sharer (docs/humans.md,
+          // Quests).
+          LowerSharedQuestRelations(Quest, Ranger);
           if IsHuman(Ranger) then
           begin
             Text :=
@@ -7090,7 +7342,7 @@ begin
             );
             ReplaceTextToken(Text, '<Ship>', Ship.GetFullName(' '), '<color=255,240,100>');
             ReplaceTextToken(Text, '<Star>', Ship.CurrentStar.Name, '<color=255,240,100>');
-            AddHumanBubble(Ranger, Text);
+            AddQuestBubble(Ranger, Text);
           end;
           PublishQuestStatus(Quest, -1);
           Ranger.ArchiveQuest(J);
@@ -7119,7 +7371,7 @@ begin
               );
           ReplaceTextToken(Text, '<Planet>', Quest.Planet.Name, '<color=255,240,100>');
           ReplaceTextToken(Text, '<Ship>', Ship.GetFullName(' '), '<color=255,240,100>');
-          AddHumanBubble(Ranger, Text);
+          AddQuestBubble(Ranger, Text);
         end;
         Quest.Successful := True;
         PublishQuestStatus(Quest, 0);
@@ -7132,9 +7384,27 @@ begin
 end;
 function TRanger.HasQuestOfType(QuestType: TQuestType): Boolean;
 var
-  I: Integer;
+  I, J, Count: Integer;
   Quest: PQuest;
+  Player: TPlayer;
 begin
+  // CHANGE: ENHANCEMENT - The quests are shared (docs/humans.md, Quests): native held one quest
+  // of a type per ranger, so the shared set holds one per human. A human may take another
+  // while fewer than the humans are of that type, whoever holds them.
+  if QuestsShared(Self) then
+  begin
+    Count := 0;
+    for I := 0 to Session.Humans.Count - 1 do
+    begin
+      Player := Session.Humans[I].Player;
+      if Player <> nil then
+        for J := 0 to Player.Quests.Count - 1 do
+          if PQuest(Player.Quests[J]).QuestType = QuestType then
+            Inc(Count);
+    end;
+    Result := Count >= Session.Humans.Count;
+    Exit;
+  end;
   for I := 0 to Quests.Count - 1 do
   begin
     Quest := PQuest(Quests[I]);

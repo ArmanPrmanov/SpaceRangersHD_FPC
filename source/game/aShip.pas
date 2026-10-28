@@ -3087,7 +3087,7 @@ end;
 function TShip.CalculateWealth: Integer;
 var
   I: Integer;
-  Capital: Int64;
+  Capital, Stored: Int64;
   Item: TItem;
   Good: Byte;
   Entry: PStorageEntry;
@@ -3107,11 +3107,18 @@ begin
     Inc(Capital, CargoGoods[Good].TotalCost);
   if IsHuman(Self) then
   begin
+    Stored := 0;
     for I := 0 to TPlayer(Self).StorageEntries.Count - 1 do
     begin
       Entry := PStorageEntry(TPlayer(Self).StorageEntries[I]);
-      Inc(Capital, Entry.Item.Cost);
+      Inc(Stored, Entry.Item.Cost);
     end;
+    // CHANGE: ENHANCEMENT - The humans that share a storage pool (aPlayer.ShareHumanStorage)
+    // own it together: each counts its share, so the galaxy's capital counts it once.
+    if (TPlayer(Self).StorageEntries is TStorageList)
+        and (TStorageList(TPlayer(Self).StorageEntries).Sharers > 1) then
+      Stored := Stored div TStorageList(TPlayer(Self).StorageEntries).Sharers;
+    Inc(Capital, Stored);
     Inc(Capital, TPlayer(Self).ComputeDepositAccruedValue);
   end;
   if Capital > MaxInt then

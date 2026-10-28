@@ -324,7 +324,9 @@ begin
                 P.CurrentPlanet.Name,
                 '<color=255,240,100>'
             );
-            ActorHuman(Command).AddOrUpdateBubble(0, Galaxy.CurrentTurn, News, '');
+            // CHANGE: ENHANCEMENT - Every human's news when the quests are shared
+            // (docs/humans.md, Quests).
+            AddQuestBubble(P, News);
           end;
           ItemName :=
               LookupLocalizedTextByKey(
@@ -424,7 +426,9 @@ begin
             GovernmentQuest.Planet.GetRelationLevelTextToShip(P),
             '<color=255,240,100>'
         );
-        Human.AddOrUpdateBubble(0, Galaxy.CurrentTurn, News, '');
+        // CHANGE: ENHANCEMENT - Every human's news when the quests are shared (docs/humans.md,
+        // Quests).
+        AddQuestBubble(P, News);
         P.CurrentPlanet.TextQuestId := -1;
         P.ArchiveQuest(I);
         Break;

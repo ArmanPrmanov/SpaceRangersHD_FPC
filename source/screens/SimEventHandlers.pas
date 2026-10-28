@@ -62,6 +62,28 @@ begin
     HangarScreen.RefreshOtherHumansPortraits;
 end;
 
+// CHANGE: ENHANCEMENT - Another human changed the shared storage where the local human's ranger
+// is (aPlayer.StorageChanged): an open ship screen shows its storage cells again.
+procedure RefreshSharedStorage;
+begin
+  if (ShipScreen <> nil) and (GetInnermostScreenLoop = ShipScreen) then
+    ShipScreen.RefreshSharedStorage;
+end;
+
+// CHANGE: ENHANCEMENT - A human gave another human money (aPlayerActions.TransferMoney): when
+// the local human is one of the two, the star map's panel shows its money and bubbles again.
+procedure RefreshAfterMoneyTransfer(FromId, ToId, Amount: Integer);
+begin
+  if (LocalHuman = nil) or ((LocalHuman.Id <> FromId) and (LocalHuman.Id <> ToId)) then
+    Exit;
+  if (StarMapScreen <> nil) and (StarMapScreen.MainPanel <> nil)
+      and (CurrentScreenId = screenStarMap) and (StarMapScreen.Mode = smmOrders) then
+  begin
+    StarMapScreen.MainPanel.RefreshMoneyAndCargo;
+    StarMapScreen.MainPanel.RebuildMessageButtons(False);
+  end;
+end;
+
 procedure PlayUiSound(const Name: WideString);
 begin
   SoundManager.PlaySound(Name);
@@ -100,6 +122,8 @@ begin
   PlayerResultHandler := RecordScore;
   PlayerShipReleaseHandler := WaitForPlayerShipScreens;
   ShopStockChangedHandler := RefreshShopGoods;
+  StorageChangedHandler := RefreshSharedStorage;
+  MoneyTransferHandler := RefreshAfterMoneyTransfer;
   SoundHandler := PlayUiSound;
   HumanScreenHandler := OpenScreen;
   InspectedShipHandler := ShipOnOpenScreen;

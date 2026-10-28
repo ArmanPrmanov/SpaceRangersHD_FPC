@@ -39,6 +39,9 @@ type
     // ignored, so old logs and saves load.
     // Whether a human may attack another human. The host owns the switch.
     FriendlyFireEnabled: Boolean;
+    // CHANGE: ENHANCEMENT - Whether cheat codes work in multiplayer (CheatCode). On by default;
+    // the host owns the switch. Single player ignores it.
+    CheatsAllowed: Boolean;
     UselessItemRemainsCount: Integer;
     // Whether the player star's day has been prepared ahead of the turn.
     PlayerStarDayPrepared: Boolean;
@@ -69,6 +72,7 @@ const
   // Was the text-quest switch; SetSessionFlag ignores it now.
   SessionFlagTextQuestsRetired = 0;
   SessionFlagFriendlyFire = 1;
+  SessionFlagCheats = 2;
 var
   Session: TSessionState;
 // Puts the session flags back to their defaults, as for a new game.
@@ -82,17 +86,19 @@ implementation
 procedure ResetSessionFlags;
 begin
   Session.FriendlyFireEnabled := True;
+  Session.CheatsAllowed := True;
 end;
 
 function SessionFlagsAreDefault: Boolean;
 begin
-  Result := Session.FriendlyFireEnabled;
+  Result := Session.FriendlyFireEnabled and Session.CheatsAllowed;
 end;
 
 procedure SetSessionFlag(Flag: Integer; Value: Boolean);
 begin
   case Flag of
     SessionFlagFriendlyFire: Session.FriendlyFireEnabled := Value;
+    SessionFlagCheats: Session.CheatsAllowed := Value;
   end;
 end;
 

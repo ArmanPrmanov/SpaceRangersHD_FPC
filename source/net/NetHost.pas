@@ -296,6 +296,7 @@ uses
   aHoldActions,
   aObjectRefs,
   aPlanet,
+  aPlayer,
   aPlayerActions,
   aQuestActions,
   aSession,
@@ -1393,13 +1394,52 @@ var
   Peer: THostPeer;
   Relayed: TPlayerCommand;
   Sale: AnsiString;
+  Storage: Boolean;
 begin
   if FApplyingQueues or not IsTradeCommand(Command.Kind) then
     Exit;
   Actor := FindHuman(Integer(Command.Actor));
   if (Actor = nil) or (Actor.Player = nil) then
     Exit;
-  Location := HumanShopLocation(Actor);
+  // CHANGE: ENHANCEMENT - A money transfer goes to every other joined client, wherever its human
+  // is (aPlayerActions.RelayedTransferOf: the amount, moved without the checks), so that the
+  // recipient sees the money and the bubble before the next state.
+  if Command.Kind = ckTransferMoney then
+  begin
+    Relayed := RelayedTransferOf(Command);
+    Payload := nil;
+    try
+      for I := 0 to FPeers.Count - 1 do
+      begin
+        Peer := THostPeer(FPeers[I]);
+        if (Peer.State <> hpJoined) or Peer.Leaving or (Peer.HumanId = Actor.Id) then
+          Continue;
+        if Payload = nil then
+        begin
+          Payload := TBufEC.Create;
+          EncodeRelayCommand(Actor.Id, Relayed, Payload);
+        end;
+        FThread.Send(Peer.PeerId, nkRelayCommand, Payload);
+        NetLog(
+            Format(
+                'relayed human=%d kind=%s to=%d recipient=%d amount=%d',
+                [Actor.Id, CommandKindName(Relayed.Kind), Peer.HumanId, IntArg(Relayed, 0),
+                    IntArg(Relayed, 1)]
+            )
+        );
+      end;
+    finally
+      Payload.Free;
+    end;
+    Exit;
+  end;
+  // CHANGE: ENHANCEMENT - A change to the shared storage goes to the humans who reach the same
+  // storage (aPlayer.PlayerStorageLocation: a planet, or the ship docked to), as its effect.
+  Storage := IsStorageCommand(Command.Kind);
+  if Storage then
+    Location := PlayerStorageLocation(Actor.Player)
+  else
+    Location := HumanShopLocation(Actor);
   if Location = nil then
     Exit;
   // CHANGE: BUGFIX - A ship screen sale runs on what the actor holds, which the hold commands
@@ -1427,7 +1467,24 @@ begin
   // their planet screens say who plays the planet's quest (docs/progress/
   // 2026-10-19-text-quests-plan.md, The lock).
   else if Command.Kind = ckBeginTextQuest then
-    Relayed := RelayedTextQuestOf(Command);
+    Relayed := RelayedTextQuestOf(Command)
+  // CHANGE: ENHANCEMENT - A storage command runs on what the actor holds, as a sale does: the
+  // pool's entries at the location go instead (aHoldActions.RelayedStorageOf).
+  else if Storage then
+  begin
+    Relayed := RelayedStorageOf(Command);
+    Sale := ' storage=' + CommandKindName(Command.Kind);
+    if Relayed.Kind = ckNone then
+    begin
+      NetLog(
+          Format(
+              'no relay human=%d kind=%s: no storage to relay',
+              [Actor.Id, CommandKindName(Command.Kind)]
+          )
+      );
+      Exit;
+    end;
+  end;
   Payload := nil;
   try
     for I := 0 to FPeers.Count - 1 do
@@ -1436,7 +1493,14 @@ begin
       if (Peer.State <> hpJoined) or Peer.Leaving or (Peer.HumanId = Actor.Id) then
         Continue;
       Human := FindHuman(Peer.HumanId);
-      if (Human = nil) or (Human.Player = nil) or (HumanShopLocation(Human) <> Location) then
+      if (Human = nil) or (Human.Player = nil) then
+        Continue;
+      if Storage then
+      begin
+        if PlayerStorageLocation(Human.Player) <> Location then
+          Continue;
+      end
+      else if HumanShopLocation(Human) <> Location then
         Continue;
       if Payload = nil then
       begin

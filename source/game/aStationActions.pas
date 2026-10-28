@@ -982,6 +982,8 @@ begin
       P.AddItemToPlayerStorage(Hull, P.CurrentPlanet, -1)
     else
       P.AddItemToPlayerStorage(Hull, P.DockedTo, -1);
+    // CHANGE: ENHANCEMENT - The storage is shared: the others' open ship screen there shows it.
+    StorageChanged(PlayerStorageLocation(P), ActorHuman(Command));
     if P.DockedTo.TypeId = Byte(rstPirateBase) then
     begin
       P.ChangePlanetRelations(nil, rcmIncrease, 30, [1]);
@@ -1652,7 +1654,7 @@ end;
 // Moved from TfRuinsTalk.IsResearchItemQuestLetter.
 function IsResearchItemQuestLetter(P: TPlayer; Item: TItem): Boolean;
 var
-  I: Integer;
+  I, J: Integer;
   Quest: PQuest;
 begin
   Result := False;
@@ -1666,6 +1668,20 @@ begin
             = (Item as TUselessItem).ConfigBlockName then
           Result := True;
     end;
+  // CHANGE: ENHANCEMENT - Or the letter of another human's quest: the quests are shared
+  // (docs/humans.md, Quests), and any human may carry the letter.
+  if not Result and (Item is TUselessItem) and (Item.ScriptItem = nil) and QuestsShared(P) then
+    for J := 0 to Session.Humans.Count - 1 do
+      if (Session.Humans[J].Player <> nil) and (Session.Humans[J].Player <> P) then
+        for I := 0 to Session.Humans[J].Player.Quests.Count - 1 do
+        begin
+          Quest := Session.Humans[J].Player.Quests[I];
+          if Quest.QuestType = qtSendLetter then
+            if LocalizedColorText(
+                    WideString('Quest.SendLetter.' + IntToStr(Quest.QuestNumber) + '.SysName'))
+                = (Item as TUselessItem).ConfigBlockName then
+              Result := True;
+        end;
 end;
 
 // Moved from TfRuinsTalk.SellResearchRemains.
@@ -2861,6 +2877,8 @@ var
         P.StorageEntries.Delete(I);
         P.RefreshStorageBubbles;
         Dispose(Entry);
+        // CHANGE: ENHANCEMENT - The storage is shared: the others' open ship screen there shows it.
+        StorageChanged(PlayerStorageLocation(P), HumanOf(P));
         Break;
       end;
     end;

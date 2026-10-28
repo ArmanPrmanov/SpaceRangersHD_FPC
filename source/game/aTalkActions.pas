@@ -1825,7 +1825,7 @@ end;
 
 function IsMilitaryProtectedQuestItem(Player: TPlayer; Item: TItem): Boolean;
 var
-  I: Integer;
+  I, J: Integer;
   Quest: PQuest;
 begin
   Result := False;
@@ -1839,6 +1839,20 @@ begin
             = (Item as TUselessItem).ConfigBlockName then
           Result := True;
     end;
+  // CHANGE: ENHANCEMENT - Or the letter of another human's quest: the quests are shared
+  // (docs/humans.md, Quests), and any human may carry the letter.
+  if not Result and (Item is TUselessItem) and (Item.ScriptItem = nil) and QuestsShared(Player) then
+    for J := 0 to Session.Humans.Count - 1 do
+      if (Session.Humans[J].Player <> nil) and (Session.Humans[J].Player <> Player) then
+        for I := 0 to Session.Humans[J].Player.Quests.Count - 1 do
+        begin
+          Quest := Session.Humans[J].Player.Quests[I];
+          if Quest.QuestType = qtSendLetter then
+            if LocalizedColorText(
+                    WideString('Quest.SendLetter.' + IntToStr(Quest.QuestNumber) + '.SysName'))
+                = (Item as TUselessItem).ConfigBlockName then
+              Result := True;
+        end;
 end;
 
 procedure DonateMilitaryResearchMaterial(Series: TDominatorSeries; Amount: Integer);

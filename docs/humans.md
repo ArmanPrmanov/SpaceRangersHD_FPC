@@ -97,7 +97,8 @@ Converting the script functions (`aScriptFun`):
   to the script's human (`ScriptHuman.AddOrUpdateBubble`), as other bubbles go
   to their human. The open shop a script reads or changes is the script's
   human's; a change to a shop's stock rebuilds the other humans' grids there
-  (see Shops).
+  (see Shops). The script player's storage is the pool every human shares
+  (see Storage).
 - "Is this ship the player", `Ship = GetPlayer`, is decided per function:
   - The script asks whether a ship is its own player, as in `IsPlayer(ship)`
     or a star requirement of the player: `Ship = ScriptPlayer`. Most scripts
@@ -482,7 +483,9 @@ reference table:
 - from version 3, the items of the shop grids that write their slots empty, by
   id (see Shops). An older block has none;
 - from version 4, the days each human owes for a text quest
-  (`THuman.QuestDaysOwed`, see Text quests). An older block owes none.
+  (`THuman.QuestDaysOwed`, see Text quests). An older block owes none;
+- from version 5, the cheats flag (`Session.CheatsAllowed`). An older block
+  allows cheats, the flag's default.
 
 The block is written only when a save without it would load differently: more
 than one human, a flag that is not its default, a cheat on record, a finished
@@ -503,14 +506,34 @@ are the host's: a host refuses a client's `SetSessionFlag` before it is queued
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `FriendlyFireEnabled` | on | whether a human may attack another human (see PvP) |
+| `CheatsAllowed` (flag 2, `SessionFlagCheats`) | on | whether cheat codes work in multiplayer (see Cheats); single player ignores it |
+
+The settings screen (`fCfgSettings`, first group) shows the cheats switch in a multiplayer
+game, or one this machine hosts or has joined. The host and a hot-seat game change it there
+(OK submits `SetSessionFlag`); a client sees it greyed out. Its caption is
+`FormCfgSettings.CheatsAllowed`, which the game's texts lack, so an English caption stands in.
+Friendly fire has no switch on the screen yet.
 
 Flag 0 was `TextQuestsDisabled`. It is retired (`SessionFlagTextQuestsRetired`): text quests
 are always on. `SetSessionFlag` ignores it, and the block keeps its byte, written off and
 ignored on load, so old saves and logs load.
 
-**Cheats.** `Human.RecordCheat(Name, Points)` records that a human used a
-cheat. A cheat command's executor calls it for the command's actor. Nothing
-calls it yet, since `CheatCode` is not built.
+**Cheats.** A code is typed holding Ctrl+Shift (`CheatCode.HandleDebugKey`, the message
+loop's `DebugKeyCallback`, which nothing set before, so no cheat worked). The machine where it
+is typed matches it and submits a `Cheat` command ([commands.md](commands.md)) with the code
+and what its screen showed (the screen id and the star map's mode, which the codes' conditions
+test); SKILL adds the ship the screen shows, HOLE the map chosen in its dialog. The executor runs
+the code for the command's actor (`CheatPlayer`, `CheatHuman`) on every machine: a client's
+cheat is predicted at once and applied by the host at the barrier. `ReportCheat` adds the
+galaxy's cheat points and the `PlayerEntersCheatCode` event (bound to the actor) and calls
+`Human.RecordCheat(Name, Points)`, so each human's cheats are on record. Only the typing
+machine touches its screens (`CheatUi`) and shows the cheat's message box, after the command.
+What a cheat puts into a star joins the scene of each machine that shows that star. MAKEDUMP,
+SEED, EVENTS, INFOS and WIN stay local; MAKEDUMP and WIN do nothing in multiplayer. SUDO's
+script command runs as a `CheatScript` command. In multiplayer, cheats work while
+`Session.CheatsAllowed` is on: with it off the typed code is ignored, and a command that
+arrives anyway is refused (`rrOther`). The mod's own `CheatsDisabled` still turns them off
+everywhere.
 
 ## Shops
 
@@ -563,6 +586,139 @@ named.
   every day, so single player does not change; a headless run that keeps a
   grid open over days (the observer's parked turns) restocks from the real
   stock.
+
+## Storage
+
+A planet's or station's storage (склад) is one pool for every human: any human
+there can put items in and take any item out. Native kept a list per ranger
+(`TPlayer.StorageEntries`: entries naming their planet or station, a cell and
+the item).
+
+- **One list.** The humans' rangers share one list object, the first human's in
+  `Session.Humans` (`aPlayer.ShareHumanStorage`; `TStorageList.Sharers` counts
+  them, and the last ranger to go frees it). Every storage routine keeps
+  working on `StorageEntries` unchanged, so the ship screen, the scripts
+  (`ScriptPlayer`), the station builds, the hull purchases, the tranclucator
+  and the equipment sets all see and change the pool. A join shares it, and a
+  load shares it once the references resolved. With one human it is that
+  human's own list: a single-player game and its saves are as before.
+- **Saving.** The original layout stays. The first sharer in
+  `Session.Humans` writes the pool; the others write an empty storage
+  (`TPlayer.StorageSavedByAnother`). A save made before the pool, with a
+  storage per human, loads with the others' entries appended to the first
+  human's; an entry whose cell at its location is taken moves to the next free
+  cell there. A round trip keeps the pool. The per-human block did not change.
+- **Rules.** The storage has no fee or limit; the rules stay those of whoever
+  acts. A ranger's wealth counts its share of the pool (its value divided by
+  the sharers, `TShip.CalculateWealth`), so the galaxy's capital counts it
+  once; a join and a load compute the wealth again once the pool is shared.
+- **Commands.** The ship screen's storage commands are trades
+  ([commands.md](commands.md), Trades): `TakeStored` and `TakeStoredHull` name
+  the cell and the item it showed, and a second take of the same item, or one
+  of a cell another human changed, is refused (`rrItemGone`) before anything
+  changes; `StoreHeld` shifts the cells after a taken one, as native did. A
+  host relays their effect (`RelayedStorage`, [network.md](network.md),
+  Trades).
+- **Screens.** A change by another human (an executor's
+  `SharedStorageChanged`, a relay, a hull bought into the storage, a station
+  build that used a stored part) tells the local screen
+  (`aPlayer.StorageChanged`, `SimEvents.NotifyStorageChanged`), and an open
+  ship screen shows its storage cells again (`TfShip2.RefreshSharedStorage`).
+- **Bubbles.** The storage bubbles on the star map list the pool for every
+  sharer: `TPlayer.RefreshStorageBubbles` builds each sharer's, and the
+  storage trades refresh them when the pool is shared. A load keeps a shared
+  pool's saved bubbles (building them there would differ from the host's).
+
+## Quests
+
+The government quests (задания: a letter, a ship to kill or defend, a star to defend, a
+planet's text quest) are shared in multiplayer: every human sees every active quest, any human
+may fulfil one, and its reward is split equally (`aRanger.QuestsShared`: `IsMultiplayer` and a
+human's ranger). With one human every rule below is native, so single player and its saves are
+as before.
+
+- **Lists.** Each quest stays in the list of the human who accepted it (`TRanger.Quests`), so
+  the save layout, old saves and the per-human block are unchanged; the rules treat the union
+  of the humans' lists as one set. A human who leaves takes its list with it.
+- **The journal.** A quest's entry (`TRanger.PublishQuestStatus`: accepted, its daily
+  countdown, completed, failed; with its star-map target) goes to every human, and so does its
+  news (`AddQuestBubble`). Native gave the entry to the local human whoever's quest it was:
+  on a host a client's quest went to the host's journal, and the client's own copy was replaced
+  by the next state. A finished quest goes into every human's finished quests (`ArchiveQuest`),
+  so a later offer does not repeat it and the cowardice count is shared.
+- **Fulfilling.** At a government (`TryTurnInAnyQuest`) a human turns in its own quests first,
+  then the other humans' in `Session.Humans` order (`TryTurnInQuestOf`); the quest leaves its
+  holder's list. A letter is delivered by whoever carries it (a human hands it on through the
+  shared storage). A kill or defend quest succeeds as native, whoever kills or whatever
+  defends (`ProcessShipDestructionQuests` already walks every ranger's quests), and a kill of
+  another human's quest target counts as a quest kill (`TNormalShip.ProcessShipKill`). The
+  letters of every human's quests are kept out of the research and military sales.
+- **Reward.** The sharers are every human whose game has not ended, the one who turns the
+  quest in always among them (`CollectQuestSharers`). The money and the experience are split
+  equally (`GrantSharedQuestMoney`, `GrantSharedQuestExperience`); the one who turns it in also
+  gets what does not divide, and its text says its part of the experience (the money shown is
+  the quest's). Every sharer's relation to the planet rises as native raised the deliverer's,
+  and the pirates' main planet's for a pirate quest. The item the government adds (a medal,
+  programs, an artefact, a micromodule) cannot be split and goes to the one who turns it in.
+  Everything runs in the command or the day on every machine, in `Session.Humans` order, so
+  the split is the same everywhere.
+- **Failure.** A quest fails once: its deadline (`ProcessQuestTimersAndOutcomes`, in its
+  holder's day) or its defended ship or star (`ProcessShipDestructionQuests`) drops every
+  sharer's relations as native dropped the holder's, each sharer's cowardice award is checked,
+  and every human's journal and finished quests get the failure.
+- **Offers.** A government gives the humans one quest at a time: while any human holds one of
+  its quests it offers none (`GenerateQuestOffer`, "you have our quest"), and an
+  `AcceptQuest` of an older offer from it is refused (`rrOfferGone`; two humans asked the same
+  day and the other's acceptance was applied first). The set holds one quest of each type per
+  human (`HasQuestOfType`: a human may take one while fewer than the humans are of that type),
+  and no quest of a type and number another human holds is offered (`HasPlayerQuestHistory`),
+  so no two humans carry the same letter.
+- **Text quests** (`qtPlanetQuest`) keep their rules (Text quests): only the holder may play
+  it, one human at a time per planet. It shows in every journal, and once it succeeded any
+  human at the government that gave it may turn it in, with the reward split as above.
+- **Not covered.** The quest functions of scripts (`ScriptPlayer.Quests`) still see the
+  script's player's own list, and the star-map quest targets that steer the AI
+  (`TPlayer.QuestTargetKillShip` and the like) are per list. A human who joins sees the
+  active quests from their next daily update.
+
+## Players
+
+In a multiplayer game (`IsMultiplayer`, hot-seat too) the star map shows a button for every
+other human with a ranger whose game has not ended, after the hired partners' buttons in the
+same row at the top right (`TfStarMap.RebuildPartnerButtons`, which now places both; the humans
+count for the row's spacing). A human's button uses the partner art of its ranger (its race's
+portrait) and is always enabled, wherever the ranger is; its hint names the human and its star
+(or hyperspace), and hovering it shows the ranger's info as a partner's does.
+
+- **A click** centres the map on the ranger as a partner's button does when it is in the local
+  star (`PartnerClicked`), else the hint line says where it is; then a menu
+  (`fListBox.ShowListDialog`) offers:
+  - **Ship and hold**: the scanner screen (`TfScaner`) on the ranger, as a scan in range shows a
+    ship (equipment, skills, cargo and artefacts), at any distance and without the scanner's
+    power check. Read-only.
+  - **Talk**: the ranger-to-ranger talk (`fTalk`), as a click with the talk cursor starts it
+    (`BeginTalk`, then the talk's own commands, then `EndTalk`), at any distance and in any star.
+    The commands are the same as in range, so the host applies them at the barrier and every
+    machine agrees. The talk screen draws no ring for a ranger in another star, and its goods
+    trade answers "too far" for one (`TfTalk.ShowTrade` checks the star besides the distance).
+    The other human is not asked anything: as in range, the talk is with its ranger, answered by
+    the ranger's own talk logic.
+  - **Transfer money**: the number dialog scripts use (`fCount1.ShowNumberDialog`, a slider with
+    +/-, accelerating repeat, the wheel, the arrow keys and Max) chooses 1 to all of the local
+    human's money; OK submits `TransferMoney` ([commands.md](commands.md), Trades) with
+    `SubmitTrade`. The executor checks the amount against the sender's money when it applies, on
+    the host for a client's; both humans get a bubble, and the panel shows the money again
+    (`SimEvents.NotifyMoneyTransfer`).
+- **A right click** talks at once, as a right click on a partner's button does (but at any
+  distance).
+- Only on the star map in order mode, so only while the local ranger is in normal space; the
+  planet, station and jump screens have no such buttons yet. During the film a click only
+  centres.
+- **Texts.** The port's own texts (`aPortText`: `Multiplayer.PlayerShip`, `PlayerTalk`,
+  `PlayerTransfer`, `TransferCaption`, `TransferNoMoney`, `PlayerInStar`, `PlayerInHyperspace`,
+  `MoneySent`, `MoneyReceived`) come from the language data when it has them, else Russian in a
+  Russian game (`PortTextRussian`, from the selected language) and English otherwise. Their
+  Russian literals live in that one unit, which is compiled as UTF-8 (`{$codepage utf8}`).
 
 ## Classifying a site
 
@@ -662,6 +818,15 @@ note in the progress entry.
   of another item by the slot its grid showed before (which has moved) goes
   through; an item the first sells back shows in the second's grid and can be
   bought; no item is lost or in two places; and a round trip keeps both grids.
+- Each save also runs `--sim-shared-quests` (Quests, `check_shared_quests`): human A joins and
+  takes a letter quest, and every human's journal must show it; human B, in another star, gets
+  A's letter and delivers it: A's quest is done, the reward is split equally (B gets what does
+  not divide), every human gets experience, the completion, the finished quest and the
+  relation to the planet. While A holds a quest from a planet, another human there must be
+  offered none and its stale offer refused (`offer-gone`). A quest's deadline must fail it once
+  for every human (journal, finished quest, relation), and a round trip must keep every
+  human's finished quests. The networked run is `--sim-net-shared-quest`
+  ([network.md](network.md), Tests).
 - Each save also runs `--sim-script-routing` (Scripts): two humans join and
   one is made local. The other's script code must show nothing and get the
   declining answers; a command nested in its command, or in another's command
@@ -698,6 +863,10 @@ note in the progress entry.
   quest has ended (and the planet's quest is gone), `offer-gone`.
 - The session probe also gives every human text-quest days owed; the round trips keep
   them (`quest-days=` in the `state human` lines).
+- The network tests run `--sim-net-transfer` once (`check_network_transfer`; Players,
+  [network.md](network.md), Tests): money transfers from the host's human and a client, their
+  relays, the over-amount refusals, and a client's talk with another human's ranger in another
+  star.
 - The same counts run `--sim-pvp` on each save: a second human joins in the
   local human's star and the local one attacks it. With friendly fire on its
   hits must do damage; after the `SetSessionFlag` command turns it off, the
