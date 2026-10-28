@@ -25,7 +25,8 @@ unit aArcadeActions;
 // loot goes as one command before its exit (ArcadeLoot, BeginArcadeLoot and SubmitArcadeLoot).
 interface
 uses
-  aCommands;
+  aCommands,
+  aPlayer;
 const
   // Command kinds 625-649 (see TCommandKind).
   ckArcadeSetWeaponSlotData = 625;
@@ -68,7 +69,9 @@ procedure CheckNoShotsArcadeVictory;
 // it, and its result is the day's (THuman.ArcadeBattleHeld).
 function LocalArcadeBattleHeld: Boolean;
 // Notes the local ranger's hold, cargo and kill counts before such a battle.
-procedure BeginArcadeLoot;
+procedure BeginArcadeLoot; overload;
+// CHANGE: ENHANCEMENT - Notes every ranger of a co-op battle (Players).
+procedure BeginArcadeLoot(const Players: array of TPlayer); overload;
 // At the battle's end: what it added since BeginArcadeLoot (new items, grown stacks, cargo,
 // kill counts) is taken back and submitted as ArcadeLoot, which adds it again here and on the
 // host. Nothing without BeginArcadeLoot.
@@ -88,7 +91,6 @@ uses
   aHuman,
   aItem,
   aKling,
-  aPlayer,
   aPlayerActions,
   aScript,
   aSession,
@@ -140,6 +142,7 @@ var
 begin
   P := Actor(Command);
   ActorHuman(Command).ArcadeBattleHeld := False;
+  ActorHuman(Command).ArcadePartnerId := 0;
   Flags := IntArg(Command, 0);
   if (Flags and 1) <> 0 then
   begin
@@ -233,38 +236,41 @@ type
     Cost: Integer;
   end;
 
+  // What BeginArcadeLoot noted of one ranger.
+  TArcadeLootNote = class
+    Player: TPlayer;
+    Items: TList;
+    Stacks: array of TArcadeLootStack;
+    Goods: array[0..7] of TCargoGoodsEntry;
+    BlackHoleKills, HyperspaceKills: Integer;
+    constructor Create(P: TPlayer);
+    destructor Destroy; override;
+  end;
+
 var
-  // What BeginArcadeLoot noted.
-  ArcadeLootTaken: Boolean;
-  ArcadeLootItems: TList;
-  ArcadeLootStacks: array of TArcadeLootStack;
-  ArcadeLootGoods: array[0..7] of TCargoGoodsEntry;
-  ArcadeLootBlackHoleKills, ArcadeLootHyperspaceKills: Integer;
+  // CHANGE: ENHANCEMENT - One note per ranger of the battle: in a co-op battle every
+  // participant's (each machine's battle changes them all), else the local one's.
+  ArcadeLootNotes: TList;
 
 function LocalArcadeBattleHeld: Boolean;
 begin
   Result := (LocalHuman <> nil) and LocalHuman.ArcadeBattleHeld;
 end;
 
-procedure BeginArcadeLoot;
+constructor TArcadeLootNote.Create(P: TPlayer);
 var
-  P: TPlayer;
   I: Integer;
 begin
-  P := LocalPlayer;
-  if P = nil then
-    Exit;
-  if ArcadeLootItems = nil then
-    ArcadeLootItems := TList.Create;
-  ArcadeLootItems.Clear;
-  ArcadeLootStacks := nil;
+  inherited Create;
+  Player := P;
+  Items := TList.Create;
   for I := 0 to P.Inventory.Count - 1 do
   begin
-    ArcadeLootItems.Add(P.Inventory[I]);
+    Items.Add(P.Inventory[I]);
     if TObject(P.Inventory[I]) is TCountableItem then
     begin
-      SetLength(ArcadeLootStacks, Length(ArcadeLootStacks) + 1);
-      with ArcadeLootStacks[High(ArcadeLootStacks)] do
+      SetLength(Stacks, Length(Stacks) + 1);
+      with Stacks[High(Stacks)] do
       begin
         Item := TCountableItem(P.Inventory[I]);
         StackCount := Item.StackCount;
@@ -273,12 +279,46 @@ begin
     end;
   end;
   for I := 0 to P.Artefacts.Count - 1 do
-    ArcadeLootItems.Add(P.Artefacts[I]);
-  for I := 0 to High(ArcadeLootGoods) do
-    ArcadeLootGoods[I] := P.CargoGoods[I];
-  ArcadeLootBlackHoleKills := P.BlackHoleKillCount;
-  ArcadeLootHyperspaceKills := P.HyperspaceKillCount;
-  ArcadeLootTaken := True;
+    Items.Add(P.Artefacts[I]);
+  for I := 0 to High(Goods) do
+    Goods[I] := P.CargoGoods[I];
+  BlackHoleKills := P.BlackHoleKillCount;
+  HyperspaceKills := P.HyperspaceKillCount;
+end;
+
+destructor TArcadeLootNote.Destroy;
+begin
+  Items.Free;
+  inherited Destroy;
+end;
+
+procedure ClearArcadeLootNotes;
+var
+  I: Integer;
+begin
+  if ArcadeLootNotes = nil then
+    Exit;
+  for I := 0 to ArcadeLootNotes.Count - 1 do
+    TArcadeLootNote(ArcadeLootNotes[I]).Free;
+  ArcadeLootNotes.Clear;
+end;
+
+procedure BeginArcadeLoot(const Players: array of TPlayer);
+var
+  I: Integer;
+begin
+  if ArcadeLootNotes = nil then
+    ArcadeLootNotes := TList.Create;
+  ClearArcadeLootNotes;
+  for I := 0 to High(Players) do
+    if Players[I] <> nil then
+      ArcadeLootNotes.Add(TArcadeLootNote.Create(Players[I]));
+end;
+
+procedure BeginArcadeLoot;
+begin
+  if LocalPlayer <> nil then
+    BeginArcadeLoot([LocalPlayer]);
 end;
 
 // An item's bytes (aHoldActions.StoredItemBytes), as its length and then four to an integer,
@@ -392,7 +432,8 @@ begin
   P.RefreshDerivedStats(True);
 end;
 
-procedure SubmitArcadeLoot;
+// What the battle added to Note's ranger, as an ArcadeLoot command, taken back from the ranger.
+function TakeBackArcadeLoot(Note: TArcadeLootNote): TPlayerCommand;
 var
   P: TPlayer;
   Command: TPlayerCommand;
@@ -401,35 +442,32 @@ var
   NewItems: TList;
   Artefact: array of Boolean;
 begin
-  P := LocalPlayer;
-  if not ArcadeLootTaken or (P = nil) then
-    Exit;
-  ArcadeLootTaken := False;
-  ClearPlayerHoldEntries(LocalHuman);
+  P := Note.Player;
+  ClearPlayerHoldEntries(HumanOf(P));
   Command := NewCommand(ckArcadeLoot);
-  AddInt(Command, P.BlackHoleKillCount - ArcadeLootBlackHoleKills);
-  AddInt(Command, P.HyperspaceKillCount - ArcadeLootHyperspaceKills);
-  P.BlackHoleKillCount := ArcadeLootBlackHoleKills;
-  P.HyperspaceKillCount := ArcadeLootHyperspaceKills;
-  for I := 0 to High(ArcadeLootGoods) do
+  AddInt(Command, P.BlackHoleKillCount - Note.BlackHoleKills);
+  AddInt(Command, P.HyperspaceKillCount - Note.HyperspaceKills);
+  P.BlackHoleKillCount := Note.BlackHoleKills;
+  P.HyperspaceKillCount := Note.HyperspaceKills;
+  for I := 0 to High(Note.Goods) do
   begin
-    AddInt(Command, P.CargoGoods[I].Count - ArcadeLootGoods[I].Count);
-    AddInt(Command, P.CargoGoods[I].TotalCost - ArcadeLootGoods[I].TotalCost);
-    P.CargoGoods[I] := ArcadeLootGoods[I];
+    AddInt(Command, P.CargoGoods[I].Count - Note.Goods[I].Count);
+    AddInt(Command, P.CargoGoods[I].TotalCost - Note.Goods[I].TotalCost);
+    P.CargoGoods[I] := Note.Goods[I];
   end;
   NewItems := TList.Create;
   try
     // The stacks that grew, by their index in the inventory without the new items, which
-    // come after the noted ones in ArcadeLootItems.
+    // come after the noted ones in Note.Items.
     CountAt := Length(Command.Ints);
     AddInt(Command, 0);
     Count := 0;
-    for I := 0 to High(ArcadeLootStacks) do
-      with ArcadeLootStacks[I] do
+    for I := 0 to High(Note.Stacks) do
+      with Note.Stacks[I] do
         if (P.Inventory.IndexOf(Item) >= 0)
             and ((Item.StackCount <> StackCount) or (Item.Cost <> Cost)) then
         begin
-          AddInt(Command, ArcadeLootItems.IndexOf(Item));
+          AddInt(Command, Note.Items.IndexOf(Item));
           AddInt(Command, Item.StackCount - StackCount);
           AddInt(Command, Item.Cost - Cost);
           Item.StackCount := StackCount;
@@ -440,14 +478,14 @@ begin
     Command.Ints[CountAt] := Count;
     Artefact := nil;
     for I := 0 to P.Inventory.Count - 1 do
-      if ArcadeLootItems.IndexOf(P.Inventory[I]) < 0 then
+      if Note.Items.IndexOf(P.Inventory[I]) < 0 then
       begin
         NewItems.Add(P.Inventory[I]);
         SetLength(Artefact, Length(Artefact) + 1);
         Artefact[High(Artefact)] := False;
       end;
     for I := 0 to P.Artefacts.Count - 1 do
-      if ArcadeLootItems.IndexOf(P.Artefacts[I]) < 0 then
+      if Note.Items.IndexOf(P.Artefacts[I]) < 0 then
       begin
         NewItems.Add(P.Artefacts[I]);
         SetLength(Artefact, Length(Artefact) + 1);
@@ -466,10 +504,31 @@ begin
   finally
     NewItems.Free;
   end;
-  ArcadeLootItems.Clear;
-  ArcadeLootStacks := nil;
   P.RefreshDerivedStats(True);
-  SubmitCommand(Command);
+  Result := Command;
+end;
+
+procedure SubmitArcadeLoot;
+var
+  I: Integer;
+  Note: TArcadeLootNote;
+  Command: TPlayerCommand;
+  Local: Boolean;
+begin
+  if (ArcadeLootNotes = nil) or (ArcadeLootNotes.Count = 0) then
+    Exit;
+  // CHANGE: ENHANCEMENT - Every noted ranger's changes are taken back; only the local one's
+  // go, as its own command: each participant's machine sends its own (docs/network.md,
+  // Co-op black hole battles).
+  for I := 0 to ArcadeLootNotes.Count - 1 do
+  begin
+    Note := ArcadeLootNotes[I];
+    Command := TakeBackArcadeLoot(Note);
+    Local := Note.Player = LocalPlayer;
+    if Local then
+      SubmitCommand(Command);
+  end;
+  ClearArcadeLootNotes;
 end;
 
 procedure EndHeldArcadeBattleDay;
@@ -549,5 +608,6 @@ initialization
   RegisterCommand(ckArcadeNoShotsVictory, 'ArcadeNoShotsVictory', @ExecuteArcadeNoShotsVictory);
   RegisterCommand(ckArcadeLoot, 'ArcadeLoot', @ExecuteArcadeLoot);
 finalization
-  ArcadeLootItems.Free;
+  ClearArcadeLootNotes;
+  ArcadeLootNotes.Free;
 end.

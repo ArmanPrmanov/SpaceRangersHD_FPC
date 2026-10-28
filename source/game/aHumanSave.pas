@@ -20,7 +20,8 @@ unit aHumanSave;
 //   again;
 // - since version 4, the game days each human owes for a text quest (THuman.QuestDaysOwed);
 // - since version 5, the cheats session flag (Session.CheatsAllowed);
-// - since version 6, the humans whose black hole battle holds the day (THuman.ArcadeBattleHeld).
+// - since version 6, the humans whose black hole battle holds the day (THuman.ArcadeBattleHeld);
+// - since version 7, each human's co-op battle partner (THuman.ArcadePartnerId).
 // It is written only when some of this differs from what a save without it loads as: more
 // than one human, a flag that is not its default, a cheat on record, or a script or event
 // bound to a human other than the first. A single-player save is therefore byte for byte as
@@ -67,7 +68,8 @@ const
   // 4: the days each human owes for a text quest.
   // 5: whether cheats work in multiplayer (Session.CheatsAllowed).
   // 6: the humans whose black hole battle holds the day (THuman.ArcadeBattleHeld).
-  HumanBlockVersion = 6;
+  // 7: each human's co-op battle partner (THuman.ArcadePartnerId).
+  HumanBlockVersion = 7;
 
 procedure ResetHumanSessionState;
 begin
@@ -77,6 +79,7 @@ begin
   LocalHuman.FinishReason := -1;
   LocalHuman.QuestDaysOwed := 0;
   LocalHuman.ArcadeBattleHeld := False;
+  LocalHuman.ArcadePartnerId := 0;
 end;
 
 function FirstHumanId: Integer;
@@ -107,7 +110,8 @@ begin
     if Session.Humans[I].HasCheated
         or Session.Humans[I].Finished
         or (Session.Humans[I].QuestDaysOwed > 0)
-        or Session.Humans[I].ArcadeBattleHeld then
+        or Session.Humans[I].ArcadeBattleHeld
+        or (Session.Humans[I].ArcadePartnerId <> 0) then
       Exit;
   if Galaxy.Scripts <> nil then
     for I := 0 to Galaxy.Scripts.Count - 1 do
@@ -433,6 +437,13 @@ begin
     Buffer.AddDWord(Cardinal(Session.Humans[I].Id));
     Buffer.AddBoolean(Session.Humans[I].ArcadeBattleHeld);
   end;
+  // Version 7.
+  Buffer.AddIntegerValue(Session.Humans.Count);
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Buffer.AddDWord(Cardinal(Session.Humans[I].Id));
+    Buffer.AddIntegerValue(Session.Humans[I].ArcadePartnerId);
+  end;
   Buffer.SetInt32At(SizeOffset, Buffer.Position - SizeOffset - 4);
 end;
 
@@ -446,7 +457,7 @@ var
   Points: Integer;
   NextItemId: Cardinal;
   Finished, Held: Boolean;
-  Reason, Days: Integer;
+  Reason, Days, Partner: Integer;
 begin
   Start := Buffer.Position;
   if (Buffer.DataSize - Start < 12) or (Buffer.GetUInt32 <> HumanBlockMagic) then
@@ -574,6 +585,18 @@ begin
       Held := Buffer.GetBoolean;
       if Human <> nil then
         Human.ArcadeBattleHeld := Held;
+    end;
+  end;
+  // Version 6 and older pair no one.
+  if Version >= 7 then
+  begin
+    Count := Buffer.GetInt32;
+    for I := 0 to Count - 1 do
+    begin
+      Human := FindHuman(Integer(Buffer.GetUInt32));
+      Partner := Buffer.GetInt32;
+      if Human <> nil then
+        Human.ArcadePartnerId := Partner;
     end;
   end;
   Buffer.SetPosition(Start + Size);

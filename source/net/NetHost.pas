@@ -22,6 +22,7 @@ uses
   NetTransport,
   NetThread,
   NetProtocol,
+  NetArcade,
   QuestPage;
 type
   THostPeerState = (hpHello, hpPendingJoin, hpJoined);
@@ -272,6 +273,9 @@ type
     // CHANGE: ENHANCEMENT - A page of the host's own human's text quest (QuestPage.QuestPageHook):
     // kept and sent to every joined client. Pages are presentation: nothing here is a command.
     procedure PublishQuestPage(const Page: TWatchedQuestPage);
+    // CHANGE: ENHANCEMENT - The host's own human's input of a co-op black hole battle goes to
+    // every client (docs/network.md, Co-op black hole battles); Skip is not sent it.
+    procedure SendArcadeInput(const Message: TArcadeInputMessage; Skip: THostPeer = nil);
     // The latest text-quest page of each human, the host's own included (the watch window's).
     property QuestPages: TQuestPageStore read FQuestPages;
   end;
@@ -488,6 +492,7 @@ var
   Other: THostPeer;
   Character: TCharacterMessage;
   Page: TWatchedQuestPage;
+  Input: TArcadeInputMessage;
 begin
   if Peer.Leaving then
     Exit;
@@ -587,8 +592,39 @@ begin
         FQuestPages.Put(Page);
         NetLogQuestPage('relayed', Page, SendQuestPage(Page, Peer));
       end;
+    // CHANGE: ENHANCEMENT - A client's input of a co-op black hole battle: kept here, and
+    // passed on to every other client; it names the peer's human whatever it says.
+    nkArcadeInput:
+      if Peer.State = hpJoined then
+      begin
+        Input := DecodeArcadeInput(Payload);
+        Input.HumanId := Peer.HumanId;
+        StoreArcadeInput(Input);
+        SendArcadeInput(Input, Peer);
+      end;
     nkBye:
       Peer.Leaving := True;
+  end;
+end;
+
+procedure TNetHost.SendArcadeInput(const Message: TArcadeInputMessage; Skip: THostPeer);
+var
+  I: Integer;
+  Peer: THostPeer;
+  Payload: TBufEC;
+begin
+  Payload := TBufEC.Create;
+  try
+    EncodeArcadeInput(Message, Payload);
+    for I := 0 to FPeers.Count - 1 do
+    begin
+      Peer := THostPeer(FPeers[I]);
+      if (Peer <> Skip) and (Peer.State = hpJoined) and not Peer.Leaving
+          and (Peer.HumanId <> Message.HumanId) then
+        FThread.Send(Peer.PeerId, nkArcadeInput, Payload);
+    end;
+  finally
+    Payload.Free;
   end;
 end;
 

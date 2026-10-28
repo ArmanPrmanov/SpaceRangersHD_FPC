@@ -2436,8 +2436,12 @@ begin
       // (a) The fall holds B's day, not A's.
       B.Player.InHyperspace := True;
       A.Player.InHyperspace := True;
-      HoldRemoteArcadeBattle(A.Player);
-      HoldRemoteArcadeBattle(B.Player);
+      HoldRemoteArcadeBattle(A.Player, 777, True);
+      HoldRemoteArcadeBattle(B.Player, 777, True);
+      // The day's end pairs the two humans in one hole (co-op battles).
+      StartDayRound;
+      if (A.ArcadePartnerId <> B.Id) or (B.ArcadePartnerId <> A.Id) then
+        Fail('the humans in one hole were not paired');
       if A.ArcadeBattleHeld then
         Fail('A''s own battle held the day');
       if not B.ArcadeBattleHeld then
@@ -2458,8 +2462,10 @@ begin
       B := FindHuman(Integer(BId));
       if (B = nil) or not B.ArcadeBattleHeld then
         Fail('the round trip lost the flag');
+      if B.ArcadePartnerId = 0 then
+        Fail('the round trip lost the partner');
       ArcadeProbeHuman := B;
-      Emit('arcade hold held=B day-waits=B roundtrip=kept');
+      Emit('arcade hold held=B paired=A,B day-waits=B roundtrip=kept');
       // (b) The loot, as B's battle leaves it.
       SetLocalHuman(B);
       BeginArcadeLoot;
@@ -2508,6 +2514,8 @@ begin
       ExitArcadeBattle(B.Player.GetHull.HullPoints, False, nil);
       if B.ArcadeBattleHeld then
         Fail('the exit kept the flag');
+      if B.ArcadePartnerId <> 0 then
+        Fail('the exit kept the partner');
       // The exit lands a ranger whose order is no jump; B's is none here.
       B.Player.InHyperspace := True;
       if HumanHoldsDay(B) then

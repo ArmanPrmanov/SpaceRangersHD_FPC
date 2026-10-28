@@ -32,7 +32,8 @@ uses
   Math,
   aMyFunction,
   ab_Ship,
-  GlobalsV;
+  GlobalsV,
+  ab_Coop;
 
 constructor TabW16.Create;
 begin
@@ -50,7 +51,8 @@ var
 begin
   if Image <> nil then
   begin
-    ab_WorldImage_Delete(Image);
+    // CHANGE: ENHANCEMENT - A co-op object goes at a fixed tick: its explosion plays on.
+    ab_WorldImage_Release(Image);
     Image := nil;
   end;
   Obj := FirstArcadeObject;
@@ -144,7 +146,8 @@ begin
   begin
     Child := TabW16.Create;
     ab_Object_Add(Child);
-    Child.LaunchChild(Self, Random(360));
+    // CHANGE: ENHANCEMENT - The simulation draws from the co-op stream in a co-op battle.
+    Child.LaunchChild(Self, CoopRandom(360));
   end
   else if (Phase = 2) and (ParentProjectile <> nil) then
   begin
@@ -155,12 +158,12 @@ begin
         MaxSpeed := ParentProjectile.MaxSpeed * 1.5;
       end
       else if Distance < 5 then
-        State.BearingDegrees := Random(360)
+        State.BearingDegrees := CoopRandom(360)
       else
         MaxSpeed := MaxSpeed * 0.6;
   end
   else if (Phase = 1) or (Phase = 3) then
-    DeletionPending := Image.Finished;
+    DeletionPending := CoopVisualDone(Image.Finished);
 end;
 
 procedure TabW16.UpdateVisuals;

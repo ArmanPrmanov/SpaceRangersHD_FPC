@@ -170,6 +170,16 @@ type
     // the per-human save block (version 6), so that the client's state says to play it.
     // Never set without a network session (RemoteArcadeHook).
     ArcadeBattleHeld: Boolean;
+    // CHANGE: ENHANCEMENT - A co-op black hole battle (docs/network.md, Co-op black hole
+    // battles): the human whose ranger fell into the same hole the same day, and who fights
+    // the battle with this one; 0 for none. Set for both by StartDayRound on a host (the
+    // humans HoldRemoteArcadeBattle noted that day), cleared by the human's ArcadeBattleExit.
+    // Saved in the per-human save block (version 7).
+    ArcadePartnerId: Integer;
+    // The hole the ranger fell into this day (HoldRemoteArcadeBattle), and whether its battle
+    // may be fought together (not Keller's); for StartDayRound's pairing only, not saved.
+    ArcadeHoleId: Integer;
+    ArcadeHoleCoop: Boolean;
     // The text quest the human has open, from its BeginTextQuest to its CloseQuest
     // (aQuestActions): one human at a time plays the quest of a planet, TextQuestPlanetId
     // (0 for a prison or a script's quest). Session state, not game state: not saved;
@@ -412,7 +422,9 @@ var
   RemoteArcadeHook: TRemoteArcadeHook;
 // The ranger of a human fell into a black hole with a battle: where its battle is played on
 // another machine (RemoteArcadeHook), the human holds the day until the battle's result comes.
-procedure HoldRemoteArcadeBattle(Ship: TObject);
+// CHANGE: ENHANCEMENT - In a session (RemoteArcadeHook) the hole HoleId is noted for the day's
+// pairing (StartDayRound); Coop is whether its battle may be fought together.
+procedure HoldRemoteArcadeBattle(Ship: TObject; HoleId: Integer; Coop: Boolean);
 // CHANGE: ENHANCEMENT - Whether a dialogue can reach Human (docs/network.md, Remote dialogue):
 // the local human, or, where a network session can ask remote humans (RemoteTalkHook), a
 // connected human who plays on. The answer about a remote human is recorded
@@ -1275,16 +1287,53 @@ begin
           and (Human.QuestDaysOwed <= 0);
 end;
 
-procedure HoldRemoteArcadeBattle(Ship: TObject);
+procedure HoldRemoteArcadeBattle(Ship: TObject; HoleId: Integer; Coop: Boolean);
 var
   Human: THuman;
 begin
   Human := HumanOf(Ship);
-  if (Human <> nil) and Assigned(RemoteArcadeHook) and RemoteArcadeHook(Human) then
+  if (Human = nil) or not Assigned(RemoteArcadeHook) then
+    Exit;
+  Human.ArcadeHoleId := HoleId;
+  Human.ArcadeHoleCoop := Coop;
+  if RemoteArcadeHook(Human) then
   begin
     Human.ArcadeBattleHeld := True;
     Human.EndedTurn := False;
     Human.ContinueUntilArrival := False;
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - The humans whose rangers fell into one hole this day fight its battle
+// together, two at a time in Session.Humans order (docs/network.md, Co-op black hole battles).
+// Only where the day noted them (a session's host) and while both play on.
+procedure PairArcadeBattles;
+var
+  I, J: Integer;
+  Human, Other: THuman;
+begin
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Human := Session.Humans[I];
+    if (Human.ArcadeHoleId = 0) or not Human.ArcadeHoleCoop or (Human.ArcadePartnerId <> 0)
+        or not Human.Connected or Human.Finished then
+      Continue;
+    for J := I + 1 to Session.Humans.Count - 1 do
+    begin
+      Other := Session.Humans[J];
+      if (Other.ArcadeHoleId = Human.ArcadeHoleId) and Other.ArcadeHoleCoop
+          and (Other.ArcadePartnerId = 0) and Other.Connected and not Other.Finished then
+      begin
+        Human.ArcadePartnerId := Other.Id;
+        Other.ArcadePartnerId := Human.Id;
+        Break;
+      end;
+    end;
+  end;
+  for I := 0 to Session.Humans.Count - 1 do
+  begin
+    Session.Humans[I].ArcadeHoleId := 0;
+    Session.Humans[I].ArcadeHoleCoop := False;
   end;
 end;
 
@@ -1354,6 +1403,7 @@ var
   I: Integer;
   Human: THuman;
 begin
+  PairArcadeBattles;
   for I := 0 to Session.Humans.Count - 1 do
   begin
     Human := Session.Humans[I];

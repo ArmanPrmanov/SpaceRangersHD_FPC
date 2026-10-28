@@ -31,7 +31,9 @@ uses
   aPath,
   aArcadeActions,
   ab_Item,
-  ab_Zone;
+  ab_Zone,
+  aPlayer,
+  ab_Coop;
 type
   TfAB = class;
   PointerToTArcadeMapColorHeader = ^TArcadeMapColorHeader;
@@ -208,6 +210,15 @@ type
     procedure OpenShipEquipment(Sender: TObjectGI);
     procedure SyncWeaponInventory;
     procedure PickUpItem(Item: TabItem);
+    // CHANGE: ENHANCEMENT - Co-op black hole battles (ab_Coop).
+    // PickUpItem into Player's hold (a co-op participant's).
+    procedure PickUpItemFor(Item: TabItem; Player: TPlayer);
+    procedure CreateCoopShips;
+    function CoopSampleLocalInput(Tick: Integer): TArcadeInput;
+    function CoopPrepareTick(Tick: Integer): Boolean;
+    function CoopApplyInputs: Boolean;
+    procedure CoopPickUpClicked(Participant: Integer; ObjectId: Integer);
+    function CoopStateHash: Cardinal;
     function RandomRange(BoundA: Integer; BoundB: Integer): Integer;
     function RandomFloat(BoundA: Double; BoundB: Double): Double;
     procedure UpdateHelp(Sender: TObjectGI; Show: Boolean);
@@ -242,7 +253,6 @@ uses
   ab_WorldImage,
   ab_Ship,
   aConst,
-  aPlayer,
   aGalaxy,
   EC_CacheBuf,
   GR_DX,
@@ -283,6 +293,96 @@ var
   // CHANGE: ENHANCEMENT - The ranger was beaten in a multiplayer battle and is on its way out
   // with one hull point (BeginBattleExit); its defeat no longer counts down.
   ArcadeDefeatEscaped: Boolean;
+  // CHANGE: ENHANCEMENT - A co-op battle's local side (ab_Coop): the exit the local player
+  // asked for (sent as ciExit) and whether it went out, the one-shot inputs the keys and the
+  // mouse queued since the last sample, the last tick sampled, the stall's length, each
+  // remote participant's weapons as their rangers' items, and the running tick's inputs.
+  CoopExitRequested: Boolean;
+  CoopExitSent: Boolean;
+  CoopPendingWeapon: Integer;
+  CoopPendingToggles: Byte;
+  CoopPendingPickup: Integer;
+  CoopLastSampledTick: Integer;
+  CoopStallFires: Integer;
+  CoopStallShown: Boolean;
+  CoopCampaignWeapons: array[0..CoopMaxParticipants - 1, 0..4] of TWeapon;
+  CoopTickInputs: array[0..CoopMaxParticipants - 1] of TArcadeInput;
+
+// CHANGE: ENHANCEMENT - NormalizeWeaponSelection for any ship.
+procedure NormalizeShipWeapons(Ship: TabShip);
+var
+  Index: Integer;
+begin
+  if (Ship.PrimaryWeapon >= 0)
+      and ((Ship.Weapons[Ship.PrimaryWeapon].SlotData and EquipmentSecondaryFireFlag) <> 0) then
+    Ship.PrimaryWeapon := -1;
+  if Ship.PrimaryWeapon < 0 then
+    for Index := 0 to Ship.WeaponCount - 1 do
+      if (Ship.Weapons[Index].SlotData and EquipmentSecondaryFireFlag) = 0 then
+      begin
+        Ship.PrimaryWeapon := Index;
+        Break;
+      end;
+  if (Ship.SecondaryWeapon >= 0)
+      and ((Ship.Weapons[Ship.SecondaryWeapon].SlotData and EquipmentSecondaryFireFlag) = 0) then
+    Ship.SecondaryWeapon := -1;
+  if Ship.SecondaryWeapon < 0 then
+    for Index := 0 to Ship.WeaponCount - 1 do
+      if (Ship.Weapons[Index].SlotData and EquipmentSecondaryFireFlag) <> 0 then
+      begin
+        Ship.SecondaryWeapon := Index;
+        Break;
+      end;
+end;
+
+// CHANGE: ENHANCEMENT - SyncWeaponInventory for a remote co-op participant's ship: its
+// weapons from its ranger's slots (Campaign holds the items its slots came from).
+procedure SyncShipWeapons(Ship: TabShip; Player: TPlayer; var Campaign: array of TWeapon);
+var
+  SavedWeapons: array[0..4] of TWeapon;
+  SavedAmmo: array[0..4] of Integer;
+  Index, SlotIndex, SlotCount, KeptAmmo: Integer;
+  Item: TWeapon;
+begin
+  for Index := 0 to 4 do
+  begin
+    SavedWeapons[Index] := Campaign[Index];
+    if SavedWeapons[Index] <> nil then
+      SavedAmmo[Index] := Ship.Weapons[Index].Ammo
+    else
+      SavedAmmo[Index] := 0;
+  end;
+  Ship.WeaponCount := 0;
+  SlotCount := Player.GetSlotCount(sskWeapon);
+  for SlotIndex := 0 to SlotCount - 1 do
+  begin
+    Item := Player.FindEquippedItemInSlot(Ord(t_Weapon1), SlotIndex) as TWeapon;
+    if Player.IsEquipmentUsable(Item) then
+    begin
+      if (Campaign[Ship.WeaponCount] <> Item)
+          or (Ship.Weapons[Ship.WeaponCount].SlotData <> Item.AssignedSlotData) then
+      begin
+        ab_Weapon_InitializeFromInfo(@Ship.Weapons[Ship.WeaponCount], Item.GetWeaponInfo);
+        Campaign[Ship.WeaponCount] := Item;
+        KeptAmmo := 0;
+        for Index := 0 to 4 do
+          if SavedWeapons[Index] = Item then
+          begin
+            KeptAmmo := SavedAmmo[Index];
+            Break;
+          end;
+        if KeptAmmo > Ship.Weapons[Ship.WeaponCount].MaxAmmo then
+          KeptAmmo := 0;
+        Ship.Weapons[Ship.WeaponCount].Ammo := KeptAmmo;
+        Ship.Weapons[Ship.WeaponCount].SlotData := Item.AssignedSlotData;
+      end;
+      Inc(Ship.WeaponCount);
+    end;
+  end;
+  for SlotIndex := Ship.WeaponCount to 4 do
+    Campaign[SlotIndex] := nil;
+  NormalizeShipWeapons(Ship);
+end;
 
 constructor TfAB.Create;
 begin
@@ -445,7 +545,8 @@ end;
 procedure TfAB.OnOpen;
 var
   Ship, ShipX0, ShipX1: TabShip;
-  Index: Integer;
+  Index, Slot: Integer;
+  WasCoop: Boolean;
 begin
   if not MusicInHyperEnabled then
     MusicManager.RequestFadeOut;
@@ -455,7 +556,44 @@ begin
     ActiveArcadeRequestShips := ActiveArcadeRequest.Ships
   else
     ActiveArcadeRequestShips := nil;
+  // CHANGE: ENHANCEMENT - A black hole battle may be fought together (ab_Coop): the network
+  // decides it here, before the seed; every machine then starts from the same seed.
   if (Galaxy <> nil)
+      and (LocalPlayer <> nil)
+      and (LocalPlayer.Order = soJumpHole)
+      and (ActiveArcadeRequest = nil) then
+  begin
+    if Assigned(CoopPrepareHook) then
+      CoopPrepareHook;
+  end
+  else
+    CoopArcadeActive := False;
+  // A co-op battle whose participants cannot be found is fought alone; the network hears of
+  // it at once.
+  WasCoop := CoopArcadeActive;
+  if not CoopBeginBattle and WasCoop and Assigned(CoopFinishHook) then
+    CoopFinishHook;
+  for Index := 0 to CoopMaxParticipants - 1 do
+  begin
+    CoopShips[Index] := nil;
+    CoopShipAutopilot[Index] := False;
+    for Slot := 0 to 4 do
+      CoopCampaignWeapons[Index, Slot] := nil;
+  end;
+  CoopExitRequested := False;
+  CoopExitSent := False;
+  CoopPendingWeapon := -1;
+  CoopPendingToggles := 0;
+  CoopPendingPickup := 0;
+  CoopLastSampledTick := 0;
+  CoopStallFires := 0;
+  CoopStallShown := False;
+  if CoopArcadeActive then
+  begin
+    InitialRandomSeed := CoopBattleSeed;
+    RandomSeed := InitialRandomSeed;
+  end
+  else if (Galaxy <> nil)
       and (LocalPlayer <> nil)
       and (ActiveArcadeRequest = nil)
       and not Galaxy.IsChaoticRandomEnabled then
@@ -548,58 +686,66 @@ begin
       TShip2SE(PlayerVisual).SetTailMode(0);
   end;
   ab_Object_Clear;
-  Ship := TabShipAI.Create;
-  ab_Object_Add(Ship);
-  PlayerArcadeShip := Ship;
-  if LocalPlayer = nil then
-    Ship.CreateShipVisual('Ship.People.Ranger', 64)
+  // CHANGE: ENHANCEMENT - Co-op objects are named from 1 in creation order; a co-op battle
+  // has one ship per participant, in participant order (ab_Coop).
+  ResetCoopObjectIds;
+  if CoopArcadeActive then
+    CreateCoopShips
   else
   begin
-    if LocalPlayer.Graphic is TRuinsSE then
-      Ship.CreateRuinsVisual(LocalPlayer.Graphic.GraphKey, LocalPlayer.Graphic.Size.X)
-    else if GiResourceVariant = 2 then
-      Ship.CreateShipVisual(LocalPlayer.Graphic.GraphKey, LocalPlayer.Graphic.Size.X)
+    Ship := TabShipAI.Create;
+    ab_Object_Add(Ship);
+    PlayerArcadeShip := Ship;
+    if LocalPlayer = nil then
+      Ship.CreateShipVisual('Ship.People.Ranger', 64)
     else
-      Ship.CreateShipVisual(
-          LocalPlayer.Graphic.GraphKey,
-          Round((LocalPlayer.Graphic.Size.X shl 10) / 800)
-      );
-    RunScriptItemsAct(LocalPlayer, $37, Ship, nil, 0);
-  end;
-  Ship.MaxSpeed := 11;
-  Ship.TurnSpeed := PlayerInitialTurnSpeed;
-  Ship.Thrust := 0;
-  if LocalPlayer = nil then
-  begin
-    Ship.MaxHealth := 1000;
-    Ship.Health := 1000;
-    Ship.WeaponCount := 5;
-    ab_Weapon_Initialize(@Ship.Weapons[0], PickRandomItemType([Ord(t_Weapon1)..Ord(t_Weapon18)]));
-    Ship.Weapons[0].SlotData := 0;
-    ab_Weapon_Initialize(@Ship.Weapons[1], PickRandomItemType([Ord(t_Weapon1)..Ord(t_Weapon18)]));
-    Ship.Weapons[1].SlotData := 1;
-    ab_Weapon_Initialize(@Ship.Weapons[2], PickRandomItemType([Ord(t_Weapon1)..Ord(t_Weapon18)]));
-    Ship.Weapons[2].SlotData := 2;
-    ab_Weapon_Initialize(@Ship.Weapons[3], PickRandomItemType([Ord(t_Weapon1)..Ord(t_Weapon18)]));
-    Ship.Weapons[3].SlotData := 3 or EquipmentSecondaryFireFlag;
-    ab_Weapon_Initialize(@Ship.Weapons[4], PickRandomItemType([Ord(t_Weapon1)..Ord(t_Weapon18)]));
-    Ship.Weapons[4].SlotData := 4 or EquipmentSecondaryFireFlag;
-    Ship.PrimaryWeapon := -1;
-    Ship.SecondaryWeapon := -1;
-    NormalizeWeaponSelection;
-  end
-  else
-  begin
-    Ship.MaxHealth := LocalPlayer.GetHull.Weight;
-    Ship.Health := LocalPlayer.GetHull.HullPoints;
-    for Index := 0 to 4 do
-      CampaignWeapons[Index] := nil;
-    SyncWeaponInventory;
-    for Index := 0 to Ship.WeaponCount - 1 do
-      Ship.Weapons[Index].Ammo := Ship.Weapons[Index].MaxAmmo;
-    Ship.PrimaryWeapon := -1;
-    Ship.SecondaryWeapon := -1;
-    NormalizeWeaponSelection;
+    begin
+      if LocalPlayer.Graphic is TRuinsSE then
+        Ship.CreateRuinsVisual(LocalPlayer.Graphic.GraphKey, LocalPlayer.Graphic.Size.X)
+      else if GiResourceVariant = 2 then
+        Ship.CreateShipVisual(LocalPlayer.Graphic.GraphKey, LocalPlayer.Graphic.Size.X)
+      else
+        Ship.CreateShipVisual(
+            LocalPlayer.Graphic.GraphKey,
+            Round((LocalPlayer.Graphic.Size.X shl 10) / 800)
+        );
+      RunScriptItemsAct(LocalPlayer, $37, Ship, nil, 0);
+    end;
+    Ship.MaxSpeed := 11;
+    Ship.TurnSpeed := PlayerInitialTurnSpeed;
+    Ship.Thrust := 0;
+    if LocalPlayer = nil then
+    begin
+      Ship.MaxHealth := 1000;
+      Ship.Health := 1000;
+      Ship.WeaponCount := 5;
+      ab_Weapon_Initialize(@Ship.Weapons[0], PickRandomItemType([Ord(t_Weapon1)..Ord(t_Weapon18)]));
+      Ship.Weapons[0].SlotData := 0;
+      ab_Weapon_Initialize(@Ship.Weapons[1], PickRandomItemType([Ord(t_Weapon1)..Ord(t_Weapon18)]));
+      Ship.Weapons[1].SlotData := 1;
+      ab_Weapon_Initialize(@Ship.Weapons[2], PickRandomItemType([Ord(t_Weapon1)..Ord(t_Weapon18)]));
+      Ship.Weapons[2].SlotData := 2;
+      ab_Weapon_Initialize(@Ship.Weapons[3], PickRandomItemType([Ord(t_Weapon1)..Ord(t_Weapon18)]));
+      Ship.Weapons[3].SlotData := 3 or EquipmentSecondaryFireFlag;
+      ab_Weapon_Initialize(@Ship.Weapons[4], PickRandomItemType([Ord(t_Weapon1)..Ord(t_Weapon18)]));
+      Ship.Weapons[4].SlotData := 4 or EquipmentSecondaryFireFlag;
+      Ship.PrimaryWeapon := -1;
+      Ship.SecondaryWeapon := -1;
+      NormalizeWeaponSelection;
+    end
+    else
+    begin
+      Ship.MaxHealth := LocalPlayer.GetHull.Weight;
+      Ship.Health := LocalPlayer.GetHull.HullPoints;
+      for Index := 0 to 4 do
+        CampaignWeapons[Index] := nil;
+      SyncWeaponInventory;
+      for Index := 0 to Ship.WeaponCount - 1 do
+        Ship.Weapons[Index].Ammo := Ship.Weapons[Index].MaxAmmo;
+      Ship.PrimaryWeapon := -1;
+      Ship.SecondaryWeapon := -1;
+      NormalizeWeaponSelection;
+    end;
   end;
   if LocalPlayer = nil then
   begin
@@ -671,13 +817,14 @@ begin
     ABSpaceBuild(1, HeadingDegreesToRadians(RandomRange(0, 355)))
   else if LocalPlayer.Order = soJumpHole then
   begin
-    if LocalPlayer.TransitOriginStar <> nil then
+    // CHANGE: ENHANCEMENT - A co-op battle is built for its leader's ranger (ab_Coop).
+    if CoopGenerationPlayer.TransitOriginStar <> nil then
       ABSpaceBuild(
           1,
           HeadingDegreesToRadians(
               PointBearingDegrees(
-                  LocalPlayer.TransitOriginStar.Position,
-                  LocalPlayer.CurrentStar.Position
+                  CoopGenerationPlayer.TransitOriginStar.Position,
+                  CoopGenerationPlayer.CurrentStar.Position
               )
           )
       )
@@ -807,11 +954,20 @@ begin
   for Index := 0 to 7 do
     ClearTrackedShipStatus(Index);
   CloseVictory(nil, 0);
+  // CHANGE: ENHANCEMENT - The co-op battle is over for this machine (ab_Coop).
+  CoopBattleRunning := False;
+  if CoopArcadeActive then
+  begin
+    if Assigned(CoopFinishHook) then
+      CoopFinishHook;
+    CoopArcadeActive := False;
+  end;
 end;
 
 procedure TfAB.RequestExit(Sender: TObjectGI);
 var
   Standalone: Boolean;
+  Index: Integer;
 begin
   if ShowMessageBoxGI(
           Self,
@@ -824,7 +980,11 @@ begin
       CacheLoader.ClearFlag18;
     ClearShipPath;
     PlayerArcadeShip := nil;
+    // CHANGE: ENHANCEMENT - The co-op participants' ships go too (ab_Coop).
+    for Index := 0 to CoopMaxParticipants - 1 do
+      CoopShips[Index] := nil;
     ab_Object_Clear;
+    ab_Hit_FreeCoopEffects;
     if MemorySnapshotBuffer <> nil then
       MemorySnapshotBuffer.Free;
     MemorySnapshotBuffer := nil;
@@ -871,7 +1031,11 @@ begin
               mbgOK or mbgCancel or mbgQuestion)
           = mbgResultOK then
       begin
-        if (LocalPlayer.Order = soJumpHole) or (ActiveArcadeRequest <> nil) then
+        // CHANGE: ENHANCEMENT - A co-op participant leaves at a tick every machine knows: its
+        // exit goes with its input (ab_Coop).
+        if CoopArcadeActive then
+          CoopExitRequested := True
+        else if (LocalPlayer.Order = soJumpHole) or (ActiveArcadeRequest <> nil) then
           BeginBattleExit
         else
           BeginMapTransition;
@@ -1061,7 +1225,8 @@ begin
       and not IsVirtualKeyDown(VK_SHIFT)
       and not IsVirtualKeyDown(VK_CONTROL) then
     OpenShipEquipment(nil)
-  else if (VirtualKey = Ord('P')) or (VirtualKey = VK_PAUSE) then
+  // CHANGE: ENHANCEMENT - A co-op battle cannot pause (ab_Coop).
+  else if ((VirtualKey = Ord('P')) or (VirtualKey = VK_PAUSE)) and not CoopArcadeActive then
     SimulationPaused := not SimulationPaused;
 end;
 
@@ -1190,7 +1355,12 @@ begin
       and (LocalPlayer.CalculateCargoHookPower(LocalPlayer.GetCargoHook)
           >= CargoPickupItem.Item.Weight) then
   begin
-    PickUpItem(CargoPickupItem);
+    // CHANGE: ENHANCEMENT - A co-op click goes with the input and picks up at its tick on
+    // every machine (ab_Coop).
+    if CoopArcadeActive then
+      CoopPendingPickup := CargoPickupItem.CoopId
+    else
+      PickUpItem(CargoPickupItem);
     CancelCargoPickup;
   end;
 end;
@@ -1758,7 +1928,13 @@ procedure TfAB.WeaponSelect(Sender: TObjectGI);
 var
   Index: Integer;
 begin
-  if PlayerArcadeShip <> nil then
+  // CHANGE: ENHANCEMENT - A co-op choice goes with the input (ab_Coop).
+  if CoopArcadeActive then
+  begin
+    if (PlayerArcadeShip <> nil) and (Sender.UserValue >= 0) then
+      CoopPendingWeapon := Sender.UserValue;
+  end
+  else if PlayerArcadeShip <> nil then
   begin
     Index := Sender.UserValue;
     if (Index >= 0) and (PlayerArcadeShip.PrimaryWeapon <> Index) then
@@ -1773,7 +1949,17 @@ procedure TfAB.ToggleWeaponGroup(Sender: TObjectGI);
 var
   Index: Integer;
 begin
-  if PlayerArcadeShip <> nil then
+  // CHANGE: ENHANCEMENT - A co-op toggle goes with the input (ab_Coop).
+  if CoopArcadeActive then
+  begin
+    Index := Sender.UserValue;
+    if (PlayerArcadeShip <> nil) and (Index >= 0) and (Index <= 4) then
+    begin
+      CoopPendingToggles := CoopPendingToggles xor (1 shl Index);
+      UpdateHelp(Sender, True);
+    end;
+  end
+  else if PlayerArcadeShip <> nil then
   begin
     Index := Sender.UserValue;
     if Index >= 0 then
@@ -1891,9 +2077,15 @@ begin
 end;
 
 procedure TfAB.ClearBattle;
+var
+  Index: Integer;
 begin
   PlayerArcadeShip := nil;
+  // CHANGE: ENHANCEMENT - The co-op participants' ships go too (ab_Coop).
+  for Index := 0 to CoopMaxParticipants - 1 do
+    CoopShips[Index] := nil;
   ab_Object_Clear;
+  ab_Hit_FreeCoopEffects;
   ClearGrid;
   ClearOverlaySegments;
   ab_Zone_ClearImages;
@@ -2255,9 +2447,10 @@ begin
     Space.Danger := 0;
   end;
   Other := nil;
-  if (LocalPlayer <> nil)
-      and (LocalPlayer.Order = soJumpHole)
-      and ((LocalPlayer.OrderTarget as THole).HoleType = 4)
+  // CHANGE: ENHANCEMENT - A co-op battle is built for its leader's ranger (ab_Coop).
+  if (CoopGenerationPlayer <> nil)
+      and (CoopGenerationPlayer.Order = soJumpHole)
+      and ((CoopGenerationPlayer.OrderTarget as THole).HoleType = 4)
       and (Galaxy.KellerLeaveTurn = 0)
       and (KellerShip <> nil)
       and KellerShip.InHyperspace
@@ -2289,8 +2482,8 @@ begin
       Space.Color34 := (ArcadeMapPalette[Space.AppearanceIndex * 6 + 5] and $FFFFFF) or $80000000;
       if Space = Other then
         Space.PopulateKellerEncounter
-      else if (LocalPlayer <> nil)
-          and (LocalPlayer.Order = soJumpHole)
+      else if (CoopGenerationPlayer <> nil)
+          and (CoopGenerationPlayer.Order = soJumpHole)
           and (ActiveArcadeRequest = nil) then
         Space.PopulateHoleEncounter
       else if (LocalPlayer <> nil) and (ActiveArcadeRequest <> nil) then
@@ -2427,6 +2620,8 @@ begin
 end;
 
 procedure TfAB.ResetBattleControls;
+var
+  Index: Integer;
 begin
   CloseVictory(nil, 0);
   ListedObjects.Clear;
@@ -2439,6 +2634,14 @@ begin
   PrimaryFireKeyDown := False;
   SecondaryFireKeyDown := False;
   PlayerArcadeShip.DisruptUntilTick := 0;
+  // CHANGE: ENHANCEMENT - Every co-op participant's ship starts the same way.
+  if CoopArcadeActive then
+    for Index := 0 to CoopParticipantCount - 1 do
+    begin
+      CoopShipAutopilot[Index] := False;
+      if CoopShips[Index] <> nil then
+        CoopShips[Index].DisruptUntilTick := 0;
+    end;
   ArcadeLastInputTick := ArcadeTickCount;
   ArcadeAutopilotEnabled := False;
   ArcadeEnemiesDefeated := False;
@@ -2586,6 +2789,15 @@ begin
   PlayerArcadeShip.StopThrust;
   PlayerArcadeShip.Velocity := MakePointF(0, 0);
   PlayerArcadeShip.SetTurnInput(0);
+  // CHANGE: ENHANCEMENT - Every co-op participant's ship enters the same way.
+  if CoopArcadeActive then
+    for Index := 0 to CoopParticipantCount - 1 do
+      if CoopShips[Index] <> nil then
+      begin
+        CoopShips[Index].StopThrust;
+        CoopShips[Index].Velocity := MakePointF(0, 0);
+        CoopShips[Index].SetTurnInput(0);
+      end;
   ab_Space_ClearImages;
   StartStarImage.SetActive(False);
   EndStarImage.SetActive(False);
@@ -2671,10 +2883,11 @@ begin
     Dec(Remaining, PInteger(PtrUInt(ColorData) + 12)^);
     ColorData := Pointer(PInteger(PtrUInt(ColorData) + 12)^+PtrUInt(ColorData));
   end;
+  // CHANGE: ENHANCEMENT - A co-op battle is built for its leader's ranger (ab_Coop).
   ArcadeKellerEncounter :=
-      (LocalPlayer <> nil)
-          and (LocalPlayer.Order = soJumpHole)
-          and ((LocalPlayer.OrderTarget as THole).HoleType = 4)
+      (CoopGenerationPlayer <> nil)
+          and (CoopGenerationPlayer.Order = soJumpHole)
+          and ((CoopGenerationPlayer.OrderTarget as THole).HoleType = 4)
           and (Galaxy.KellerLeaveTurn = 0)
           and (KellerShip <> nil)
           and (Galaxy.KellerMissionState in [4, 5]);
@@ -2689,14 +2902,28 @@ begin
         if ActiveArcadeRequest = nil then
         begin
           Ship := Obj as TabShipAI;
-          PlayerArcadeShip.AddEnemy(Ship);
-          Ship.AddEnemy(PlayerArcadeShip);
+          // CHANGE: ENHANCEMENT - In a co-op battle every enemy fights every participant's
+          // ship, in participant order, and the participants are not each other's enemies.
+          if CoopArcadeActive then
+          begin
+            for OtherIndex := 0 to CoopParticipantCount - 1 do
+              if CoopShips[OtherIndex] <> nil then
+                CoopShips[OtherIndex].AddEnemy(Ship);
+            for OtherIndex := 0 to CoopParticipantCount - 1 do
+              if CoopShips[OtherIndex] <> nil then
+                Ship.AddEnemy(CoopShips[OtherIndex]);
+          end
+          else
+          begin
+            PlayerArcadeShip.AddEnemy(Ship);
+            Ship.AddEnemy(PlayerArcadeShip);
+          end;
           if Galaxy <> nil then
             if (KellerArcadeShip = nil) and Galaxy.IsArcadeBattleRoyaleEnabled then
               for OtherIndex := Index + 1 to CurrentArcadeSpace.Objects.Count - 1 do
               begin
                 Other := CurrentArcadeSpace.Objects[OtherIndex];
-                if (Other is TabShipAI) and (PlayerArcadeShip <> Other) then
+                if (Other is TabShipAI) and not IsHumanShip(Other) then
                   if Ship.Visual.GraphKey <> (Other as TabShipAI).Visual.GraphKey then
                   begin
                     Ship.AddEnemy(Other as TabShipAI);
@@ -2719,7 +2946,8 @@ begin
   begin
     if Obj is TabShip then
     begin
-      if PlayerArcadeShip = Obj then
+      // CHANGE: ENHANCEMENT - Every co-op participant's ship starts in a player zone.
+      if IsHumanShip(Obj) then
       begin
         Zone := ab_Zone_RandomKind(1);
         if Zone = nil then
@@ -2912,6 +3140,7 @@ var
   Bearing: TSphericalBearingDistance;
   State: TSphericalBearingState;
   UnusedAfterState: array[0..3] of Byte; // Native unused bytes before backend temporaries.
+  CoopStalled: Boolean;
 begin
   Stage := 0;
   Obj := nil;
@@ -2944,20 +3173,27 @@ begin
         UpdateAutopilotButtons;
       end;
       AdvanceMapColors;
-      ab_Item_Update;
+      // CHANGE: ENHANCEMENT - In a co-op battle the item rules run inside the tick.
+      if not CoopArcadeActive then
+        ab_Item_Update;
     end;
     Stage := 2;
     if (LocalPlayer <> nil)
         and ((PlayerArcadeShip = nil) or (PlayerArcadeShip.Health <= 0))
-        and not ArcadeDefeatEscaped then
+        and not ArcadeDefeatEscaped
+        and not (CoopArcadeActive and CoopExitRequested) then
     begin
       Stage := 3;
       // CHANGE: ENHANCEMENT - In multiplayer the defeat does not end the game for everyone:
       // the ranger comes out of the battle with one hull point and goes on (BeginBattleExit).
+      // A co-op participant's exit goes with its input and runs at its tick (ab_Coop).
       if (DefeatCountdownTicks <= 0) and IsMultiplayer then
       begin
         ArcadeDefeatEscaped := True;
-        BeginBattleExit;
+        if CoopArcadeActive then
+          CoopExitRequested := True
+        else
+          BeginBattleExit;
       end
       else if DefeatCountdownTicks <= 0 then
       begin
@@ -3242,11 +3478,25 @@ begin
         LoadPanel.SetProgress(CampaignLoadProgress);
       end;
     end;
-    if (ArcadeViewMode = 0) and not SimulationPaused then
+    // CHANGE: ENHANCEMENT - A co-op tick runs only with every participant's input; until
+    // then the battle stalls and is only drawn (ab_Coop).
+    CoopStalled := False;
+    if CoopArcadeActive
+        and CoopBattleRunning
+        and (ArcadeViewMode = 0)
+        and not SimulationPaused then
+      CoopStalled := not CoopPrepareTick(ArcadeTickCount + 1);
+    if (ArcadeViewMode = 0) and not SimulationPaused and not CoopStalled then
     begin
       Stage := 16;
       Inc(ArcadeTickCount);
-      if (PlayerArcadeShip <> nil) and not ArcadeAutopilotEnabled then
+      if CoopArcadeActive then
+      begin
+        if not CoopApplyInputs then
+          Exit;
+        ab_Item_Update;
+      end
+      else if (PlayerArcadeShip <> nil) and not ArcadeAutopilotEnabled then
       begin
         if ForwardKeyDown then
           PlayerArcadeShip.StartThrust
@@ -3291,6 +3541,11 @@ begin
       while Obj <> nil do
       begin
         Obj.Advance;
+        // CHANGE: ENHANCEMENT - A co-op object goes at its fixed tick (ab_Coop).
+        if CoopArcadeActive
+            and (Obj.CoopExpireTick > 0)
+            and (ArcadeTickCount >= Obj.CoopExpireTick) then
+          Obj.DeletionPending := True;
         if Obj.DeletionPending then
         begin
           Stage := 23;
@@ -3309,20 +3564,34 @@ begin
           and TabShipAI(PlayerArcadeShip).InsideCurrentZone
           and (TabShipAI(PlayerArcadeShip).CurrentZone.Kind in [2..4]) then
       begin
-        NextArcadeSpace := nil;
-        if LocalPlayer.Order = soJumpHole then
-          BeginBattleExit
+        // CHANGE: ENHANCEMENT - A co-op participant's exit goes with its input (ab_Coop).
+        if CoopArcadeActive then
+          CoopExitRequested := True
         else
         begin
-          ArcadePaused := False;
-          ArcadePauseWithShift := False;
-          PlayButton.SetActive(not ArcadePaused);
-          PauseButton.SetActive(ArcadePaused);
-          BeginMapTransition;
+          NextArcadeSpace := nil;
+          if LocalPlayer.Order = soJumpHole then
+            BeginBattleExit
+          else
+          begin
+            ArcadePaused := False;
+            ArcadePauseWithShift := False;
+            PlayButton.SetActive(not ArcadePaused);
+            PauseButton.SetActive(ArcadePaused);
+            BeginMapTransition;
+          end;
         end;
       end;
+      // CHANGE: ENHANCEMENT - A co-op tick ends with the overlap repulsion (outside a tick it
+      // would depend on the frame rate) and, every CoopHashInterval ticks, its state hash.
+      if CoopArcadeActive then
+      begin
+        ab_Ship_RepelOverlaps;
+        if Assigned(CoopHashHook) and (ArcadeTickCount mod CoopHashInterval = 0) then
+          CoopHashHook(ArcadeTickCount, CoopStateHash);
+      end;
     end
-    else if ArcadeViewMode = 0 then
+    else if (ArcadeViewMode = 0) and not CoopStalled then
     begin
       Stage := 25;
       Step := 0.5;
@@ -3514,7 +3783,7 @@ begin
       );
     end;
     Stage := 37;
-    if not SimulationPaused then
+    if not SimulationPaused and not CoopArcadeActive then
       ab_Ship_RepelOverlaps;
   except
     on E: Exception do
@@ -5106,6 +5375,9 @@ end;
 
 procedure TfAB.OpenShipEquipment(Sender: TObjectGI);
 begin
+  // CHANGE: ENHANCEMENT - The modal equipment screen would stop a co-op battle (ab_Coop).
+  if CoopArcadeActive then
+    Exit;
   if (ArcadeViewMode <> 5)
       and (LocalPlayer <> nil)
       and (PlayerArcadeShip <> nil)
@@ -5205,6 +5477,11 @@ begin
 end;
 
 procedure TfAB.PickUpItem(Item: TabItem);
+begin
+  PickUpItemFor(Item, LocalPlayer);
+end;
+
+procedure TfAB.PickUpItemFor(Item: TabItem; Player: TPlayer);
 var
   Instance: TItem;
   Other: TObject;
@@ -5212,6 +5489,9 @@ var
 begin
   if Galaxy <> nil then
     aCalc.WaitForTurnCalculationUI;
+  // CHANGE: ENHANCEMENT - A co-op participant's pickup goes into its own ranger's hold.
+  if CoopArcadeActive and (CargoPickupItem = Item) then
+    CancelCargoPickup;
   Instance := Item.Item;
   Instance.GetGraphObject.DetachFromSpace;
   Instance.ReleaseGraphObject;
@@ -5220,9 +5500,9 @@ begin
   if Instance is TArtefact then
   begin
     (Instance as TEquipment).EquippedFlag := 0;
-    LocalPlayer.Artefacts.Add(Instance);
+    Player.Artefacts.Add(Instance);
     if Instance is TArtefactTranclucator then
-      (TObject((Instance as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip := LocalPlayer;
+      (TObject((Instance as TArtefactTranclucator).Ship) as TTranclucator).OwnerShip := Player;
   end
   else if Instance is TCountableItem then
   begin
@@ -5230,10 +5510,10 @@ begin
     (Instance as TEquipment).EquippedFlag := 0;
     Index := 0;
     Other := nil;
-    Count := LocalPlayer.Inventory.Count;
+    Count := Player.Inventory.Count;
     while Index < Count do
     begin
-      Other := LocalPlayer.Inventory[Index];
+      Other := Player.Inventory[Index];
       if (Instance as TCountableItem).CanMerge(Other) then
         Break;
       Inc(Index);
@@ -5244,28 +5524,347 @@ begin
       Instance.Free;
     end
     else
-      LocalPlayer.Inventory.Add(Instance);
+      Player.Inventory.Add(Instance);
   end
   else if Instance is TEquipment then
   begin
     (Instance as TEquipment).EquippedFlag := 0;
-    LocalPlayer.Inventory.Add(Instance);
+    Player.Inventory.Add(Instance);
   end
   else if Instance is TGoods then
   begin
     Inc(
-        LocalPlayer.CargoGoods[Ord((Instance as TGoods).ItemType)].Count,
+        Player.CargoGoods[Ord((Instance as TGoods).ItemType)].Count,
         (Instance as TGoods).Quantity
     );
     Inc(
-        LocalPlayer.CargoGoods[Ord((Instance as TGoods).ItemType)].TotalCost,
+        Player.CargoGoods[Ord((Instance as TGoods).ItemType)].TotalCost,
         (Instance as TGoods).Cost
     );
     Instance.Free;
   end;
-  LocalPlayer.RefreshDerivedStats(True);
+  Player.RefreshDerivedStats(True);
   if Galaxy <> nil then
     aCalc.WaitForTurnCalculationUI;
+end;
+
+// CHANGE: ENHANCEMENT - A co-op battle's participants' ships (ab_Coop), in participant order,
+// each from its own ranger the way OnOpen builds the single player's one. The local one is
+// PlayerArcadeShip and keeps the weapon panel's items (CampaignWeapons).
+procedure TfAB.CreateCoopShips;
+var
+  Index, Slot: Integer;
+  Player: TPlayer;
+  Ship: TabShip;
+begin
+  for Index := 0 to CoopParticipantCount - 1 do
+  begin
+    Player := CoopPlayers[Index];
+    Ship := TabShipAI.Create;
+    ab_Object_Add(Ship);
+    CoopShips[Index] := Ship;
+    CoopShipAutopilot[Index] := False;
+    if Index = CoopLocalIndex then
+      PlayerArcadeShip := Ship;
+    if Player.Graphic is TRuinsSE then
+      Ship.CreateRuinsVisual(Player.Graphic.GraphKey, Player.Graphic.Size.X)
+    else if GiResourceVariant = 2 then
+      Ship.CreateShipVisual(Player.Graphic.GraphKey, Player.Graphic.Size.X)
+    else
+      Ship.CreateShipVisual(Player.Graphic.GraphKey, Round((Player.Graphic.Size.X shl 10) / 800));
+    RunScriptItemsAct(Player, $37, Ship, nil, 0);
+    Ship.MaxSpeed := 11;
+    Ship.TurnSpeed := PlayerInitialTurnSpeed;
+    Ship.Thrust := 0;
+    Ship.MaxHealth := Player.GetHull.Weight;
+    Ship.Health := Player.GetHull.HullPoints;
+    if Index = CoopLocalIndex then
+    begin
+      for Slot := 0 to 4 do
+        CampaignWeapons[Slot] := nil;
+      SyncWeaponInventory;
+    end
+    else
+      SyncShipWeapons(Ship, Player, CoopCampaignWeapons[Index]);
+    for Slot := 0 to Ship.WeaponCount - 1 do
+      Ship.Weapons[Slot].Ammo := Ship.Weapons[Slot].MaxAmmo;
+    Ship.PrimaryWeapon := -1;
+    Ship.SecondaryWeapon := -1;
+    NormalizeShipWeapons(Ship);
+  end;
+end;
+
+// The local participant's input of Tick: the test driver's, or the keys, the autopilot (the
+// player's or its idle timer's), Alt and the one-shot inputs queued since the last sample;
+// and the exit once asked for.
+function TfAB.CoopSampleLocalInput(Tick: Integer): TArcadeInput;
+begin
+  if Assigned(CoopLocalInputHook) then
+    Result := CoopLocalInputHook(Tick)
+  else
+  begin
+    Result := EmptyArcadeInput;
+    if ForwardKeyDown then
+      Result.Buttons := Result.Buttons or ciForward;
+    if ReverseKeyDown then
+      Result.Buttons := Result.Buttons or ciReverse;
+    if BrakeKeyDown then
+      Result.Buttons := Result.Buttons or ciBrake;
+    if TurnLeftKeyDown then
+      Result.Buttons := Result.Buttons or ciTurnLeft;
+    if TurnRightKeyDown then
+      Result.Buttons := Result.Buttons or ciTurnRight;
+    if PrimaryFireKeyDown then
+      Result.Buttons := Result.Buttons or ciPrimaryFire;
+    if SecondaryFireKeyDown then
+      Result.Buttons := Result.Buttons or ciSecondaryFire;
+    if ArcadeAutopilotEnabled then
+      Result.Buttons := Result.Buttons or ciAutopilot;
+    if IsVirtualKeyDown(VK_MENU) then
+      Result.Buttons := Result.Buttons or ciAltPickup;
+    Result.WeaponSelect := CoopPendingWeapon;
+    Result.GroupToggles := CoopPendingToggles;
+    Result.PickupObject := CoopPendingPickup;
+  end;
+  CoopPendingWeapon := -1;
+  CoopPendingToggles := 0;
+  CoopPendingPickup := 0;
+  if CoopExitRequested then
+    Result.Buttons := Result.Buttons or ciExit;
+end;
+
+// Before co-op tick Tick runs: the local input of Tick + CoopInputDelay is sampled and sent
+// (once), and every participant's input of Tick is gathered into CoopTickInputs. False while
+// one is missing (the battle stalls; after a while the waiting text shows).
+function TfAB.CoopPrepareTick(Tick: Integer): Boolean;
+var
+  Index: Integer;
+  Input: TArcadeInput;
+  Name: WideString;
+  Fetched: Boolean;
+begin
+  if not CoopExitSent and (CoopLastSampledTick < Tick + CoopInputDelay) then
+  begin
+    CoopLastSampledTick := Tick + CoopInputDelay;
+    Input := CoopSampleLocalInput(CoopLastSampledTick);
+    CoopStoreLocalInput(CoopLastSampledTick, Input);
+    if Assigned(CoopSendHook) then
+      CoopSendHook(CoopLastSampledTick, Input);
+    if (Input.Buttons and ciExit) <> 0 then
+      CoopExitSent := True;
+  end;
+  for Index := 0 to CoopParticipantCount - 1 do
+  begin
+    if CoopLeft[Index] or (Tick <= CoopInputDelay) then
+      CoopTickInputs[Index] := EmptyArcadeInput
+    else if Index = CoopLocalIndex then
+      CoopTickInputs[Index] := CoopLocalInput(Tick)
+    else
+    begin
+      Fetched := False;
+      if not CoopGone[Index] and Assigned(CoopFetchHook) then
+        Fetched := CoopFetchHook(Tick, Index, CoopTickInputs[Index]);
+      if not Fetched then
+      begin
+        if not CoopGone[Index]
+            and Assigned(CoopFetchHook)
+            and not (Assigned(CoopGoneHook) and CoopGoneHook(Index)) then
+        begin
+          CoopWaitingFor := Index;
+          Inc(CoopStallFires);
+          if CoopStallFires = CoopStallNoticeFires then
+          begin
+            Name := '';
+            if CoopPlayers[Index] <> nil then
+              Name := CoopPlayers[Index].Name;
+            BattleHelpLabel.SetActive(True);
+            BattleHelpLabel.SetText('Waiting for ' + Name + '...');
+            CoopStallShown := True;
+          end;
+          Exit(False);
+        end;
+        // The participant left the session: its ship flies by autopilot from now on.
+        CoopGone[Index] := True;
+        CoopTickInputs[Index] := EmptyArcadeInput;
+        CoopTickInputs[Index].Buttons := ciAutopilot;
+      end;
+    end;
+  end;
+  CoopWaitingFor := -1;
+  CoopStallFires := 0;
+  if CoopStallShown then
+  begin
+    CoopStallShown := False;
+    HideHelp;
+  end;
+  Result := True;
+end;
+
+// Applies the running tick's inputs to the participants' ships, in participant order. False
+// when the local participant left at this tick (BeginBattleExit ran; the tick stops here).
+function TfAB.CoopApplyInputs: Boolean;
+var
+  Index, Slot: Integer;
+  Input: TArcadeInput;
+  Ship: TabShip;
+  Local: Boolean;
+begin
+  Result := True;
+  for Index := 0 to CoopParticipantCount - 1 do
+  begin
+    if CoopLeft[Index] then
+      Continue;
+    Input := CoopTickInputs[Index];
+    Ship := CoopShips[Index];
+    Local := Index = CoopLocalIndex;
+    if (Input.Buttons and ciExit) <> 0 then
+    begin
+      CoopLeft[Index] := True;
+      CoopAltHeld[Index] := False;
+      CoopShipAutopilot[Index] := False;
+      if Local then
+      begin
+        // The local participant goes out as a single player's battle does; its hull is its
+        // ship's, or one point when the ship is lost (multiplayer's escape).
+        CoopBattleRunning := False;
+        if (PlayerArcadeShip = nil) or (PlayerArcadeShip.Health <= 0) then
+          ArcadeDefeatEscaped := True;
+        BeginBattleExit;
+        if Assigned(CoopLocalExitHook) then
+          CoopLocalExitHook;
+        Exit(False);
+      end;
+      if Ship <> nil then
+        ab_Object_Delete(Ship);
+      Continue;
+    end;
+    CoopAltHeld[Index] := (Input.Buttons and ciAltPickup) <> 0;
+    CoopShipAutopilot[Index] := (Input.Buttons and ciAutopilot) <> 0;
+    if Ship = nil then
+      Continue;
+    if (Input.WeaponSelect >= 0) and (Ship.PrimaryWeapon <> Input.WeaponSelect) then
+    begin
+      Ship.SelectWeapon(Input.WeaponSelect);
+      if Local then
+        UpdateWeaponHighlights(True);
+    end;
+    if Input.GroupToggles <> 0 then
+    begin
+      for Slot := 0 to Ship.WeaponCount - 1 do
+        if (Input.GroupToggles and (1 shl Slot)) <> 0 then
+        begin
+          Ship.Weapons[Slot].SlotData := Ship.Weapons[Slot].SlotData xor EquipmentSecondaryFireFlag;
+          // Only the owner writes its ranger's slot back to the galaxy.
+          if Local and (LocalPlayer <> nil) then
+          begin
+            if Galaxy <> nil then
+              aCalc.WaitForTurnCalculationUI;
+            SetArcadeWeaponSlotData(
+                Ship.Weapons[Slot].SlotData and EquipmentSlotIndexMask,
+                Ship.Weapons[Slot].SlotData
+            );
+            if Galaxy <> nil then
+              aCalc.WaitForTurnCalculationUI;
+          end;
+        end;
+      NormalizeShipWeapons(Ship);
+      if Local then
+        UpdateWeaponPanel;
+    end;
+    if Input.PickupObject <> 0 then
+      CoopPickUpClicked(Index, Input.PickupObject);
+    if not CoopShipAutopilot[Index] then
+    begin
+      if (Input.Buttons and ciForward) <> 0 then
+        Ship.StartThrust
+      else if (Input.Buttons and ciReverse) <> 0 then
+        Ship.StartReverseThrust
+      else
+        Ship.StopThrust;
+      if (Input.Buttons and ciBrake) <> 0 then
+        Ship.Brake;
+      if (Input.Buttons and ciTurnLeft) <> 0 then
+      begin
+        Ship.SetTurnInput(-100);
+        if Local then
+          SphereViewState.BearingDegrees :=
+              WrapHeadingDegrees(SphereViewState.BearingDegrees - 0.3);
+      end
+      else if (Input.Buttons and ciTurnRight) <> 0 then
+      begin
+        Ship.SetTurnInput(100);
+        if Local then
+          SphereViewState.BearingDegrees :=
+              WrapHeadingDegrees(SphereViewState.BearingDegrees + 0.3);
+      end
+      else
+        Ship.SetTurnInput(0);
+      if (Input.Buttons and ciPrimaryFire) <> 0 then
+        Ship.FirePrimary;
+      if (Input.Buttons and ciSecondaryFire) <> 0 then
+        Ship.FireSecondary;
+    end;
+  end;
+end;
+
+// A participant's click on cargo (its CoopId): picked up into its ranger's hold when the
+// single player's click would pick it up.
+procedure TfAB.CoopPickUpClicked(Participant: Integer; ObjectId: Integer);
+var
+  Obj: TabObject;
+  Item: TabItem;
+  Ship: TabShip;
+  Player: TPlayer;
+begin
+  Ship := CoopShips[Participant];
+  Player := CoopPlayers[Participant];
+  if (Ship = nil) or (Ship.Health <= 0) or (Player = nil) then
+    Exit;
+  Obj := FirstArcadeObject;
+  while (Obj <> nil) and (Obj.CoopId <> ObjectId) do
+    Obj := Obj.Next;
+  if not (Obj is TabItem) then
+    Exit;
+  Item := TabItem(Obj);
+  if (Item.BonusKind < 0)
+      and (Item.Item <> nil)
+      and (Player.CargoFreeSpace >= Item.Item.Weight)
+      and (Ship.DistanceTo(Item) < ManualCargoPickupDistance)
+      and Player.IsEquipmentUsable(Player.GetCargoHook)
+      and (Player.CalculateCargoHookPower(Player.GetCargoHook) >= Item.Item.Weight) then
+    PickUpItemFor(Item, Player);
+end;
+
+// The battle's state for the tests: every object in list order, the battle's and the co-op
+// random streams and the tick.
+function TfAB.CoopStateHash: Cardinal;
+var
+  Obj: TabObject;
+  Index: Integer;
+  Name: ShortString;
+begin
+  Result := 2166136261;
+  CoopHashInteger(Result, ArcadeTickCount);
+  Obj := FirstArcadeObject;
+  while Obj <> nil do
+  begin
+    CoopHashInteger(Result, Obj.CoopId);
+    Name := Obj.ClassName;
+    CoopHashBytes(Result, Name[1], Length(Name));
+    CoopHashDouble(Result, Obj.State.LongitudeDegrees);
+    CoopHashDouble(Result, Obj.State.PolarAngleDegrees);
+    CoopHashDouble(Result, Obj.State.BearingDegrees);
+    CoopHashDouble(Result, Obj.Velocity.X);
+    CoopHashDouble(Result, Obj.Velocity.Y);
+    if Obj is TabHit then
+      CoopHashInteger(Result, TabHit(Obj).Health);
+    if Obj is TabShip then
+      for Index := 0 to TabShip(Obj).WeaponCount - 1 do
+        CoopHashInteger(Result, TabShip(Obj).Weapons[Index].Ammo);
+    Obj := Obj.Next;
+  end;
+  CoopHashInteger(Result, Integer(RandomSeed));
+  CoopHashInteger(Result, Integer(CoopRandomStateValue));
 end;
 
 function TfAB.RandomRange(BoundA, BoundB: Integer): Integer;

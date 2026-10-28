@@ -39,6 +39,8 @@ var
   KellerSplitActive: Boolean;
   KellerFinishRequested: Boolean;
   KellerDeathPending: Boolean;
+// CHANGE: ENHANCEMENT - Frees the hit and explosion effects that outlived their co-op objects.
+procedure ab_Hit_FreeCoopEffects;
 procedure LinkRecoveredTypes;
 implementation
 uses
@@ -63,7 +65,44 @@ uses
   ab_ShipAI,
   SE_Ruins,
   aGalaxy,
-  aPlayer;
+  aPlayer,
+  ab_Coop;
+
+type
+  // CHANGE: ENHANCEMENT - In a co-op battle an object's deletion does not wait for its
+  // effects (ab_Coop): those still playing are handed over here and free themselves.
+  TCoopEffectReaper = class
+    procedure EffectComplete(Sender: TObjectGI);
+  end;
+
+var
+  CoopEffectReaper: TCoopEffectReaper = nil;
+  CoopOrphanEffects: TList = nil;
+
+procedure TCoopEffectReaper.EffectComplete(Sender: TObjectGI);
+var
+  Index: Integer;
+begin
+  if CoopOrphanEffects <> nil then
+  begin
+    Index := CoopOrphanEffects.IndexOf(Sender);
+    if Index >= 0 then
+      CoopOrphanEffects.Delete(Index);
+  end;
+  Sender.Free;
+end;
+
+procedure ab_Hit_FreeCoopEffects;
+var
+  Index: Integer;
+begin
+  if CoopOrphanEffects <> nil then
+  begin
+    for Index := CoopOrphanEffects.Count - 1 downto 0 do
+      TObject(CoopOrphanEffects[Index]).Free;
+    CoopOrphanEffects.Clear;
+  end;
+end;
 
 constructor TabHit.Create;
 begin
@@ -85,7 +124,18 @@ begin
     for Index := 0 to Effects.Count - 1 do
     begin
       Effect := Effects[Index];
-      Effect.Free;
+      // CHANGE: ENHANCEMENT - A co-op object goes at a fixed tick: its effects play on.
+      if CoopArcadeActive and (Effect is TgaiGI) then
+      begin
+        if CoopEffectReaper = nil then
+          CoopEffectReaper := TCoopEffectReaper.Create;
+        if CoopOrphanEffects = nil then
+          CoopOrphanEffects := TList.Create;
+        TgaiGI(Effect).CycleCompleteCallback := CoopEffectReaper.EffectComplete;
+        CoopOrphanEffects.Add(Effect);
+      end
+      else
+        Effect.Free;
     end;
     Effects.Free;
     Effects := nil;
@@ -102,7 +152,9 @@ var
 begin
   if Health > 0 then
   begin
-    Invulnerable := (Galaxy <> nil) and (Galaxy.GodModEnabled = 1) and (PlayerArcadeShip = Self);
+    // CHANGE: ENHANCEMENT - Every co-op participant's ship is a player ship, with its own
+    // autopilot and ranger.
+    Invulnerable := (Galaxy <> nil) and (Galaxy.GodModEnabled = 1) and IsHumanShip(Self);
     if (Self <> KellerFragments[0])
         and (Self <> KellerFragments[1])
         and (Self <> KellerFragments[2])
@@ -111,15 +163,16 @@ begin
         if (Self is TabShip) and (Source is TabShip) then
           if (Source as TabShip).Enemies.IndexOf(Self) < 0 then
             Amount := Amount div 4;
-    if (PlayerArcadeShip = Self) and (LocalPlayer <> nil) then
+    if IsHumanShip(Self) and (HumanShipPlayer(Self) <> nil) then
     begin
-      if ArcadeAutopilotEnabled then
+      if HumanShipAutopilot(Self) then
         Amount := Round(Amount * 0.7);
       if KellerArcadeShip <> nil then
         Amount :=
             Round(
                 RemapClamped(
-                        LocalPlayer.BlackHoleKillCount + LocalPlayer.HyperspaceKillCount,
+                        HumanShipPlayer(Self).BlackHoleKillCount
+                            + HumanShipPlayer(Self).HyperspaceKillCount,
                         5,
                         70,
                         0.1,
@@ -137,7 +190,7 @@ begin
       if ArcadeTickCount < DisruptUntilTick then
       begin
         Inc(DisruptUntilTick, Amount);
-        if (PlayerArcadeShip = Self) and (DisruptUntilTick - ArcadeTickCount > 350) then
+        if IsHumanShip(Self) and (DisruptUntilTick - ArcadeTickCount > 350) then
           DisruptUntilTick := ArcadeTickCount + 350;
       end
       else
@@ -168,6 +221,11 @@ begin
     begin
       if Health <= 0 then
       begin
+        // CHANGE: ENHANCEMENT - In a co-op battle the object goes a fixed number of ticks after
+        // its death on every machine, not when this camera's explosion ends or when it is
+        // behind this camera's horizon; the explosion is only shown.
+        if CoopArcadeActive then
+          CoopExpireTick := ArcadeTickCount + CoopDeathTicks;
         if IsDepthBeforeSphereHorizon(GetProjectedPosition.Z) then
         begin
           Effect := TgaiGI.Create(ArcadeBattleScreen.WorldPanel);
@@ -203,7 +261,7 @@ begin
             SoundManager
                 .PlaySound(ArcadeExplosionSounds[RandomIntRange(0, High(ArcadeExplosionSounds))]);
         end
-        else
+        else if not CoopArcadeActive then
           DeletionPending := True;
       end
       else
@@ -248,7 +306,8 @@ procedure TabHit.UpdateState;
 begin
   if ArcadeTickCount < DisruptUntilTick then
   begin
-    if PlayerArcadeShip = Self then
+    // CHANGE: ENHANCEMENT - Every co-op participant's ship is a player ship.
+    if IsHumanShip(Self) then
     begin
       SpeedScale := 0.7;
       TurnSpeedScale := 0.6;
@@ -399,9 +458,11 @@ procedure TabHit.ExplosionComplete(Sender: TObjectGI);
 begin
   Effects.Delete(Effects.IndexOf(Sender));
   Sender.Free;
+  // CHANGE: ENHANCEMENT - A co-op object's deletion never waits for an animation.
   if Effects.Count <= 0 then
     if Health <= 0 then
-      DeletionPending := True;
+      if not CoopArcadeActive then
+        DeletionPending := True;
 end;
 
 procedure TabHit.KellerBreakupComplete(Sender: TObjectGI);

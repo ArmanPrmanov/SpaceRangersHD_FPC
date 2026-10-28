@@ -13,7 +13,9 @@ uses
   SE_Space,
   ab_Object,
   ab_Hit,
-  ab_W;
+  ab_W,
+  aPlayer,
+  ab_Coop;
 type
   TabShip = class;
   TabShip = class(TabHit)
@@ -101,7 +103,27 @@ var
   KellerAuxiliaryShip: TabShip = nil;
   ArcadePaused: Boolean;
   ArcadePauseWithShift: Boolean;
+  // CHANGE: ENHANCEMENT - A co-op battle's participants' ships, in participant order (nil once
+  // deleted or before the battle), and each one's autopilot at the running tick (ab_Coop).
+  // PlayerArcadeShip is the local participant's one.
+  CoopShips: array[0..CoopMaxParticipants - 1] of TabShip;
+  CoopShipAutopilot: array[0..CoopMaxParticipants - 1] of Boolean;
 procedure ab_Ship_RepelOverlaps;
+// CHANGE: ENHANCEMENT - The simulation's player-ship rules apply to every co-op participant's
+// ship. Outside a co-op battle these are PlayerArcadeShip, ArcadeAutopilotEnabled and
+// LocalPlayer, as before.
+// Whether Obj is a human player's ship.
+function IsHumanShip(Obj: TObject): Boolean;
+// Its participant (index into CoopShips), or -1; 0 for PlayerArcadeShip outside co-op.
+function HumanShipIndex(Obj: TObject): Integer;
+// Whether a human ship flies itself.
+function HumanShipAutopilot(Ship: TObject): Boolean;
+// A human ship's ranger.
+function HumanShipPlayer(Ship: TObject): TPlayer;
+// Whether Ship is an enemy of a human ship (one of its Enemies is one).
+function IsEnemyOfHumans(Ship: TabShip): Boolean;
+// The ships alive that some human ship has as enemy.
+function CountLivingHumanEnemies: Integer;
 procedure LinkRecoveredTypes;
 implementation
 uses
@@ -123,9 +145,132 @@ uses
   ab_Zone,
   abWall,
   ab_ShipAI,
-  aPlayer,
   aShip,
   aGalaxy;
+
+function IsHumanShip(Obj: TObject): Boolean;
+var
+  Index: Integer;
+begin
+  if not CoopArcadeActive then
+    Exit((Obj <> nil) and (Obj = PlayerArcadeShip));
+  Result := False;
+  if Obj <> nil then
+    for Index := 0 to CoopParticipantCount - 1 do
+      if CoopShips[Index] = Obj then
+        Exit(True);
+end;
+
+function HumanShipIndex(Obj: TObject): Integer;
+var
+  Index: Integer;
+begin
+  Result := -1;
+  if Obj = nil then
+    Exit;
+  if not CoopArcadeActive then
+  begin
+    if Obj = PlayerArcadeShip then
+      Result := 0;
+    Exit;
+  end;
+  for Index := 0 to CoopParticipantCount - 1 do
+    if CoopShips[Index] = Obj then
+      Exit(Index);
+end;
+
+function HumanShipAutopilot(Ship: TObject): Boolean;
+var
+  Index: Integer;
+begin
+  if not CoopArcadeActive then
+    Exit(ArcadeAutopilotEnabled);
+  Index := HumanShipIndex(Ship);
+  Result := (Index >= 0) and CoopShipAutopilot[Index];
+end;
+
+function HumanShipPlayer(Ship: TObject): TPlayer;
+var
+  Index: Integer;
+begin
+  if not CoopArcadeActive then
+    Exit(LocalPlayer);
+  Index := HumanShipIndex(Ship);
+  if Index >= 0 then
+    Result := CoopPlayers[Index]
+  else
+    Result := nil;
+end;
+
+function IsEnemyOfHumans(Ship: TabShip): Boolean;
+var
+  Index: Integer;
+begin
+  if not CoopArcadeActive then
+    Exit((PlayerArcadeShip <> nil) and (PlayerArcadeShip.Enemies.IndexOf(Ship) >= 0));
+  Result := False;
+  for Index := 0 to CoopParticipantCount - 1 do
+    if (CoopShips[Index] <> nil) and (CoopShips[Index].Enemies.IndexOf(Ship) >= 0) then
+      Exit(True);
+end;
+
+function CountLivingHumanEnemies: Integer;
+var
+  Obj: TabObject;
+begin
+  Result := 0;
+  Obj := FirstArcadeObject;
+  while Obj <> nil do
+  begin
+    if (Obj is TabShip) and (TabShip(Obj).Health > 0) and IsEnemyOfHumans(TabShip(Obj)) then
+      Inc(Result);
+    Obj := Obj.Next;
+  end;
+end;
+
+// CHANGE: ENHANCEMENT - A co-op battle is won when no participant's ship has an enemy ship
+// left; every machine decides it at the same deletion.
+procedure CheckCoopVictory;
+var
+  Index, EnemyIndex: Integer;
+  AnyHuman: Boolean;
+  Obj: TabObject;
+begin
+  if ArcadeEnemiesDefeated then
+    Exit;
+  AnyHuman := False;
+  for Index := 0 to CoopParticipantCount - 1 do
+    if CoopShips[Index] <> nil then
+    begin
+      AnyHuman := True;
+      for EnemyIndex := 0 to CoopShips[Index].Enemies.Count - 1 do
+        if TObject(CoopShips[Index].Enemies[EnemyIndex]) is TabShipAI then
+          Exit;
+    end;
+  if not AnyHuman then
+    Exit;
+  for Index := 0 to CoopParticipantCount - 1 do
+  begin
+    CoopShipAutopilot[Index] := False;
+    if CoopShips[Index] <> nil then
+    begin
+      CoopShips[Index].StopThrust;
+      CoopShips[Index].SetTurnInput(0);
+    end;
+  end;
+  ArcadeAutopilotEnabled := False;
+  ArcadeBattleScreen.UpdateAutopilotButtons;
+  ArcadeEnemiesDefeated := True;
+  Obj := FirstArcadeObject;
+  while Obj <> nil do
+  begin
+    if (Obj is TabWall) and (TabWall(Obj).Health > 0) then
+      TabWall(Obj).Health := Min(20, TabWall(Obj).Health);
+    Obj := Obj.Next;
+  end;
+  if PlayerArcadeShip <> nil then
+    ArcadeBattleScreen.ShowVictory;
+end;
 
 constructor TabShip.Create;
 begin
@@ -154,6 +299,7 @@ var
   Obj: TabObject;
   Ship: TabShip;
   Index, Count: Integer;
+  CoopHuman: Boolean;
 begin
   Obj := FirstArcadeObject;
   while Obj <> nil do
@@ -186,13 +332,29 @@ begin
     end;
     Obj := Obj.Next;
   end;
+  // CHANGE: ENHANCEMENT - A co-op participant's ship leaves its slot.
+  CoopHuman := False;
+  if CoopArcadeActive then
+  begin
+    Index := HumanShipIndex(Self);
+    if Index >= 0 then
+    begin
+      CoopShips[Index] := nil;
+      CoopHuman := True;
+    end;
+  end;
   if Self = PlayerArcadeShip then
     PlayerArcadeShip := nil;
   if Self = KellerArcadeShip then
     KellerArcadeShip := nil;
   if Self = KellerAuxiliaryShip then
     KellerAuxiliaryShip := nil;
-  if PlayerArcadeShip <> nil then
+  if CoopArcadeActive then
+  begin
+    if not CoopHuman then
+      CheckCoopVictory;
+  end
+  else if PlayerArcadeShip <> nil then
   begin
     Index := 0;
     Count := PlayerArcadeShip.Enemies.Count;
@@ -413,7 +575,8 @@ var
   DamageScale: Single;
 begin
   if (Health > 0) and (WeaponCount > 0) and (BonusTicks[abkWeaponLock] <= 0) then
-    if (Self <> PlayerArcadeShip)
+    // CHANGE: ENHANCEMENT - Every co-op participant's ship is a player ship.
+    if not IsHumanShip(Self)
         or (LastPrimaryWeapon = PrimaryWeapon)
         or (WeaponSwitchDelayMs div 20 <= ArcadeTickCount - LastPrimaryFireTick) then
       if CanFireWeapon(PrimaryWeapon) then
@@ -423,7 +586,7 @@ begin
         LastPrimaryWeapon := PrimaryWeapon;
         LastPrimaryFireTick := ArcadeTickCount;
         Weapons[PrimaryWeapon].LastFireTick := ArcadeTickCount;
-        if not ((Galaxy <> nil) and (Galaxy.AmmoModEnabled = 1) and (Self = PlayerArcadeShip)) then
+        if not ((Galaxy <> nil) and (Galaxy.AmmoModEnabled = 1) and IsHumanShip(Self)) then
           Dec(Weapons[PrimaryWeapon].Ammo, Weapons[PrimaryWeapon].AmmoCost);
         if BonusTicks[abkDamage] > 0 then
           DamageScale := WeaponDamageBonusScale
@@ -466,7 +629,8 @@ var
   DamageScale: Single;
 begin
   if (Health > 0) and (WeaponCount > 0) and (BonusTicks[abkWeaponLock] <= 0) then
-    if (Self <> PlayerArcadeShip)
+    // CHANGE: ENHANCEMENT - Every co-op participant's ship is a player ship.
+    if not IsHumanShip(Self)
         or (LastSecondaryWeapon = SecondaryWeapon)
         or (WeaponSwitchDelayMs div 20 <= ArcadeTickCount - LastSecondaryFireTick) then
       if CanFireWeapon(SecondaryWeapon) then
@@ -476,7 +640,7 @@ begin
         LastSecondaryWeapon := SecondaryWeapon;
         LastSecondaryFireTick := ArcadeTickCount;
         Weapons[SecondaryWeapon].LastFireTick := ArcadeTickCount;
-        if not ((Galaxy <> nil) and (Galaxy.AmmoModEnabled = 1) and (Self = PlayerArcadeShip)) then
+        if not ((Galaxy <> nil) and (Galaxy.AmmoModEnabled = 1) and IsHumanShip(Self)) then
           Dec(Weapons[SecondaryWeapon].Ammo, Weapons[SecondaryWeapon].AmmoCost);
         if BonusTicks[abkDamage] > 0 then
           DamageScale := WeaponDamageBonusScale
@@ -484,7 +648,7 @@ begin
           DamageScale := 1;
         DamageScale := DamageScale * WeaponDamageScale;
         ab_Weapon_Fire(@Weapons[SecondaryWeapon], Self, DamageScale);
-        if (Self = PlayerArcadeShip)
+        if IsHumanShip(Self)
             and (Weapons[SecondaryWeapon].Ammo < Weapons[SecondaryWeapon].AmmoCost) then
         begin
           BestScore := -1;
@@ -540,7 +704,8 @@ end;
 
 procedure TabShip.SelectWeapon(Index: Integer);
 begin
-  if Self = PlayerArcadeShip then
+  // CHANGE: ENHANCEMENT - Every co-op participant's ship is a player ship.
+  if IsHumanShip(Self) then
   begin
     if Index < 0 then
     begin
@@ -669,15 +834,16 @@ begin
       if RegenerationRate >= 10 then
         Health := Min(MaxHealth, Health + Round(RegenerationHealthPerTick * RegenerationRate / 10));
     end;
-    if (Self = PlayerArcadeShip) and (TickCounter mod 10 = 0) then
-      if LocalPlayer <> nil then
-        if LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactDroid)) > 0 then
+    // CHANGE: ENHANCEMENT - Each co-op participant's ship repairs by its own ranger's droids.
+    if IsHumanShip(Self) and (TickCounter mod 10 = 0) then
+      if HumanShipPlayer(Self) <> nil then
+        if HumanShipPlayer(Self).CountActiveArtefacts(Ord(t_ArtefactDroid)) > 0 then
           Health :=
               Min(
                   MaxHealth,
                   Health
                       + RegenerationHealthPerTick
-                          * LocalPlayer.CountActiveArtefacts(Ord(t_ArtefactDroid))
+                          * HumanShipPlayer(Self).CountActiveArtefacts(Ord(t_ArtefactDroid))
               );
     if (BonusTicks[abkInvisibility] > 0) and (RevealTicks > 0) then
       Dec(RevealTicks);

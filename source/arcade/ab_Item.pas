@@ -54,7 +54,58 @@ uses
   GR_Main,
   GR_Sound,
   Globals,
-  GlobalsV;
+  GlobalsV,
+  ab_Coop;
+
+// CHANGE: ENHANCEMENT - Whether the bonus spawners run: some co-op participant's ship (the
+// player's ship outside co-op) has enemies.
+function BonusesActive: Boolean;
+var
+  Index: Integer;
+begin
+  Result := False;
+  if not CoopArcadeActive then
+  begin
+    if PlayerArcadeShip <> nil then
+      if PlayerArcadeShip.Enemies.Count > 0 then
+        Result := True;
+    Exit;
+  end;
+  for Index := 0 to CoopParticipantCount - 1 do
+    if (CoopShips[Index] <> nil) and (CoopShips[Index].Enemies.Count > 0) then
+      Exit(True);
+end;
+
+// CHANGE: ENHANCEMENT - A co-op participant holding Alt picks up the cargo within its ship's
+// reach into its ranger's hold, on every machine (its ciAltPickup).
+procedure CoopAltPickup(Participant: Integer);
+var
+  Ship: TabShip;
+  Player: TPlayer;
+  NextObj, Obj: TabObject;
+begin
+  Ship := CoopShips[Participant];
+  Player := CoopPlayers[Participant];
+  if (Ship = nil) or (Ship.Health <= 0) or (Player = nil) then
+    Exit;
+  if not Player.IsEquipmentUsable(Player.GetCargoHook) then
+    Exit;
+  NextObj := FirstArcadeObject;
+  while NextObj <> nil do
+  begin
+    Obj := NextObj;
+    NextObj := NextObj.Next;
+    if (Obj is TabItem) and ((Obj as TabItem).Item <> nil) then
+      if ((Obj as TabItem).Item.Weight <= Player.CargoFreeSpace)
+          and (Ship.DistanceTo(Obj) < CargoPickupDistance) then
+        if Player.CalculateCargoHookPower(Player.GetCargoHook) >= (Obj as TabItem).Item.Weight then
+        begin
+          if (Participant = CoopLocalIndex) and (ArcadeBattleScreen.CargoPickupItem = Obj) then
+            ArcadeBattleScreen.CancelCargoPickup;
+          ArcadeBattleScreen.PickUpItemFor(Obj as TabItem, Player);
+        end;
+  end;
+end;
 
 constructor TabItem.Create;
 begin
@@ -76,6 +127,11 @@ var
   Obj: TabObject;
   Ship: TabShipAI;
 begin
+  // CHANGE: ENHANCEMENT - Another co-op participant may take the cargo this player points at.
+  if CoopArcadeActive
+      and (ArcadeBattleScreen <> nil)
+      and (ArcadeBattleScreen.CargoPickupItem = Self) then
+    ArcadeBattleScreen.CancelCargoPickup;
   Obj := FirstArcadeObject;
   while Obj <> nil do
   begin
@@ -192,47 +248,48 @@ var
   NextObj, Obj, Ship: TabObject;
   Kinds: array[0..7] of Integer;
 begin
-  if PlayerArcadeShip <> nil then
-    if PlayerArcadeShip.Enemies.Count > 0 then
+  // CHANGE: ENHANCEMENT - The bonus spawners run for every co-op participant.
+  if BonusesActive then
+  begin
+    Zone := FirstZone;
+    while Zone <> nil do
     begin
-      Zone := FirstZone;
-      while Zone <> nil do
+      if ((Zone.BonusFlags and ArcadeBonusKindMask) <> 0)
+          and (Zone.NextBonusTick >= 0)
+          and (Zone.NextBonusTick <= ArcadeTickCount) then
       begin
-        if ((Zone.BonusFlags and ArcadeBonusKindMask) <> 0)
-            and (Zone.NextBonusTick >= 0)
-            and (Zone.NextBonusTick <= ArcadeTickCount) then
-        begin
-          Zone.NextBonusTick := -1;
-          Count := 0;
-          for Index := Low(Kinds) to High(Kinds) do
-            if (Zone.BonusFlags and (1 shl Index)) <> 0 then
-            begin
-              Kinds[Count] := Index;
-              Inc(Count);
-            end;
-          Bonus := TabItem.Create;
-          Bonus.SetBonus(
-              Kinds[RandomIntRange(0, Count - 1)],
-              (Zone.BonusFlags and ArcadeHiddenBonusFlag) <> 0,
-              Zone
-          );
-          Bonus.State.LongitudeDegrees := Zone.Longitude;
-          Bonus.State.PolarAngleDegrees := Zone.PolarAngle;
-          Bonus.State.BearingDegrees := RandomIntRange(0, 359);
-          Distance := 0;
-          AdvanceSphericalBearingState(
-              Bonus.State.LongitudeDegrees,
-              Bonus.State.PolarAngleDegrees,
-              Bonus.State.BearingDegrees,
-              SphereRadius,
-              Distance
-          );
-          Bonus.AttachVisual;
-          ab_Object_Add(Bonus);
-        end;
-        Zone := Zone.Next;
+        Zone.NextBonusTick := -1;
+        Count := 0;
+        for Index := Low(Kinds) to High(Kinds) do
+          if (Zone.BonusFlags and (1 shl Index)) <> 0 then
+          begin
+            Kinds[Count] := Index;
+            Inc(Count);
+          end;
+        Bonus := TabItem.Create;
+        // CHANGE: ENHANCEMENT - The simulation draws from the co-op stream in a co-op battle.
+        Bonus.SetBonus(
+            Kinds[CoopRandomRange(0, Count - 1)],
+            (Zone.BonusFlags and ArcadeHiddenBonusFlag) <> 0,
+            Zone
+        );
+        Bonus.State.LongitudeDegrees := Zone.Longitude;
+        Bonus.State.PolarAngleDegrees := Zone.PolarAngle;
+        Bonus.State.BearingDegrees := CoopRandomRange(0, 359);
+        Distance := 0;
+        AdvanceSphericalBearingState(
+            Bonus.State.LongitudeDegrees,
+            Bonus.State.PolarAngleDegrees,
+            Bonus.State.BearingDegrees,
+            SphereRadius,
+            Distance
+        );
+        Bonus.AttachVisual;
+        ab_Object_Add(Bonus);
       end;
+      Zone := Zone.Next;
     end;
+  end;
   NextObj := FirstArcadeObject;
   while NextObj <> nil do
   begin
@@ -250,7 +307,7 @@ begin
           Bonus.SpawnZone.NextBonusTick :=
               ArcadeTickCount
                   + 20
-                      * RandomIntRange(
+                      * CoopRandomRange(
                           BonusRespawnSeconds[Bonus.SpawnZone.BonusRespawnClass * 2],
                           BonusRespawnSeconds[Bonus.SpawnZone.BonusRespawnClass * 2 + 1]);
           if (Bonus.BonusKind = abkInvisibility)
@@ -266,7 +323,14 @@ begin
       end;
     end;
   end;
-  if IsVirtualKeyDown(VK_MENU)
+  // CHANGE: ENHANCEMENT - In a co-op battle Alt comes with each participant's input.
+  if CoopArcadeActive then
+  begin
+    for Index := 0 to CoopParticipantCount - 1 do
+      if CoopAltHeld[Index] then
+        CoopAltPickup(Index);
+  end
+  else if IsVirtualKeyDown(VK_MENU)
       and (PlayerArcadeShip <> nil)
       and (PlayerArcadeShip.Health > 0)
       and (LocalPlayer <> nil)
@@ -301,8 +365,9 @@ begin
   Dropped.SetItem(Item);
   for Attempt := 0 to 10 do
   begin
-    Distance := RandomIntRange(MinDistance, MaxDistance);
-    Bearing := RandomIntRange(0, 359);
+    // CHANGE: ENHANCEMENT - The simulation draws from the co-op stream in a co-op battle.
+    Distance := CoopRandomRange(MinDistance, MaxDistance);
+    Bearing := CoopRandomRange(0, 359);
     Dropped.State := Origin.State;
     Dropped.State.BearingDegrees := Bearing;
     AdvanceSphericalBearingState(
@@ -389,7 +454,8 @@ begin
           begin
             Route := ab_Zone_FindReachableRouteZone(TabItem(Obj).SpawnZone);
             if Route <> nil then
-              if RandomIntRange(0, 2) = 0 then
+              // CHANGE: ENHANCEMENT - The co-op stream in a co-op battle.
+              if CoopRandomRange(0, 2) = 0 then
               begin
                 Zone := Route;
                 BestDistance := Distance;

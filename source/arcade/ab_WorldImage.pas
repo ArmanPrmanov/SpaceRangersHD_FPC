@@ -38,6 +38,9 @@ var
 procedure ab_WorldImage_Clear;
 function ab_WorldImage_Add: PabWorldImage;
 procedure ab_WorldImage_Delete(Entry: PabWorldImage);
+// CHANGE: ENHANCEMENT - An owner lets go of its image: deleted now, or in a co-op battle
+// (ab_Coop), where objects go at a fixed tick, when its one-shot animation ends.
+procedure ab_WorldImage_Release(Entry: PabWorldImage);
 function ab_WorldImage_Create(
     Position: TVector3D;
     const FrontPath: WideString;
@@ -65,10 +68,48 @@ uses
   GI_Tail,
   ab_Global,
   Globals,
-  aMyFunction;
+  aMyFunction,
+  ab_Coop;
+
+var
+  // Images released while their one-shot animation was still playing (co-op battles).
+  OrphanWorldImages: TList = nil;
+
+procedure ab_WorldImage_Release(Entry: PabWorldImage);
+begin
+  if not CoopArcadeActive or Entry.LoopAnimation or Entry.Finished then
+  begin
+    ab_WorldImage_Delete(Entry);
+    Exit;
+  end;
+  if OrphanWorldImages = nil then
+    OrphanWorldImages := TList.Create;
+  OrphanWorldImages.Add(Entry);
+end;
+
+// Deletes the released images whose animation has ended.
+procedure DeleteFinishedOrphans;
+var
+  Index: Integer;
+  Entry: PabWorldImage;
+begin
+  if (OrphanWorldImages = nil) or (OrphanWorldImages.Count = 0) then
+    Exit;
+  for Index := OrphanWorldImages.Count - 1 downto 0 do
+  begin
+    Entry := OrphanWorldImages[Index];
+    if Entry.Finished then
+    begin
+      OrphanWorldImages.Delete(Index);
+      ab_WorldImage_Delete(Entry);
+    end;
+  end;
+end;
 
 procedure ab_WorldImage_Clear;
 begin
+  if OrphanWorldImages <> nil then
+    OrphanWorldImages.Clear;
   while not (FirstWorldImage = nil) do
     ab_WorldImage_Delete(LastWorldImage);
   if WorldImageHeap <> 0 then
@@ -189,6 +230,7 @@ var
   Frame: Integer;
   Position, Center: TVector3D;
 begin
+  DeleteFinishedOrphans;
   Center := MakeVector3D(0, 0, 0);
   Center := ProjectPointByMatrix(SphereProjectionMatrix, Center);
   Entry := FirstWorldImage;

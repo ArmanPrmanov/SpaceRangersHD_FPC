@@ -52,13 +52,14 @@ var
 begin
   if Image <> nil then
   begin
-    ab_WorldImage_Delete(Image);
+    // CHANGE: ENHANCEMENT - A co-op object goes at a fixed tick: its explosion plays on.
+    ab_WorldImage_Release(Image);
     Image := nil;
   end;
   if TrailImages <> nil then
   begin
     for Index := 0 to TrailImages.Count - 1 do
-      ab_WorldImage_Delete(TrailImages[Index]);
+      ab_WorldImage_Release(TrailImages[Index]);
     TrailImages.Free;
     TrailImages := nil;
   end;
@@ -118,7 +119,7 @@ begin
     ab_WorldImage_SetLooping(Image, False);
   end
   else if Exploding then
-    DeletionPending := Image.Finished;
+    DeletionPending := CoopVisualDone(Image.Finished);
 end;
 
 procedure TabW12.UpdateVisuals;

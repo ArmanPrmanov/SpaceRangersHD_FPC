@@ -119,8 +119,12 @@ int sr_window_open(int w, int h) {
 #endif
     logical_w = w;
     logical_h = h;
+    /* CHANGE: ENHANCEMENT - The tests' game processes (CoopArcadeTest) run with a hidden window. */
+    Uint32 window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+    if (SDL_getenv("SR_HIDDEN_WINDOW") != NULL)
+        window_flags |= SDL_WINDOW_HIDDEN;
     window = SDL_CreateWindow("Rangers", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h,
-                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+                              window_flags);
     if (!window)
         return 0;
     apply_cursor_visibility();

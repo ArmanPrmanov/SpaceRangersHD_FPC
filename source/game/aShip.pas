@@ -14363,8 +14363,16 @@ begin
         // CHANGE: ENHANCEMENT - A remote human's black hole battle holds the day until its
         // result comes (THuman.ArcadeBattleHeld); not a hole that has none (the star map's
         // 'SkipAB' maps).
+        // CHANGE: ENHANCEMENT - Not together in Keller's hole (the arcade's Keller encounter).
         if IsHuman(Self) and (Pos('SkipAB', THole(OrderTarget).ArcadeMapName) <> 1) then
-          HoldRemoteArcadeBattle(Self);
+          HoldRemoteArcadeBattle(
+              Self,
+              Integer(THole(OrderTarget).Id),
+              not ((THole(OrderTarget).HoleType = 4)
+                  and (Galaxy.KellerLeaveTurn = 0)
+                  and (KellerShip <> nil)
+                  and (Galaxy.KellerMissionState in [4, 5]))
+          );
         if RecordFilm then
         begin
           TEFilm(PrimaryFilm).DetachObject(StepIndex, FilmObject);

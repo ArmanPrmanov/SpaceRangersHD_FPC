@@ -49,6 +49,11 @@ type
     RegenerationRate: Single;
     DamageTakenScale: Single;
     LuckScale: Single;
+    // CHANGE: ENHANCEMENT - Co-op black hole battles (ab_Coop): the object's id, the same on
+    // every machine (creation order), and the tick at which a dying or exploding object is
+    // deleted (0 while it is not).
+    CoopId: Integer;
+    CoopExpireTick: Integer;
     procedure ApplyDamage(Amount: Integer; Source: TabObject; Disrupt: Boolean); virtual;
     procedure UpdateState; virtual;
     procedure Advance; virtual;
@@ -65,6 +70,9 @@ type
     function CollidesWith(Other: TabObject): Boolean;
     function FindCollision: TabObject;
     function RandomRange(BoundA: Integer; BoundB: Integer): Integer;
+    // Whether an exploding projectile is done: its animation's end (Finished), or in a co-op
+    // battle a fixed number of ticks after the first call.
+    function CoopVisualDone(Finished: Boolean): Boolean;
   end;
 var
   FirstArcadeObject: TabObject = nil;
@@ -85,7 +93,8 @@ uses
   ab_Ship,
   ab_ShipAI,
   ab_Zone,
-  ab_StopLine;
+  ab_StopLine,
+  ab_Coop;
 
 constructor TabObject.Create;
 begin
@@ -108,6 +117,9 @@ begin
   RegenerationRate := 0;
   DamageTakenScale := 1;
   LuckScale := 1;
+  // CHANGE: ENHANCEMENT - Co-op battles name objects by their creation order.
+  CoopId := NextCoopObjectId;
+  CoopExpireTick := 0;
 end;
 
 destructor TabObject.Destroy;
@@ -292,7 +304,8 @@ begin
           SphereRadius
       );
       Limit := 2;
-      if PlayerArcadeShip = Self then
+      // CHANGE: ENHANCEMENT - Every co-op participant's ship is a player ship.
+      if IsHumanShip(Self) then
         if Sqr(Velocity.X) + Sqr(Velocity.Y) > Sqr(2.0) then
           Limit := 8;
       if Zone.GravityStrength < 0 then
@@ -352,9 +365,10 @@ begin
               - RemapClamped(ArcDistance, 0, MaxSpeed, SphereLowSpeedDrag, SphereHighSpeedDrag)
       );
   TravelBearing := PointBearingDegrees(MakePointF(0, 0), Velocity);
-  if PlayerArcadeShip = Self then
+  // CHANGE: ENHANCEMENT - Every co-op participant's ship is a player ship.
+  if IsHumanShip(Self) then
   begin
-    PlayerArcadeShip.TurnSpeed :=
+    TabShip(Self).TurnSpeed :=
         RemapClamped(ArcDistance, 0, MaxSpeed, PlayerSlowTurnSpeed, PlayerFastTurnSpeed);
     Limit := PlayerDriftTurnStep;
     Factor := HeadingDifferenceDegrees(TravelBearing, State.BearingDegrees);
@@ -429,6 +443,15 @@ begin
     Result := BoundA + Result mod (BoundB - BoundA + 1)
   else
     Result := BoundB + Result mod (BoundA - BoundB + 1);
+end;
+
+function TabObject.CoopVisualDone(Finished: Boolean): Boolean;
+begin
+  if not CoopArcadeActive then
+    Exit(Finished);
+  if CoopExpireTick = 0 then
+    CoopExpireTick := ArcadeTickCount + CoopProjectileExpireTicks;
+  Result := ArcadeTickCount >= CoopExpireTick;
 end;
 
 procedure ab_Object_Clear;

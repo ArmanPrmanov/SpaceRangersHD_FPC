@@ -26,7 +26,8 @@ const
   // carries a change to the shared storage as its effect (aHoldActions.ckRelayedStorage).
   // 13: TransferMoney, a trade, and RelayCommand carries it as RelayedTransfer to every client
   // (aPlayerActions), so that a peer without them does not join.
-  ProtocolVersion = 13;
+  // 14: ArcadeInput (a co-op black hole battle's lockstep input).
+  ProtocolVersion = 14;
   // The game a peer runs, for the host's log; the data hash decides whether it may join.
   GameVersionText = '2.1.2500';
 
@@ -61,7 +62,22 @@ const
   // TWatchedQuestPage, docs/network.md, Text quests). client -> host: its own human's page;
   // host -> client: any other human's. Presentation only: no command, never logged or hashed.
   nkQuestPage = 18;
+  // CHANGE: ENHANCEMENT - both ways: one participant's input for one tick of a co-op black hole
+  // battle (TArcadeInputMessage; docs/network.md, Co-op black hole battles). client -> host:
+  // its own human's; host -> every client: its own human's and every client's it gets.
+  // Presentation only: no command, never logged or hashed.
+  nkArcadeInput = 19;
 type
+  TArcadeInputMessage = record
+    // The battle: its seed (ab_Coop.CoopBattleSeed).
+    Battle: Cardinal;
+    HumanId: Integer;
+    Tick: Integer;
+    Buttons: Word;
+    WeaponSelect: ShortInt;
+    GroupToggles: Byte;
+    PickupObject: Integer;
+  end;
   // CHANGE: ENHANCEMENT - host -> client: a command the client sent, named by the number the
   // client gave it (Command), was applied (Ok) or refused, and why (docs/network.md,
   // Commands). The host sends it for a refused command, and for a trade it applied (Trades).
@@ -198,6 +214,8 @@ procedure EncodeRelayCommand(HumanId: Integer; const Command: TPlayerCommand; Bu
 function DecodeRelayCommand(Buffer: TBufEC; out HumanId: Integer): TPlayerCommand;
 procedure EncodeAck(Day: Integer; Buffer: TBufEC);
 function DecodeAck(Buffer: TBufEC): Integer;
+procedure EncodeArcadeInput(const Message: TArcadeInputMessage; Buffer: TBufEC);
+function DecodeArcadeInput(Buffer: TBufEC): TArcadeInputMessage;
 procedure EncodeCharacter(const Message: TCharacterMessage; Buffer: TBufEC);
 function DecodeCharacter(Buffer: TBufEC): TCharacterMessage;
 procedure EncodeStatus(const Message: TStatusMessage; Buffer: TBufEC);
@@ -465,6 +483,28 @@ end;
 function DecodeAck(Buffer: TBufEC): Integer;
 begin
   Result := Buffer.GetInt32;
+end;
+
+procedure EncodeArcadeInput(const Message: TArcadeInputMessage; Buffer: TBufEC);
+begin
+  Buffer.AddDWord(Message.Battle);
+  Buffer.AddInt32(Message.HumanId);
+  Buffer.AddInt32(Message.Tick);
+  Buffer.AddWord(Message.Buttons);
+  Buffer.AddByte(Byte(Message.WeaponSelect));
+  Buffer.AddByte(Message.GroupToggles);
+  Buffer.AddInt32(Message.PickupObject);
+end;
+
+function DecodeArcadeInput(Buffer: TBufEC): TArcadeInputMessage;
+begin
+  Result.Battle := Buffer.GetUInt32;
+  Result.HumanId := Buffer.GetInt32;
+  Result.Tick := Buffer.GetInt32;
+  Result.Buttons := Buffer.GetWord;
+  Result.WeaponSelect := ShortInt(Buffer.GetByte);
+  Result.GroupToggles := Buffer.GetByte;
+  Result.PickupObject := Buffer.GetInt32;
 end;
 
 procedure EncodeStatus(const Message: TStatusMessage; Buffer: TBufEC);

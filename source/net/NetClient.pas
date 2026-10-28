@@ -321,6 +321,9 @@ type
     // kept, and sent to the host, which passes it on to the other clients. Not between a loss and
     // the state after the reconnect: the host has ended the quest for its watchers then.
     procedure SendQuestPage(Page: TWatchedQuestPage);
+    // CHANGE: ENHANCEMENT - The local human's input of a co-op black hole battle goes to the host
+    // (docs/network.md, Co-op black hole battles).
+    procedure SendArcadeInput(const Message: TArcadeInputMessage);
     // The latest text-quest page of each human the host sent, and this client's own; emptied
     // when the connection is lost (the host sends the open ones again after the reconnect).
     property QuestPages: TQuestPageStore read FQuestPages;
@@ -358,6 +361,7 @@ uses
   aObjectRefs,
   aPlayerActions,
   aSaveLoad,
+  NetArcade,
   NetDelta;
 
 const
@@ -734,6 +738,7 @@ var
   I, J: Integer;
   Changed: Boolean;
   Page: TWatchedQuestPage;
+  Input: TArcadeInputMessage;
 begin
   case Kind of
     nkWelcome:
@@ -868,6 +873,12 @@ begin
         Page := DecodeWatchedQuestPage(Payload);
         FQuestPages.Put(Page);
         NetLogQuestPage('received', Page, -1);
+      end;
+    // CHANGE: ENHANCEMENT - A partner's input of a co-op black hole battle, kept for the battle.
+    nkArcadeInput:
+      begin
+        Input := DecodeArcadeInput(Payload);
+        StoreArcadeInput(Input);
       end;
     nkRelayCommand:
       begin
@@ -1309,6 +1320,21 @@ begin
     Payload.Free;
   end;
   NetLogQuestPage('sent', Page, -1);
+end;
+
+procedure TNetClient.SendArcadeInput(const Message: TArcadeInputMessage);
+var
+  Payload: TBufEC;
+begin
+  if not Connected then
+    Exit;
+  Payload := TBufEC.Create;
+  try
+    EncodeArcadeInput(Message, Payload);
+    FThread.Send(FPeerId, nkArcadeInput, Payload);
+  finally
+    Payload.Free;
+  end;
 end;
 
 procedure TNetClient.SendCharacter(const Name: WideString; const Character: TJoinCharacter);

@@ -312,6 +312,60 @@ def check_arcade_hold(args, binary: Path, save: Path) -> tuple[bool, str]:
     return True, f"a remote black hole battle holds the day and sends its loot ({loot})"
 
 
+# The co-op black hole battle's test (check_coop_arcade): ticks before both participants leave.
+COOP_TICKS = 1500
+
+
+def free_port() -> int:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def check_coop_arcade(args, binary: Path, save: Path) -> tuple[bool, str]:
+    """Two humans fight one black hole battle in lockstep (--coop-arcade-test; docs/network.md,
+    Co-op black hole battles).
+
+    Two game processes with hidden windows (SR_HIDDEN_WINDOW) load the save, put a second human
+    and both rangers in one hole, connect, and run the battle with a scripted input each until
+    both leave at COOP_TICKS. Their battle hashes must match at every checkpoint, both must leave,
+    and every kill counts for both humans."""
+    port = free_port()
+    env = dict(os.environ, SR_HIDDEN_WINDOW="1")
+    common = [f"--load-save={save}", f"--coop-arcade-ticks={COOP_TICKS}"]
+    host = GameProcess(binary, args.game_dir, [*common, f"--coop-arcade-test=host:{port}"], env)
+    join = GameProcess(binary, args.game_dir, [*common, f"--coop-arcade-test=join:{port}"], env)
+    host_code = host.finish()
+    join_code = join.finish()
+    outputs = {"host": host.output, "join": join.output}
+    for name, code in (("host", host_code), ("join", join_code)):
+        if code != 0 or "coop test done" not in outputs[name]:
+            return False, f"coop arcade: the {name} failed:" + output_tail(outputs[name])
+    hashes = {}
+    for name, output in outputs.items():
+        hashes[name] = {line["tick"]: line["hash"] for line in net_lines(output, "coop hash ")}
+    common_ticks = sorted(set(hashes["host"]) & set(hashes["join"]), key=int)
+    if len(common_ticks) < COOP_TICKS // 50 - 2:
+        return False, f"coop arcade: only {len(common_ticks)} common checkpoints" + output_tail(host.output)
+    for tick in common_ticks:
+        if hashes["host"][tick] != hashes["join"][tick]:
+            return False, f"coop arcade: the battles differ from tick {tick}"
+    results = {name: fields(last_line(output, "coop test result ")) for name, output in outputs.items()}
+    kills = {name: int(result.get("kills", "-1")) for name, result in results.items()}
+    if kills["host"] != kills["join"]:
+        return False, f"coop arcade: kills differ ({kills['host']} and {kills['join']})"
+    holds = {name: int(result.get("hold", "0")) for name, result in results.items()}
+    # Each kill's reward goes to one of the two, never to both.
+    if holds["host"] + holds["join"] > kills["host"]:
+        return False, f"coop arcade: {holds['host']}+{holds['join']} rewards for {kills['host']} kills"
+    return True, (
+        f"two humans fight one black hole battle in lockstep: {len(common_ticks)} checkpoints match "
+        f"over {COOP_TICKS} ticks, {kills['host']} kills count for both, loot "
+        f"{holds['host']}+{holds['join']} items"
+    )
+
+
 def check_script_routing(args, binary: Path, save: Path) -> tuple[bool, str]:
     """Script builtins act for the script's human, on that human's machine (--sim-script-routing).
 
@@ -599,7 +653,7 @@ class GameProcess:
     NET_TIMEOUT seconds after it started has hung: finish kills it and adds a TIMEOUT line,
     naming the command, to its output."""
 
-    def __init__(self, binary: Path, game_dir: Path, options: list[str]):
+    def __init__(self, binary: Path, game_dir: Path, options: list[str], env: dict | None = None):
         self.profile = tempfile.TemporaryDirectory(prefix="rangers-net-")
         self.command = [
             str(binary), f"--game-dir={game_dir}", f"--user-dir={self.profile.name}",
@@ -608,7 +662,7 @@ class GameProcess:
         self.started = time.monotonic()
         self.process = subprocess.Popen(
             self.command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=self.profile.name,
-            creationflags=NO_WINDOW,
+            creationflags=NO_WINDOW, env=env,
         )
         self.lines: list[str] = []
         self.reader = threading.Thread(target=self._read, daemon=True)
@@ -2110,6 +2164,10 @@ def check_save(args, binary: Path, save: Path) -> tuple[bool, list[str]]:
     passed_arcade, note = check_arcade_hold(args, binary, save)
     notes.append(note)
     passed = passed and passed_arcade
+
+    passed_coop, note = check_coop_arcade(args, binary, save)
+    notes.append(note)
+    passed = passed and passed_coop
 
     passed_routing, note = check_script_routing(args, binary, save)
     notes.append(note)

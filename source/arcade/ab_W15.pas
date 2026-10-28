@@ -35,7 +35,8 @@ uses
   Math,
   GlobalsV,
   ab_Ship,
-  aMyFunction;
+  aMyFunction,
+  ab_Coop;
 
 constructor TabW15.Create;
 var
@@ -68,7 +69,8 @@ destructor TabW15.Destroy;
 begin
   if Image <> nil then
   begin
-    ab_WorldImage_Delete(Image);
+    // CHANGE: ENHANCEMENT - A co-op object goes at a fixed tick: its explosion plays on.
+    ab_WorldImage_Release(Image);
     Image := nil;
   end;
   Dec(W15ProjectileCount);
@@ -104,7 +106,8 @@ begin
   if Phase <> 2 then
     ab_WorldImage_SetPosition(Image, GetWorldPosition);
   if ArcadeTickCount mod 150 = 0 then
-    TurnBias := RandomIntRange(25, 40) * (RandomIntRange(0, 1) * 2 - 1);
+    // CHANGE: ENHANCEMENT - The simulation draws from the co-op stream in a co-op battle.
+    TurnBias := CoopRandomRange(25, 40) * (CoopRandomRange(0, 1) * 2 - 1);
   Collision := nil;
   if Phase <> 2 then
   begin
@@ -150,7 +153,7 @@ begin
     end;
   end
   else if Phase = 2 then
-    DeletionPending := Image.Finished;
+    DeletionPending := CoopVisualDone(Image.Finished);
 end;
 
 procedure TabW15.UpdateVisuals;

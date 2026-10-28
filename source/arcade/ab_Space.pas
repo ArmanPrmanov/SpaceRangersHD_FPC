@@ -116,7 +116,8 @@ uses
   ab_Ship,
   ab_W,
   ab_MainForm,
-  ab_Hit;
+  ab_Hit,
+  ab_Coop;
 
 constructor TabSpace.Create;
 begin
@@ -355,14 +356,17 @@ var
   Index, WeaponIndex, Count, MineralBudget, Minimum, Maximum, Kind, VisualIndex, Hitpoints: Integer;
   Ship: TabShipAI;
   Scale: Single;
+  Ranger: TPlayer;
 begin
-  if LocalPlayer = nil then
+  // CHANGE: ENHANCEMENT - A co-op battle is built for its leader's ranger (ab_Coop).
+  Ranger := CoopGenerationPlayer;
+  if Ranger = nil then
     Exit;
   Count := ArcadeBattleScreen.RandomRange(2, 4);
   Count := Min(6, Count + Round(RemapClamped(Galaxy.TechLevel, 4, 8, 0, 2)));
-  if LocalPlayer.BlackHoleKillCount = 0 then
+  if Ranger.BlackHoleKillCount = 0 then
     Count := 1
-  else if LocalPlayer.BlackHoleKillCount
+  else if Ranger.BlackHoleKillCount
       < 5 / GalaxyDifficultyTuning[Galaxy.DifficultyLevels[6]].QuestTimeAndExperienceFactor then
     Count := Min(Count, 2);
   Minimum := Round(RemapClamped(Galaxy.RefreshTechLevel, 3, 8, 0, 6));
@@ -371,36 +375,36 @@ begin
   for Index := 0 to Count - 1 do
   begin
     Ship := TabShipAI.Create;
-    case LocalPlayer.BlackHoleKillCount of
+    case Ranger.BlackHoleKillCount of
       0: Scale := 0.1;
-      1..5: Scale := RemapClamped(LocalPlayer.BlackHoleKillCount, 1, 5, 0.5, 0.6);
-      6..12: Scale := RemapClamped(LocalPlayer.BlackHoleKillCount, 6, 12, 0.6, 0.8);
-      13..23: Scale := RemapClamped(LocalPlayer.BlackHoleKillCount, 13, 23, 0.8, 1);
-      24..40: Scale := RemapClamped(LocalPlayer.BlackHoleKillCount, 24, 40, 1, 1.3);
+      1..5: Scale := RemapClamped(Ranger.BlackHoleKillCount, 1, 5, 0.5, 0.6);
+      6..12: Scale := RemapClamped(Ranger.BlackHoleKillCount, 6, 12, 0.6, 0.8);
+      13..23: Scale := RemapClamped(Ranger.BlackHoleKillCount, 13, 23, 0.8, 1);
+      24..40: Scale := RemapClamped(Ranger.BlackHoleKillCount, 24, 40, 1, 1.3);
     else
-      Scale := RemapClamped(LocalPlayer.BlackHoleKillCount, 41, 100, 1.3, 1.6);
+      Scale := RemapClamped(Ranger.BlackHoleKillCount, 41, 100, 1.3, 1.6);
     end;
     Scale :=
         Scale * GalaxyDifficultyTuning[Galaxy.DifficultyLevels[6]].QuestTimeAndExperienceFactor;
     Scale :=
         RemapClamped(
-                LocalPlayer.Wealth,
+                Ranger.Wealth,
                 Galaxy.AverageRangerCapital / 2,
                 Galaxy.MaxRangerWealth,
                 0.8,
                 1.1)
             * Scale;
-    Scale := RemapClamped(LocalPlayer.StrengthInBestRanger, 0.2, 1, 0.5, 1.1) * Scale;
+    Scale := RemapClamped(Ranger.StrengthInBestRanger, 0.2, 1, 0.5, 1.1) * Scale;
     if Index = 0 then
       Scale := ArcadeBattleScreen.RandomFloat(1, 1.5) * Scale
     else if Index = 1 then
       Scale := ArcadeBattleScreen.RandomFloat(0.7, 1.1) * Scale
     else
       Scale := ArcadeBattleScreen.RandomFloat(0.2, 0.6) * Scale;
-    if LocalPlayer.BlackHoleKillCount = 0 then
+    if Ranger.BlackHoleKillCount = 0 then
       Hitpoints := 150
     else
-      Hitpoints := Round(Max(150, Min(LocalPlayer.GetHull.Weight * 1.2, 525 * Scale)));
+      Hitpoints := Round(Max(150, Min(Ranger.GetHull.Weight * 1.2, 525 * Scale)));
     Ship.CreateShipVisual(
         'Ship.X.' + IntToStr(IncrementWrapped(VisualIndex, 0, 2)),
         Round(RemapClamped(Hitpoints, 150, 900, 50, 80))
@@ -410,12 +414,12 @@ begin
     Ship.MaxHealth := Hitpoints;
     Ship.Health := Hitpoints;
     Ship.MaxSpeed := RemapClamped(Ship.VisualDiameter, 50, 80, 7, 5);
-    Ship.MaxSpeed := RemapClamped(LocalPlayer.BlackHoleKillCount, 0, 30, 0.6, 1) * Ship.MaxSpeed;
+    Ship.MaxSpeed := RemapClamped(Ranger.BlackHoleKillCount, 0, 30, 0.6, 1) * Ship.MaxSpeed;
     Ship.MaxSpeed :=
         Ship.MaxSpeed
             * GalaxyDifficultyTuning[Galaxy.DifficultyLevels[6]].QuestTimeAndExperienceFactor;
     Ship.TurnSpeed := RemapClamped(Ship.VisualDiameter, 50, 80, 4, 3);
-    Ship.TurnSpeed := RemapClamped(LocalPlayer.BlackHoleKillCount, 0, 30, 0.6, 1) * Ship.TurnSpeed;
+    Ship.TurnSpeed := RemapClamped(Ranger.BlackHoleKillCount, 0, 30, 0.6, 1) * Ship.TurnSpeed;
     Ship.TurnSpeed :=
         Ship.TurnSpeed
             * GalaxyDifficultyTuning[Galaxy.DifficultyLevels[6]].QuestTimeAndExperienceFactor;
@@ -427,13 +431,13 @@ begin
     if Index = 0 then
     begin
       Ship.AddWeapon(IncrementWrapped(Kind, Minimum, Maximum));
-      if ((LocalPlayer.BlackHoleKillCount > 0) and (LocalPlayer.StrengthInBestRanger > 0.9))
-          or (LocalPlayer.WealthInBestRanger > 0.9) then
+      if ((Ranger.BlackHoleKillCount > 0) and (Ranger.StrengthInBestRanger > 0.9))
+          or (Ranger.WealthInBestRanger > 0.9) then
         Ship.AddWeapon(IncrementWrapped(Kind, Minimum, Maximum));
     end;
-    if LocalPlayer.BlackHoleKillCount > 0 then
+    if Ranger.BlackHoleKillCount > 0 then
     begin
-      if (LocalPlayer.StrengthInBestRanger > 0.7) or (LocalPlayer.WealthInBestRanger > 0.7) then
+      if (Ranger.StrengthInBestRanger > 0.7) or (Ranger.WealthInBestRanger > 0.7) then
         Ship.AddWeapon(IncrementWrapped(Kind, Minimum, Maximum));
       if ArcadeBattleScreen.RandomRange(0, Round(Danger)) < Danger then
         Ship.AddWeapon(IncrementWrapped(Kind, Minimum, Maximum));
@@ -450,7 +454,7 @@ begin
   MineralBudget :=
       Min(
           CargoHookLevelStats[8].PickupPower,
-          LocalPlayer.Wealth div 40 div GoodsMarket[4].AveragePrice
+          Ranger.Wealth div 40 div GoodsMarket[4].AveragePrice
       );
   MineralBudget := Round(RemapClamped(Count, 2, 4, 0.8, 1.2) * MineralBudget);
   for Index := 1 to 8 do

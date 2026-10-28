@@ -67,6 +67,7 @@ uses
   aSaveLoad,
   ObserverHost,
   HeadlessSim,
+  CoopArcadeTest,
   HeadlessNet,
   CommandLog,
   HotSeat,
@@ -246,6 +247,15 @@ begin
     // CHANGE: ENHANCEMENT - Open a save at startup, past the main menu.
     else if Pos('--load-save=', Argument) = 1 then
       StartupSave := ExpandFileName(Copy(Argument, 13, MaxInt))
+    // CHANGE: ENHANCEMENT - The co-op black hole battle's test (CoopArcadeTest): host:PORT or
+    // join:PORT, and the tick both participants leave at.
+    else if Pos('--coop-arcade-test=', Argument) = 1 then
+    begin
+      CoopTestRole := Copy(Argument, 20, Pos(':', Argument) - 20);
+      CoopTestPort := StrToInt(Copy(Argument, Pos(':', Argument) + 1, MaxInt));
+    end
+    else if Pos('--coop-arcade-ticks=', Argument) = 1 then
+      CoopTestTicks := StrToInt(Copy(Argument, 21, MaxInt))
     else if Pos('--sim-hotseat=', Argument) = 1 then
       Simulation.HotSeatDays := StrToInt(Copy(Argument, 15, MaxInt))
     // CHANGE: ENHANCEMENT - Networked play over loopback (ROADMAP.md, Phase 5): a headless
@@ -531,6 +541,7 @@ begin
     // game starts, joins and applies the host's state here.
     ApplyTurnPass;
     NetBetweenScreens;
+    CoopArcadeTestBetweenScreens;
     NextScreen := RequestedScreenId;
     if NextScreen = screenLoadRobot then
       raise Exception.Create('This port has robot battles disabled');
@@ -815,7 +826,8 @@ begin
         if LogReady then
           ErrorText :=
               ErrorText + #13#10#13#10 + 'Log: ' + UserDirectory + '/' + RuntimeLogFileName;
-        if SimulationMode then
+        // CHANGE: ENHANCEMENT - The co-op battle's test processes show no box either.
+        if SimulationMode or (CoopTestRole <> '') then
           WriteLn(StdErr, ErrorText)
         else
           MessageBoxA(

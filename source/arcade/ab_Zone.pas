@@ -111,7 +111,8 @@ uses
   GR_Main,
   Globals,
   aMyFunction,
-  ab_StopLine;
+  ab_StopLine,
+  ab_Coop;
 
 procedure ab_Zone_Clear;
 begin
@@ -504,17 +505,18 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - These draw from the co-op stream in a co-op battle (ab_Coop).
 function ab_Zone_RandomKind(Kind: Integer): PabZone;
 begin
-  Result := ab_Zone_GetKind(Kind, RandomIntRange(0, ab_Zone_CountKind(Kind) - 1));
+  Result := ab_Zone_GetKind(Kind, CoopRandomRange(0, ab_Zone_CountKind(Kind) - 1));
 end;
 
 function ab_Zone_RandomPosition(Zone: PabZone): TSphericalBearingState;
 begin
   Result :=
       AdvanceSphericalStateOnCurrentSphere(
-          MakeSphericalBearingState(Zone.Longitude, Zone.PolarAngle, RandomIntRange(0, 360)),
-          Random * Zone.Radius / 2 + Zone.Radius / 4
+          MakeSphericalBearingState(Zone.Longitude, Zone.PolarAngle, CoopRandomRange(0, 360)),
+          CoopRandomFloat * Zone.Radius / 2 + Zone.Radius / 4
       );
 end;
 
@@ -862,7 +864,7 @@ begin
     while Attempts > 0 do
     begin
       Dec(Attempts);
-      Candidate := Current.Routes[RandomIntRange(0, Current.Routes.Count - 1)];
+      Candidate := Current.Routes[CoopRandomRange(0, Current.Routes.Count - 1)];
       if (Candidate <> nil)
           and (Candidate.Routes <> nil)
           and (Candidate.Routes.Count >= 1)

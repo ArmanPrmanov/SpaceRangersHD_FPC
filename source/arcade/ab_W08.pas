@@ -38,7 +38,8 @@ uses
   Math,
   ab_Ship,
   GlobalsV,
-  aMyFunction;
+  aMyFunction,
+  ab_Coop;
 
 constructor TabW08.Create;
 begin
@@ -54,7 +55,8 @@ destructor TabW08.Destroy;
 begin
   if Image <> nil then
   begin
-    ab_WorldImage_Delete(Image);
+    // CHANGE: ENHANCEMENT - A co-op object goes at a fixed tick: its explosion plays on.
+    ab_WorldImage_Release(Image);
     Image := nil;
   end;
   inherited Destroy;
@@ -126,7 +128,7 @@ begin
       Child.Launch(
           SourceObject as TabShip,
           Damage div 3,
-          RandomIntRange(0, 360),
+          CoopRandomRange(0, 360),
           Generation + 1,
           Self
       );
@@ -135,7 +137,7 @@ begin
       Child.Launch(
           SourceObject as TabShip,
           Damage div 3,
-          RandomIntRange(0, 360),
+          CoopRandomRange(0, 360),
           Generation + 1,
           Self
       );
@@ -144,7 +146,7 @@ begin
       Child.Launch(
           SourceObject as TabShip,
           Damage div 3,
-          RandomIntRange(0, 360),
+          CoopRandomRange(0, 360),
           Generation + 1,
           Self
       );
@@ -155,7 +157,7 @@ begin
     ab_WorldImage_SetLooping(Image, False);
   end
   else if Exploding then
-    DeletionPending := Image.Finished;
+    DeletionPending := CoopVisualDone(Image.Finished);
 end;
 
 procedure TabW08.UpdateVisuals;

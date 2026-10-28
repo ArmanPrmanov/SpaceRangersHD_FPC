@@ -51,7 +51,8 @@ destructor TabW18.Destroy;
 begin
   if Image <> nil then
   begin
-    ab_WorldImage_Delete(Image);
+    // CHANGE: ENHANCEMENT - A co-op object goes at a fixed tick: its explosion plays on.
+    ab_WorldImage_Release(Image);
     Image := nil;
   end;
   inherited Destroy;
@@ -162,7 +163,7 @@ begin
     ab_WorldImage_SetLooping(Image, False);
   end
   else if Exploding then
-    DeletionPending := Image.Finished;
+    DeletionPending := CoopVisualDone(Image.Finished);
 end;
 
 procedure TabW18.UpdateVisuals;

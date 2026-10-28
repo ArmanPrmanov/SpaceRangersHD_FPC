@@ -1,23 +1,24 @@
 # How each unit refers to humans. Written by tools/player_sites.py --update.
 # unit	layer	unclassified	local	actor	each	any	host
 Achievements.pas	presentation	0	78	0	0	0	0
-arcade/ab_Hit.pas	presentation	0	4	0	0	0	0
+arcade/ab_Coop.pas	presentation	0	1	0	0	1	0
+arcade/ab_Hit.pas	presentation	0	1	0	0	0	0
 arcade/ab_Item.pas	presentation	0	6	0	0	0	0
-arcade/ab_MainForm.pas	presentation	0	147	0	0	0	0
-arcade/ab_Ship.pas	presentation	0	3	0	0	0	0
-arcade/ab_ShipAI.pas	presentation	0	45	0	0	0	0
-arcade/ab_Space.pas	presentation	0	63	0	0	0	0
+arcade/ab_MainForm.pas	presentation	0	131	0	0	0	0
+arcade/ab_Ship.pas	presentation	0	1	0	0	0	0
+arcade/ab_ShipAI.pas	presentation	0	61	0	0	0	0
+arcade/ab_Space.pas	presentation	0	41	0	0	0	0
 aSaveLoad.pas	presentation	0	84	0	5	1	0
 CheatCode.pas	presentation	0	9	3	0	0	0
 CommandLog.pas	presentation	0	0	0	3	1	0
-game/aArcadeActions.pas	simulation	0	6	14	0	0	0
+game/aArcadeActions.pas	simulation	0	6	15	0	1	0
 game/aAsteroid.pas	simulation	0	0	0	1	1	0
 game/aCommands.pas	simulation	0	1	14	0	0	0
 game/aConst.pas	simulation	0	8	8	0	0	0
-game/aGalaxy.pas	simulation	18	106	0	72	75	9
+game/aGalaxy.pas	simulation	18	106	0	72	77	9
 game/aHoldActions.pas	simulation	0	17	94	4	0	0
-game/aHuman.pas	simulation	0	22	21	43	30	3
-game/aHumanSave.pas	simulation	0	10	0	31	5	0
+game/aHuman.pas	simulation	0	22	21	50	30	3
+game/aHumanSave.pas	simulation	0	11	0	36	6	0
 game/aItem.pas	simulation	0	6	4	5	1	0
 game/aKling.pas	simulation	0	0	0	12	9	6
 game/aMissile.pas	simulation	0	4	0	0	0	0
@@ -30,7 +31,7 @@ game/aPlayerActions.pas	simulation	0	7	64	4	6	0
 game/aQuestActions.pas	simulation	0	5	10	2	0	0
 game/aRanger.pas	simulation	0	8	0	27	88	4
 game/aRuins.pas	simulation	0	19	2	8	11	2
-game/aShip.pas	simulation	8	40	0	59	166	10
+game/aShip.pas	simulation	2	20	0	59	189	10
 game/aShopActions.pas	simulation	0	8	17	0	0	0
 game/aShopStock.pas	simulation	0	7	0	3	0	0
 game/aStationActions.pas	simulation	0	2	64	5	1	0
@@ -44,6 +45,7 @@ GameBootstrap.pas	presentation	0	1	0	0	0	0
 Globals.pas	presentation	0	20	0	0	0	0
 net/NetClient.pas	presentation	0	8	0	0	1	0
 net/NetHost.pas	presentation	0	4	0	24	4	0
+observer/CoopArcadeTest.pas	presentation	0	8	0	0	0	0
 observer/HeadlessNet.pas	presentation	0	118	3	37	4	9
 observer/HeadlessSim.pas	presentation	0	20	7	73	14	0
 observer/ObserverCapture.pas	presentation	0	2	0	0	0	0
@@ -51,7 +53,7 @@ observer/ObserverHost.pas	presentation	0	1	0	0	0	0
 observer/ObserverSimulation.pas	presentation	0	4	0	0	0	0
 quests/fPlanetQuest.pas	presentation	0	11	0	0	0	0
 quests/QuestRun.pas	presentation	0	59	0	0	0	0
-scene/aEFilm.pas	presentation	0	4	0	0	0	0
+scene/aEFilm.pas	presentation	0	6	0	0	0	0
 scene/aEObjInfo.pas	presentation	0	17	0	0	0	0
 scene/fFilm.pas	presentation	0	23	0	0	0	0
 scene/SE_Ship2.pas	presentation	0	2	0	0	0	0
@@ -87,9 +89,9 @@ screens/fShip2.pas	presentation	0	591	0	0	0	0
 screens/fStarMap.pas	presentation	0	449	0	4	5	0
 screens/fTalk.pas	presentation	0	731	0	0	0	0
 screens/HotSeat.pas	presentation	0	3	0	4	0	0
-screens/NetPlay.pas	presentation	0	63	0	7	3	1
+screens/NetPlay.pas	presentation	0	77	0	9	5	1
 screens/SimEventHandlers.pas	presentation	0	4	0	0	0	0
 script/aScript.pas	simulation	0	22	79	9	3	0
 script/aScriptFun.pas	simulation	0	59	281	3	51	0
-total	simulation	30	437	818	344	568	49
-total	presentation	0	4518	13	157	34	10
+total	simulation	24	418	819	356	595	49
+total	presentation	0	4516	13	159	37	10

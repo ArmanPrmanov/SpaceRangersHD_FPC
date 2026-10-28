@@ -20,6 +20,7 @@ Read [humans.md](humans.md) (the barrier, hot-seat, `ActingHuman`) and
 | `source/net/NetThread.pas` | the network thread: owns every socket, moves bytes, queues whole messages per peer |
 | `source/net/NetHost.pas` | the host session: peers, joins, commands in, states and films out |
 | `source/net/NetClient.pas` | the client session: hello, commands out, films and states in, the reconnect |
+| `source/net/NetArcade.pas` | the inputs of a co-op black hole battle that came over the network (Co-op black hole battles) |
 | `source/net/NetSession.pas` | what the rest of the game calls: role, pump, hooks |
 | `source/observer/HeadlessNet.pas` | the headless host and client for tests (Tests) |
 | `source/screens/NetPlay.pas` | the game's screens in a session: `--host`/`--join`, the waits, the client's film and state (The day, Films, Applying state, Waiting) |
@@ -1033,11 +1034,69 @@ on the client, as the host's own ranger does on the host:
 - **A disconnect.** A disconnected human holds no day; a client that reconnects
   while its flag is set gets it with the state and plays the battle again.
 
-Each human fights alone: two rangers in one hole fight two battles, one on each
-machine. Not carried by `ArcadeLoot`: the galaxy events the battle adds (a
+Two humans who fall into one hole the same day fight it together (Co-op black
+hole battles); anyone else fights alone. Not carried by `ArcadeLoot`: the galaxy events the battle adds (a
 scripted battle's labelled kills, the subportal penalty), the scripts its loot
 runs (`satOnABItemDrop`) beyond what they change in the item, and Keller's
 reward. The old hyperspace arcade battle is still not offered to a client.
+
+## Co-op black hole battles
+
+Two humans whose rangers fall into the same black hole on the same day fight
+its arcade battle together, in real time, each on its own machine.
+
+- **Pairing.** On the host, the hole step notes the hole of every human that
+  falls in (`HoldRemoteArcadeBattle`, with whether the battle may be shared:
+  not Keller's), and the day's end pairs them two by two in `Session.Humans`
+  order (`aHuman.PairArcadeBattles`, from `StartDayRound`): each gets the
+  other as `THuman.ArcadePartnerId`, in the per-human save block (version 7),
+  so the clients learn it with the state. The host's own human is paired like
+  any other. A third human in the same hole fights alone. `ArcadeBattleExit`
+  ends the actor's partnership.
+- **Lockstep.** Every participant's machine runs the whole battle
+  (`source/arcade/ab_Coop.pas` says what makes it deterministic). When the
+  battle screen opens, `CoopPrepareHook` (`NetPlay.SessionCoopPrepare`) checks
+  that both are still paired and in the session, orders them by
+  `Session.Humans` (the first is the leader, whose ranger the encounter is
+  built for), derives the battle's seed from the hole, the day and the leader,
+  and notes both rangers' holds (`BeginArcadeLoot`). A tick T runs only with
+  every participant's input of T (`TArcadeInput`: keys, autopilot, weapon
+  choice, group toggles, cargo pickups, exit), sampled 4 ticks (80 ms) ahead
+  and sent at once; a missing input stalls the battle, and after a second the
+  screen names the human it waits for.
+- **The wire.** `ArcadeInput` (protocol 14) carries one input. A client sends
+  its own to the host; the host keeps every input it gets and passes it on to
+  every other client, and sends its own human's to all. Both sides store what
+  comes in `NetArcade` as it arrives, on any screen, since a partner may start
+  first. Inputs are neither commands nor logged.
+- **Kills and loot.** Every kill counts for both rangers (their black hole kill
+  counts) on every machine. Each kill draws the reward's recipient from the
+  battle's own random stream, so every machine agrees on it; only the
+  recipient's machine makes the item. Bonuses and cargo go to the ship that
+  picks them up. At the end each machine takes back every participant's
+  changes and sends only its own human's, as `ArcadeLoot` (Black hole battles).
+- **Leaving.** A participant leaves at the tick its exit input names (the exit
+  zone, Esc after the victory, or the end of its defeat, with one hull point):
+  its ship leaves the battle on every machine, and the other fights on. A
+  participant the session reports gone (`CoopGoneHook`: on the host its
+  connection, on a client the host's status) flies by autopilot from then on.
+- **Off in a co-op battle**: pause, the equipment screen, and anything else that
+  would stop one machine's battle. A modal box (the exit's confirmation) stalls
+  the partner while it is open.
+- **Tests.** `--sim-arcade-hold` pairs two humans in one hole. The battle itself
+  runs in two game processes with hidden windows (`SR_HIDDEN_WINDOW`), started
+  by `check_coop_arcade` in `tools/test.py` with `--load-save` and
+  `--coop-arcade-test=host:PORT` / `join:PORT` (`source/observer/CoopArcadeTest.pas`):
+  before the first screen both put a second human and both rangers in one hole,
+  connect over a bare connection, fly a scripted input until both leave, and
+  print the battle's hash every 50 ticks; the hashes must match, and the kills
+  must count for both. A test process shows no error box (it writes to the
+  output instead).
+
+Not covered by the tests: the pairing inside a real day and the session's
+relay (the test connects the two processes directly), a participant that
+disconnects mid-battle, and cheats, which act on one machine and would split
+the battle.
 
 ## Remote dialogue
 

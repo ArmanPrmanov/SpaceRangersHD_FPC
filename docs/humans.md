@@ -488,11 +488,14 @@ reference table:
   allows cheats, the flag's default;
 - from version 6, the humans whose black hole battle holds the day
   (`THuman.ArcadeBattleHeld`, [network.md](network.md), Black hole battles).
-  An older block holds none.
+  An older block holds none;
+- from version 7, each human's co-op battle partner (`THuman.ArcadePartnerId`,
+  [network.md](network.md), Co-op black hole battles). An older block pairs no
+  one.
 
 The block is written only when a save without it would load differently: more
 than one human, a flag that is not its default, a cheat on record, a finished
-human, quest days owed, a held battle, or a script or event bound to a human other than the first. A single-player save is
+human, quest days owed, a held or paired battle, or a script or event bound to a human other than the first. A single-player save is
 therefore byte for byte as before. A save without the block loads as the
 original does: every script and event is bound to the first human. After a
 load the local human is still the saved `PlayerRangerIndex`, and

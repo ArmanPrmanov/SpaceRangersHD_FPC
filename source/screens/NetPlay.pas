@@ -169,6 +169,8 @@ uses
   aCommands,
   aArcadeActions,
   aScript,
+  ab_Coop,
+  NetArcade,
   ThreadCalc,
   NetThread,
   NetProtocol,
@@ -2308,4 +2310,151 @@ begin
     StartHostingGame;
 end;
 
+// CHANGE: ENHANCEMENT - A co-op black hole battle in a session (docs/network.md, Co-op black hole
+// battles): the battle screen asks CoopPrepareHook whether its battle is fought together, and
+// the lockstep's input goes through the session (NetArcade keeps what comes).
+
+function CoopMessage(Tick: Integer; const Input: TArcadeInput): TArcadeInputMessage;
+begin
+  Result.Battle := CoopBattleSeed;
+  Result.HumanId := LocalHuman.Id;
+  Result.Tick := Tick;
+  Result.Buttons := Input.Buttons;
+  Result.WeaponSelect := Input.WeaponSelect;
+  Result.GroupToggles := Input.GroupToggles;
+  Result.PickupObject := Input.PickupObject;
+end;
+
+procedure SessionCoopSend(Tick: Integer; const Input: TArcadeInput);
+var
+  Message: TArcadeInputMessage;
+begin
+  Message := CoopMessage(Tick, Input);
+  StoreArcadeInput(Message);
+  if CurrentHost <> nil then
+    CurrentHost.SendArcadeInput(Message)
+  else if CurrentClient <> nil then
+    CurrentClient.SendArcadeInput(Message);
+end;
+
+function SessionCoopFetch(Tick, Participant: Integer; out Input: TArcadeInput): Boolean;
+var
+  Message: TArcadeInputMessage;
+begin
+  Input := EmptyArcadeInput;
+  Result :=
+      (Participant >= 0)
+          and (Participant < CoopParticipantCount)
+          and FindArcadeInput(CoopBattleSeed, CoopHumanIds[Participant], Tick, Message);
+  if Result then
+  begin
+    Input.Buttons := Message.Buttons;
+    Input.WeaponSelect := Message.WeaponSelect;
+    Input.GroupToggles := Message.GroupToggles;
+    Input.PickupObject := Message.PickupObject;
+  end;
+end;
+
+// Whether the human HumanId has left the session, as this machine knows it: on a host its
+// connection, on a client the host's last status (and the host itself).
+function CoopHumanGone(HumanId: Integer): Boolean;
+var
+  I: Integer;
+  Human: THuman;
+begin
+  if (LocalHuman <> nil) and (HumanId = LocalHuman.Id) then
+    Exit(False);
+  if CurrentHost <> nil then
+  begin
+    Human := FindHuman(HumanId);
+    Exit((Human = nil) or not Human.Connected or Human.Finished);
+  end;
+  if (CurrentClient = nil) or not CurrentClient.Connected then
+    Exit(True);
+  for I := 0 to High(CurrentClient.Status.Humans) do
+    if CurrentClient.Status.Humans[I].Id = HumanId then
+      Exit(not CurrentClient.Status.Humans[I].Connected);
+  Result := False;
+end;
+
+function SessionCoopGone(Participant: Integer): Boolean;
+begin
+  Result :=
+      (Participant < 0)
+          or (Participant >= CoopParticipantCount)
+          or CoopHumanGone(CoopHumanIds[Participant]);
+end;
+
+procedure SessionCoopHash(Tick: Integer; Hash: Cardinal);
+begin
+  NetLog(Format('coop hash battle=%u tick=%d hash=%.8x', [CoopBattleSeed, Tick, Hash]));
+end;
+
+procedure SessionCoopFinish;
+begin
+  if CoopArcadeActive then
+    NetLog(Format('coop battle %u closed', [CoopBattleSeed]));
+  CoopSendHook := nil;
+  CoopFetchHook := nil;
+  CoopGoneHook := nil;
+  CoopHashHook := nil;
+end;
+
+// The local human's black hole battle is fought with its partner (THuman.ArcadePartnerId) when
+// both are still paired on this machine's copy and the partner is in the session.
+procedure SessionCoopPrepare;
+var
+  Partner: THuman;
+  First, Second: THuman;
+  HoleId: Cardinal;
+begin
+  CoopArcadeActive := False;
+  if (NetRole = nrNone) or (Galaxy = nil) or (LocalHuman = nil) or (LocalPlayer = nil)
+      or (LocalHuman.ArcadePartnerId = 0) or not (LocalPlayer.OrderTarget is THole) then
+    Exit;
+  Partner := FindHuman(LocalHuman.ArcadePartnerId);
+  if (Partner = nil) or (Partner.ArcadePartnerId <> LocalHuman.Id) or (Partner.Player = nil)
+      or Partner.Finished or CoopHumanGone(Partner.Id) then
+    Exit;
+  // Every machine orders the participants alike: Session.Humans order.
+  if Session.Humans.IndexOf(LocalHuman) < Session.Humans.IndexOf(Partner) then
+  begin
+    First := LocalHuman;
+    Second := Partner;
+  end
+  else
+  begin
+    First := Partner;
+    Second := LocalHuman;
+  end;
+  CoopParticipantCount := 2;
+  CoopHumanIds[0] := First.Id;
+  CoopHumanIds[1] := Second.Id;
+  if First = LocalHuman then
+    CoopLocalIndex := 0
+  else
+    CoopLocalIndex := 1;
+  HoleId := Cardinal(THole(LocalPlayer.OrderTarget).Id);
+  CoopBattleSeed :=
+      (HoleId * 2654435761) xor (Cardinal(Galaxy.CurrentTurn) * 40503) xor Cardinal(First.Id);
+  if CoopBattleSeed = 0 then
+    CoopBattleSeed := 1;
+  KeepOnlyArcadeBattle(CoopBattleSeed);
+  BeginArcadeLoot([First.Player, Second.Player]);
+  CoopSendHook := @SessionCoopSend;
+  CoopFetchHook := @SessionCoopFetch;
+  CoopGoneHook := @SessionCoopGone;
+  CoopHashHook := @SessionCoopHash;
+  CoopArcadeActive := True;
+  NetLog(
+      Format(
+          'coop battle %u: humans %d and %d, local %d',
+          [CoopBattleSeed, First.Id, Second.Id, CoopLocalIndex]
+      )
+  );
+end;
+
+initialization
+  CoopPrepareHook := @SessionCoopPrepare;
+  CoopFinishHook := @SessionCoopFinish;
 end.

@@ -36,7 +36,8 @@ implementation
 uses
   Math,
   GlobalsV,
-  aMyFunction;
+  aMyFunction,
+  ab_Coop;
 
 constructor TabW13.Create;
 begin
@@ -52,7 +53,8 @@ destructor TabW13.Destroy;
 begin
   if Image <> nil then
   begin
-    ab_WorldImage_Delete(Image);
+    // CHANGE: ENHANCEMENT - A co-op object goes at a fixed tick: its explosion plays on.
+    ab_WorldImage_Release(Image);
     Image := nil;
   end;
   inherited Destroy;
@@ -120,13 +122,13 @@ begin
     begin
       Child := TabW13.Create;
       ab_Object_Add(Child);
-      Child.Launch(SourceObject, Damage div 3, RandomIntRange(0, 360), Generation + 1, Self);
+      Child.Launch(SourceObject, Damage div 3, CoopRandomRange(0, 360), Generation + 1, Self);
       Child := TabW13.Create;
       ab_Object_Add(Child);
-      Child.Launch(SourceObject, Damage div 3, RandomIntRange(0, 360), Generation + 1, Self);
+      Child.Launch(SourceObject, Damage div 3, CoopRandomRange(0, 360), Generation + 1, Self);
       Child := TabW13.Create;
       ab_Object_Add(Child);
-      Child.Launch(SourceObject, Damage div 3, RandomIntRange(0, 360), Generation + 1, Self);
+      Child.Launch(SourceObject, Damage div 3, CoopRandomRange(0, 360), Generation + 1, Self);
     end;
     Exploding := True;
     ab_WorldImage_Set(Image, GetWorldPosition, 'GAI,Bm.AB.w08a_f', 'GAI,Bm.AB.w08a_s');
@@ -134,7 +136,7 @@ begin
     ab_WorldImage_SetLooping(Image, False);
   end
   else if Exploding then
-    DeletionPending := Image.Finished;
+    DeletionPending := CoopVisualDone(Image.Finished);
 end;
 
 procedure TabW13.UpdateVisuals;

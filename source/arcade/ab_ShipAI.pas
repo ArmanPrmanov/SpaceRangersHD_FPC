@@ -86,6 +86,9 @@ type
     function TryMoveToDestination(Zone: PabZone; Longitude: Double; PolarAngle: Double): Boolean;
     procedure SetAndFollowRoute(Target: PabZone);
     procedure FollowDestinationRoute;
+    // CHANGE: ENHANCEMENT - A co-op battle's kill (ab_Coop): credit and reward.
+    procedure CoopApplyKill;
+    procedure CoopGrantReward(LivingEnemies: Integer);
   end;
 procedure LinkRecoveredTypes;
 implementation
@@ -108,7 +111,8 @@ uses
   ab_Space,
   fShip2,
   Achievements,
-  aNormalShip;
+  aNormalShip,
+  ab_Coop;
 // Source helper: preserve the native full-width load before a Byte stack argument.
 // Passing the local directly lets DCC32 narrow MOV EAX to MOV AL. This identity
 // inlines without a call, extra assignment or temporary in ApplyDamage.
@@ -173,7 +177,9 @@ var
   SavedChaoticRandom: Boolean;
 begin
   Result := nil;
-  if (LocalPlayer <> nil) and (PlayerArcadeShip <> nil) then
+  // CHANGE: ENHANCEMENT - In a co-op battle the reward is the local recipient's, whose ship
+  // may be gone, and the living enemies are every participant's.
+  if (LocalPlayer <> nil) and ((PlayerArcadeShip <> nil) or CoopArcadeActive) then
     if RewardObject <> nil then
     begin
       if (RewardObject is TArtefact) and not Preview then
@@ -215,6 +221,9 @@ begin
       Reward := nil;
       LivingEnemies := 0;
       KellerPresent := False;
+      if CoopArcadeActive then
+        LivingEnemies := CountLivingHumanEnemies
+      else
       for Index := 0 to PlayerArcadeShip.Enemies.Count - 1 do
       begin
         if (KellerArcadeShip <> nil)
@@ -320,7 +329,10 @@ begin
     inherited ApplyDamage(Amount, Source, Disrupt);
     LastDamageTick := ArcadeTickCount;
     Inc(RecentHitCount);
-    if (LocalPlayer <> nil)
+    // CHANGE: ENHANCEMENT - A co-op battle's deaths count the same way on every machine.
+    if CoopArcadeActive and (Health <= 0) then
+      CoopApplyKill
+    else if (LocalPlayer <> nil)
         and (Health <= 0)
         and (PlayerArcadeShip <> nil)
         and (Enemies.IndexOf(PlayerArcadeShip) < 0) then
@@ -502,6 +514,171 @@ begin
   end;
 end;
 
+// CHANGE: ENHANCEMENT - A co-op battle's death (ab_Coop). A ship that a participant's ship has
+// as enemy counts as a kill for every participant's ranger, on every machine; its reward's
+// recipient is drawn from the co-op stream on every machine, and only the recipient's machine
+// makes the reward, into its LocalPlayer, without touching anything the battle reads.
+procedure TabShipAI.CoopApplyKill;
+var
+  Index, Recipient, LivingEnemies: Integer;
+  Player: TPlayer;
+  SavedRandomState: Cardinal;
+begin
+  if not IsEnemyOfHumans(Self) then
+    Exit;
+  aCalc.WaitForTurnCalculationUI;
+  LivingEnemies := CountLivingHumanEnemies;
+  RandomState := InitialRandomSeed;
+  for Index := 0 to CoopParticipantCount - 1 do
+  begin
+    Player := CoopPlayers[Index];
+    if Player = nil then
+      Continue;
+    if Player.Order = soJumpHole then
+      Inc(Player.BlackHoleKillCount)
+    else
+    begin
+      Inc(Player.HyperspaceKillCount);
+      if Player.InHyperspace and (Player.OwnerId <> Byte(oiPirate)) then
+        Player.AddRankPoints(2);
+    end;
+    if Index = CoopLocalIndex then
+      TryAddAchievementProgress('HOLEMAN', 1);
+  end;
+  Recipient := CoopRandomRange(0, CoopParticipantCount - 1);
+  if (Recipient = CoopLocalIndex) and (LocalPlayer <> nil) and (Galaxy <> nil) then
+  begin
+    SavedRandomState := RandomState;
+    CoopGrantReward(LivingEnemies);
+    RandomState := SavedRandomState;
+  end;
+  aCalc.WaitForTurnCalculationUI;
+end;
+
+// The local recipient's reward for a co-op kill: the single-player reward of ApplyDamage.
+procedure TabShipAI.CoopGrantReward(LivingEnemies: Integer);
+var
+  Attempts: Integer;
+  Item: TEquipment;
+  Reward: TItem;
+  RewardScale: Single;
+  SavedNextItemId: Cardinal;
+  ItemType: Byte;
+  Weight, Level: Integer;
+  Info: PWeaponInfo;
+  MinSize, MaxSize: Single;
+  MinLevel, MaxLevel, WeaponTech: Integer;
+  procedure Store(Item: TObject; AtStart: Boolean);
+  begin
+    ClearPlayerHoldEntries(LocalHuman);
+    LocalPlayer.ScriptItemsAct(satOnABItemDrop, Item, nil, 0);
+    if Item is TArtefact then
+      LocalPlayer.Artefacts.Insert(0, Item)
+    else if AtStart then
+      LocalPlayer.Inventory.Insert(1, Item)
+    else
+      LocalPlayer.Inventory.Add(Item);
+    ArcadeBattleScreen.ListedObjects.Add(Item);
+  end;
+begin
+  Reward := GetRewardItem(False);
+  if Reward <> nil then
+  begin
+    Store(Reward, False);
+    Exit;
+  end;
+  if RewardObject <> nil then
+  begin
+    Store(RewardObject, False);
+    RewardObject := nil;
+    LocalPlayer.RefreshDerivedStats(True);
+    Exit;
+  end;
+  if RandomRewardsDisabled
+      or not ((LivingEnemies = 0)
+          or ((LivingEnemies = 1) and (RandomRange(0, 100) * LuckScale > 50))
+          or ((LivingEnemies >= 2) and (RandomRange(0, 100) * LuckScale > 60))) then
+    Exit;
+  Attempts := 0;
+  RewardScale :=
+      Galaxy.GetArcadeDropValueModifier
+          * RemapClamped(LivingEnemies, 0, 5, 1.56, 0.26)
+          * GalaxyDifficultyTuning[Galaxy.DifficultyLevels[7]].ArcadeRewardScale;
+  if LocalPlayer.Order = soJumpHole then
+  begin
+    if LivingEnemies = 0 then
+      RewardScale := RewardScale * 3
+    else
+      RewardScale := 1.2 * RewardScale;
+  end
+  else
+    RewardScale :=
+        RemapClamped(
+                CurrentArcadeSpace.Danger + CurrentArcadeSpace.ApproachDanger,
+                50,
+                250,
+                0.3,
+                2)
+            * RewardScale;
+  MinSize := RemapClamped(Galaxy.TechLevel, 3, 8, EquipmentSizeFactors[4], EquipmentSizeFactors[5]);
+  MaxSize := RemapClamped(Galaxy.TechLevel, 3, 8, EquipmentSizeFactors[2], EquipmentSizeFactors[4]);
+  MinLevel := Round(RemapClamped(Galaxy.TechLevel, 3, 8, 0, 0.75) * 7 + 1);
+  MaxLevel := Round(RemapClamped(Galaxy.TechLevel, 1, 7, 0.5, 1) * 7 + 1);
+  SavedNextItemId := Galaxy.NextItemId;
+  while True do
+  begin
+    if RandomRange(1, 110) > 70 then
+    begin
+      WeaponTech := RandomRange(Max(1, Galaxy.TechLevel - 1), Min(8, Galaxy.TechLevel + 1));
+      SelectArcadeRewardWeapon(Self, WeaponTech, Info);
+      Weight := RandomRange(Round(Info.AverageSize * MinSize), Round(Info.AverageSize * MaxSize));
+      Level := RandomRange(MinLevel, MaxLevel);
+      Item := CreateGeneratedWeapon(Info, Weight, Level, 6);
+    end
+    else
+    begin
+      ItemType := PickRandomItemType([Ord(t_FuelTanks)..Ord(t_DefGenerator)]);
+      Weight :=
+          RandomRange(
+              Round(GetAverageItemSize(ItemType) * MinSize),
+              Round(GetAverageItemSize(ItemType) * MaxSize)
+          );
+      Level := RandomRange(MinLevel, MaxLevel);
+      Item := CreateGeneratedEquipment(TItemType(ItemType), Weight, Level, 6);
+    end;
+    Item.ConditionPercent := SeededRandomFloatRange(Item.Id * (Attempts + 11) * 123, 10, 100);
+    Inc(Attempts);
+    if Attempts > 10000 then
+    begin
+      Store(Item, True);
+      LocalPlayer.RefreshDerivedStats(True);
+      Break;
+    end;
+    if (LocalPlayer.GetBaseCargoHookPower > 0)
+        and (LocalPlayer.GetBaseCargoHookPower < Item.Weight)
+        and (LocalPlayer.BlackHoleKillCount + LocalPlayer.HyperspaceKillCount < 17) then
+    begin
+      Item.Free;
+      Galaxy.NextItemId := SavedNextItemId;
+      Continue;
+    end;
+    if (Item.GetConditionAdjustedCost
+            < Max(
+                800,
+                LocalPlayer.Wealth
+                    * RemapClamped(Attempts, 0, 500, 0.01 * RewardScale, 0.03 * RewardScale)))
+        and ((Item.GetConditionAdjustedCost > LocalPlayer.Wealth * 0.008 * RewardScale)
+            or (Attempts > 500)) then
+    begin
+      Store(Item, True);
+      LocalPlayer.RefreshDerivedStats(True);
+      Break;
+    end;
+    Item.Free;
+    Galaxy.NextItemId := SavedNextItemId;
+  end;
+end;
+
 procedure TabShipAI.UpdateState;
 begin
   inherited UpdateState;
@@ -525,7 +702,8 @@ begin
   begin
     if (ArcadeTickCount and 31) = 0 then
       RecentHitCount := 0;
-    if (PlayerArcadeShip <> Self) or ArcadeAutopilotEnabled then
+    // CHANGE: ENHANCEMENT - Each co-op participant's ship has its own autopilot.
+    if not IsHumanShip(Self) or HumanShipAutopilot(Self) then
     begin
       if (WeaponCount > 1)
           and ((ArcadeTickCount and 31) = 0)
@@ -577,7 +755,8 @@ end;
 
 procedure TabShipAI.NoticeCollision;
 begin
-  if (PlayerArcadeShip = Self) or (CurrentZone = nil) then
+  // CHANGE: ENHANCEMENT - Every co-op participant's ship is a player ship.
+  if IsHumanShip(Self) or (CurrentZone = nil) then
   begin
     AvoidanceZone := nil;
     Exit;
@@ -587,7 +766,8 @@ end;
 
 procedure TabShipAI.NoticeDamagingZone(Zone: PabZone);
 begin
-  if RandomIntRange(0, 10) = 0 then
+  // CHANGE: ENHANCEMENT - The simulation draws from the co-op stream in a co-op battle.
+  if CoopRandomRange(0, 10) = 0 then
     DamagingZone := Zone;
 end;
 
@@ -615,7 +795,9 @@ var
 begin
   DirectPathClear := False;
   IncomingThreat := False;
-  if PlayerArcadeShip = Self then
+  // CHANGE: ENHANCEMENT - Every co-op participant's ship is a player ship, and the simulation
+  // draws from the co-op stream in a co-op battle.
+  if IsHumanShip(Self) then
   begin
     NearestDistance := 1E30;
     for Index := 0 to Enemies.Count - 1 do
@@ -705,38 +887,38 @@ begin
   end;
   if (AvoidanceZone = nil)
       and (ArcadeTickCount - LastDamageTick < 100)
-      and ((RandomIntRange(0, 120) = 0)
-          or ((BonusTicks[abkWeaponLock] > 0) and (RandomIntRange(0, 20) = 0))
-          or ((TargetShip = nil) and (RandomIntRange(0, 20) = 0))
-          or ((PlayerArcadeShip = Self)
+      and ((CoopRandomRange(0, 120) = 0)
+          or ((BonusTicks[abkWeaponLock] > 0) and (CoopRandomRange(0, 20) = 0))
+          or ((TargetShip = nil) and (CoopRandomRange(0, 20) = 0))
+          or (IsHumanShip(Self)
               and (Health < MaxHealth * 0.3)
-              and (RandomIntRange(0, 20) = 0))) then
+              and (CoopRandomRange(0, 20) = 0))) then
     AvoidanceZone := ab_Zone_RandomRoute(CurrentZone, 2);
   if (AvoidanceZone <> nil)
       and ((AvoidanceZone = CurrentZone)
           or IncomingThreat
-          or (RandomIntRange(0, 100) = 0)
+          or (CoopRandomRange(0, 100) = 0)
           or (RecentHitCount >= 3)
           or not TryMoveToDestination(
               AvoidanceZone,
               AvoidanceZone.Longitude,
               AvoidanceZone.PolarAngle)) then
     AvoidanceZone := nil;
-  if RetreatRequested and (RandomIntRange(0, 50) = 0) then
+  if RetreatRequested and (CoopRandomRange(0, 50) = 0) then
   begin
     repeat
-      Zone := ab_Zone_RandomRoute(CurrentZone, RandomIntRange(3, 4));
+      Zone := ab_Zone_RandomRoute(CurrentZone, CoopRandomRange(3, 4));
     until Zone <> AvoidanceZone;
     AvoidanceZone := Zone;
   end;
   if (TargetBonus = nil)
       and not RetreatRequested
-      and (((TargetShip = nil) and (RandomIntRange(0, 20) = 0))
-          or ((BonusTicks[abkWeaponLock] > 0) and (RandomIntRange(0, 20) = 0))
-          or ((PlayerArcadeShip <> Self) and (RandomIntRange(0, 500) = 0))
-          or ((Health < MaxHealth * 0.4) and (RandomIntRange(0, 80) = 0))) then
+      and (((TargetShip = nil) and (CoopRandomRange(0, 20) = 0))
+          or ((BonusTicks[abkWeaponLock] > 0) and (CoopRandomRange(0, 20) = 0))
+          or (not IsHumanShip(Self) and (CoopRandomRange(0, 500) = 0))
+          or ((Health < MaxHealth * 0.4) and (CoopRandomRange(0, 80) = 0))) then
   begin
-    if PlayerArcadeShip = Self then
+    if IsHumanShip(Self) then
     begin
       TargetBonus := ab_Item_FindRepairRoute(CurrentZone, BonusRouteZone);
       if TargetBonus = nil then
@@ -764,7 +946,7 @@ begin
   end;
   if (TargetBonus <> nil)
       and ((RecentHitCount >= 3)
-          or (IncomingThreat and (RandomIntRange(0, 50) = 0))
+          or (IncomingThreat and (CoopRandomRange(0, 50) = 0))
           or not TryMoveToDestination(
               BonusRouteZone,
               TargetBonus.State.LongitudeDegrees,
@@ -1042,7 +1224,8 @@ begin
     Inc(Result);
     if Abs(TargetBearing.BearingDeltaDegrees) > Abs(ReverseTargetBearing.BearingDeltaDegrees) then
       Inc(Result);
-    if (PlayerArcadeShip = Self) and (Health < Round(MaxHealth * 0.4)) then
+    // CHANGE: ENHANCEMENT - Every co-op participant's ship is a player ship.
+    if IsHumanShip(Self) and (Health < Round(MaxHealth * 0.4)) then
       Inc(Result);
     if IncomingThreat then
       Inc(Result);
@@ -1068,7 +1251,8 @@ begin
       and ((ObstacleLevels[3] = 0) or (ObstacleLevels[4] = 0) or (ObstacleLevels[5] = 0)) then
   begin
     Inc(Result, 3);
-    if (PlayerArcadeShip = Self) and (Health < Round(MaxHealth * 0.4)) then
+    // CHANGE: ENHANCEMENT - Every co-op participant's ship is a player ship.
+    if IsHumanShip(Self) and (Health < Round(MaxHealth * 0.4)) then
       Inc(Result);
     Inc(Result, RandomRange(-2, 2));
   end
